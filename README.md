@@ -1,5 +1,5 @@
 # qobuz-dl Ultra Edition
-[![PyPI version](https://img.shields.io/pypi/v/qobuz-dl-ultra.svg)](https://pypi.org/project/qobuz-dl-ultra/) [![PyPI Downloads](https://static.pepy.tech/personalized-badge/qobuz-dl-ultra?period=total&units=INTERNATIONAL_SYSTEM&left_color=BLACK&right_color=GREEN&left_text=downloads)](https://pepy.tech/projects/qobuz-dl-ultra) ![Docker Image CI](https://github.com/kaduvercosa/qobuz-dl/actions/workflows/docker.yml/badge.svg) [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Sei969/qobuz-dl/blob/master/Qobuz_Ultimate_Colab.ipynb)
+[![PyPI version](https://img.shields.io/pypi/v/qobuz-dl-ultra.svg)](https://pypi.org/project/qobuz-dl-ultra/) [![PyPI Downloads](https://static.pepy.tech/personalized-badge/qobuz-dl-ultra?period=total&units=INTERNATIONAL_SYSTEM&left_color=BLACK&right_color=GREEN&left_text=downloads)](https://pepy.tech/projects/qobuz-dl-ultra) ![Docker Image CI](https://github.com/kaduvercosa/qobuz-dl-ultra/actions/workflows/docker.yml/badge.svg) [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Sei969/qobuz-dl/blob/master/Qobuz_Ultimate_Colab.ipynb)
 
 Search, explore, and download Lossless and Hi-Res music from [Qobuz](https://www.qobuz.com/).
 
