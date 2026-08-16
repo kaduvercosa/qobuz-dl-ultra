@@ -640,6 +640,25 @@ class Download:
                     # si (com "lines" no nivel raiz), nao o JSON inteiro.
                     qobuz_translation_response = translation_json.get("translation")
 
+            # Aviso discreto (sem despejar erro/URL) para os dois casos em que a traducao nao vai ser mesclada, mas que NAO sao um problema: 
+            
+            # 1. a musica ja esta no idioma de traducao pedido (ex: letra original em "pt" e voce pediu traducao para "pt")
+            # 2. a musica esta em outro idioma, mas o Qobuz ainda nao tem essa traducao cadastrada pra essa faixa
+            # So mostramos isso se de fato tentamos buscar traducao (translation_lang setado) e conseguimos a letra original (pra nao confundir com o caso de "letra nenhuma encontrada").
+            translation_note = None
+            if translation_lang and not qobuz_translation_response and isinstance(qobuz_lyrics_response, dict):
+                original_block = qobuz_lyrics_response.get("original")
+                original_lang = original_block.get("lang") if isinstance(original_block, dict) else None
+                if original_lang:
+                    if original_lang.lower() == translation_lang.lower():
+                        translation_note = (
+                            f"    ℹ️  Lyrics already in {translation_lang.upper()} -- no translation needed."
+                        )
+                    else:
+                        translation_note = (
+                            f"    ℹ️  No {translation_lang.upper()} translation available on Qobuz yet for this track."
+                        )
+
             with print_lock:                           
                 self.lyrics_engine.fetch_and_inject(
                     file_path=final_file, 
@@ -651,6 +670,8 @@ class Download:
                     qobuz_lyrics_response=qobuz_lyrics_response,
                     qobuz_translation_response=qobuz_translation_response,
                 )
+                if translation_note:
+                    print(f"{CYAN}{translation_note}{OFF}")
 
         delay_time = getattr(self.settings, 'delay', 0)
         if delay_time == 0 and '--delay' in sys.argv:
@@ -973,7 +994,7 @@ class Download:
                 "get", self.client.base + "track/lyricsUrl", params=params
             ) as r:
                 if r.status != 200:
-                    logger.info(
+                    logger.debug(
                         f"{OFF}track/lyricsUrl returned status {r.status}"
                         f"{f' for language={language}' if language else ''}"
                     )
@@ -993,7 +1014,7 @@ class Download:
                             break
 
             if not lyrics_json_url:
-                logger.info(
+                logger.debug(
                     f"{OFF}track/lyricsUrl did not return a lyrics URL"
                     f"{f' for language={language}' if language else ''}"
                 )
@@ -1004,12 +1025,31 @@ class Download:
                 None,
                 lambda: requests.get(lyrics_json_url, timeout=12),
             )
+
+            # 403/404 aqui e' o caso NORMAL de "essa faixa nao tem letra (ou
+            # traducao pro idioma pedido) cadastrada no Qobuz" -- o CloudFront
+            # simplesmente nao tem esse arquivo assinado. Isso acontece o
+            # tempo todo (ex: musica ja em pt pedindo traducao pt) e nao e'
+            # um problema real, entao registramos em nivel debug (nao aparece
+            # no terminal por padrao) em vez de estourar a URL assinada
+            # inteira no console.
+            if resp.status_code in (403, 404):
+                logger.debug(
+                    f"{OFF}No {'translation (' + language + ')' if language else 'lyrics'} "
+                    f"registered on Qobuz for this track (status {resp.status_code})"
+                )
+                return None
+
             resp.raise_for_status()
             return resp.json()
         except Exception as e:
+            # Aqui sim e' um erro fora do esperado (timeout, rede, JSON
+            # invalido, etc.) -- mantemos em info pra ficar visivel, mas sem
+            # despejar URLs assinadas gigantes: so' o tipo/mensagem da excecao.
             logger.info(
-                f"{OFF}No native Qobuz lyrics"
-                f"{f' translation ({language})' if language else ''} for this track ({e})"
+                f"{OFF}Error fetching Qobuz "
+                f"{f'lyrics translation ({language})' if language else 'lyrics'} "
+                f"for this track: {type(e).__name__}: {e}"
             )
             return None
 

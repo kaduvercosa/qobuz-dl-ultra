@@ -23,6 +23,7 @@ def read_file(fname):
 requirements = [
     "pathvalidate",
     "requests",
+    "charset_normalizer",
     "mutagen",
     "tqdm",
     "pick==1.6.0",
@@ -31,6 +32,7 @@ requirements = [
     # NOTE: cryptography was used in the original downloader, keeping it for safety
     "cryptography",
     "keyring",
+    "aiohttp"
 ]
 
 setup(
