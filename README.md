@@ -331,45 +331,45 @@ A Edição Ultimate inclui poderosos gerenciadores de biblioteca local para acom
 
 Você pode personalizar profundamente seu `config.ini` ou usar as flags CLI `-ff` (Formato de Pasta) e `-tf` (Formato de Faixa) usando as variáveis abaixo. Você também pode usar o caractere `/` para criar subdiretórios aninhados automaticamente!
 
-#### 📝 Tabela de Referência Completa de Variáveis
+#### 📝 Complete Variables Reference Table
 
-| Variável | Descrição | Exemplo de Saída |
-| :— | :— | :— |
-| **Artistas e Compositores** | | |
-| `{album_artist}` | O artista principal do álbum (lida com compilações com elegância). | `Daft Punk` |
-| `{artist}` / `{track_artist}` | O artista intérprete da faixa específica. | `Pharrell Williams` |
-| `{album_composer}` | O compositor de todo o álbum/obra. | `Thomas Bangalter` |
-| `{track_composer}` | O compositor da faixa específica. | `Guy-Manuel de Homem-Christo` |
-| **Títulos e Versões** | | |
-| `{album}` / `{album_title}` | Título do álbum (inclui versão como “Remastered” se houver). | `Random Access Memories (Deluxe)` |
-| `{album_title_base}` | Título base do álbum estritamente *sem* os detalhes de versão. | `Random Access Memories` |
-| `{track_title}` / `{tracktitle}`| Título da faixa (inclui versão se houver). | `Get Lucky (Radio Edit)` |
-| `{track_title_base}` | Título base da faixa estritamente *sem* os detalhes de versão. | `Get Lucky` |
-| `{version}` / `{album_version}` | Apenas a string da versão. | `Deluxe` |
-| `{version_tag}` | Tag de versão inteligente (adiciona hífen no início: ` - Deluxe`). Não deixa espaços extras se vazia! | ` - Deluxe` |
-| **Números e Datas** | | |
-| `{track_number}` | O número da faixa (sempre preenchido com zero à esquerda). | `08` |
-| `{disc_number}` | O número da mídia/disco (preenchido com zero à esquerda). | `01` |
-| `{track_count}` | Número total de faixas no álbum. | `13` |
-| `{disc_count}` | Número total de discos no álbum. | `1` |
-| `{year}` | O ano de lançamento. | `2013` |
-| `{release_date}` | A data de lançamento original completa. | `2013-05-17` |
-| **Especificações Técnicas** | | |
-| `{media_type}` | Tipo de produto extraído da API (com inicial maiúscula). | `Album` |
-| `{quality_tag}` | Tag inteligente combinando formato e profundidade de bits (fallback limpo para MP3). | `FLAC 24` |
-| `{album_url}` | A URL oficial do lançamento no Qobuz. | `https://play.qobuz.com/...` |
-| `{bit_depth}` | Profundidade de bits do áudio. | `24` |
-| `{sampling_rate}` | Taxa de amostragem do áudio em kHz. | `88.2` |
-| `{format}` | Formato do arquivo baixado. | `FLAC` |
-| **Metadados e Identificadores** | | |
-| `{release_type}` | Classificação inteligente do tipo de lançamento (`Album`, `EP`, `Single`). | `Album` |
-| `{explicit}` / `{ExplicitFlag}`| Adiciona a tag `[E]` se houver aviso parental (fica vazia se limpo). | `[E]` |
-| `{album_genre}` | Gênero principal do lançamento. | `Electronic` |
-| `{label}` | Nome da gravadora. | `Columbia` |
-| `{copyright}` | Texto de copyright. | `℗ 2013 Daft Life` |
-| `{barcode}` / `{upc}` | Código de barras / UPC global do lançamento. | `888837168618` |
-| `{isrc}` | O identificador ISRC exclusivo da faixa. | `USSM11302305` |
-| `{album_id}` / `{track_id}` | IDs internos do banco de dados do Qobuz. | `123456789` |
+| Variable | Description | Example Output |
+| :--- | :--- | :--- |
+| **Artists & Composers** | | |
+| `{album_artist}` | The main artist of the album (handles compilations gracefully). | `Daft Punk` |
+| `{artist}` / `{track_artist}` | The performing artist of the specific track. | `Pharrell Williams` |
+| `{album_composer}` | The composer of the entire album/work. | `Thomas Bangalter` |
+| `{track_composer}` | The composer of the specific track. | `Guy-Manuel de Homem-Christo` |
+| **Titles & Versions** | | |
+| `{album}` / `{album_title}` | Album title (includes version like "Remastered" if present). | `Random Access Memories (Deluxe)` |
+| `{album_title_base}` | Base album title strictly *without* the version details. | `Random Access Memories` |
+| `{track_title}` / `{tracktitle}`| Track title (includes version if present). | `Get Lucky (Radio Edit)` |
+| `{track_title_base}` | Base track title strictly *without* the version details. | `Get Lucky` |
+| `{version}` / `{album_version}` | Just the version string. | `Deluxe` |
+| `{version_tag}` | Smart version tag (prepends a dash: ` - Deluxe`). Leaves no trailing spaces if empty! | ` - Deluxe` |
+| **Numbers & Dates** | | |
+| `{track_number}` | The track number (always padded with leading zero). | `08` |
+| `{disc_number}` | The disc media number (padded with leading zero). | `01` |
+| `{track_count}` | Total number of tracks in the album. | `13` |
+| `{disc_count}` | Total number of discs in the album. | `1` |
+| `{year}` | The release year. | `2013` |
+| `{release_date}` | The full original release date. | `2013-05-17` |
+| **Technical Specs** | | |
+| `{media_type}` | Raw product type extracted from the API (capitalized). | `Album` |
+| `{quality_tag}` | Smart tag combining format and bit depth (clean MP3 fallback). | `FLAC 24` |
+| `{album_url}` | The official Qobuz URL of the release. | `https://play.qobuz.com/...` |
+| `{bit_depth}` | The audio bit depth. | `24` |
+| `{sampling_rate}` | The audio sampling rate in kHz. | `88.2` |
+| `{format}` | The downloaded file format. | `FLAC` |
+| **Metadata & IDs** | | |
+| `{release_type}` | Smart release type classification (`Album`, `EP`, `Single`). | `Album` |
+| `{explicit}` / `{ExplicitFlag}`| Adds an `[E]` tag if parental advisory is active (empty if clean). | `[E]` |
+| `{album_genre}` | Primary genre of the release. | `Electronic` |
+| `{label}` | The record label name. | `Columbia` |
+| `{copyright}` | Copyright string. | `℗ 2013 Daft Life` |
+| `{barcode}` / `{upc}` | The global UPC/Barcode of the release. | `888837168618` |
+| `{isrc}` | The unique ISRC identifier of the track. | `USSM11302305` |
+| `{album_id}` / `{track_id}` | Qobuz internal database IDs. | `123456789` |
 
 #### 💡 Exemplos Práticos
 
