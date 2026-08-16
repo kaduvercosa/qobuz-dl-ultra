@@ -109,7 +109,7 @@ def validate_config_formats(formats_to_check):
             continue
             
         try:
-            parsed_vars = [tup[1] for tup in string.Formatter().parse(str(format_string)) if tup is not None]
+            parsed_vars = [tup[1] for tup in string.Formatter().parse(str(format_string)) if tup[1] is not None]
             
             for var in parsed_vars:
                 base_var = var.split(':')[0].split('!')[0]
