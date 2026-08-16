@@ -1247,7 +1247,7 @@ def tqdm_download(url_or_callable, fname, track_name, is_parallel=False, session
 
     if not is_parallel:
         safe_print(f"{C}[+] Em Progresso: {track_name}{O}")
-        tqdm_desc = f" {G}Baixando:{O}"
+        tqdm_desc = f" {G}⬇️{O}"
         b_format = "{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]"
     else:
         tqdm_desc = ""
