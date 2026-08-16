@@ -1,3 +1,4 @@
+import os
 from qobuz_dl.constants import DEFAULT_FOLDER, DEFAULT_TRACK, DEFAULT_MULTIPLE_DISC_TRACK
 
 class QobuzDLSettings:
@@ -66,7 +67,7 @@ class QobuzDLSettings:
         self.embed_art = kwargs.get('embed_art', False)
         self.cover_og_quality = kwargs.get('og_cover', False)
         self.no_cover = kwargs.get('no_cover', False)
-        self.embedded_art_size = kwargs.get('embedded_art_size', '600')
+        self.embedded_art_size = kwargs.get('embedded_art_size', 'org')
         self.saved_art_size = kwargs.get('saved_art_size', 'org')
 
         # multiple disc option
@@ -79,6 +80,19 @@ class QobuzDLSettings:
 
         # Add parallel download thread count option
         self.max_workers = int(kwargs.get('max_workers', 3))
+
+        # Threads usados DENTRO do fallback de download segmentado (uma
+        # unica faixa, quando o CDN normal bloqueia/Akamai). Antes era um
+        # ThreadPoolExecutor(max_workers=8) fixo no codigo, igual em
+        # qualquer dispositivo. "0" (ou nao configurado) = auto-detect com
+        # base em os.cpu_count(), com teto de 8 pra nao sobrecarregar
+        # dispositivos mais fracos (ex: iPhone rodando A-Shell) nem abrir
+        # conexoes demais a toa em desktops com muitos nucleos.
+        segment_workers_raw = int(kwargs.get('segment_workers', 0) or 0)
+        if segment_workers_raw > 0:
+            self.segment_workers = segment_workers_raw
+        else:
+            self.segment_workers = min(8, max(2, (os.cpu_count() or 4) * 2))
 
         # user_auth_token
         self.user_auth_token = kwargs.get('user_auth_token', '')
@@ -128,7 +142,7 @@ class QobuzDLSettings:
             # multiple disc option
             'multiple_disc_prefix': arguments.multiple_disc_prefix or config.get(section, "multiple_disc_prefix", fallback="CD"),
             'multiple_disc_one_dir': arguments.multiple_disc_one_dir or config.getboolean(section, "multiple_disc_one_dir", fallback=False),
-            'multiple_disc_track_format': arguments.multiple_disc_track_format or config.get(section, "multiple_disc_track_format", fallback="{disc_number}.{track_number} - {track_title}"),
+            'multiple_disc_track_format': arguments.multiple_disc_track_format or config.get(section, "multiple_disc_track_format", fallback=DEFAULT_MULTIPLE_DISC_TRACK),
                                  
             # tag options
             'no_album_artist_tag': arguments.no_album_artist_tag or config.getboolean(section, "no_album_artist_tag", fallback=False),
@@ -156,6 +170,10 @@ class QobuzDLSettings:
             
             # Add parallel download thread count configuration
             'max_workers': arguments.max_workers or config.get(section, "max_workers", fallback="3"),
+
+            # Threads do fallback de download segmentado -- "0"/ausente =
+            # auto-detect adaptativo por dispositivo (ver settings.py).
+            'segment_workers': getattr(arguments, 'segment_workers', None) or config.get(section, "segment_workers", fallback="0"),
 
             # user_auth_token
             'user_auth_token': config.get(section, "user_auth_token", fallback=""),

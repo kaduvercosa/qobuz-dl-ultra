@@ -680,7 +680,11 @@ class Download:
                     # event loop tambem.
                     await loop.run_in_executor(
                         None,
-                        lambda: tqdm_download_segments(fresh_track_dict, filename, desc, is_parallel=is_parallel, session=self.http_session),
+                        lambda: tqdm_download_segments(
+                            fresh_track_dict, filename, desc, is_parallel=is_parallel,
+                            session=self.http_session,
+                            segment_workers=getattr(self.settings, 'segment_workers', None),
+                        ),
                     )
                     success = True
                     final_fmt = attempt_fmt
@@ -1225,7 +1229,15 @@ def _get_description(item: dict, track_title, multiple=None):
 
 def tqdm_download(url_or_callable, fname, track_name, is_parallel=False, session=None):
     if abort_event.is_set(): return
-    G, Y, C, O = "\033[92m", "\033[93m", "\033[96m", "\033[0m"
+    # Antes: codigos ANSI hardcoded ("\033[92m" etc, variantes BRIGHT),
+    # duplicando (e divergindo visualmente d)o que qobuz_dl.color ja expoe.
+    # Agora reaproveita os mesmos GREEN/YELLOW/CYAN/OFF usados no resto do
+    # arquivo -- passam pelo colorama (ja importado e inicializado em
+    # color.py com init(autoreset=True)), que sabe traduzir ANSI pra
+    # terminais que nao suportam nativamente (ex: cmd.exe antigo no
+    # Windows). Mantidos os nomes curtos G/Y/C/O so' pra nao precisar
+    # reescrever todas as f-strings abaixo.
+    G, Y, C, O = GREEN, YELLOW, CYAN, OFF
 
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -1365,14 +1377,23 @@ def _safe_get(d: dict, *keys, default=None):
             curr = res
     return res
 
-def tqdm_download_segments(track_url_dict, fname, track_name, is_parallel=False, session=None):
+def tqdm_download_segments(track_url_dict, fname, track_name, is_parallel=False, session=None, segment_workers=None):
     if abort_event.is_set(): return
-    G, C, O = "\033[92m", "\033[96m", "\033[0m" 
+    # Mesmo motivo do tqdm_download() acima: reaproveita as cores de
+    # qobuz_dl.color em vez de codigos ANSI hardcoded duplicados.
+    G, C, O = GREEN, CYAN, OFF
     
     tmp_fname = fname + ".mp4"
     n_segments = track_url_dict["n_segments"]
     url_template = track_url_dict["url_template"]
     raw_key = track_url_dict["raw_key"]
+
+    # Antes hardcoded em 8, igual em qualquer dispositivo. Agora vem de
+    # settings.segment_workers (auto-detectado por os.cpu_count() la' em
+    # settings.py, ou configuravel via --segment-workers/config.ini). Se
+    # chamado sem passar segment_workers (uso standalone), cai num default
+    # conservador de 4 em vez do 8 fixo de antes.
+    workers = segment_workers if segment_workers else 4
 
     # Mesmo raciocinio de tqdm_download(): reaproveita a sessao compartilhada
     # se fornecida (varias requests HEAD/GET de segmentos se beneficiam MUITO
@@ -1390,13 +1411,23 @@ def tqdm_download_segments(track_url_dict, fname, track_name, is_parallel=False,
         except: return 0
 
     total_size = 0
-    with ThreadPoolExecutor(max_workers=8) as ex:
+    with ThreadPoolExecutor(max_workers=workers) as ex:
         futures_size = [ex.submit(get_seg_size, i) for i in range(n_segments + 1)]
         for f in futures_size:
-            while not f.done():
+            # Antes: `while not f.done(): time.sleep(0.1)` -- um busy-poll
+            # que acorda 10x/segundo so' pra checar se terminou, gastando
+            # ciclos de CPU (e bateria, em mobile) a toa. f.result(timeout=)
+            # usa uma espera de verdade (threading.Condition), sem spin, e
+            # so' "acorda" quando o future termina ou o timeout expira --
+            # aqui usado apenas pra permitir checar abort_event
+            # periodicamente sem CPU-spinning.
+            while True:
                 if abort_event.is_set(): return
-                time.sleep(0.1)
-            total_size += f.result()
+                try:
+                    total_size += f.result(timeout=1.0)
+                    break
+                except concurrent.futures.TimeoutError:
+                    continue
 
     if is_parallel:
         size_mb = total_size / (1024 * 1024)
@@ -1439,13 +1470,25 @@ def tqdm_download_segments(track_url_dict, fname, track_name, is_parallel=False,
                 file.write(_decrypt_qobuz_segment(seg_data, raw_key, segment_uuid))
 
             if n_segments >= 2:
-                with ThreadPoolExecutor(max_workers=8) as executor:
+                with ThreadPoolExecutor(max_workers=workers) as executor:
                     futures_seg = [executor.submit(fetch_segment_fluid, i) for i in range(2, n_segments + 1)]
+                    # IMPORTANTE: precisamos manter a ORDEM de submissao ao
+                    # escrever no arquivo (segmentos de audio tem que ser
+                    # concatenados na sequencia certa) -- entao nao da' pra
+                    # usar concurrent.futures.as_completed() aqui (que
+                    # retorna na ordem de conclusao, nao de submissao).
+                    # Trocamos so' o busy-poll (`while not f.done():
+                    # time.sleep(0.2)`) por f.result(timeout=1.0) num loop,
+                    # que espera de forma eficiente (sem CPU-spinning) e
+                    # ainda permite checar abort_event periodicamente.
                     for f in futures_seg:
-                        while not f.done():
+                        while True:
                             if abort_event.is_set(): return
-                            time.sleep(0.2)
-                        seg_data = f.result()
+                            try:
+                                seg_data = f.result(timeout=1.0)
+                                break
+                            except concurrent.futures.TimeoutError:
+                                continue
                         if not abort_event.is_set():
                             file.write(_decrypt_qobuz_segment(seg_data, raw_key, segment_uuid))
 

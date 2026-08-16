@@ -1,6 +1,6 @@
 import os
 import logging
-import time
+import asyncio
 from mutagen.flac import FLAC
 from mutagen.id3 import ID3
 from qobuz_dl.db import handle_download_id
@@ -8,7 +8,7 @@ from qobuz_dl.color import GREEN, RED, YELLOW, CYAN, OFF
 
 logger = logging.getLogger(__name__)
 
-def sync_database(directory, db_path, client):
+async def sync_database(directory, db_path, client):
     """
     Executes the Smart Reverse Lookup operation.
 
@@ -78,14 +78,19 @@ def sync_database(directory, db_path, client):
                 # --- REVERSE LOOKUP VIA API FOR OLD FILES ---
                 if not track_id and isrc:
                     logger.info(f"{CYAN}[*] Missing local ID. Fetching via API (ISRC: {isrc})...{OFF}")
-                    res = client.search_tracks(isrc, limit=1)
+                    # search_tracks() e' async def em qopy.py -- antes era
+                    # chamado sem 'await', entao 'res' era um objeto de
+                    # corrotina nunca executado (o reverse lookup por ISRC
+                    # nunca funcionava de verdade, so' falhava silenciosamente
+                    # no except abaixo).
+                    res = await client.search_tracks(isrc, limit=1)
                     if res and "tracks" in res and res["tracks"]["items"]:
                         q_track = res["tracks"]["items"][0]
                         track_id = str(q_track["id"])
                         album_id = str(q_track.get("album", {}).get("id", ""))
                     
                     # Human behavior delay to prevent Qobuz API throttling and hanging
-                    time.sleep(0.2)
+                    await asyncio.sleep(0.2)
                 
                 # Inject Track ID into DB
                 if track_id:

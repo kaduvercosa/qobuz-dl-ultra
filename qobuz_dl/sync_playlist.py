@@ -50,7 +50,7 @@ def _scan_local_tracks(directory):
 
     return local_tracks, untagged_files
 
-def _fetch_remote_tracks(client, playlist_id):
+async def _fetch_remote_tracks(client, playlist_id):
     """
     Retrieves the complete tracklist and metadata of a playlist from the Qobuz API.
 
@@ -65,7 +65,10 @@ def _fetch_remote_tracks(client, playlist_id):
     """
     all_items = []
     playlist_name = "Unknown Playlist"
-    for chunk in client.get_plist_meta(playlist_id):
+    # get_plist_meta() retorna um async generator (ver docstring em
+    # qopy.py) -- precisa de 'async for', nao 'for'. Um 'for' comum nesse
+    # objeto estoura TypeError na hora.
+    async for chunk in client.get_plist_meta(playlist_id):
         if "name" in chunk and playlist_name == "Unknown Playlist":
             playlist_name = chunk.get("name")
         items = chunk.get("tracks", {}).get("items", [])
@@ -111,7 +114,7 @@ def _clean_empty_dirs(base_directory, exclude_dirs=None):
             except OSError:
                 pass
 
-def sync_playlist(qobuz_dl, url, folder, auto_confirm=False):
+async def sync_playlist(qobuz_dl, url, folder, auto_confirm=False):
     """
     The main Bidirectional Playlist Synchronization engine.
 
@@ -144,7 +147,7 @@ def sync_playlist(qobuz_dl, url, folder, auto_confirm=False):
     logger.info(f"{YELLOW}URL : {url}{OFF}")
 
     logger.info(f"{CYAN}[1/4] Fetching playlist from Qobuz...{OFF}")
-    playlist_name, remote_items = _fetch_remote_tracks(qobuz_dl.client, playlist_id)
+    playlist_name, remote_items = await _fetch_remote_tracks(qobuz_dl.client, playlist_id)
     remote_ids = {str(item["id"]): item for item in remote_items}
     logger.info(f"{CYAN}      Found {len(remote_ids)} tracks in the Qobuz playlist.{OFF}")
 
@@ -204,7 +207,7 @@ def sync_playlist(qobuz_dl, url, folder, auto_confirm=False):
             performer_name = item.get("performer", {}).get("name", "Unknown")
             artist = performer_name if album_artist in [None, "Various Artists"] else album_artist
             title = item.get("title", "Unknown")
-            logger.info(f"  {GREEN}↓ {artist} — {title}{OFF}")
+            logger.info(f"  {GREEN}↓ {artist} -- {title}{OFF}")
 
     if not auto_confirm:
         try:
@@ -248,7 +251,11 @@ def sync_playlist(qobuz_dl, url, folder, auto_confirm=False):
     for tid in to_download_ids:
         playlist_idx = position_map.get(tid, 0)
         try:
-            qobuz_dl.download_from_id(
+            # download_from_id() e' async def em core.py -- antes era
+            # chamado sem 'await', entao criava uma corrotina que nunca
+            # rodava de verdade: nada era baixado, mas downloaded_count
+            # incrementava do mesmo jeito (falso positivo no resumo final).
+            await qobuz_dl.download_from_id(
                 tid,
                 album=False,
                 alt_path=target_folder,

@@ -32,7 +32,8 @@ requirements = [
     # NOTE: cryptography was used in the original downloader, keeping it for safety
     "cryptography",
     "keyring",
-    "aiohttp"
+    "aiohttp",
+    "questionary"
 ]
 
 setup(
@@ -40,18 +41,18 @@ setup(
     # 2. VERSION READ AUTOMATICALLY FROM __init__.py
     version=get_version(),  
     # 3. AUTHOR INFO
-    author="Riccardo (Sei969)",
-    author_email="Sei969@users.noreply.github.com",
+    author="Eduardo Verçosa (kaduvercosa)",
+    author_email="kaduvercosa@users.noreply.github.com",
     description="The Ultimate Lossless and Hi-Res music downloader for Qobuz with ReplayGain and Classical metadata",
     long_description=read_file("README.md"),
     long_description_content_type="text/markdown",
     # 4. LINK TO YOUR FORK
-    url="https://github.com/Sei969/qobuz-dl", 
+    url="https://github.com/kaduvercosa/qobuz-dl-ultra", 
     
     project_urls={
-        "Documentation": "https://github.com/Sei969/qobuz-dl/wiki",
-        "Source Code": "https://github.com/Sei969/qobuz-dl",
-        "Bug Tracker": "https://github.com/Sei969/qobuz-dl/issues",
+        "Documentation": "https://github.com/kaduvercosa/qobuz-dl-ultra/wiki",
+        "Source Code": "https://github.com/kaduvercosa/qobuz-dl-ultra",
+        "Bug Tracker": "https://github.com/kaduvercosa/qobuz-dl-ultra/issues",
     },
     
     install_requires=requirements,

@@ -1,5 +1,5 @@
-# qobuz-dl Ultimate Edition
-[![PyPI version](https://img.shields.io/pypi/v/qobuz-dl-ultimate.svg)](https://pypi.org/project/qobuz-dl-ultimate/) [![PyPI Downloads](https://static.pepy.tech/personalized-badge/qobuz-dl-ultimate?period=total&units=INTERNATIONAL_SYSTEM&left_color=BLACK&right_color=GREEN&left_text=downloads)](https://pepy.tech/projects/qobuz-dl-ultimate) ![Docker Image CI](https://github.com/Sei969/qobuz-dl/actions/workflows/docker.yml/badge.svg) [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Sei969/qobuz-dl/blob/master/Qobuz_Ultimate_Colab.ipynb)
+# qobuz-dl Ultra Edition
+[![PyPI version](https://img.shields.io/pypi/v/qobuz-dl-ultra.svg)](https://pypi.org/project/qobuz-dl-ultra/) [![PyPI Downloads](https://static.pepy.tech/personalized-badge/qobuz-dl-ultra?period=total&units=INTERNATIONAL_SYSTEM&left_color=BLACK&right_color=GREEN&left_text=downloads)](https://pepy.tech/projects/qobuz-dl-ultra) ![Docker Image CI](https://github.com/kaduvercosa/qobuz-dl/actions/workflows/docker.yml/badge.svg) [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Sei969/qobuz-dl/blob/master/Qobuz_Ultimate_Colab.ipynb)
 
 Search, explore, and download Lossless and Hi-Res music from [Qobuz](https://www.qobuz.com/).
 
@@ -108,14 +108,14 @@ pip install qobuz-dl-ultimate
 
 ### Option B: Pre-built Binaries (Windows x64)
 The easiest way to run the program on Windows without installing Python.
-👉 **[Download the latest ZIP here](https://github.com/Sei969/qobuz-dl/releases/latest)**
+👉 **[Download the latest ZIP here](https://github.com/kaduvercosa/qobuz-dl-ultra/releases/latest)**
 * **Portable:** No installation required.
 * **Important:** Just extract the `.zip` and ensure `ffmpeg.exe` and `qobuz-dl-ultimate.exe` are in the same folder.
 
 ### Option C: Python Source (Advanced)
 Clone this repository and install the required dependencies:
 ```bash
-git clone [https://github.com/Sei969/qobuz-dl.git](https://github.com/Sei969/qobuz-dl.git)
+git clone [https://github.com/kaduvercosa/qobuz-dl-ultra.git](https://github.com/kaduvercosa/qobuz-dl-ultra.git)
 cd qobuz-dl
 pip3 install -r requirements.txt
 ```
@@ -125,12 +125,12 @@ pip3 install -r requirements.txt
 The Ultimate Edition is fully containerized and includes all dependencies (Python, FFmpeg). This is the recommended installation method for Synology, QNAP, Unraid, and headless servers.
 ```bash
 # Pull the latest official image
-docker pull ghcr.io/sei969/qobuz-dl:latest
+docker pull ghcr.io/kaduvercosa/qobuz-dl:latest
 
 # Example: Run a download and map it to your NAS music folder
 docker run -it --rm \
   -v /path/to/your/nas/music:/app/QobuzDownloads \
-  ghcr.io/sei969/qobuz-dl:latest dl "[https://play.qobuz.com/album/](https://play.qobuz.com/album/)..."
+  ghcr.io/kaduvercosa/qobuz-dl:latest dl "[https://play.qobuz.com/album/](https://play.qobuz.com/album/)..."
 ```
 
 ### Option E: ☁️ Google Colab (Cloud & Google Drive)

@@ -25,32 +25,16 @@ logging.basicConfig(
 )
 
 # --- iOS / a-Shell support ---
-# a-Shell (iOS) only exposes the app's "Documents" folder to the user via the
-# Files app. Everything qobuz-dl creates (config, database, downloads) must
-# live inside it. Set QOBUZ_DL_IOS_HOME (e.g. in a-Shell's .shellrc:
-#   export QOBUZ_DL_IOS_HOME="$HOME/Documents"
-# ) to opt in. On every other platform this variable is simply unset and
-# behavior is unchanged.
+# Deteccao cross-platform centralizada em utils.get_config_paths() -- ver
+# la' os detalhes de cada plataforma (Windows, Linux/macOS, iOS/a-Shell).
+# radar.py usa a mesma funcao, entao os dois ficam sempre sincronizados.
+from qobuz_dl.utils import get_config_paths
+_config_paths = get_config_paths()
+CONFIG_DIR = _config_paths["config_dir"]
+CONFIG_PATH = _config_paths["config_path"]
+CONFIG_FILE = _config_paths["config_file"]
+QOBUZ_DB = _config_paths["qobuz_db"]
 IOS_HOME = os.environ.get("QOBUZ_DL_IOS_HOME")
-
-CONFIG_DIR = os.environ.get("CONFIG_DIR")
-if not CONFIG_DIR:
-    if IOS_HOME:
-        CONFIG_DIR = IOS_HOME
-    elif os.name == "nt":
-        CONFIG_DIR = os.environ.get("APPDATA")
-    else:
-        # iOS / a-Shell Auto-Detection
-        home_dir = os.environ.get("HOME", "")
-        if "Containers/Data/Application" in home_dir:
-            # Força o uso da pasta Documents no iOS para evitar PermissionError
-            CONFIG_DIR = os.path.join(home_dir, "Documents")
-        else:
-            CONFIG_DIR = os.path.join(home_dir, ".config")
-
-CONFIG_PATH = os.path.join(CONFIG_DIR, "qobuz-dl")
-CONFIG_FILE = os.path.join(CONFIG_PATH, "config.ini")
-QOBUZ_DB = os.path.join(CONFIG_PATH, "qobuz_dl.db")
 
 KEYRING_SERVICE = "qobuz-dl"
 
@@ -115,7 +99,6 @@ def validate_config_formats(formats_to_check):
 
     has_errors = False
     
-    # Define color strings locally to ensure they print correctly in terminal
     C_RED = '\033[91m'
     C_YEL = '\033[93m'
     C_GRE = '\033[92m'
@@ -126,7 +109,7 @@ def validate_config_formats(formats_to_check):
             continue
             
         try:
-            parsed_vars = [tup[1] for tup in string.Formatter().parse(str(format_string)) if tup[1] is not None]
+            parsed_vars = [tup[1] for tup in string.Formatter().parse(str(format_string)) if tup is not None]
             
             for var in parsed_vars:
                 base_var = var.split(':')[0].split('!')[0]
@@ -134,11 +117,9 @@ def validate_config_formats(formats_to_check):
                 if base_var not in VALID_KEYS:
                     print(f"{C_YEL}[!] Config Warning: Unknown variable '{{{base_var}}}' detected in '{config_name}'.{C_OFF}")
                     
-                    # --- NEW: 'Did you mean' logic using difflib ---
                     similar_keys = difflib.get_close_matches(base_var, VALID_KEYS, n=1, cutoff=0.6)
                     if similar_keys:
                         print(f"    {C_GRE}-> Did you mean '{{{similar_keys[0]}}}'?{C_OFF}")
-                    # -----------------------------------------------
                     
                     print(f"    {C_RED}-> This will cause the entire format string to be discarded during download.{C_OFF}")
                     has_errors = True
@@ -149,18 +130,12 @@ def validate_config_formats(formats_to_check):
 
     if has_errors:
         print(f"\n{C_YEL}[*] Tip: Please check your config.ini file or your command line arguments and fix any typos before downloading.{C_OFF}\n")
-        # Abort the process immediately
         sys.exit(1)
 
 
 def _reset_config(config_file):
     """
     Interactive configuration wizard for initializing or resetting the config.ini file.
-    
-    Prompts the user for authentication tokens, folder preferences, and Keyring settings.
-
-    Args:
-        config_file (str): The absolute path where the config.ini should be saved.
     """
     logging.info(f"\n{YELLOW}--- QOBUZ-DL CONFIGURATION WIZARD (2026 Update) ---{OFF}")
     config = configparser.ConfigParser(interpolation=None)
@@ -177,7 +152,6 @@ def _reset_config(config_file):
 
     config["qobuz"]["password"] = ""
 
-    # --- NEW KEYRING PROMPT ---
     print(f"\n{YELLOW}[?] OS Keyring Security:{OFF}")
     print("    By default, tokens are encrypted in your OS Credential Manager.")
     print("    If you are on a headless Linux/NAS/Docker, this might fail silently.")
@@ -209,7 +183,6 @@ def _reset_config(config_file):
         or "Qobuz Downloads"
     )
     
-    # FIX: Use correct prompt and key for folder formatting
     config["qobuz"]["folder_format"] = (
         input(f"Folder format (press Enter for '{DEFAULT_FOLDER}')\n- ")
         or DEFAULT_FOLDER
@@ -233,13 +206,13 @@ def _reset_config(config_file):
     config["qobuz"]["multi_value_tags"] = "false"
     config["qobuz"]["legacy_charmap"] = "false"
     config["qobuz"]["blacklist"] = "blacklist.txt"
+    config["qobuz"]["lyrics_translation_lang"] = "pt"
 
     logging.info(f"{YELLOW}Getting tokens. Please wait...{OFF}")
     bundle = Bundle()
     config["qobuz"]["app_id"] = str(bundle.get_app_id())
     config["qobuz"]["secrets"] = ",".join(bundle.get_secrets().values())
 
-    # Removed old folder_format override that caused custom format resets
     config["qobuz"]["track_format"] = "{track_number} - {track_title}"
     config["qobuz"]["fallback_folder_format"] = "{album_artist} - {album_title}"
     config["qobuz"]["smart_discography"] = "false"
@@ -282,15 +255,10 @@ def _reset_config(config_file):
         config.write(configfile)
         
     logging.info(f"\n{GREEN}[+] Configuration successfully saved in {config_file}!{OFF}")
-    
+
 
 def _remove_leftovers(directory):
-    """
-    Cleans up any partial or temporary files (~tmp_*.tmp) left behind after an interruption.
-
-    Args:
-        directory (str): The root directory to scan for temporary files.
-    """
+    """Cleans up any partial or temporary files (~tmp_*.tmp) left behind after an interruption."""
     for pattern in [".*.tmp", "~tmp_*.tmp"]:
         search_dir = os.path.join(directory, "**", pattern)
         for i in glob.glob(search_dir, recursive=True):
@@ -301,16 +269,7 @@ def _remove_leftovers(directory):
 
 
 async def _handle_commands(qobuz, arguments):
-    """
-    Routes parsed command-line arguments to the appropriate QobuzDL core methods.
-    
-    Implements the Terminal Recovery & CTRL+C Shield (Signal Hijacking) to safely 
-    catch interruptions and prevent terminal state corruption.
-
-    Args:
-        qobuz (QobuzDL): The initialized QobuzDL core instance.
-        arguments (Namespace): The parsed command-line arguments.
-    """
+    """Routes parsed command-line arguments to the appropriate QobuzDL core methods."""
     def sigint_handler(sig, frame):
         print(f"\n\n\033[91m[!] Download forcibly interrupted by the user.\033[0m")
         print(f"\033[93mPartially downloaded files will be ignored or overwritten on the next run.\033[0m")
@@ -327,11 +286,10 @@ async def _handle_commands(qobuz, arguments):
             await qobuz.download_list_of_urls(arguments.SOURCE)
         elif arguments.command in ("sync-playlist", "sp"):
             from qobuz_dl.sync_playlist import sync_playlist
-            # ASSUMINDO QUE SYNC_PLAYLIST TAMBÉM FOI ATUALIZADO PARA ASSÍNCRONO
             await sync_playlist(
                 qobuz,
                 arguments.URL,
-                qobuz.directory,  # <-- MODIFIED: Previously it was arguments.FOLDER
+                qobuz.directory,
                 auto_confirm=arguments.yes,
             )
         elif arguments.command == "lucky":
@@ -359,6 +317,7 @@ def _initial_checks():
     if len(sys.argv) < 2:
         sys.exit(qobuz_dl_args().print_help())
 
+
 def check_for_updates():
     """Queries the GitHub API to notify the user of new Qobuz-DL Ultimate Edition releases."""
     try:
@@ -385,29 +344,34 @@ def check_for_updates():
 
 
 async def async_main():
-    """
-    The main asynchronous entry point for the CLI logic.
-    """
+    """The main asynchronous entry point for the CLI logic."""
     _initial_checks()
-    check_for_updates()
+
+    # Dispara a checagem de atualizacao em background como coroutine compativel com Python 3.13
+    async def _async_check_updates():
+        try:
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, check_for_updates)
+        except Exception:
+            pass
+
+    asyncio.create_task(_async_check_updates())
 
     # --- RADAR FEATURE (Standalone Intercept) ---
-    import sys
     if len(sys.argv) > 1 and sys.argv[1] == "radar":
         from qobuz_dl.radar import run_radar
         
         try:
-            run_radar()
+            await run_radar()
         except KeyboardInterrupt:
             print("\n\n\033[91m[!] Radar manually interrupted by the user (CTRL+C).\033[0m")
         sys.exit(0)
     # --------------------------------------------
 
-    # --- NEW: STATS COMMAND INTEGRATION ---
+    # --- STATS COMMAND INTEGRATION ---
     if len(sys.argv) > 1 and sys.argv[1] == "stats":
         from qobuz_dl.db import get_stats
         
-        # QOBUZ_DB è già definito all'inizio di cli.py, lo usiamo direttamente
         artists = get_stats(QOBUZ_DB)
         
         print(f"\n{CYAN}--- QOBUZ-DL ULTIMATE STATISTICS ---{OFF}")
@@ -419,7 +383,7 @@ async def async_main():
                 print(f" - {artist}")
         print(f"{CYAN}-------------------------------------{OFF}\n")
         sys.exit(0) 
-    # -------------------------------------------------
+    # ---------------------------------
 
     config = configparser.ConfigParser(interpolation=None)
     config.read(CONFIG_FILE)
@@ -467,7 +431,6 @@ async def async_main():
         else:
             legacy_val = config.get(section, "default_folder", fallback=None)
             if legacy_val is not None:
-                # If the legacy key is used, accept it but print a yellow warning
                 print(f"\033[93m[!] Notice: 'default_folder' in config.ini is deprecated. Please rename it to 'directory' for future updates.\033[0m")
                 default_folder = legacy_val
             else:
@@ -512,7 +475,6 @@ async def async_main():
     except (configparser.Error, KeyError) as error:
         arguments = qobuz_dl_args().parse_args()
         if not arguments.reset:
-            # FIX: Define ANSI codes locally to bypass UnboundLocalError
             RED_C = '\033[91m'
             YELLOW_C = '\033[93m'
             OFF_C = '\033[0m'
@@ -542,10 +504,8 @@ async def async_main():
         from qobuz_dl.sync import sync_database
         from qobuz_dl.qopy import Client
                 
-        # Initialize a lightweight API client for Reverse Lookup (bypassing the heavy downloader)
         sync_client = await Client.create(email, password, app_id, secrets, user_auth_token=token, force_english=force_english)
         
-        # Path management
         sync_dir = default_folder if arguments.sync_db == "DEFAULT" else arguments.sync_db
         
         if os.name == "nt":
@@ -553,7 +513,6 @@ async def async_main():
             if not sync_dir.startswith("\\\\?\\"):
                 sync_dir = "\\\\?\\" + sync_dir
                 
-        # ASSUMINDO QUE SYNC_DATABASE TAMBÉM FOI ATUALIZADO PARA ASSÍNCRONO 
         await sync_database(sync_dir, QOBUZ_DB, sync_client)
         sys.exit(f"\n{GREEN}Database synchronization finished successfully.{OFF}")
     # ----------------------------------------------
@@ -561,8 +520,21 @@ async def async_main():
     # --- RETRO LYRICS FEATURE (Standalone Mode) ---
     if arguments.command == "lyrics":
         from qobuz_dl.retro_tagger import inject_lyrics_retroactively
+        from qobuz_dl.qopy import Client
         
-        target_dir = arguments.DIR
+        # 1. Se nenhum diretório foi digitado, usa a pasta raiz do config.ini (default_folder)
+        target_dir = getattr(arguments, 'DIR', None) or default_folder
+        target_dir = os.path.expanduser(target_dir)
+
+        # --- IOS DOCUMENTS PRISON (A-SHELL FIX) ---
+        home_dir = os.environ.get("HOME", "")
+        if "Containers/Data/Application" in home_dir:
+            docs_dir = os.path.join(home_dir, "Documents")
+            if not target_dir.startswith(docs_dir):
+                base_name = os.path.basename(target_dir.rstrip('/\\'))
+                target_dir = os.path.join(docs_dir, base_name if base_name else "Qobuz Downloads")
+
+        # --- WINDOWS LONG PATH BYPASS ---
         if os.name == "nt":
             target_dir = os.path.abspath(target_dir)
             if not target_dir.startswith("\\\\?\\"):
@@ -570,13 +542,34 @@ async def async_main():
         
         lrc_pref = not config.getboolean(section, "no_lrc_files", fallback=False)
         embed_pref = config.getboolean(section, "embed_lyrics", fallback=True)
+        trans_lang = config.get(section, "lyrics_translation_lang", fallback="pt")
+        
         local_settings = QobuzDLSettings(lrc_files=lrc_pref, embed_lyrics=embed_pref)
+        local_settings.lyrics_translation_lang = trans_lang
+        local_settings.default_folder = target_dir
+
+        # 2. Inicializa o cliente Qobuz para consulta de letras e traduções
+        lyrics_client = None
+        try:
+            lyrics_client = await Client.create(
+                email, password, app_id, secrets, user_auth_token=token, force_english=force_english
+            )
+        except Exception as e:
+            logging.debug(f"Authentication warning for lyrics client: {e}")
                 
         try:
-            inject_lyrics_retroactively(target_dir, genius_token=genius_token, settings=local_settings)
+            await inject_lyrics_retroactively(
+                target_dir,
+                client=lyrics_client,
+                genius_token=genius_token,
+                settings=local_settings
+            )
         except KeyboardInterrupt:
             print("\n\n\033[91m[!] Operation manually interrupted by the user (CTRL+C).\033[0m")
             print("\033[93mAlready processed files are safe. Exiting...\033[0m")
+        finally:
+            if lyrics_client:
+                await lyrics_client.close()
         sys.exit(0)
     # ----------------------------------------------
     
@@ -587,13 +580,9 @@ async def async_main():
     home_dir = os.environ.get("HOME", "")
     if "Containers/Data/Application" in home_dir:
         docs_dir = os.path.join(home_dir, "Documents")
-        # Se a pasta não estiver na raiz do Documents, a forçamos para lá
         if not directory_to_use.startswith(docs_dir):
             base_name = os.path.basename(directory_to_use.rstrip('/\\'))
             directory_to_use = os.path.join(docs_dir, base_name if base_name else "Qobuz Downloads")
-
-    # --- WINDOWS LONG PATH BYPASS ---
-
 
     # --- WINDOWS LONG PATH BYPASS ---
     if os.name == "nt":
@@ -605,7 +594,6 @@ async def async_main():
     settings = QobuzDLSettings.from_arguments_configparser(arguments, config)
     settings.legacy_charmap = legacy_charmap
     
-    # Execute the Pre-flight Config Check
     # --- PRE-FLIGHT CONFIG CHECK ---
     formats_to_validate = {
         "folder_format": arguments.folder_format or folder_format,
@@ -645,20 +633,17 @@ async def async_main():
     try:
         await _handle_commands(qobuz, arguments)
     finally:
-        # Garante que a sessão HTTP seja encerrada corretamente e limpa da memória
         if hasattr(qobuz, 'client') and qobuz.client:
             await qobuz.client.close()
+
 
 def main():
     """
     The synchronous wrapper that kicks off the async process.
-    This ensures compatibility with external scripts like __main__.py 
-    that simply call cli.main() expecting it to be synchronous.
     """
     try:
         asyncio.run(async_main())
     except KeyboardInterrupt:
-        # Handles quick CTRL+C during startup before _handle_commands takes over the signal
         sys.exit(1)
 
 

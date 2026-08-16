@@ -707,7 +707,11 @@ class QobuzDL:
         
         logger.info(f"{CYAN}[*] Last.fm URL detected! Initiating Last.fm integration...{OFF}")
         
-        tracks_list = fetch_lastfm_playlist(playlist_url)
+        # fetch_lastfm_playlist() e' sincrona/bloqueante (requests.get +
+        # parsing de HTML, timeout=15s) -- offload pra nao travar o event
+        # loop durante esse tempo.
+        loop = asyncio.get_event_loop()
+        tracks_list = await loop.run_in_executor(None, fetch_lastfm_playlist, playlist_url)
         
         if not tracks_list:
             logger.info(f"{YELLOW}[!] Last.fm processing aborted (no tracks).{OFF}")

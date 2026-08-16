@@ -2,7 +2,7 @@ import os
 import re
 import requests
 import mutagen
-from mutagen.id3 import ID3, USLT, ID3NoHeaderError
+from mutagen.id3 import ID3, USLT, TXXX, ID3NoHeaderError
 from mutagen.flac import FLAC
 
 # Import lyricsgenius only if the user has configured the token
@@ -271,6 +271,7 @@ class LyricsEngine:
                 original_sync = qobuz_lyrics.get("synced")
                 original_plain = qobuz_lyrics.get("plain")
                 translations = qobuz_lyrics.get("translations", [])
+                orig_lang = str(qobuz_lyrics.get("lang") or "unknown").lower()
 
                 # Tenta achar a traducao em PT primeiro, senao usa a primeira disponivel
                 best_trans = None
@@ -283,6 +284,15 @@ class LyricsEngine:
 
                 final_sync = original_sync
                 final_plain = original_plain
+
+                # Idioma real gravado no arquivo -- usado pelo retro_tagger em
+                # execucoes futuras para confirmar (ou corrigir) o conteudo,
+                # em vez de so' assumir que "ter texto" significa "estar certo".
+                if best_trans and (best_trans.get("synced") or best_trans.get("plain")):
+                    trans_lang = str(best_trans.get("language") or "unknown").lower()
+                    lang_tag = f"{orig_lang}+{trans_lang}"
+                else:
+                    lang_tag = orig_lang
 
                 # Mesclagem Bilingue
                 if best_trans:
@@ -299,9 +309,9 @@ class LyricsEngine:
                 if final_sync:
                     is_bilingual = "BILINGUAL " if best_trans and best_trans.get("synced") else ""
                     if embed_lyrics:
-                        self._inject_metadata(file_path, final_sync, source=source_label)
+                        self._inject_metadata(file_path, final_sync, source=source_label, language=lang_tag)
                     if save_lrc:
-                        self._save_lrc_file(file_path, final_sync, source=source_label)
+                        self._save_lrc_file(file_path, final_sync, source=source_label, language=lang_tag)
 
                     if embed_lyrics and save_lrc:
                         print(f"    ✅ Synchronized {is_bilingual}lyrics injected and saved as .lrc (via Qobuz)!")
@@ -314,9 +324,9 @@ class LyricsEngine:
                 elif final_plain:
                     is_bilingual = "BILINGUAL " if best_trans and best_trans.get("plain") else ""
                     if embed_lyrics:
-                        self._inject_metadata(file_path, final_plain, source=source_label)
+                        self._inject_metadata(file_path, final_plain, source=source_label, language=lang_tag)
                     if save_lrc:
-                        self._save_lrc_file(file_path, final_plain, source=source_label)
+                        self._save_lrc_file(file_path, final_plain, source=source_label, language=lang_tag)
 
                     if embed_lyrics and save_lrc:
                         print(f"    ✅ Standard {is_bilingual}lyrics injected and saved as .txt (via Qobuz)!")
@@ -344,9 +354,9 @@ class LyricsEngine:
 
                 if synced_lyrics:
                     if embed_lyrics:
-                        self._inject_metadata(file_path, synced_lyrics, source="LRCLIB")
+                        self._inject_metadata(file_path, synced_lyrics, source="LRCLIB", language="unknown")
                     if save_lrc:
-                        self._save_lrc_file(file_path, synced_lyrics, source="LRCLIB")
+                        self._save_lrc_file(file_path, synced_lyrics, source="LRCLIB", language="unknown")
 
                     if embed_lyrics and save_lrc:
                         print(f"    ✅ Synchronized lyrics injected and saved as .lrc (via LRCLIB)!")
@@ -358,9 +368,9 @@ class LyricsEngine:
 
                 elif plain_lyrics:
                     if embed_lyrics:
-                        self._inject_metadata(file_path, plain_lyrics, source="LRCLIB")
+                        self._inject_metadata(file_path, plain_lyrics, source="LRCLIB", language="unknown")
                     if save_lrc:
-                        self._save_lrc_file(file_path, plain_lyrics, source="LRCLIB")
+                        self._save_lrc_file(file_path, plain_lyrics, source="LRCLIB", language="unknown")
 
                     if embed_lyrics and save_lrc:
                         print(f"    ✅ Standard lyrics injected and saved as .txt (via LRCLIB)!")
@@ -375,9 +385,9 @@ class LyricsEngine:
                 song = self.genius.search_song(track, artist)
                 if song and song.lyrics:
                     if embed_lyrics:
-                        self._inject_metadata(file_path, song.lyrics, source="Genius")
+                        self._inject_metadata(file_path, song.lyrics, source="Genius", language="unknown")
                     if save_lrc:
-                        self._save_lrc_file(file_path, song.lyrics, source="Genius")
+                        self._save_lrc_file(file_path, song.lyrics, source="Genius", language="unknown")
 
                     if embed_lyrics and save_lrc:
                         print(f"    ✅ Lyrics injected via Genius and saved!")
@@ -392,25 +402,32 @@ class LyricsEngine:
         except Exception as e:
             print(f"    ⚠️ Error during lyrics search: {e}")
 
-    def _save_lrc_file(self, audio_file_path, synced_lyrics, source=None):
+    def _save_lrc_file(self, audio_file_path, synced_lyrics, source=None, language=None):
         """
         Creates the .lrc or .txt file next to the audio file.
 
         Se 'source' for informado, adiciona a tag padrao de LRC [by:<source>]
         no topo do arquivo, deixando visivel (em qualquer player que leia
         metadados de LRC) de onde a letra veio -- por exemplo [by:Qobuz].
+        Se 'language' for informado, adiciona a tag padrao [la:<lang>]
+        (ex: [la:es] ou [la:es+pt] para bilingue), permitindo que execucoes
+        futuras do retro_tagger saibam com certeza qual idioma foi gravado.
         """
         base_name = os.path.splitext(audio_file_path)[0]
         lrc_path = f"{base_name}.lrc"
 
-        content = synced_lyrics
+        header_lines = []
         if source:
-            content = f"[by:{source}]\n{synced_lyrics}"
+            header_lines.append(f"[by:{source}]")
+        if language:
+            header_lines.append(f"[la:{language}]")
+
+        content = ("\n".join(header_lines) + "\n" + synced_lyrics) if header_lines else synced_lyrics
 
         with open(lrc_path, 'w', encoding='utf-8') as f:
             f.write(content)
 
-    def _inject_metadata(self, file_path, lyrics, source=None):
+    def _inject_metadata(self, file_path, lyrics, source=None, language=None):
         """
         Injects lyrics directly into FLAC (LYRICS block) or MP3 (USLT frame) tags.
 
@@ -420,6 +437,14 @@ class LyricsEngine:
           - MP3: usa o campo 'desc' do frame USLT para guardar a origem, ja que
             USLT e identificado justamente pela combinacao (lang, desc) -- assim
             da pra saber a origem sem precisar abrir um leitor de tags externo.
+
+        Se 'language' for informado, grava tambem o idioma real do texto que
+        foi injetado (ex: "es", "pt", ou "es+pt" quando bilingue):
+          - FLAC: tag Vorbis extra 'LYRICS_LANG'.
+          - MP3: frame TXXX separado com desc='LYRICS_LANG'.
+        Isso permite que uma execucao futura do retro_tagger saiba com certeza
+        qual idioma esta gravado no arquivo, em vez de precisar adivinhar --
+        e assim consiga detectar e corrigir uma letra no idioma errado.
         """
         if not lyrics:
             return
@@ -431,6 +456,8 @@ class LyricsEngine:
                 audio['LYRICS'] = lyrics
                 if source:
                     audio['LYRICS_SOURCE'] = source
+                if language:
+                    audio['LYRICS_LANG'] = language
                 audio.save()
             elif ext == '.mp3':
                 try:
@@ -439,6 +466,10 @@ class LyricsEngine:
                     audio = ID3()
                 desc = source if source else ''
                 audio.add(USLT(encoding=3, lang='eng', desc=desc, text=lyrics))
+                if language:
+                    # Remove qualquer TXXX:LYRICS_LANG anterior antes de gravar o novo valor
+                    audio.delall('TXXX:LYRICS_LANG')
+                    audio.add(TXXX(encoding=3, desc='LYRICS_LANG', text=language))
                 audio.save(file_path)
         except Exception:
             pass

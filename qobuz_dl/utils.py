@@ -484,3 +484,55 @@ def invalid_chars_to_fullwidth(filename):
     for invalid_char, fullwidth_char in invalid_to_fullwidth.items():
         filename = filename.replace(invalid_char, fullwidth_char)
     return filename
+
+
+def get_config_paths():
+    """
+    Resolves the cross-platform config directory (Windows, Linux/macOS, and
+    iOS/a-Shell), and returns the standard config.ini / database paths inside
+    it.
+
+    Centralizes the detection logic that used to live only in cli.py --
+    other entry points (e.g. radar.py) need the exact same resolution, and
+    keeping a single source of truth means a future change to this logic
+    (e.g. supporting a new platform) only needs to happen once.
+
+    Returns:
+        dict: {
+            "config_dir": ..., "config_path": ..., "config_file": ...,
+            "qobuz_db": ...,
+        }
+    """
+    # a-Shell (iOS) only exposes the app's "Documents" folder to the user via
+    # the Files app. Everything qobuz-dl creates (config, database,
+    # downloads) must live inside it. Set QOBUZ_DL_IOS_HOME (e.g. in
+    # a-Shell's .shellrc: export QOBUZ_DL_IOS_HOME="$HOME/Documents") to opt
+    # in. On every other platform this variable is simply unset and behavior
+    # is unchanged.
+    ios_home = os.environ.get("QOBUZ_DL_IOS_HOME")
+
+    config_dir = os.environ.get("CONFIG_DIR")
+    if not config_dir:
+        if ios_home:
+            config_dir = ios_home
+        elif os.name == "nt":
+            config_dir = os.environ.get("APPDATA")
+        else:
+            # iOS / a-Shell Auto-Detection
+            home_dir = os.environ.get("HOME", "")
+            if "Containers/Data/Application" in home_dir:
+                # Forca o uso da pasta Documents no iOS para evitar PermissionError
+                config_dir = os.path.join(home_dir, "Documents")
+            else:
+                config_dir = os.path.join(home_dir, ".config")
+
+    config_path = os.path.join(config_dir, "qobuz-dl")
+    config_file = os.path.join(config_path, "config.ini")
+    qobuz_db = os.path.join(config_path, "qobuz_dl.db")
+
+    return {
+        "config_dir": config_dir,
+        "config_path": config_path,
+        "config_file": config_file,
+        "qobuz_db": qobuz_db,
+    }
