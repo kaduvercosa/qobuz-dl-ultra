@@ -1296,8 +1296,9 @@ def tqdm_download(url_or_callable, fname, track_name, is_parallel=False, session
 
                 with open(fname, mode) as file, tqdm(
                     total=total_size, unit="iB", unit_scale=True, unit_divisor=1024,
-                    desc=tqdm_desc, initial=downloaded_size, bar_format=b_format, leave=False, disable=is_parallel
+                    desc=tqdm_desc, initial=downloaded_size, bar_format=b_format, leave=False, disable=is_parallel, dynamic_ncols=True
                 ) as bar:
+
                     for data in r.iter_content(chunk_size=65536):
                         if abort_event.is_set(): return
                         if data:
@@ -1455,8 +1456,9 @@ def tqdm_download_segments(track_url_dict, fname, track_name, is_parallel=False,
     try:
         with open(tmp_fname, "wb") as file, tqdm(
             total=total_size, unit="iB", unit_scale=True, unit_divisor=1024,
-            desc=tqdm_desc, bar_format=b_format, leave=False, disable=is_parallel
+            desc=tqdm_desc, bar_format=b_format, leave=False, disable=is_parallel, dynamic_ncols=True
         ) as bar:
+
 
             segment_uuid = None
             for i in range(2):
