@@ -1,6 +1,7 @@
 import re
 import os
 import logging
+import unicodedata
 
 from mutagen.flac import FLAC, Picture
 import mutagen.id3 as id3
@@ -50,35 +51,24 @@ ID3_LEGEND = {
 EMB_COVER_NAME = "embed_cover.jpg"
 
 LOCAL_GENRE_MAP = {
-    # Elettronica & Dance
     "Électronique": "Electronic",
     "Ambiance": "Ambient",
-    
-    # Classica & Strumentale
     "Classique": "Classical",
     "Musique de chambre": "Chamber Music",
     "Opéra": "Opera",
     "Chorale": "Choral",
     "Symphonique": "Symphonic",
-    
-    # Colonne Sonore & Media
     "Bande Originale": "Soundtrack",
     "Musique de film": "Soundtrack",
     "Comédie Musicale": "Musical",
     "Bande originale de jeu vidéo": "Video Game Soundtrack",
-    
-    # Jazz & Blues
     "Jazz Vocal": "Vocal Jazz",
     "Jazz Contemporain": "Contemporary Jazz",
-    
-    # World Music & Regionali
     "Musiques du monde": "World",
     "Musique celtique": "Celtic",
     "Musique latine": "Latin",
     "Variété Française": "French Pop",
     "Alternatif et Indé": "Alternative & Indie",
-        
-    # Varie
     "Enfants": "Children's Music",
     "Berceuses": "Lullabies",
     "Poésie et Littérature": "Spoken Word",
@@ -90,16 +80,6 @@ LOCAL_GENRE_MAP = {
 }
 
 def _get_title_with_version(title: str = "", version: str = "") -> str:
-    """
-    Constructs a track or album title by appending its version if it exists.
-
-    Args:
-        title (str, optional): The original title. Defaults to "".
-        version (str, optional): The version of the track/album (e.g., 'Remastered'). Defaults to "".
-
-    Returns:
-        str: The combined title and version string.
-    """
     item_title = title
     if version:
         item_title = (
@@ -111,20 +91,10 @@ def _get_title_with_version(title: str = "", version: str = "") -> str:
 
 
 def _get_title(track_dict):
-    """
-    Constructs a comprehensive title for a track, including version and classical work prefixes.
-
-    Args:
-        track_dict (dict): The dictionary containing track metadata.
-
-    Returns:
-        str: The fully formatted title string.
-    """
     title = track_dict["title"]
     version = track_dict.get("version")
     if version:
         title = f"{title} ({version})"
-    # for classical works
     if track_dict.get("work"):
         title = f"{track_dict['work']}: {title}"
 
@@ -132,15 +102,6 @@ def _get_title(track_dict):
 
 
 def _format_copyright(s: str) -> str:
-    """
-    Replaces standard text copyright symbols with their Unicode equivalents.
-
-    Args:
-        s (str): The original copyright string containing '(P)' or '(C)'.
-
-    Returns:
-        str: The formatted copyright string with Unicode symbols.
-    """
     if s:
         s = s.replace("(P)", PHON_COPYRIGHT)
         s = s.replace("(C)", COPYRIGHT)
@@ -148,43 +109,33 @@ def _format_copyright(s: str) -> str:
 
 
 def _format_genres(genres: list) -> str:
-    """
-    Cleans and formats a list of genres, removing duplicates and extracting primary names.
-
-    Args:
-        genres (list): A list of genre strings from the Qobuz API.
-
-    Returns:
-        str: A comma-separated string of unique, formatted genres.
-    """
     genres = re.findall(r"([^\u2192\/]+)", "/".join(genres))
     no_repeats = []
     [no_repeats.append(g) for g in genres if g not in no_repeats]
     return ", ".join(no_repeats)
 
 
-def _embed_flac_img(root_dir, audio: FLAC):
-    """
-    Embeds a cover image into a FLAC audio file.
-
-    Ensures the image does not exceed the maximum allowed block size for FLAC metadata 
-    to prevent encoding errors.
-
-    Args:
-        root_dir (str): The directory containing the audio file and cover image.
-        audio (FLAC): The Mutagen FLAC audio object to be tagged.
-    """
+def _get_cover_path(root_dir):
+    """Auxiliary function to locate the embedded cover art path."""
     emb_image = os.path.join(root_dir, EMB_COVER_NAME)
     multi_emb_image = os.path.join(
         os.path.abspath(os.path.join(root_dir, os.pardir)), EMB_COVER_NAME
     )
     if os.path.isfile(emb_image):
-        cover_image = emb_image
-    else:
-        cover_image = multi_emb_image
+        return emb_image
+    elif os.path.isfile(multi_emb_image):
+        return multi_emb_image
+    return None
 
-    if not os.path.isfile(cover_image):
-        logger.debug(f"Cover image not found to embed: {cover_image}")
+def _normalize_name(name: str) -> str:
+    """Removes accents, invisible spaces, and converts to lowercase for strict duplicate checking."""
+    return unicodedata.normalize('NFKD', str(name)).encode('ASCII', 'ignore').decode('utf-8').lower().strip()
+
+def _embed_flac_img(root_dir, audio: FLAC):
+    cover_image = _get_cover_path(root_dir)
+
+    if not cover_image or not os.path.isfile(cover_image):
+        logger.debug(f"Cover image not found to embed.")
         return
 
     try:
@@ -206,24 +157,10 @@ def _embed_flac_img(root_dir, audio: FLAC):
 
 
 def _embed_id3_img(root_dir, audio: id3.ID3):
-    """
-    Embeds a cover image into an MP3 file using ID3 tags.
+    cover_image = _get_cover_path(root_dir)
 
-    Args:
-        root_dir (str): The directory containing the audio file and cover image.
-        audio (id3.ID3): The Mutagen ID3 audio object to be tagged.
-    """
-    emb_image = os.path.join(root_dir, EMB_COVER_NAME)
-    multi_emb_image = os.path.join(
-        os.path.abspath(os.path.join(root_dir, os.pardir)), EMB_COVER_NAME
-    )
-    if os.path.isfile(emb_image):
-        cover_image = emb_image
-    else:
-        cover_image = multi_emb_image
-
-    if not os.path.isfile(cover_image):
-        logger.debug(f"Cover image not found to embed: {cover_image}")
+    if not cover_image or not os.path.isfile(cover_image):
+        logger.debug(f"Cover image not found to embed.")
         return
 
     with open(cover_image, "rb") as cover:
@@ -233,23 +170,6 @@ def _embed_id3_img(root_dir, audio: id3.ID3):
 def tag_flac(
     filename, root_dir, final_name, d: dict, album, istrack=True, em_image=False, settings: QobuzDLSettings = None
 ):
-    """
-    Applies metadata tags and cover art to a FLAC audio file.
-
-    Supports advanced tagging features including multi-value tags, ReplayGain injections, 
-    and custom Qobuz IDs for local database synchronization. Renames the file to its 
-    final destination upon completion.
-
-    Args:
-        filename (str): The current path to the audio file.
-        root_dir (str): The directory where the file and cover image are located.
-        final_name (str): The final designated filename after tagging is complete.
-        d (dict): The track or album dictionary containing metadata.
-        album (dict): The dictionary containing album-level metadata.
-        istrack (bool, optional): Indicates if the file is a single track. Defaults to True.
-        em_image (bool, optional): Flag to enable embedding the cover image. Defaults to False.
-        settings (QobuzDLSettings, optional): Configuration object for user preferences. Defaults to None.
-    """
     audio = FLAC(filename)
 
     if istrack:
@@ -270,13 +190,25 @@ def tag_flac(
     if not settings.no_disc_total_tag:
         tags["DISCTOTAL"] = str(qobuz_album.get("media_count", "1"))
 
+    # --- RICH COMMENT TAG INJECTION ---
+    base_comment = f"Qobuz | {qobuz_item.get('maximum_bit_depth', 16)}b/{qobuz_item.get('maximum_sampling_rate', 44.1)}kHz | Rel: {qobuz_album.get('release_date_original', 'Unknown')} | Trk ID: {qobuz_item.get('id', 'Unknown')}"
+    
+    if em_image:
+        cover_path = _get_cover_path(root_dir)
+        if cover_path:
+            img_size_bytes = os.path.getsize(cover_path)
+            img_size_mb = img_size_bytes / (1024 * 1024)
+            req_size = getattr(settings, 'embedded_art_size', 'unknown')
+            is_org = "YES" if req_size == "org" else "NO"
+            base_comment += f" | Cover: {img_size_mb:.2f} MB (Req: {req_size}, Org: {is_org})"
+            
+    tags["COMMENT"] = base_comment
+
     for k, v in tags.items():
         if v:
-            # --- MULTI-TAG FEATURE ---
             if getattr(settings, 'multi_value_tags', False) and k == "GENRE" and isinstance(v, str):
                 if ", " in v:
                     v = v.split(", ")
-            
             audio[k] = v
 
     if em_image:
@@ -290,27 +222,10 @@ def tag_flac(
         audio.tags.vendor = ""
 
     audio.save(padding=lambda info: 8192)
-    
     os.rename(filename, final_name)
 
 
 def tag_mp3(filename, root_dir, final_name, d, album, istrack=True, em_image=False, settings: QobuzDLSettings = None):
-    """
-    Applies ID3 metadata tags and cover art to an MP3 audio file.
-
-    Maps custom Qobuz metadata to corresponding ID3 legends and handles standard track 
-    and disc numbering. Renames the file upon completion.
-
-    Args:
-        filename (str): The current path to the audio file.
-        root_dir (str): The directory where the file and cover image are located.
-        final_name (str): The final designated filename after tagging is complete.
-        d (dict): The track or album dictionary containing metadata.
-        album (dict): The dictionary containing album-level metadata.
-        istrack (bool, optional): Indicates if the file is a single track. Defaults to True.
-        em_image (bool, optional): Flag to enable embedding the cover image. Defaults to False.
-        settings (QobuzDLSettings, optional): Configuration object for user preferences. Defaults to None.
-    """
     try:
         audio = id3.ID3(filename)
     except ID3NoHeaderError:
@@ -325,12 +240,28 @@ def tag_mp3(filename, root_dir, final_name, d, album, istrack=True, em_image=Fal
 
     tags = _get_tags_to_add(qobuz_album, qobuz_item, settings=settings)
 
+    # --- RICH COMMENT TAG INJECTION ---
+    base_comment = f"Qobuz | {qobuz_item.get('maximum_bit_depth', 16)}b/{qobuz_item.get('maximum_sampling_rate', 44.1)}kHz | Rel: {qobuz_album.get('release_date_original', 'Unknown')} | Trk ID: {qobuz_item.get('id', 'Unknown')}"
+    
+    if em_image:
+        cover_path = _get_cover_path(root_dir)
+        if cover_path:
+            img_size_bytes = os.path.getsize(cover_path)
+            img_size_mb = img_size_bytes / (1024 * 1024)
+            req_size = getattr(settings, 'embedded_art_size', 'unknown')
+            is_org = "YES" if req_size == "org" else "NO"
+            base_comment += f" | Cover: {img_size_mb:.2f} MB (Req: {req_size}, Org: {is_org})"
+            
+    tags["COMMENT"] = base_comment
+
     for k, v in tags.items():
         if v:
             id3tag = ID3_LEGEND.get(k.lower()) or ID3_LEGEND.get(k)
             if id3tag:
                 if id3tag == id3.TXXX:
                     audio.add(id3tag(encoding=3, desc=k, text=v))
+                elif id3tag == id3.COMM:
+                    audio.add(id3tag(encoding=3, lang='eng', desc='', text=[v]))
                 else:
                     audio[id3tag.__name__] = id3tag(encoding=3, text=v)
 
@@ -350,22 +281,6 @@ def tag_mp3(filename, root_dir, final_name, d, album, istrack=True, em_image=Fal
 
 
 def _get_tags_to_add(qobuz_album: dict, qobuz_item : dict, settings: QobuzDLSettings = None):
-    """
-    Extracts and maps metadata from Qobuz API responses into a standardized tag dictionary.
-
-    This core engine processes native Qobuz data including Classical music roles, 
-    ReplayGain track/peak values, multi-artist matrices, and custom Qobuz IDs, 
-    adhering strictly to the provided configuration flags.
-
-    Args:
-        qobuz_album (dict): The dictionary containing album-level metadata.
-        qobuz_item (dict): The dictionary containing track-level metadata.
-        settings (QobuzDLSettings, optional): Configuration object containing user preferences 
-            (e.g., flags to disable specific tags). Defaults to None.
-
-    Returns:
-        dict: A dictionary mapping standardized tag keys to their corresponding extracted values.
-    """
     tags = dict()
     if not qobuz_album or not qobuz_item:
         return tags
@@ -383,8 +298,22 @@ def _get_tags_to_add(qobuz_album: dict, qobuz_item : dict, settings: QobuzDLSett
         tags["ALBUMARTIST"] = get_album_artist(qobuz_album)
         
     if not settings.no_track_artist_tag:
-        main_artist = qobuz_item.get("performer", {}).get("name", "") or qobuz_album.get("artist", {}).get("name", "")
-        artists = [main_artist] if main_artist else []
+        artists = []
+        seen_artists = set()
+        
+        def add_unique_artist(name):
+            if not name: return
+            norm_name = _normalize_name(name)
+            if norm_name and norm_name not in seen_artists:
+                seen_artists.add(norm_name)
+                artists.append(name)
+
+        main_artist_raw = qobuz_item.get("performer", {}).get("name", "") or qobuz_album.get("artist", {}).get("name", "")
+        
+        # Split just in case Qobuz sent a pre-merged string like "Jão, Danna Paola"
+        if main_artist_raw:
+            for part in main_artist_raw.split(","):
+                add_unique_artist(part.strip())
         
         performers_str = qobuz_item.get("performers", "")
         if performers_str:
@@ -394,14 +323,11 @@ def _get_tags_to_add(qobuz_album: dict, qobuz_item : dict, settings: QobuzDLSett
                     name = parts[0]
                     roles = parts[1:]
                     
-                    if "FeaturedArtist" in roles or "MainArtist" in roles:
-                        if name not in artists:
-                            artists.append(name)
+                    if "FeaturedArtist" in roles or "MainArtist" in roles or "PrimaryArtist" in roles:
+                        add_unique_artist(name)
         
-        if len(artists) == 1:
-            tags["ARTIST"] = artists[0]
-        elif len(artists) > 1:
-            tags["ARTIST"] = artists
+        if len(artists) > 0:
+            tags["ARTIST"] = ", ".join(artists)
         else:
             tags["ARTIST"] = ""
 
@@ -425,10 +351,8 @@ def _get_tags_to_add(qobuz_album: dict, qobuz_item : dict, settings: QobuzDLSett
             if main_composer:
                 composers.append(main_composer)
 
-        if len(composers) == 1:
-            tags["COMPOSER"] = composers[0]
-        elif len(composers) > 1:
-            tags["COMPOSER"] = composers
+        if len(composers) > 0:
+            tags["COMPOSER"] = ", ".join(composers)
         else:
             tags["COMPOSER"] = ""
 
@@ -509,7 +433,6 @@ def _get_tags_to_add(qobuz_album: dict, qobuz_item : dict, settings: QobuzDLSett
         tags["CONDUCTOR"] = conductors if len(conductors) > 1 else conductors[0]
     if ensembles and not getattr(settings, 'no_ensemble_tag', False):
         tags["ENSEMBLE"] = ensembles if len(ensembles) > 1 else ensembles[0]
-    # ----------------------------
 
     # --- DB SYNC FEATURE: SAVE QOBUZ IDS ---
     track_id = qobuz_item.get("id")

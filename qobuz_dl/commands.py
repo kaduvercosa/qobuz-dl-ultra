@@ -1,4 +1,19 @@
 import argparse
+import os
+
+
+def _default_download_folder():
+    """
+    Resolves the fallback download folder.
+
+    On iOS (a-Shell), QOBUZ_DL_IOS_HOME must be set (e.g. to $HOME/Documents),
+    since that's the only folder the Files app can see. Everywhere else this
+    is unset and the historical relative "QobuzDownloads" default is kept.
+    """
+    ios_home = os.environ.get("QOBUZ_DL_IOS_HOME")
+    if ios_home:
+        return os.path.join(ios_home, "QobuzDownloads")
+    return "QobuzDownloads"
 
 
 def fun_args(subparsers, default_limit):
@@ -434,8 +449,8 @@ def add_common_arg(custom_parser, default_folder, default_quality):
     artwork_group.add_argument(
         "--embedded-art-size",
         choices=["50", "100", "150", "300", "600", "max", "org"],
-        default="600",
-        help="size of embedded artwork (default: 600)"
+        default="org",
+        help="size of embedded artwork (default: org)"
     )
     artwork_group.add_argument(
         "--saved-art-size",
@@ -475,7 +490,7 @@ def add_common_arg(custom_parser, default_folder, default_quality):
 
 
 def qobuz_dl_args(
-    default_quality=6, default_limit=20, default_folder="QobuzDownloads"
+    default_quality=6, default_limit=20, default_folder=None
 ):
     """
     Initializes and constructs the main argument parser for Qobuz-DL Ultimate Edition.
@@ -491,6 +506,9 @@ def qobuz_dl_args(
     Returns:
         ArgumentParser: The fully configured master argparse object.
     """
+    if default_folder is None:
+        default_folder = _default_download_folder()
+
     parser = argparse.ArgumentParser(
         prog="qobuz-dl",
         description=(

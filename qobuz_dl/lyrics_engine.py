@@ -1,4 +1,5 @@
 import os
+import re
 import requests
 import mutagen
 from mutagen.id3 import ID3, USLT, ID3NoHeaderError
@@ -13,11 +14,11 @@ except ImportError:
 
 class LyricsEngine:
     """
-    Roon-Ready Synchronized Lyrics Engine.
-    
-    Responsible for fetching synchronized (LRC) or plain text lyrics from LRCLIB 
-    and falling back to Genius API if configured. It handles both saving external 
-    .lrc/.txt files and natively embedding the lyrics into audio metadata.
+    Roon-Ready Synchronized Lyrics Engine (Bilingual Edition).
+
+    Responsible for fetching synchronized (LRC) or plain text lyrics from Qobuz natively,
+    LRCLIB, and falling back to Genius API if configured. It automatically merges official
+    Qobuz translations into a single interleaved Bilingual LRC file (quando disponíveis).
     """
 
     def __init__(self, genius_token=None):
@@ -33,35 +34,283 @@ class LyricsEngine:
             self.genius = lyricsgenius.Genius(self.genius_token, remove_section_headers=True)
             self.genius.verbose = False
 
-    def fetch_and_inject(self, file_path, artist, track, album, save_lrc=True, embed_lyrics=True):
+    # ------------------------------------------------------------------
+    # HELPERS DE CONVERSAO DE TEMPO (formato real do Qobuz: ms inteiros)
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _ms_to_lrc_timestamp(ms):
         """
-        Waterfall engine: first try LRCLIB (for LRC format), then Genius.
-        
-        Attempts to fetch lyrics for the given track. If synchronized lyrics are found, 
-        they can be saved as a separate .lrc file and/or embedded into the audio file's tags 
-        for native Karaoke support in Roon and advanced DAPs.
+        Converte um timestamp em milissegundos (formato bruto devolvido pelo
+        Qobuz em 'start'/'end') para o formato padrao LRC [mm:ss.mmm].
+
+        Usamos 3 casas decimais (milissegundos) em vez das 2 centesimais
+        tradicionais porque o Qobuz ja entrega precisao de milissegundo, e o
+        parser de _build_bilingual_lrc (regex \\d{2,}:\\d{2}\\.\\d{2,3}) aceita
+        tanto 2 quanto 3 digitos na fracao, entao nao perdemos compatibilidade.
+        """
+        minutes = ms // 60000
+        seconds = (ms % 60000) / 1000.0
+        return f"[{minutes:02d}:{seconds:06.3f}]"
+
+    def _qobuz_lines_to_lrc(self, lines):
+        """
+        Converte a lista de linhas do Qobuz (cada uma com 'line', 'start', 'end')
+        em um bloco de texto LRC sincronizado, na ordem certa e com o tempo certo.
+
+        Linhas sem 'start' (os separadores estruturais tipo {"line": ""} que o
+        Qobuz usa entre estrofes) nao carregam nenhuma informacao de tempo, entao
+        sao simplesmente ignoradas -- inclui-las geraria uma linha "fantasma" sem
+        timestamp valido no arquivo final.
+        """
+        lrc_rows = []
+        for entry in lines:
+            start = entry.get("start")
+            if start is None:
+                continue  # separador estrutural sem timing, pula
+
+            text = (entry.get("line") or "").strip()
+            timestamp = self._ms_to_lrc_timestamp(start)
+            lrc_rows.append(f"{timestamp} {text}")
+
+        return "\n".join(lrc_rows) if lrc_rows else None
+
+    @staticmethod
+    def _qobuz_lines_to_plain(lines):
+        """
+        Gera a versao em texto puro (sem timestamps) a partir das mesmas linhas,
+        preservando as quebras de estrofe (linhas vazias) para leitura humana.
+        """
+        plain_rows = [(entry.get("line") or "").strip() for entry in lines]
+        # Remove espacos redundantes nas pontas, mas mantem as linhas em branco internas
+        text = "\n".join(plain_rows).strip("\n")
+        return text if text else None
+
+    # ------------------------------------------------------------------
+    # EXTRACAO A PARTIR DA RESPOSTA REAL DE track/lyricsUrl
+    # ------------------------------------------------------------------
+    def extract_qobuz_lyrics(self, lyrics_response, translation_response=None):
+        """
+        Extrai letras (e, se fornecida, traducao) a partir da resposta CRUA do
+        endpoint track/lyricsUrl.
+
+        Formato real observado:
+            {
+              "album_id": "...",
+              "track_id": ...,
+              "translation_langs": ["pt", "de", ...],
+              "publishers": [...],
+              "writers": "...",
+              "original": {
+                  "type": "lsync",
+                  "lang": "en",
+                  "lines": [{"line": "...", "start": 7380, "end": 11500}, ...]
+              }
+            }
 
         Args:
-            file_path (str): The absolute path to the audio file.
-            artist (str): The name of the main artist.
-            track (str): The track title.
-            album (str): The album title.
-            save_lrc (bool, optional): If True, saves an external .lrc or .txt file next to the audio. Defaults to True.
-            embed_lyrics (bool, optional): If True, injects the lyrics into the audio file's metadata. Defaults to True.
+            lyrics_response (dict): resposta bruta de client.api_call("track/lyricsUrl", ...).
+            translation_response (dict, optional): resposta de uma futura chamada de
+                traducao, no MESMO formato de 'original' (ex: {"lang": "pt", "lines": [...]})
+                -- ainda nao temos confirmado o endpoint/parametro exato pra isso, entao
+                esse argumento fica pronto pra ser plugado assim que descobrirmos.
+
+        Returns:
+            dict | None: {
+                "synced": str | None,       # LRC sincronizado do original
+                "plain": str | None,        # texto puro do original
+                "source": "qobuz",
+                "lang": str,                 # idioma original (ex: "en")
+                "translation_langs": list,   # idiomas de traducao anunciados pela API
+                "translations": [            # populado somente se translation_response vier preenchido
+                    {"language": str, "plain": str | None, "synced": str | None}
+                ],
+            }
         """
-        
+        if not lyrics_response or not isinstance(lyrics_response, dict):
+            return None
+
+        original = lyrics_response.get("original")
+        if not original or not isinstance(original, dict):
+            return None
+
+        lines = original.get("lines") or []
+        if not lines:
+            return None
+
+        synced = self._qobuz_lines_to_lrc(lines)
+        plain = self._qobuz_lines_to_plain(lines)
+
+        if not synced and not plain:
+            return None
+
+        result = {
+            "synced": synced,
+            "plain": plain,
+            "source": "qobuz",
+            "lang": original.get("lang", "en"),
+            "translation_langs": lyrics_response.get("translation_langs", []),
+            "translations": [],
+        }
+
+        # Se uma resposta de traducao ja veio pronta (mesmo formato de 'original'),
+        # convertemos ela tambem e anexamos a lista de traducoes.
+        if translation_response and isinstance(translation_response, dict):
+            t_lines = translation_response.get("lines") or []
+            if t_lines:
+                t_synced = self._qobuz_lines_to_lrc(t_lines)
+                t_plain = self._qobuz_lines_to_plain(t_lines)
+                if t_synced or t_plain:
+                    result["translations"].append({
+                        "language": translation_response.get("lang", "translated"),
+                        "plain": t_plain,
+                        "synced": t_synced,
+                    })
+
+        return result
+
+    def _build_bilingual_lrc(self, original_lrc, translated_lrc):
+        """
+        Interleaves original and translated LRC files chronologically.
+        If timestamps match exactly, the original line is placed first.
+        """
+        if not original_lrc or not translated_lrc:
+            return original_lrc or translated_lrc
+
+        def parse_lrc(lrc_text, is_translation):
+            parsed = []
+            for line in lrc_text.splitlines():
+                tags = re.findall(r'\[\d{2,}:\d{2}\.\d{2,3}\]', line)
+                text = re.sub(r'\[\d{2,}:\d{2}\.\d{2,3}\]', '', line).strip()
+
+                if not text:
+                    continue  # Ignora linhas vazias para nao sujar o player
+
+                for tag in tags:
+                    try:
+                        m, s = tag.strip('[]').split(':')
+                        s, ms = s.split('.')
+                        # Normaliza os milissegundos para manter uma ordenacao perfeita
+                        time_ms = int(m) * 60000 + int(s) * 1000 + int(ms.ljust(3, '0')[:3])
+                        parsed.append((time_ms, tag, text, is_translation))
+                    except ValueError:
+                        continue
+            return parsed
+
+        orig_parsed = parse_lrc(original_lrc, False)
+        trans_parsed = parse_lrc(translated_lrc, True)
+
+        combined = orig_parsed + trans_parsed
+
+        # Ordena primariamente pelo timestamp (ms).
+        # Em caso de empate, a original (False) vem antes da traducao (True).
+        combined.sort(key=lambda x: (x[0], x[3]))
+
+        final_lrc = []
+        for item in combined:
+            tag, text, is_trans = item[1], item[2], item[3]
+            if is_trans:
+                # Seta de recuo e espaco para diferenciar visualmente a traducao
+                final_lrc.append(f"{tag}    ↳ {text}")
+            else:
+                final_lrc.append(f"{tag} {text}")
+
+        return "\n".join(final_lrc)
+
+    # ------------------------------------------------------------------
+    # FLUXO PRINCIPAL
+    # ------------------------------------------------------------------
+    def fetch_and_inject(self, file_path, artist, track, album, save_lrc=True,
+                          embed_lyrics=True, qobuz_lyrics_response=None,
+                          qobuz_translation_response=None):
+        """
+        Waterfall engine: first try Qobuz natively, then LRCLIB (for LRC format), then Genius.
+
+        Args:
+            qobuz_lyrics_response (dict, optional): resposta bruta de
+                client.api_call("track/lyricsUrl", track_id=...). Substitui o antigo
+                parametro 'track_dict', que esperava um formato que a API nunca
+                devolveu de fato.
+            qobuz_translation_response (dict, optional): resposta bruta de uma
+                futura chamada de traducao (mesmo formato de 'original'), se/quando
+                descobrirmos o endpoint/parametro certo.
+        """
         if not save_lrc and not embed_lyrics:
             return
-            
+
         try:
             print(f"    🔍 Searching lyrics for: {track}...")
-            
+
+            # 1. Tenta as letras nativas do Qobuz (Original + Bilingue se houver traducao)
+            qobuz_lyrics = self.extract_qobuz_lyrics(
+                qobuz_lyrics_response, qobuz_translation_response
+            )
+
+            if qobuz_lyrics and (qobuz_lyrics.get("synced") or qobuz_lyrics.get("plain")):
+                original_sync = qobuz_lyrics.get("synced")
+                original_plain = qobuz_lyrics.get("plain")
+                translations = qobuz_lyrics.get("translations", [])
+
+                # Tenta achar a traducao em PT primeiro, senao usa a primeira disponivel
+                best_trans = None
+                for t in translations:
+                    if "pt" in str(t.get("language", "")).lower():
+                        best_trans = t
+                        break
+                if not best_trans and translations:
+                    best_trans = translations[0]
+
+                final_sync = original_sync
+                final_plain = original_plain
+
+                # Mesclagem Bilingue
+                if best_trans:
+                    if original_sync and best_trans.get("synced"):
+                        final_sync = self._build_bilingual_lrc(original_sync, best_trans.get("synced"))
+                    if original_plain and best_trans.get("plain"):
+                        final_plain = f"{original_plain}\n\n--- TRADUCAO ({best_trans.get('language', 'pt').upper()}) ---\n\n{best_trans.get('plain')}"
+
+                # 'source' fica marcado em toda a cadeia (print + tags no arquivo)
+                # para deixar claro, tanto no terminal quanto no arquivo, que a
+                # letra embutida veio oficialmente do Qobuz.
+                source_label = "Qobuz"
+
+                if final_sync:
+                    is_bilingual = "BILINGUAL " if best_trans and best_trans.get("synced") else ""
+                    if embed_lyrics:
+                        self._inject_metadata(file_path, final_sync, source=source_label)
+                    if save_lrc:
+                        self._save_lrc_file(file_path, final_sync, source=source_label)
+
+                    if embed_lyrics and save_lrc:
+                        print(f"    ✅ Synchronized {is_bilingual}lyrics injected and saved as .lrc (via Qobuz)!")
+                    elif save_lrc:
+                        print(f"    ✅ Synchronized {is_bilingual}lyrics saved as .lrc (via Qobuz)!")
+                    elif embed_lyrics:
+                        print(f"    ✅ Synchronized {is_bilingual}lyrics injected into metadata (via Qobuz)!")
+                    return
+
+                elif final_plain:
+                    is_bilingual = "BILINGUAL " if best_trans and best_trans.get("plain") else ""
+                    if embed_lyrics:
+                        self._inject_metadata(file_path, final_plain, source=source_label)
+                    if save_lrc:
+                        self._save_lrc_file(file_path, final_plain, source=source_label)
+
+                    if embed_lyrics and save_lrc:
+                        print(f"    ✅ Standard {is_bilingual}lyrics injected and saved as .txt (via Qobuz)!")
+                    elif save_lrc:
+                        print(f"    ✅ Standard {is_bilingual}lyrics saved as .txt (via Qobuz)!")
+                    elif embed_lyrics:
+                        print(f"    ✅ Standard {is_bilingual}lyrics injected into metadata (via Qobuz)!")
+                    return
+
+            # 2. Fallback to LRCLIB
             lrclib_url = "https://lrclib.net/api/get"
             headers = {"User-Agent": "qobuz-dl-ultimate/1.0 (https://github.com/Sei969/qobuz-dl)"}
-            
+
             params = {"artist_name": artist, "track_name": track, "album_name": album}
-            response = requests.get(lrclib_url, params=params, headers=headers, timeout=12) 
-            
+            response = requests.get(lrclib_url, params=params, headers=headers, timeout=12)
+
             if response.status_code != 200:
                 params = {"artist_name": artist, "track_name": track}
                 response = requests.get(lrclib_url, params=params, headers=headers, timeout=12)
@@ -70,43 +319,44 @@ class LyricsEngine:
                 data = response.json()
                 synced_lyrics = data.get("syncedLyrics")
                 plain_lyrics = data.get("plainLyrics")
-                
+
                 if synced_lyrics:
                     if embed_lyrics:
-                        self._inject_metadata(file_path, synced_lyrics)
+                        self._inject_metadata(file_path, synced_lyrics, source="LRCLIB")
                     if save_lrc:
-                        self._save_lrc_file(file_path, synced_lyrics)
-                        
+                        self._save_lrc_file(file_path, synced_lyrics, source="LRCLIB")
+
                     if embed_lyrics and save_lrc:
-                        print(f"    ✅ Synchronized lyrics injected and saved as .lrc!")
+                        print(f"    ✅ Synchronized lyrics injected and saved as .lrc (via LRCLIB)!")
                     elif save_lrc:
-                        print(f"    ✅ Synchronized lyrics saved as .lrc (Embedding disabled)!")
+                        print(f"    ✅ Synchronized lyrics saved as .lrc (via LRCLIB)!")
                     elif embed_lyrics:
-                        print(f"    ✅ Synchronized lyrics injected into metadata!")
+                        print(f"    ✅ Synchronized lyrics injected into metadata (via LRCLIB)!")
                     return
-                    
+
                 elif plain_lyrics:
                     if embed_lyrics:
-                        self._inject_metadata(file_path, plain_lyrics)
+                        self._inject_metadata(file_path, plain_lyrics, source="LRCLIB")
                     if save_lrc:
-                        self._save_lrc_file(file_path, plain_lyrics)
+                        self._save_lrc_file(file_path, plain_lyrics, source="LRCLIB")
 
                     if embed_lyrics and save_lrc:
-                        print(f"    ✅ Standard lyrics injected and saved as .txt!")
+                        print(f"    ✅ Standard lyrics injected and saved as .txt (via LRCLIB)!")
                     elif save_lrc:
-                        print(f"    ✅ Standard lyrics saved as .txt (Embedding disabled)!")
+                        print(f"    ✅ Standard lyrics saved as .txt (via LRCLIB)!")
                     elif embed_lyrics:
-                        print(f"    ✅ Standard lyrics injected into metadata!")
+                        print(f"    ✅ Standard lyrics injected into metadata (via LRCLIB)!")
                     return
 
+            # 3. Fallback to Genius
             if self.genius:
                 song = self.genius.search_song(track, artist)
                 if song and song.lyrics:
                     if embed_lyrics:
-                        self._inject_metadata(file_path, song.lyrics)
+                        self._inject_metadata(file_path, song.lyrics, source="Genius")
                     if save_lrc:
-                        self._save_lrc_file(file_path, song.lyrics)
-                        
+                        self._save_lrc_file(file_path, song.lyrics, source="Genius")
+
                     if embed_lyrics and save_lrc:
                         print(f"    ✅ Lyrics injected via Genius and saved!")
                     elif save_lrc:
@@ -120,41 +370,53 @@ class LyricsEngine:
         except Exception as e:
             print(f"    ⚠️ Error during lyrics search: {e}")
 
-    def _save_lrc_file(self, audio_file_path, synced_lyrics):
+    def _save_lrc_file(self, audio_file_path, synced_lyrics, source=None):
         """
         Creates the .lrc or .txt file next to the audio file.
 
-        Args:
-            audio_file_path (str): The absolute path to the downloaded audio file.
-            synced_lyrics (str): The lyrics string to be saved.
+        Se 'source' for informado, adiciona a tag padrao de LRC [by:<source>]
+        no topo do arquivo, deixando visivel (em qualquer player que leia
+        metadados de LRC) de onde a letra veio -- por exemplo [by:Qobuz].
         """
         base_name = os.path.splitext(audio_file_path)[0]
         lrc_path = f"{base_name}.lrc"
-        with open(lrc_path, 'w', encoding='utf-8') as f:
-            f.write(synced_lyrics)
 
-    def _inject_metadata(self, file_path, lyrics):
+        content = synced_lyrics
+        if source:
+            content = f"[by:{source}]\n{synced_lyrics}"
+
+        with open(lrc_path, 'w', encoding='utf-8') as f:
+            f.write(content)
+
+    def _inject_metadata(self, file_path, lyrics, source=None):
         """
         Injects lyrics directly into FLAC (LYRICS block) or MP3 (USLT frame) tags.
 
-        Args:
-            file_path (str): The absolute path to the downloaded audio file.
-            lyrics (str): The fetched lyrics string.
+        Se 'source' for informado:
+          - FLAC: grava tambem uma tag extra 'LYRICS_SOURCE' (ex: "Qobuz"),
+            visivel em qualquer player/organizador que leia tags Vorbis Comment.
+          - MP3: usa o campo 'desc' do frame USLT para guardar a origem, ja que
+            USLT e identificado justamente pela combinacao (lang, desc) -- assim
+            da pra saber a origem sem precisar abrir um leitor de tags externo.
         """
-        if not lyrics: return
-        
+        if not lyrics:
+            return
+
         ext = os.path.splitext(file_path)[1].lower()
         try:
             if ext == '.flac':
                 audio = FLAC(file_path)
                 audio['LYRICS'] = lyrics
+                if source:
+                    audio['LYRICS_SOURCE'] = source
                 audio.save()
             elif ext == '.mp3':
                 try:
                     audio = ID3(file_path)
                 except ID3NoHeaderError:
                     audio = ID3()
-                audio.add(USLT(encoding=3, lang='eng', desc='', text=lyrics))
+                desc = source if source else ''
+                audio.add(USLT(encoding=3, lang='eng', desc=desc, text=lyrics))
                 audio.save(file_path)
         except Exception:
-            pass # Ignore writing errors to avoid crashing the program
+            pass

@@ -9,6 +9,7 @@ import re
 import threading
 import signal
 from typing import Tuple
+import asyncio
 import concurrent.futures
 from concurrent.futures import ThreadPoolExecutor
 
@@ -67,15 +68,6 @@ def format_release_type(release_type: str) -> str:
 def process_folder_format_with_subdirs(folder_format, attr_dict, path=None, legacy_charmap=False):
     """
     Parses and sanitizes the user's custom folder format string, generating a safe directory path.
-
-    Args:
-        folder_format (str): The format template string (e.g., "{album_artist}/{album_title}").
-        attr_dict (dict): The dictionary containing metadata attributes to format the string.
-        path (str, optional): The base destination path. Defaults to None.
-        legacy_charmap (bool, optional): If True, applies legacy character mapping. Defaults to False.
-
-    Returns:
-        str: The fully resolved and sanitized local directory path.
     """
     path_parts = folder_format.split('/')
     cleaned_parts = []
@@ -83,10 +75,8 @@ def process_folder_format_with_subdirs(folder_format, attr_dict, path=None, lega
         if part:
             try:
                 formatted_part = part.format(**attr_dict)
-                # AGGIUNTO legacy_charmap QUI:
-                cleaned_part = sanitize_filepath(clean_filename(formatted_part, legacy_charmap=legacy_charmap), replacement_text="_")
+                cleaned_part = sanitize_filepath(clean_filename(formatted_part, legacy_charmap=legacy_flag if 'legacy_flag' in locals() else legacy_charmap), replacement_text="_")
                 
-                # --- FIX: SMART TRUNCATION FOR ALBUM FOLDER ---
                 if cleaned_part and len(cleaned_part) > 120:
                     start_f = cleaned_part[:60].rstrip(' ."-_\'')
                     end_f = cleaned_part[-50:].lstrip(' ."-_\'')
@@ -96,7 +86,6 @@ def process_folder_format_with_subdirs(folder_format, attr_dict, path=None, lega
                     cleaned_parts.append(cleaned_part)
             except KeyError as e:
                 logger.warning(f"{YELLOW}Format error ({e}), using original text.{OFF}")
-                # AGGIUNTO legacy_charmap ANCHE QUI:
                 cleaned_part = sanitize_filepath(clean_filename(part, legacy_charmap=legacy_charmap), replacement_text="_")
                 
                 if cleaned_part and len(cleaned_part) > 120:
@@ -133,9 +122,6 @@ logger.setLevel(logging.INFO)
 class Download:
     """
     The main Download engine handling the retrieval of audio files, booklets, and metadata.
-    
-    Features include multithreaded queueing, intelligent quality fallbacks, SIGINT hijacking 
-    for safe aborts, and on-the-fly metadata tagging.
     """
 
     def __init__(
@@ -162,32 +148,6 @@ class Download:
         booklet_only: bool = False,
         playlist_as_albums: bool = False,
     ):
-        """
-        Initializes the Download class.
-
-        Args:
-            client: The authenticated Qobuz API client instance.
-            item_id (str): The target Qobuz ID (track or album).
-            path (str): Base destination directory.
-            quality (int): Requested audio quality format ID.
-            embed_art (bool): Flag to embed cover art inside audio tags.
-            albums_only (bool): If True, skips Singles and EPs.
-            downgrade_quality (bool): If True, automatically fetches lower quality if requested quality is unavailable.
-            cover_og_quality (bool): Flag to download original uncompressed cover art.
-            no_cover (bool): If True, skips cover art download completely.
-            folder_format (str, optional): Custom string format for the album folder.
-            track_format (str, optional): Custom string format for the track filenames.
-            fetch_lyrics (bool): Flag to fetch synchronized lyrics via LyricsEngine.
-            no_lrc_files (bool): If True, lyrics are embedded but not saved as separate .lrc files.
-            genius_token (str, optional): Authentication token for the Genius API.
-            no_credits (bool): If True, prevents Digital Booklet generation.
-            settings (QobuzDLSettings, optional): The application settings object.
-            download_db (str, optional): Path to the SQLite sync database.
-            is_playlist (bool): True if downloading elements as part of a playlist.
-            playlist_track_number (int, optional): The overridden track number in a playlist context.
-            booklet_only (bool): If True, downloads only the Digital Booklet and cover art, skipping audio.
-            playlist_as_albums (bool): If True, downloads playlist tracks into their original album folders.
-        """
         self.client = client
         self.item_id = item_id
         self.path = path
@@ -218,35 +178,22 @@ class Download:
         self._original_track_format = track_format or DEFAULT_TRACK
         self._original_multiple_disc_track_format = settings.multiple_disc_track_format if settings else DEFAULT_MULTIPLE_DISC_TRACK
 
-    def download_id_by_type(self, track=True):
-        """
-        Routes the download request based on the item type.
-
-        Args:
-            track (bool, optional): If True, processes as a single track. Defaults to True.
-        """
+    async def download_id_by_type(self, track=True):
+        """Routes the download request based on the item type."""
         self.folder_format = self._original_folder_format
         self.track_format = self._original_track_format
         if self.settings:
             self.settings.multiple_disc_track_format = self._original_multiple_disc_track_format
         
         if not track:
-            self.download_release()
+            await self.download_release()
         else:
-            self.download_track()
+            await self.download_track()
 
-    def download_release(self):
-        """
-        Handles the full download sequence for an album/release.
-        
-        Features:
-        - 3-Stage Fail-Safe Folders ([IN PROGRESS], [INCOMPLETE], clean name).
-        - Multithreaded track fetching via ThreadPoolExecutor.
-        - SIGINT hijacking to gracefully abort and release file locks.
-        - Skips geoblocked/unavailable tracks automatically without crashing.
-        """
+    async def download_release(self):
+        """Handles the full download sequence for an album/release."""
         count = 0
-        album_meta = self.client.get_album_meta(self.item_id)
+        album_meta = await self.client.get_album_meta(self.item_id)
 
         if not album_meta.get("streamable"):
             raise NonStreamable("This release is not streamable")
@@ -262,7 +209,7 @@ class Download:
         url = album_meta.get("url", "")
         release_date = album_meta.get("release_date_original", "")
 
-        format_info = self._get_format(album_meta)
+        format_info = await self._get_format(album_meta)
         file_format, quality_met, bit_depth, sampling_rate = format_info
 
         if not self.downgrade_quality and not quality_met:
@@ -328,9 +275,6 @@ class Download:
         aborted_by_user = False
         abort_event.clear()
 
-        # --- SIGINT HIJACKER (Hacker Fix) ---
-        # Intercept Ctrl+C to prevent core/cli from brutally killing the process,
-        # ensuring we have time to release file locks and rename the folder to [INCOMPLETE].
         original_sigint = None
         try:
             original_sigint = signal.getsignal(signal.SIGINT)
@@ -357,64 +301,46 @@ class Download:
                 
             if getattr(self, 'booklet_only', False):
                 safe_print(f"{YELLOW}[*] --booklet-only flag active. Skipping audio tracks.{OFF}")
-                
                 if is_standard_album and working_dirn == inprogress_dirn:
                     try:
                         os.rename(working_dirn, incomplete_dirn)
                     except OSError as e:
                         logger.warning(f"{YELLOW}[!] Impossibile rinominare la cartella in [INCOMPLETE]. ({e}){OFF}")
-                
                 return
              
-            with concurrent.futures.ThreadPoolExecutor(max_workers=active_workers) as executor:
-                futures = []
-                for i in album_meta["tracks"]["items"]:
-                    if abort_event.is_set():
-                        break
+            semaphore = asyncio.Semaphore(active_workers)
+
+            async def process_track(idx, i):
+                nonlocal failed_tracks
+                if abort_event.is_set():
+                    return False
+                async with semaphore:
                     try:
-                        parse = self.client.get_track_url(i["id"], fmt_id=self.quality)
+                        parse = await self.client.get_track_url(i["id"], fmt_id=self.quality)
                     except Exception as e:
                         safe_print(f"{RED}[!] API Error for track {i.get('track_number', 'unknown')} (ID: {i['id']}): {e}{OFF}")
                         safe_print(f"{YELLOW}[*] Skipping track and continuing with the album...{OFF}")
-                        count += 1
-                        failed_tracks += 1
-                        continue
+                        return False
 
-                    if "sample" not in parse and parse["sampling_rate"]:
+                    if "sample" not in parse and parse.get("sampling_rate"):
                         is_mp3 = True if int(self.quality) == 5 else False
-                        futures.append(
-                            executor.submit(
-                                self._download_and_tag, dirn, count, parse, i, album_meta, False,
-                                is_mp3, i.get("media_number") if is_multiple else None, is_parallel=is_parallel
-                            )
+                        res = await self._download_and_tag(
+                            dirn, idx, parse, i, album_meta, False,
+                            is_mp3, i.get("media_number") if is_multiple else None, is_parallel=is_parallel
                         )
+                        return res
                     else:
                         logger.info(f"{OFF}Demo. Skipping")
-                        failed_tracks += 1
-                    count += 1
+                        return False
+
+            tasks = [process_track(idx, i) for idx, i in enumerate(album_meta["tracks"]["items"])]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            for res in results:
+                if res is False or isinstance(res, Exception):
+                    failed_tracks += 1
                     
-                try:
-                    for f in futures:
-                        while not f.done():
-                            if abort_event.is_set():
-                                break
-                            time.sleep(0.2)
-                            
-                    if not abort_event.is_set():
-                        for f in futures:
-                            try:
-                                res = f.result()
-                                if res is False:
-                                    failed_tracks += 1
-                            except Exception as inner_e:
-                                safe_print(f"{RED}[!] Track download failed: {inner_e}{OFF}")
-                                failed_tracks += 1
-                except (KeyboardInterrupt, SystemExit):
-                    abort_event.set()
-                    aborted_by_user = True
-                    safe_print(f"\n{RED}[!] CTRL+C Intercepted: Securing files and folders...{OFF}")
-                    
-            if not aborted_by_user:
+            if not abort_event.is_set():
                 _clean_embed_art(dirn, self.settings)
                 if getattr(self, 'fetch_lyrics', False) and not self.no_credits:
                     self._append_lyrics_to_booklet(dirn, album_title)
@@ -425,7 +351,6 @@ class Download:
             safe_print(f"\n{RED}[!] CTRL+C Intercepted: Securing files and folders...{OFF}")
             
         finally:
-            # Restore original signal handler so the CLI functions normally afterwards
             try:
                 if original_sigint:
                     signal.signal(signal.SIGINT, original_sigint)
@@ -433,10 +358,8 @@ class Download:
                 pass
                 
         if aborted_by_user:
-            # Crucial: Wait for threads to drop OS file locks before attempting folder rename
             time.sleep(1.5)
             
-        # --- FINAL DIRECTORY STATE EVALUATION ---
         if is_standard_album and working_dirn == inprogress_dirn:
             final_dirn = target_dirn if (failed_tracks == 0 and not aborted_by_user) else incomplete_dirn
             try:
@@ -455,7 +378,6 @@ class Download:
         if aborted_by_user:
             os._exit(1)
             
-        # --- DATABASE UPGRADE: Inject artist and album metadata ---
         db_artist = album_attr.get("album_artist", "Unknown")
         db_album = album_attr.get("album_title", "Unknown")
         
@@ -465,13 +387,11 @@ class Download:
                            url=url, release_date=release_date, artist=db_artist, album=db_album)
         safe_print(f"{GREEN}Completed{OFF}")
 
-    def download_track(self):
-        """
-        Handles the download sequence for a standalone single track.
-        """
-        parse = self.client.get_track_url(self.item_id, self.quality)
-        if "sample" not in parse and parse["sampling_rate"]:
-            track_meta = self.client.get_track_meta(self.item_id)
+    async def download_track(self):
+        """Handles the download sequence for a standalone single track."""
+        parse = await self.client.get_track_url(self.item_id, self.quality)
+        if "sample" not in parse and parse.get("sampling_rate"):
+            track_meta = await self.client.get_track_meta(self.item_id)
             
             if getattr(self, 'is_playlist', False) and not getattr(self, 'playlist_as_albums', False) and getattr(self, 'playlist_track_number', None):
                 track_meta["track_number"] = self.playlist_track_number
@@ -481,7 +401,7 @@ class Download:
             logger.info(f"\n{YELLOW}Downloading: {artist} - {track_title}{OFF}")
             url = track_meta.get("album", {}).get("url", "")
             release_date = track_meta.get("release_date_original", "")
-            format_info = self._get_format(track_meta, is_track_id=True, track_url_dict=parse)
+            format_info = await self._get_format(track_meta, is_track_id=True, track_url_dict=parse)
             file_format, quality_met, bit_depth, sampling_rate = format_info
 
             folder_format, track_format = _clean_format_str(self.folder_format, self.track_format, str(bit_depth))
@@ -523,7 +443,7 @@ class Download:
                 
             is_mp3 = True if int(self.quality) == 5 else False
             
-            self._download_and_tag(
+            await self._download_and_tag(
                 dirn,
                 1,
                 parse,
@@ -537,7 +457,6 @@ class Download:
             
             _clean_embed_art(dirn, self.settings)
             
-            # --- DATABASE UPGRADE: Inject artist and album metadata ---
             db_artist = track_attr.get("artist", "Unknown")
             db_album = track_attr.get("album", "Unknown")
             
@@ -549,7 +468,7 @@ class Download:
             logger.info(f"{OFF}Demo. Skipping")
         logger.info(f"{GREEN}Completed{OFF}")
 
-    def _download_and_tag(
+    async def _download_and_tag(
         self,
         root_dir,
         tmp_count,
@@ -561,26 +480,7 @@ class Download:
         multiple=None,
         is_parallel=False
     ) -> bool:
-        """
-        Coordinates the actual downloading, fallback mechanisms, and metadata tagging.
-
-        Tries to download the requested quality; if blocked by the server or Akamai WAF, 
-        it automatically attempts to fetch lower tiers. Applies tagging and fetches lyrics upon success.
-
-        Args:
-            root_dir (str): Base destination directory for the track.
-            tmp_count (int): Temporary file counter.
-            track_url_dict (dict): Dictionary containing direct or segmented URLs.
-            track_metadata (dict): API metadata specific to the track.
-            album_or_track_metadata (dict): The higher-level metadata containing release info.
-            is_track (bool): Indicates if the context is a single track download.
-            is_mp3 (bool): If True, processes the file as MP3 ID3v2.
-            multiple (bool/int, optional): Indicates if part of a multi-disc set. Defaults to None.
-            is_parallel (bool, optional): Mutes individual progress bars if multithreading. Defaults to False.
-
-        Returns:
-            bool: True if download and tagging succeed, False otherwise (e.g. aborted).
-        """
+        """Coordinates the actual downloading, fallback mechanisms, and metadata tagging."""
         extension = ".mp3" if is_mp3 else ".flac"
 
         track_artist = _safe_get(track_metadata, "performer", "name")
@@ -590,17 +490,14 @@ class Download:
             album_or_track_metadata.get("album", {}) if is_track else album_or_track_metadata
         )
 
-        # --- FIX MARROBHD & SYNC-PLAYLIST: CLEAN PLAYLIST NAMING ---
         legacy_flag = getattr(self.settings, 'legacy_charmap', False) if hasattr(self, 'settings') else False
         
         if getattr(self, 'is_playlist', False) and not getattr(self, 'playlist_as_albums', False):
-            # Forza un nome file pulito senza numero traccia per le playlist
             clean_playlist_format = "{artist} - {track_title}"
             formatted_path = sanitize_filename(clean_filename(clean_playlist_format.format(**filename_attr), legacy_charmap=legacy_flag), replacement_text="_")
         elif multiple and self.settings.multiple_disc_one_dir:
             formatted_path = sanitize_filename(clean_filename(self.settings.multiple_disc_track_format.format(**filename_attr), legacy_charmap=legacy_flag), replacement_text="_")
         else:
-            # FIX MULTI-DISC PATHING: Includiamo la cartella CD nel percorso finale se ci sono più dischi
             base_formatted = sanitize_filename(clean_filename(self.track_format.format(**filename_attr), legacy_charmap=legacy_flag), replacement_text="_")
             total_discs = album_or_track_metadata.get('media_count', 1)
             if multiple and total_discs > 1:
@@ -610,7 +507,6 @@ class Download:
                 formatted_path = os.path.join(disc_folder, base_formatted)
             else:
                 formatted_path = base_formatted
-        # -----------------------------------------------------------
             
         max_len = 180
         if len(formatted_path) > max_len:
@@ -627,7 +523,7 @@ class Download:
         if abort_event.is_set():
             return False
 
-        time.sleep(1)
+        await asyncio.sleep(1)
         try:
             url = track_url_dict["url"]
         except KeyError:
@@ -669,11 +565,11 @@ class Download:
             if attempt_fmt != int(self.quality):
                 safe_print(f"{YELLOW}[!] Automatic downgrade: Attempting to save in {TIER_NAMES[attempt_fmt]}...{OFF}")
 
-            def get_fresh_url(fmt=attempt_fmt, force_segments=False):
-                return self.client.get_track_url(track_metadata["id"], fmt_id=fmt, force_segments=force_segments)
+            async def get_fresh_url(fmt=attempt_fmt, force_segments=False):
+                return await self.client.get_track_url(track_metadata["id"], fmt_id=fmt, force_segments=force_segments)
 
             try:
-                fresh_track_dict = get_fresh_url(force_segments=False)
+                fresh_track_dict = await get_fresh_url(force_segments=False)
                 
                 if "url" in fresh_track_dict:
                     try:
@@ -684,7 +580,7 @@ class Download:
                     except Exception as e:
                         if abort_event.is_set(): return False
                         safe_print(f"{YELLOW}[!] Akamai block detected. Activating fallback segmented download...{OFF}")
-                        fresh_track_dict = get_fresh_url(force_segments=True)
+                        fresh_track_dict = await get_fresh_url(force_segments=True)
                 
                 if "url_template" in fresh_track_dict:
                     tqdm_download_segments(fresh_track_dict, filename, desc, is_parallel=is_parallel)
@@ -723,7 +619,27 @@ class Download:
             search_artist = performer_name if album_artist in [None, "Various Artists"] else album_artist
 
             search_album = _safe_get(track_metadata, "album", "title", default="")
-            
+
+            # Busca a letra original e, se configurado, a traducao -- cada uma
+            # exige uma chamada separada a track/lyricsUrl (sem/com o parametro
+            # "language"), pois o endpoint devolve apenas UM bloco por chamada
+            # ("original" ou "translation", nunca os dois juntos). Ver
+            # _fetch_qobuz_lyrics_json() para detalhes do formato.
+            qobuz_lyrics_response = await self._fetch_qobuz_lyrics_json(
+                track_metadata["id"]
+            )
+
+            qobuz_translation_response = None
+            translation_lang = getattr(self.settings, "lyrics_translation_lang", "pt")
+            if translation_lang:
+                translation_json = await self._fetch_qobuz_lyrics_json(
+                    track_metadata["id"], language=translation_lang
+                )
+                if isinstance(translation_json, dict):
+                    # extract_qobuz_lyrics() espera o bloco "translation" em
+                    # si (com "lines" no nivel raiz), nao o JSON inteiro.
+                    qobuz_translation_response = translation_json.get("translation")
+
             with print_lock:                           
                 self.lyrics_engine.fetch_and_inject(
                     file_path=final_file, 
@@ -731,7 +647,9 @@ class Download:
                     track=track_title, 
                     album=search_album,
                     save_lrc=not self.no_lrc_files,
-                    embed_lyrics=getattr(self.settings, 'embed_lyrics', True)
+                    embed_lyrics=getattr(self.settings, 'embed_lyrics', True),
+                    qobuz_lyrics_response=qobuz_lyrics_response,
+                    qobuz_translation_response=qobuz_translation_response,
                 )
 
         delay_time = getattr(self.settings, 'delay', 0)
@@ -741,13 +659,12 @@ class Download:
             
         if delay_time > 0 and not abort_event.is_set():
             safe_print(f"{YELLOW}[*] Sleeping for {delay_time} seconds to prevent rate limiting...{OFF}")
-            time.sleep(delay_time)
+            await asyncio.sleep(delay_time)
             
         return True
 
     @staticmethod
     def _get_filename_attr(track_artist, track_metadata: dict, album_metadata: dict): 
-        """Builds a dictionary of attributes to format the final filename."""    
         def _flatten_artists(artist_data):
             if isinstance(artist_data, list): return ", ".join(artist_data)
             return str(artist_data) if artist_data else ""
@@ -781,7 +698,6 @@ class Download:
 
     @staticmethod
     def _get_track_attr(meta, track_title, bit_depth, sampling_rate, file_format):
-        """Builds directory attributes when downloading a single track."""
         album_meta = meta.get("album", {})
         def _flatten_artists(artist_data):
             if isinstance(artist_data, list): return ", ".join(artist_data)
@@ -825,7 +741,6 @@ class Download:
 
     @staticmethod
     def _get_album_attr(meta, album_title, file_format, bit_depth, sampling_rate):
-        """Builds directory attributes when downloading an entire album/release."""
         def _flatten_artists(artist_data):
             if isinstance(artist_data, list): return ", ".join(artist_data)
             return str(artist_data) if artist_data else ""
@@ -863,30 +778,21 @@ class Download:
             "release_type": format_release_type(meta.get("release_type")),
         }
 
-    def _get_format(self, item_dict, is_track_id=False, track_url_dict=None):
-        """Checks stream restrictions and determines the actual obtainable audio format."""
-        # Aggiungi questa protezione anti-crash SOLO per le release complete (Album/EP)
+    async def _get_format(self, item_dict, is_track_id=False, track_url_dict=None):
         if not is_track_id:
             if "tracks" not in item_dict or not item_dict["tracks"].get("items"):
-                from qobuz_dl.exceptions import NonStreamable
                 raise NonStreamable("This release has no tracks available (possibly region-locked or removed)")
 
-        # FIX: Applica la logica corretta a seconda se è una traccia singola o un album
         track_dict = item_dict if is_track_id else item_dict["tracks"]["items"][0]
-        
-        # INIZIALIZZAZIONE MANCANTE: Di default la qualità è rispettata!
         quality_met = True
         
         try:
-                     
-            # FIX PRINCIPALE: Inizializziamo sempre una variabile interna
             new_track_dict = (
-                self.client.get_track_url(track_dict["id"], fmt_id=self.quality)
+                await self.client.get_track_url(track_dict["id"], fmt_id=self.quality)
                 if not track_url_dict
                 else track_url_dict
             )
             
-            # Se la chiamata API non ha restituito un dizionario valido (es. None), forziamo l'eccezione
             if not new_track_dict:
                  raise KeyError("No URL dict returned by API")
 
@@ -900,12 +806,9 @@ class Download:
             return (actual_format, quality_met, new_track_dict["bit_depth"], new_track_dict["sampling_rate"])
             
         except (KeyError, requests.exceptions.HTTPError, Exception):
-            # In caso di errore (geoblocco, traccia non disponibile, ecc.), restituiamo i valori None
-            # in modo che il downloader "salti" la traccia senza mandare in crash l'intero loop.
             return ("Unknown", quality_met, None, None)
 
     def _determine_formats(self, album_meta, album_attr, tracks_meta, track_attr, is_track, file_format, settings: QobuzDLSettings):
-        """Safely evaluates the user's config formats and falls back if tags are missing."""
         format_combinations = [
             (self._original_folder_format, self._original_track_format, self._original_multiple_disc_track_format),
             (settings.fallback_folder_format, self._original_track_format, self._original_multiple_disc_track_format),
@@ -917,7 +820,6 @@ class Download:
         is_multiple = True if media_count > 1 else False
         extension = ".flac" if file_format.lower() == "flac" else ".mp3"
         
-        # --- NEW: Retrieve legacy charmap flag ---
         legacy_flag = getattr(settings, 'legacy_charmap', False) if settings else False
 
         for folder_fmt, track_fmt, multi_disc_fmt in format_combinations:
@@ -944,12 +846,7 @@ class Download:
                         
                         track_path = sanitize_filename(clean_filename(track_fmt.format(**filename_attr), legacy_charmap=legacy_flag), replacement_text="_")
 
-                    # --- FIX: REMOVED OBSOLETE LENGTH CHECK ---
-                    # We no longer invalidate the user's custom format if the path is too long.
-                    # String truncation is now safely handled downstream in _download_and_tag.
-
             except (KeyError, ValueError):
-                # Fallback to the next format ONLY if there is a missing tag/variable in the metadata
                 valid_combination = False
                 continue
 
@@ -964,12 +861,6 @@ class Download:
         self.track_format = DEFAULT_TRACK
 
     def _generate_tracklist(self, meta, dirn, album_title, file_format, bit_depth, sampling_rate):
-        """
-        Generates the Enhanced Digital Booklet (Tracklist.txt) with full credits and reviews.
-        """
-        import re
-        import textwrap
-        
         if self.no_credits or abort_event.is_set():
             return
         
@@ -993,9 +884,7 @@ class Download:
                 explicit_tag = " [E]" if meta.get("parental_warning") else ""
                 
                 f.write("=" * 70 + "\n")
-                
                 f.write(f"ALBUM      : {album_title}{explicit_tag}\n")
-                
                 if composer != "N/A": f.write(f"COMPOSER   : {composer}\n")
                 f.write(f"MAIN ART.  : {artist_name}\n")
                 f.write(f"LABEL      : {label}\n")
@@ -1047,9 +936,84 @@ class Download:
         except Exception as e:
             safe_print(f"{RED}[!] Error creating booklet: {e}{OFF}")
 
+    async def _fetch_qobuz_lyrics_json(self, track_id, language=None):
+        """
+        Chama track/lyricsUrl (opcionalmente com o parametro 'language', que
+        faz o endpoint devolver o bloco 'translation' em vez de 'original')
+        e resolve a URL assinada (CloudFront) retornada, devolvendo o JSON
+        de nivel 2 que de fato contem as linhas sincronizadas.
+
+        Sem 'language': o JSON devolvido tem a chave "original".
+        Com 'language="pt"' (por ex.): o JSON devolvido tem a chave
+        "translation" (mesmo formato de "original" -- type/lang/lines),
+        SEM a chave "original" junto.
+
+        Retorna None se a faixa nao tiver letra/traducao cadastrada nesse
+        idioma no Qobuz, ou se qualquer uma das duas chamadas falhar --
+        nunca levanta excecao, para nao travar o download.
+
+        NOTA: usamos aqui a MESMA construcao manual de request (params +
+        _modern_sig + client.session.request) que validamos no script de
+        teste (test_language_pt_only.py) -- e nao self.client.api_call(),
+        porque nao temos garantia de que api_call() repassa um kwarg extra
+        como "language" pro calculo da assinatura da mesma forma. Usar
+        api_call() aqui seria assumir um comportamento que nunca testamos
+        de fato; isso pode ter sido a causa de a traducao nao aparecer.
+        """
+        try:
+            params = {"track_id": track_id}
+            if language:
+                params["language"] = language
+            params["request_ts"] = int(time.time())
+            params["request_sig"] = self.client._modern_sig(
+                "track/lyricsUrl", params, self.client.sec
+            )
+
+            async with self.client.session.request(
+                "get", self.client.base + "track/lyricsUrl", params=params
+            ) as r:
+                if r.status != 200:
+                    logger.info(
+                        f"{OFF}track/lyricsUrl returned status {r.status}"
+                        f"{f' for language={language}' if language else ''}"
+                    )
+                    return None
+                lyrics_url_meta = await r.json()
+
+            lyrics_json_url = None
+            if isinstance(lyrics_url_meta, dict):
+                # A chave observada na pratica e' "lyrics_url"/"url", mas
+                # procuramos qualquer chave que contenha "url" para nao
+                # quebrar se a Qobuz renomear o campo.
+                lyrics_json_url = lyrics_url_meta.get("url") or lyrics_url_meta.get("lyrics_url")
+                if not lyrics_json_url:
+                    for k, v in lyrics_url_meta.items():
+                        if "url" in k.lower() and isinstance(v, str):
+                            lyrics_json_url = v
+                            break
+
+            if not lyrics_json_url:
+                logger.info(
+                    f"{OFF}track/lyricsUrl did not return a lyrics URL"
+                    f"{f' for language={language}' if language else ''}"
+                )
+                return None
+
+            loop = asyncio.get_event_loop()
+            resp = await loop.run_in_executor(
+                None,
+                lambda: requests.get(lyrics_json_url, timeout=12),
+            )
+            resp.raise_for_status()
+            return resp.json()
+        except Exception as e:
+            logger.info(
+                f"{OFF}No native Qobuz lyrics"
+                f"{f' translation ({language})' if language else ''} for this track ({e})"
+            )
+            return None
+
     def _append_lyrics_to_booklet(self, dirn, album_title):
-        """Reads downloaded .lrc files, strips timecodes, and appends the raw text to the booklet."""
-        import re
         if abort_event.is_set(): return
         
         safe_title = sanitize_filename(album_title)
@@ -1094,22 +1058,12 @@ class Download:
                 logger.error(f"{RED}[!] Error appending lyrics to booklet: {e}{OFF}")
 
 def _get_description(item: dict, track_title, multiple=None):
-    """Formats a logging string containing track info and bit depth."""
     downloading_title = f"{track_title} [{item.get('bit_depth', '')}/{item.get('sampling_rate', '')}]"
     if multiple:
         downloading_title = f"[CD {multiple}] {downloading_title}"
     return downloading_title
 
 def tqdm_download(url_or_callable, fname, track_name, is_parallel=False):
-    """
-    Standard HTTP downloader wrapped in a tqdm progress bar with retry logic.
-
-    Args:
-        url_or_callable (str|callable): Direct URL or a lambda to fetch it.
-        fname (str): Target file name.
-        track_name (str): Track display name for the UI logger.
-        is_parallel (bool, optional): Disables progress bars for clean multithreaded logging.
-    """
     if abort_event.is_set(): return
     G, Y, C, O = "\033[92m", "\033[93m", "\033[96m", "\033[0m"
 
@@ -1192,7 +1146,6 @@ def tqdm_download(url_or_callable, fname, track_name, is_parallel=False):
         raise Exception("Incomplete download")
 
 def _get_title(item_dict):
-    """Safely extracts and formats the track/album title."""
     item_title = item_dict.get("title")
     version = item_dict.get("version")
     if version:
@@ -1201,7 +1154,6 @@ def _get_title(item_dict):
 
 
 def _get_extra(item, dirn, extra="cover.jpg", art_size=None, og_quality=False):
-    """Downloads supplementary files (e.g., Cover Arts)."""
     if abort_event.is_set(): return
     extra_file = os.path.join(dirn, extra)
     if os.path.isfile(extra_file):
@@ -1218,18 +1170,15 @@ def _get_extra(item, dirn, extra="cover.jpg", art_size=None, og_quality=False):
         safe_print(f"  {YELLOW}[!] Skipping cover art '{extra}': URL unreachable ({e}){OFF}")
 
 def _clean_format_str(folder: str, track: str, file_format: str) -> Tuple[str, str]:
-    """Strips file extensions from format templates to prevent double-extensions."""
     final = []
     for i, fs in enumerate((folder, track)):
         if fs.endswith(".mp3"): fs = fs[:-4]
         elif fs.endswith(".flac"): fs = fs[:-5]
         fs = fs.strip()
-           
         final.append(fs)
     return tuple(final)
 
 def _safe_get(d: dict, *keys, default=None):
-    """Safely traverses nested dictionaries."""
     curr = d
     res = default
     for key in keys:
@@ -1241,19 +1190,6 @@ def _safe_get(d: dict, *keys, default=None):
     return res
 
 def tqdm_download_segments(track_url_dict, fname, track_name, is_parallel=False):
-    """
-    Downloads segmented tracks via the Web Player endpoint (WAF bypass).
-    
-    Uses multithreading to rapidly fetch stream chunks, decrypts them via AES-CTR 
-    using the Qobuz Session Key, and finally remuxes the segments into a gapless 
-    audio file using FFmpeg.
-
-    Args:
-        track_url_dict (dict): API payload containing 'url_template', 'n_segments', and 'raw_key'.
-        fname (str): Final target file path.
-        track_name (str): Track display name for the UI.
-        is_parallel (bool, optional): Disables progress bars for clean multithreaded logging.
-    """
     if abort_event.is_set(): return
     G, C, O = "\033[92m", "\033[96m", "\033[0m" 
     
@@ -1347,7 +1283,6 @@ def tqdm_download_segments(track_url_dict, fname, track_name, is_parallel=False)
 
 
 def _get_qobuz_segment_uuid(segment_data):
-    """Parses segment metadata to extract the UUID required for decryption."""
     pos = 0
     while pos + 24 <= len(segment_data):
         size = int.from_bytes(segment_data[pos : pos + 4], "big")
@@ -1360,17 +1295,6 @@ def _get_qobuz_segment_uuid(segment_data):
 
 
 def _decrypt_qobuz_segment(segment_data, raw_key, segment_uuid):
-    """
-    Performs AES-CTR decryption on a single downloaded file chunk.
-
-    Args:
-        segment_data (bytearray): The raw, encrypted downloaded chunk.
-        raw_key (bytes): The AES unwrapped track key.
-        segment_uuid (bytes): The chunk-specific UUID initialized for AES Counter (CTR).
-
-    Returns:
-        bytes: The fully decrypted audio chunk.
-    """
     if segment_uuid is None: return bytes(segment_data)
 
     buf = bytearray(segment_data)
@@ -1404,7 +1328,6 @@ def _decrypt_qobuz_segment(segment_data, raw_key, segment_uuid):
     return bytes(buf)
 
 def _download_goodies(album_meta, dirn):
-    """Downloads official digital PDF booklets provided by the Qobuz API."""
     if abort_event.is_set(): return
     try:
         for goody in album_meta.get("goodies", []):
@@ -1417,7 +1340,6 @@ def _download_goodies(album_meta, dirn):
 
 
 def _clean_embed_art(dirn, settings=None):
-    """Cleans up the temporary embed_cover.jpg file after tagging is complete."""
     embed_file = os.path.join(dirn, EMB_COVER_NAME)
     if os.path.exists(embed_file):
         try:
