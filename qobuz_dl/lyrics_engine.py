@@ -21,18 +21,40 @@ class LyricsEngine:
     Qobuz translations into a single interleaved Bilingual LRC file (quando disponíveis).
     """
 
-    def __init__(self, genius_token=None):
+    def __init__(self, genius_token=None, session=None):
         """
         Initializes the Lyrics Engine and conditionally loads the Genius API client.
 
         Args:
             genius_token (str, optional): The user's Genius API token. Defaults to None.
+            session (requests.Session, optional): A shared HTTP session to reuse for
+                LRCLIB requests (connection pooling / keep-alive). If not provided,
+                a dedicated session is created and owned by this instance. Note: the
+                Genius client (lyricsgenius) manages its own internal session
+                regardless -- it's a third-party library and isn't easily made to
+                share our pool.
         """
         self.genius_token = genius_token
         self.genius = None
         if self.genius_token and lyricsgenius:
             self.genius = lyricsgenius.Genius(self.genius_token, remove_section_headers=True)
             self.genius.verbose = False
+
+        self._owns_session = session is None
+        self.session = session or requests.Session()
+
+    def close(self):
+        """
+        Closes the underlying HTTP session -- but ONLY if this instance created
+        it itself. If a shared session was passed in (session=...), closing it
+        is the caller's responsibility, since other components may still be
+        using it.
+        """
+        if self._owns_session:
+            try:
+                self.session.close()
+            except Exception:
+                pass
 
     # ------------------------------------------------------------------
     # HELPERS DE CONVERSAO DE TEMPO (formato real do Qobuz: ms inteiros)
@@ -309,11 +331,11 @@ class LyricsEngine:
             headers = {"User-Agent": "qobuz-dl-ultimate/1.0 (https://github.com/Sei969/qobuz-dl)"}
 
             params = {"artist_name": artist, "track_name": track, "album_name": album}
-            response = requests.get(lrclib_url, params=params, headers=headers, timeout=12)
+            response = self.session.get(lrclib_url, params=params, headers=headers, timeout=12)
 
             if response.status_code != 200:
                 params = {"artist_name": artist, "track_name": track}
-                response = requests.get(lrclib_url, params=params, headers=headers, timeout=12)
+                response = self.session.get(lrclib_url, params=params, headers=headers, timeout=12)
 
             if response.status_code == 200:
                 data = response.json()

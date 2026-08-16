@@ -162,10 +162,29 @@ class Download:
         self.no_credits = no_credits
         self.booklet_only = booklet_only        
 
+        # Sessao HTTP unica, compartilhada por TODAS as chamadas de rede
+        # sincronas feitas por esta instancia de Download durante o ciclo de
+        # vida de um item (faixas de audio, capas, goodies, letras do Qobuz
+        # via CloudFront, e o fallback LRCLIB). Reaproveitar a sessao mantem
+        # as conexoes TCP/TLS "quentes" (keep-alive/connection pooling) em
+        # vez de renegociar handshake a cada request -- importante sobretudo
+        # em redes moveis/instaveis (ex: A-Shell no iOS). E' seguro usar essa
+        # mesma sessao a partir de multiplas worker threads simultaneas (via
+        # run_in_executor) para fazer GETs concorrentes -- o pool de conexoes
+        # do urllib3 por baixo do requests.Session e' thread-safe para isso.
+        # Fechada de forma garantida em close_session(), chamado no finally
+        # de download_id_by_type().
+        self.http_session = requests.Session()
+        self.http_session.headers.update({
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Accept": "audio/webm,audio/ogg,audio/wav,audio/*;q=0.9,*/*;q=0.5",
+            "Connection": "keep-alive",
+        })
+
         self.fetch_lyrics = fetch_lyrics
         self.no_lrc_files = no_lrc_files
         if self.fetch_lyrics:
-            self.lyrics_engine = LyricsEngine(genius_token)
+            self.lyrics_engine = LyricsEngine(genius_token, session=self.http_session)
 
         self.settings = settings or QobuzDLSettings()
         self.download_db = download_db
@@ -185,10 +204,41 @@ class Download:
         if self.settings:
             self.settings.multiple_disc_track_format = self._original_multiple_disc_track_format
         
-        if not track:
-            await self.download_release()
-        else:
-            await self.download_track()
+        try:
+            if not track:
+                await self.download_release()
+            else:
+                await self.download_track()
+        finally:
+            # Garante que a sessao HTTP compartilhada seja fechada ao final
+            # deste item, mesmo se download_release/download_track lancar
+            # excecao, for interrompido (Ctrl+C -> KeyboardInterrupt) ou
+            # simplesmente terminar normal. Sem isso, cada Download() que
+            # falha no meio do caminho vazaria conexoes abertas.
+            self.close_session()
+
+    def close_session(self):
+        """
+        Fecha a sessao HTTP compartilhada desta instancia de Download (usada
+        por tqdm_download, tqdm_download_segments, downloads de capa/goodies
+        e busca de letras no Qobuz). Tambem fecha a sessao do LyricsEngine
+        SE ela nao for a mesma instancia (nao deveria ser o caso aqui, ja que
+        passamos self.http_session pra ele -- mas close() la' e' um no-op
+        nesse caso, ver LyricsEngine.close()).
+        Idempotente e silenciosa: pode ser chamada mais de uma vez sem erro.
+        """
+        if hasattr(self, "lyrics_engine"):
+            try:
+                self.lyrics_engine.close()
+            except Exception:
+                pass
+
+        session = getattr(self, "http_session", None)
+        if session is not None:
+            try:
+                session.close()
+            except Exception:
+                pass
 
     async def download_release(self):
         """Handles the full download sequence for an album/release."""
@@ -288,16 +338,31 @@ class Download:
         try:
             self._generate_tracklist(album_meta, dirn, album_title, file_format, bit_depth, sampling_rate)
 
+            # Downloads de capa/goodies aqui rodam UMA vez por album (nao por
+            # faixa), entao o impacto e' bem menor que o das faixas em si --
+            # mas ainda sao chamadas sincronas/bloqueantes (_get_extra e'
+            # tqdm_download por baixo dos panos) rodando direto numa
+            # coroutine async, entao offload por consistencia: sem isso, o
+            # inicio do download paralelo das faixas fica esperando a capa
+            # baixar antes de sequer comecar.
+            loop = asyncio.get_event_loop()
+
             if self.settings.no_cover:
                 logger.info(f"{OFF}Skipping cover")
             else:
-                _get_extra(album_meta["image"]["large"], dirn, art_size=self.settings.saved_art_size)
+                await loop.run_in_executor(
+                    None,
+                    lambda: _get_extra(album_meta["image"]["large"], dirn, art_size=self.settings.saved_art_size, session=self.http_session),
+                )
 
             if self.settings.embed_art:
-                _get_extra(album_meta["image"]["large"], dirn, extra=EMB_COVER_NAME, art_size=self.settings.embedded_art_size)
+                await loop.run_in_executor(
+                    None,
+                    lambda: _get_extra(album_meta["image"]["large"], dirn, extra=EMB_COVER_NAME, art_size=self.settings.embedded_art_size, session=self.http_session),
+                )
 
             if "goodies" in album_meta:
-                _download_goodies(album_meta, dirn)
+                await loop.run_in_executor(None, lambda: _download_goodies(album_meta, dirn, session=self.http_session))
                 
             if getattr(self, 'booklet_only', False):
                 safe_print(f"{YELLOW}[*] --booklet-only flag active. Skipping audio tracks.{OFF}")
@@ -421,12 +486,19 @@ class Download:
             dirn = process_folder_format_with_subdirs(self.folder_format, track_attr, self.path, legacy_charmap=legacy_flag)
             os.makedirs(dirn, exist_ok=True)
 
+            # Mesmo caso do download_release(): _get_extra() e' bloqueante,
+            # offload por consistencia.
+            loop = asyncio.get_event_loop()
+
             if getattr(self, 'is_playlist', False) and not getattr(self, 'playlist_as_albums', False):
                 logger.info(f"{OFF}Skipping standard cover save to keep playlist folder clean")
             elif self.settings.no_cover:
                 logger.info(f"{OFF}Skipping cover")
             else:
-                _get_extra(track_meta["album"]["image"]["large"], dirn, art_size=self.settings.saved_art_size)
+                await loop.run_in_executor(
+                    None,
+                    lambda: _get_extra(track_meta["album"]["image"]["large"], dirn, art_size=self.settings.saved_art_size, session=self.http_session),
+                )
 
             if self.settings.embed_art:
                 embed_path = os.path.join(dirn, EMB_COVER_NAME)
@@ -436,8 +508,11 @@ class Download:
                     except OSError:
                         pass
                 
-                _get_extra(track_meta["album"]["image"]["large"], dirn, extra=EMB_COVER_NAME,
-                           art_size=self.settings.embedded_art_size)
+                await loop.run_in_executor(
+                    None,
+                    lambda: _get_extra(track_meta["album"]["image"]["large"], dirn, extra=EMB_COVER_NAME,
+                                        art_size=self.settings.embedded_art_size, session=self.http_session),
+                )
             else:
                 logger.info(f"{OFF}Skipping embedded art")
                 
@@ -482,6 +557,11 @@ class Download:
     ) -> bool:
         """Coordinates the actual downloading, fallback mechanisms, and metadata tagging."""
         extension = ".mp3" if is_mp3 else ".flac"
+        # Um unico loop reference, reutilizado em todos os run_in_executor()
+        # dessa funcao -- ver comentario mais abaixo sobre por que essas
+        # chamadas precisam ser offloaded pra nao travar o event loop
+        # inteiro (e com isso, travar TODAS as outras faixas "paralelas").
+        loop = asyncio.get_event_loop()
 
         track_artist = _safe_get(track_metadata, "performer", "name")
         filename_attr = self._get_filename_attr(
@@ -573,7 +653,18 @@ class Download:
                 
                 if "url" in fresh_track_dict:
                     try:
-                        tqdm_download(fresh_track_dict["url"], filename, desc, is_parallel=is_parallel)
+                        # tqdm_download() e' 100% sincrona/bloqueante (requests
+                        # + iter_content em loop). Chamada direta aqui
+                        # travaria o event loop inteiro pela duracao do
+                        # download -- ou seja, TODAS as outras faixas
+                        # "paralelas" ficariam paradas esperando essa
+                        # terminar, mesmo com max_workers > 1. run_in_executor
+                        # joga isso numa thread separada, liberando o event
+                        # loop pra de fato processar as outras faixas.
+                        await loop.run_in_executor(
+                            None,
+                            lambda: tqdm_download(fresh_track_dict["url"], filename, desc, is_parallel=is_parallel, session=self.http_session),
+                        )
                         success = True
                         final_fmt = attempt_fmt
                         break
@@ -583,7 +674,14 @@ class Download:
                         fresh_track_dict = await get_fresh_url(force_segments=True)
                 
                 if "url_template" in fresh_track_dict:
-                    tqdm_download_segments(fresh_track_dict, filename, desc, is_parallel=is_parallel)
+                    # Mesmo motivo: tqdm_download_segments() e' sincrona (usa
+                    # seu proprio ThreadPoolExecutor por dentro, mas a funcao
+                    # em si bloqueia ate' terminar) -- precisa rodar fora do
+                    # event loop tambem.
+                    await loop.run_in_executor(
+                        None,
+                        lambda: tqdm_download_segments(fresh_track_dict, filename, desc, is_parallel=is_parallel, session=self.http_session),
+                    )
                     success = True
                     final_fmt = attempt_fmt
                     break
@@ -606,9 +704,17 @@ class Download:
 
         tag_function = metadata.tag_mp3 if is_mp3 else metadata.tag_flac
         try:
-            tag_function(
-                filename, root_dir, final_file, track_metadata,
-                album_or_track_metadata, is_track, self.embed_art, settings=self.settings,
+            # tag_function() faz I/O de arquivo sincrono (mutagen) -- rapido
+            # na maioria dos casos, mas ainda bloqueante; offload por
+            # consistencia com o resto do pipeline e pra nao segurar o
+            # event loop durante escrita em disco lento (ex: iCloud Drive
+            # sincronizando no A-Shell).
+            await loop.run_in_executor(
+                None,
+                lambda: tag_function(
+                    filename, root_dir, final_file, track_metadata,
+                    album_or_track_metadata, is_track, self.embed_art, settings=self.settings,
+                ),
             )
         except Exception as e:
             safe_print(f"{RED}[!] Error tagging: {e}{OFF}")
@@ -659,19 +765,33 @@ class Download:
                             f"    ℹ️  No {translation_lang.upper()} translation available on Qobuz yet for this track."
                         )
 
-            with print_lock:                           
-                self.lyrics_engine.fetch_and_inject(
-                    file_path=final_file, 
-                    artist=search_artist, 
-                    track=track_title, 
-                    album=search_album,
-                    save_lrc=not self.no_lrc_files,
-                    embed_lyrics=getattr(self.settings, 'embed_lyrics', True),
-                    qobuz_lyrics_response=qobuz_lyrics_response,
-                    qobuz_translation_response=qobuz_translation_response,
-                )
-                if translation_note:
-                    print(f"{CYAN}{translation_note}{OFF}")
+            def _inject_lyrics_and_print():
+                # O print_lock precisa ser adquirido AQUI DENTRO (rodando
+                # numa worker thread via run_in_executor), nao no thread do
+                # event loop. Se fosse `with print_lock:` la' fora, envolvendo
+                # o `await run_in_executor(...)`, o lock em si nao trava o
+                # event loop -- mas se DUAS tasks tentassem essa aquisicao ao
+                # mesmo tempo, a segunda faria um `with print_lock:` sincrono
+                # dentro da coroutine, o que TRAVARIA o event loop inteiro
+                # ate' a primeira task soltar o lock. Adquirindo dentro da
+                # worker thread, um eventual bloqueio so' segura essa worker
+                # thread (o event loop continua livre pra processar as
+                # outras faixas normalmente).
+                with print_lock:
+                    self.lyrics_engine.fetch_and_inject(
+                        file_path=final_file,
+                        artist=search_artist,
+                        track=track_title,
+                        album=search_album,
+                        save_lrc=not self.no_lrc_files,
+                        embed_lyrics=getattr(self.settings, 'embed_lyrics', True),
+                        qobuz_lyrics_response=qobuz_lyrics_response,
+                        qobuz_translation_response=qobuz_translation_response,
+                    )
+                    if translation_note:
+                        print(f"{CYAN}{translation_note}{OFF}")
+
+            await loop.run_in_executor(None, _inject_lyrics_and_print)
 
         delay_time = getattr(self.settings, 'delay', 0)
         if delay_time == 0 and '--delay' in sys.argv:
@@ -1023,7 +1143,7 @@ class Download:
             loop = asyncio.get_event_loop()
             resp = await loop.run_in_executor(
                 None,
-                lambda: requests.get(lyrics_json_url, timeout=12),
+                lambda: self.http_session.get(lyrics_json_url, timeout=12),
             )
 
             # 403/404 aqui e' o caso NORMAL de "essa faixa nao tem letra (ou
@@ -1103,7 +1223,7 @@ def _get_description(item: dict, track_title, multiple=None):
         downloading_title = f"[CD {multiple}] {downloading_title}"
     return downloading_title
 
-def tqdm_download(url_or_callable, fname, track_name, is_parallel=False):
+def tqdm_download(url_or_callable, fname, track_name, is_parallel=False, session=None):
     if abort_event.is_set(): return
     G, Y, C, O = "\033[92m", "\033[93m", "\033[96m", "\033[0m"
 
@@ -1126,22 +1246,32 @@ def tqdm_download(url_or_callable, fname, track_name, is_parallel=False):
     max_retries = 5
     backoff_delays = [2, 4, 8, 16, 32] 
 
-    for attempt in range(max_retries):
-        if abort_event.is_set(): return
-        try:
-            url = url_or_callable() if callable(url_or_callable) else url_or_callable
+    # Reaproveita a sessao compartilhada (session=Download.http_session) se
+    # fornecida -- mantem a conexao TCP/TLS viva entre tentativas de retry
+    # E entre faixas diferentes, em vez de abrir uma sessao nova a cada
+    # `with requests.Session() as s:` (como era antes, inclusive a CADA
+    # tentativa de retry). Se nenhuma sessao for passada (uso standalone,
+    # ex: chamado fora do fluxo normal do Download), cria uma local e a
+    # fecha sozinha ao final -- nunca fecha uma sessao que nao criou.
+    owns_session = session is None
+    http = session or requests.Session()
 
-            if downloaded_size > 0:
-                headers['Range'] = f'bytes={downloaded_size}-'
-                mode = 'ab'
-            else:
-                headers['Range'] = 'bytes=0-'
-                mode = 'wb'
-            
-            with requests.Session() as s:
-                r = s.get(url, allow_redirects=True, stream=True, headers=headers, timeout=(10, 60))
-                
-                if r.status_code == 416: return 
+    try:
+        for attempt in range(max_retries):
+            if abort_event.is_set(): return
+            try:
+                url = url_or_callable() if callable(url_or_callable) else url_or_callable
+
+                if downloaded_size > 0:
+                    headers['Range'] = f'bytes={downloaded_size}-'
+                    mode = 'ab'
+                else:
+                    headers['Range'] = 'bytes=0-'
+                    mode = 'wb'
+
+                r = http.get(url, allow_redirects=True, stream=True, headers=headers, timeout=(10, 60))
+
+                if r.status_code == 416: return
                 if r.status_code not in [200, 206]:
                     raise Exception(f"Status Server: {r.status_code}")
 
@@ -1163,27 +1293,33 @@ def tqdm_download(url_or_callable, fname, track_name, is_parallel=False):
                             downloaded_size += size
                             if not is_parallel:
                                 bar.update(size)
-            
-            if downloaded_size >= total_size:
-                safe_print(f"{G}  L Completed: {track_name}{O}")
-                return 
 
-        except Exception as e:
-            if "404" in str(e):
-                if os.path.exists(fname): os.remove(fname)
-                raise Exception("HTTP 404: File not found on server.")
-                        
-            if attempt < max_retries - 1:
-                wait = backoff_delays[attempt]
-                safe_print(f"\n{Y}[!] Server block. Retrying in {wait}s ({attempt+1}/{max_retries}) | Error details: {e}{O}")
-                time.sleep(wait)
-            else:
-                if os.path.exists(fname): os.remove(fname)
-                raise Exception(f"Definitive timeout after {max_retries} attempts. Last error: {e}")
+                if downloaded_size >= total_size:
+                    safe_print(f"{G}  L Completed: {track_name}{O}")
+                    return
 
-    if downloaded_size < total_size and not abort_event.is_set():
-        if os.path.exists(fname): os.remove(fname)
-        raise Exception("Incomplete download")
+            except Exception as e:
+                if "404" in str(e):
+                    if os.path.exists(fname): os.remove(fname)
+                    raise Exception("HTTP 404: File not found on server.")
+
+                if attempt < max_retries - 1:
+                    wait = backoff_delays[attempt]
+                    safe_print(f"\n{Y}[!] Server block. Retrying in {wait}s ({attempt+1}/{max_retries}) | Error details: {e}{O}")
+                    time.sleep(wait)
+                else:
+                    if os.path.exists(fname): os.remove(fname)
+                    raise Exception(f"Definitive timeout after {max_retries} attempts. Last error: {e}")
+
+        if downloaded_size < total_size and not abort_event.is_set():
+            if os.path.exists(fname): os.remove(fname)
+            raise Exception("Incomplete download")
+    finally:
+        if owns_session:
+            try:
+                http.close()
+            except Exception:
+                pass
 
 def _get_title(item_dict):
     item_title = item_dict.get("title")
@@ -1193,7 +1329,7 @@ def _get_title(item_dict):
     return item_title
 
 
-def _get_extra(item, dirn, extra="cover.jpg", art_size=None, og_quality=False):
+def _get_extra(item, dirn, extra="cover.jpg", art_size=None, og_quality=False, session=None):
     if abort_event.is_set(): return
     extra_file = os.path.join(dirn, extra)
     if os.path.isfile(extra_file):
@@ -1205,7 +1341,7 @@ def _get_extra(item, dirn, extra="cover.jpg", art_size=None, og_quality=False):
         item = item.replace("_600.", f"_{art_size}.")
         
     try:
-        tqdm_download(item, extra_file, extra, is_parallel=False)
+        tqdm_download(item, extra_file, extra, is_parallel=False, session=session)
     except Exception as e:
         safe_print(f"  {YELLOW}[!] Skipping cover art '{extra}': URL unreachable ({e}){OFF}")
 
@@ -1229,7 +1365,7 @@ def _safe_get(d: dict, *keys, default=None):
             curr = res
     return res
 
-def tqdm_download_segments(track_url_dict, fname, track_name, is_parallel=False):
+def tqdm_download_segments(track_url_dict, fname, track_name, is_parallel=False, session=None):
     if abort_event.is_set(): return
     G, C, O = "\033[92m", "\033[96m", "\033[0m" 
     
@@ -1238,11 +1374,18 @@ def tqdm_download_segments(track_url_dict, fname, track_name, is_parallel=False)
     url_template = track_url_dict["url_template"]
     raw_key = track_url_dict["raw_key"]
 
+    # Mesmo raciocinio de tqdm_download(): reaproveita a sessao compartilhada
+    # se fornecida (varias requests HEAD/GET de segmentos se beneficiam MUITO
+    # de connection pooling, ja que sao dezenas de pequenas requisicoes pra
+    # o mesmo host). Fecha por conta propria apenas se ninguem passou uma.
+    owns_session = session is None
+    http = session or requests.Session()
+
     def get_seg_size(seg_num):
         if abort_event.is_set(): return 0
         url = url_template.replace("$SEGMENT$", str(seg_num))
         try:
-            r = requests.head(url, timeout=5)
+            r = http.head(url, timeout=5)
             return int(r.headers.get("content-length", 0))
         except: return 0
 
@@ -1267,7 +1410,7 @@ def tqdm_download_segments(track_url_dict, fname, track_name, is_parallel=False)
     def fetch_segment_fluid(seg_num):
         if abort_event.is_set(): return bytearray()
         url = url_template.replace("$SEGMENT$", str(seg_num))
-        r = requests.get(url, stream=True, timeout=15)
+        r = http.get(url, stream=True, timeout=15)
         r.raise_for_status()
         seg_data = bytearray()
         
@@ -1320,6 +1463,10 @@ def tqdm_download_segments(track_url_dict, fname, track_name, is_parallel=False)
         if os.path.isfile(tmp_fname):
             try: os.remove(tmp_fname)
             except OSError: pass
+        if owns_session:
+            try: http.close()
+            except Exception: pass
+
 
 
 def _get_qobuz_segment_uuid(segment_data):
@@ -1367,14 +1514,14 @@ def _decrypt_qobuz_segment(segment_data, raw_key, segment_uuid):
         pos += size
     return bytes(buf)
 
-def _download_goodies(album_meta, dirn):
+def _download_goodies(album_meta, dirn, session=None):
     if abort_event.is_set(): return
     try:
         for goody in album_meta.get("goodies", []):
             if abort_event.is_set(): break
             if not goody.get("url"): continue
             goody_name = sanitize_filename(clean_filename(f'{album_meta.get("title")} ({goody.get("id")}).pdf'))
-            _get_extra(goody.get("url"), dirn, extra=goody_name)
+            _get_extra(goody.get("url"), dirn, extra=goody_name, session=session)
     except Exception as e:
         logger.error(f"{RED}Error downloading goodies: {e}", exc_info=True)
 
