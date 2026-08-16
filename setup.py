@@ -2,7 +2,7 @@ import os
 from setuptools import setup, find_packages
 
 # 1. NEW PACKAGE NAME (Must be unique on PyPI)
-pkg_name = "qobuz-dl-ultimate"
+pkg_name = "qobuz-dl-ultra"
 
 def get_version():
     init_path = os.path.join(os.path.dirname(__file__), "qobuz_dl", "__init__.py")
