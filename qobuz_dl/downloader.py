@@ -267,7 +267,7 @@ class Download:
             return
 
         logger.info(
-            f"\n{YELLOW}Downloading: {album_title}\nQuality: {file_format}"
+            f"\n{YELLOW}Baixando: {album_title}\nQuality: {file_format}"
             f" ({bit_depth}/{sampling_rate})\n{OFF}"
         )
         
@@ -463,7 +463,7 @@ class Download:
             
             track_title = _get_title(track_meta)
             artist = _safe_get(track_meta, "performer", "name")
-            logger.info(f"\n{YELLOW}Downloading: {artist} - {track_title}{OFF}")
+            logger.info(f"\n{YELLOW}Baixando: {artist} - {track_title}{OFF}")
             url = track_meta.get("album", {}).get("url", "")
             release_date = track_meta.get("release_date_original", "")
             format_info = await self._get_format(track_meta, is_track_id=True, track_url_dict=parse)
@@ -1246,8 +1246,8 @@ def tqdm_download(url_or_callable, fname, track_name, is_parallel=False, session
     }
 
     if not is_parallel:
-        safe_print(f"{C}[+] In progress: {track_name}{O}")
-        tqdm_desc = f" {G}Downloading{O}"
+        safe_print(f"{C}[+] Em Progresso: {track_name}{O}")
+        tqdm_desc = f" {G}Baixando:{O}"
         b_format = "{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]"
     else:
         tqdm_desc = ""
