@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import hashlib
 import logging
@@ -108,6 +109,14 @@ class Client:
         self.sec = None
         # Variables for encryption session management
         self.session_id = None
+        # Guarda a inicializacao unica do session_id/session_key contra
+        # downloads paralelos: sem isso, se 2+ faixas caem no fallback
+        # segmentado ao mesmo tempo e session_id ainda e' None pras duas,
+        # ambas passam no "if self.session_id is None" antes de qualquer
+        # uma escrever o valor -- a segunda pisa no session_id/session_key
+        # da primeira, e a primeira faixa acaba tentando descriptografar
+        # com a chave errada.
+        self._session_init_lock = asyncio.Lock()
         self.session_infos = None
         self.session_key = None
 
@@ -632,11 +641,15 @@ class Client:
 
         # "WEB PLAYER" METHOD (SEGMENTED DOWNLOAD)
         if self.session_id is None:
-            session = await self.api_call("session/start")
-            self.session_id = session["session_id"]
-            self.session_infos = session["infos"]
-            self.session_key = self._derive_session_key()
-            self.session.headers.update({"X-Session-Id": self.session_id})
+            async with self._session_init_lock:
+                # Reconfere depois de pegar o lock: se outra faixa paralela
+                # ja' inicializou enquanto esperavamos, nao faz de novo.
+                if self.session_id is None:
+                    session = await self.api_call("session/start")
+                    self.session_id = session["session_id"]
+                    self.session_infos = session["infos"]
+                    self.session_key = self._derive_session_key()
+                    self.session.headers.update({"X-Session-Id": self.session_id})
 
         track = await self.api_call("file/url", id=id, fmt_id=fmt_id)
         if "bits_depth" in track and "bit_depth" not in track:

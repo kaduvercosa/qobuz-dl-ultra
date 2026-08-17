@@ -317,9 +317,9 @@ async def process_retroactive_lyrics_async(directory_path, client, genius_token=
                     )
                     stats["updated_new_pt"] += 1
                     report_items.append((display_name, "ATUALIZADO", "Letra original inserida em PT (tradução desnecessária)"))
-                elif existing_lang and existing_lang not in ("unknown", expected_lang) and track_id_is_trusted:
+                elif (not existing_lang or existing_lang == "unknown" or existing_lang != expected_lang) and track_id_is_trusted:
                     # Sabemos com certeza (tag própria) que o idioma gravado está
-                    # errado, e o track_id é confiável -> corrige.
+                    # errado, ausente ou veio de fallback (unknown), e o track_id é confiável -> corrige.
                     engine.fetch_and_inject(
                         file_path=file_path, artist=artist, track=title, album=album,
                         save_lrc=save_lrc, embed_lyrics=embed_lyrics,
@@ -327,7 +327,7 @@ async def process_retroactive_lyrics_async(directory_path, client, genius_token=
                     )
                     stats["updated_new_pt"] += 1
                     stats["corrected_wrong_language"] += 1
-                    report_items.append((display_name, "CORRIGIDO", f"Idioma gravado era '{existing_lang}', deveria ser '{expected_lang}' -- letra substituída"))
+                    report_items.append((display_name, "CORRIGIDO", "Letra nativa do Qobuz sobrescreveu a existente (Fallback/Idioma diferente)"))
                 else:
                     stats["unchanged_already_pt"] += 1
                     report_items.append((display_name, "SEM ALTERAÇÃO", "Letra já presente e em PT"))
@@ -343,7 +343,7 @@ async def process_retroactive_lyrics_async(directory_path, client, genius_token=
                     )
                     stats["updated_new_original"] += 1
                     report_items.append((display_name, "ATUALIZADO", f"Letra original ({orig_lang.upper()}) inserida (sem tradução PT no Qobuz)"))
-                elif existing_lang and existing_lang not in ("unknown", expected_lang) and track_id_is_trusted:
+                elif (not existing_lang or existing_lang == "unknown" or existing_lang != expected_lang) and track_id_is_trusted:
                     engine.fetch_and_inject(
                         file_path=file_path, artist=artist, track=title, album=album,
                         save_lrc=save_lrc, embed_lyrics=embed_lyrics,
@@ -351,7 +351,7 @@ async def process_retroactive_lyrics_async(directory_path, client, genius_token=
                     )
                     stats["updated_new_original"] += 1
                     stats["corrected_wrong_language"] += 1
-                    report_items.append((display_name, "CORRIGIDO", f"Idioma gravado era '{existing_lang}', deveria ser '{expected_lang}' -- letra substituída"))
+                    report_items.append((display_name, "CORRIGIDO", "Letra original do Qobuz sobrescreveu a existente (Fallback/Idioma diferente)"))
                 else:
                     stats["unchanged_no_trans_yet"] += 1
                     report_items.append((display_name, "SEM ALTERAÇÃO", "Letra original já presente; sem tradução PT no Qobuz no momento"))
@@ -368,8 +368,8 @@ async def process_retroactive_lyrics_async(directory_path, client, genius_token=
                     stats["updated_bilingual_direct"] += 1
                     report_items.append((display_name, "ATUALIZADO", "Letra original e tradução PT inseridas diretamente (Bilíngue)"))
 
-                elif existing_lang and existing_lang not in ("unknown", expected_lang) and track_id_is_trusted:
-                    # Cobre tanto "idioma original errado" quanto "faltando a
+                elif (not existing_lang or existing_lang == "unknown" or existing_lang != expected_lang) and track_id_is_trusted:
+                    # Cobre tanto "idioma original errado", fallback, ou "faltando a
                     # metade da tradução" (ex: tag diz só 'es', deveria ser 'es+pt')
                     engine.fetch_and_inject(
                         file_path=file_path, artist=artist, track=title, album=album,
@@ -378,7 +378,7 @@ async def process_retroactive_lyrics_async(directory_path, client, genius_token=
                     )
                     stats["updated_to_bilingual"] += 1
                     stats["corrected_wrong_language"] += 1
-                    report_items.append((display_name, "CORRIGIDO -> BILÍNGUE", f"Idioma gravado era '{existing_lang}', deveria ser '{expected_lang}' -- letra substituída"))
+                    report_items.append((display_name, "CORRIGIDO -> BILÍNGUE", "Letra do Qobuz sobrescreveu a existente (Fallback/Idioma diferente)"))
 
                 elif not is_bilingual and track_id_is_trusted:
                     # Upgrade de monolíngue para bilíngue (só quando o track_id veio

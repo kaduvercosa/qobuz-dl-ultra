@@ -26,14 +26,23 @@ requirements = [
     "charset_normalizer",
     "mutagen",
     "tqdm",
-    "pick==1.6.0",
     "beautifulsoup4",
     "colorama",
     # NOTE: cryptography was used in the original downloader, keeping it for safety
     "cryptography",
     "keyring",
     "aiohttp",
-    "questionary"
+    "questionary",
+    # core.py importa isso incondicionalmente no topo do arquivo (fora de
+    # qualquer funcao) pra montar a TUI interativa. Sem essa linha aqui, um
+    # `pip install` limpo (a-Shell, Colab, venv novo) instala o pacote sem
+    # erro nenhum, mas o programa morre com sys.exit() no PRIMEIRO comando
+    # rodado, ate' num `--help`.
+    "prompt_toolkit",
+    # lyrics_engine.py importa isso com try/except (nao derruba o programa
+    # se faltar), mas sem declarar aqui o fallback de letras via Genius
+    # fica mudo silenciosamente pra quem instalar via pip puro.
+    "lyricsgenius",
 ]
 
 setup(

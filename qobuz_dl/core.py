@@ -3,9 +3,21 @@ import os
 import sys
 import time
 import asyncio
+import shutil
 
 import requests
 from pathvalidate import sanitize_filename
+
+try:
+    from prompt_toolkit.application import Application
+    from prompt_toolkit.key_binding import KeyBindings
+    from prompt_toolkit.layout.containers import Window, ScrollOffsets
+    from prompt_toolkit.layout.controls import FormattedTextControl
+    from prompt_toolkit.layout.layout import Layout
+    from prompt_toolkit.styles import Style
+    from prompt_toolkit import PromptSession
+except ImportError:
+    sys.exit("Erro: Por favor, instale o prompt_toolkit executando: pip install prompt_toolkit")
 
 from qobuz_dl.bundle import Bundle
 from qobuz_dl import downloader, qopy
@@ -22,23 +34,173 @@ from qobuz_dl.utils import (
 )
 from qobuz_dl.settings import QobuzDLSettings
 
-# --- UI TABLE FORMATTING HELPER ---
+# --- UI STYLE FOR PROMPT_TOOLKIT (100% CONTRAST FIX) ---
+pt_style = Style.from_dict({
+    'title': 'ansicyan bold',
+    'pointer': 'ansiyellow bold',
+    'checkbox': 'ansigreen',
+    'hovered': 'bg:#cccccc fg:#000000 bold',  # Fundo Cinza Claro e Texto Preto! Impossível de não ver no claro ou escuro.
+    'meta': '',            
+    'highlight': 'ansicyan bold',
+    'footer': 'ansiyellow',
+})
+
 def _align_text(text, width):
-    """
-    Truncates text with '...' if it exceeds the specified width, 
-    or pads it with spaces to ensure perfect UI table alignment.
-
-    Args:
-        text (str): The text to format.
-        width (int): The maximum character width.
-
-    Returns:
-        str: The aligned and formatted string.
-    """
+    """Truncates or pads text for table alignment."""
     text = str(text)
     if len(text) > width:
         return text[:width - 3] + "..."
     return text.ljust(width)
+
+# --- PROMPT_TOOLKIT CUSTOM APPLICATION ---
+async def _tui_select(title, options_dicts, is_multi=False, item_category="album"):
+    """
+    Motor interativo customizado usando Prompt_Toolkit.
+    Garante [Espaço] para marcar, [Enter] para avançar e layout responsivo.
+    """
+    bindings = KeyBindings()
+    selected_indices = set()
+    cursor_pos = 0
+
+    @bindings.add('up')
+    def _(event):
+        nonlocal cursor_pos
+        cursor_pos = max(0, cursor_pos - 1)
+
+    @bindings.add('down')
+    def _(event):
+        nonlocal cursor_pos
+        cursor_pos = min(len(options_dicts) - 1, cursor_pos + 1)
+
+    if is_multi:
+        @bindings.add('space')
+        def _(event):
+            if cursor_pos in selected_indices:
+                selected_indices.remove(cursor_pos)
+            else:
+                selected_indices.add(cursor_pos)
+                
+        @bindings.add('t')
+        def _(event):
+            if len(selected_indices) == len(options_dicts):
+                selected_indices.clear()
+            else:
+                selected_indices.update(range(len(options_dicts)))
+
+    @bindings.add('enter')
+    def _(event):
+        if is_multi:
+            if not selected_indices:
+                selected_indices.add(cursor_pos)
+            event.app.exit(result=[(options_dicts[i], i) for i in sorted(list(selected_indices))])
+        else:
+            event.app.exit(result=(options_dicts[cursor_pos], cursor_pos))
+
+    @bindings.add('c-c')
+    def _(event):
+        event.app.exit(exception=KeyboardInterrupt)
+
+    def get_text():
+        columns, lines = shutil.get_terminal_size((80, 24))
+        is_table = columns >= 105
+        is_table_simple = columns >= 75
+        
+        res = []
+        res.append(('class:title', f"=== {title} ===\n\n"))
+        
+        if item_category in ["album", "track"] and is_table:
+            res.append(('class:meta', f"       {'ARTISTA'.ljust(20)} | {'TÍTULO'.ljust(35)} | {'TIPO'.ljust(8)} | {'ANO'.ljust(4)} | FAIXAS | DURAÇÃO | QUALIDADE\n"))
+            res.append(('class:meta', f"       {'-' * 110}\n"))
+        elif item_category == "playlist" and is_table_simple:
+            res.append(('class:meta', f"       {'NOME'.ljust(40)} | {'CRIADOR'.ljust(20)} | FAIXAS | DURAÇÃO\n"))
+            res.append(('class:meta', f"       {'-' * 85}\n"))
+        elif item_category == "artist" and is_table_simple:
+            res.append(('class:meta', f"       {'NOME DO ARTISTA'.ljust(50)} | LANÇAMENTOS\n"))
+            res.append(('class:meta', f"       {'-' * 65}\n"))
+            
+        for i, opt in enumerate(options_dicts):
+            hovered = (i == cursor_pos)
+            checked = (i in selected_indices)
+            
+            style = 'class:hovered' if hovered else ''
+            title_style = 'class:hovered' if hovered else 'class:highlight'
+            
+            ptr = ">" if hovered else " "
+            chk = "[x]" if checked else "[ ]"
+            if not is_multi: chk = ""
+            
+            prefix = f" {ptr} {chk} " if is_multi else f" {ptr} "
+            
+            res.append((style, prefix))
+            
+            if isinstance(opt, str):
+                res.append((style, f"{opt}\n"))
+                continue
+                
+            meta = opt.get("meta", {})
+            
+            if item_category in ["album", "track"]:
+                if is_table:
+                    art = _align_text(meta.get('artist', ''), 20)
+                    tit = _align_text(meta.get('title', ''), 35)
+                    typ = _align_text(meta.get('type', ''), 8)
+                    yr = _align_text(meta.get('year', ''), 4)
+                    fx = str(meta.get('tracks_count', '')).ljust(6)
+                    dur = str(meta.get('duration', '')).ljust(7)
+                    ql = meta.get('quality', '')
+                    res.append((style, f"{art} | {tit} | {typ} | {yr} | {fx} | {dur} | {ql}\n"))
+                else:
+                    res.append((title_style, f"{meta.get('title', '')}\n"))
+                    res.append((style, f"       👤 {meta.get('artist', '')}  |  💿 {meta.get('type', '')}  |  📅 {meta.get('year', '')}\n"))
+                    res.append((style, f"       🎧 {meta.get('quality', '')}  |  🎶 {meta.get('tracks_count', 0)} faixas  |  ⏱️ {meta.get('duration', '--:--')}\n"))
+                    gnr = meta.get('genre', '')
+                    lbl = meta.get('label', '')
+                    if gnr or lbl:
+                        res.append((style, f"       🎵 {gnr}  |  🏷️ {lbl}\n"))
+                    res.append((style, f"       {'-'*30}\n"))
+                    
+            elif item_category == "playlist":
+                if is_table_simple:
+                    n = _align_text(meta.get('name', ''), 40)
+                    o = _align_text(meta.get('owner', ''), 20)
+                    c = str(meta.get('count', '')).ljust(6)
+                    dur = str(meta.get('duration', ''))
+                    res.append((style, f"{n} | {o} | {c} | {dur}\n"))
+                else:
+                    res.append((title_style, f"{meta.get('name', '')}\n"))
+                    res.append((style, f"       👤 Criador: {meta.get('owner', '')}\n"))
+                    res.append((style, f"       🎶 {meta.get('count', 0)} faixas  |  ⏱️ {meta.get('duration', '--:--')}\n"))
+                    res.append((style, f"       {'-'*30}\n"))
+                    
+            elif item_category == "artist":
+                if is_table_simple:
+                    n = _align_text(meta.get('name', ''), 50)
+                    c = meta.get('count', '')
+                    res.append((style, f"{n} | {c} álbuns\n"))
+                else:
+                    res.append((title_style, f"{meta.get('name', '')}\n"))
+                    res.append((style, f"       📦 {meta.get('count', '')} álbuns listados\n"))
+                    res.append((style, f"       {'-'*30}\n"))
+            elif item_category == "filter":
+                 res.append((style, f"{opt}\n"))
+
+        res.append(('', "\n"))
+        if is_multi:
+            res.append(('class:checkbox', f" ✓ Selecionados: {len(selected_indices)}\n"))
+            res.append(('class:footer', f" [↑ ↓] Mover   [Espaço] Selecionar   [t] Selecionar Todos   [Enter] Confirmar"))
+        else:
+            res.append(('class:footer', f" [↑ ↓] Mover   [Enter] Confirmar"))
+            
+        return res
+
+    layout = Layout(Window(content=FormattedTextControl(text=get_text), scroll_offsets=ScrollOffsets(top=2, bottom=2)))
+    app = Application(layout=layout, key_bindings=bindings, full_screen=True, style=pt_style)
+    
+    res = await app.run_async()
+    if isinstance(res, Exception):
+        raise res
+    return res
+
 # ----------------------------------
 
 WEB_URL = "https://play.qobuz.com/"
@@ -57,9 +219,6 @@ logger = logging.getLogger(__name__)
 class QobuzDL:
     """
     The main orchestrator class for Qobuz-DL Ultimate Edition.
-    
-    Ties together the API Client, Downloader, UI routing, and advanced automations 
-    such as Stateful Batch Downloading, Anti-Spam Blacklisting, and Interactive UI menus.
     """
 
     def __init__(
@@ -90,9 +249,6 @@ class QobuzDL:
         blacklist=None,
         playlist_as_albums: bool = False,
     ):
-        """
-        Initializes the Core application and parses settings.
-        """
         self.directory = create_and_return_dir(directory)
         self.quality = quality
         self.embed_art = embed_art
@@ -127,23 +283,18 @@ class QobuzDL:
                 logger.error(f"{RED}[!] Failed to load blacklist: {e}{OFF}")
         
     async def initialize_client(self, email, pwd, app_id, secrets):
-        """Authenticates the session and initializes the Stealth Spoofing client."""
         self.client = await qopy.Client.create(email, pwd, app_id, secrets, self.settings.user_auth_token, force_english=self.force_english)
         logger.info(f"{YELLOW}Set max quality: {QUALITIES[int(self.quality)]}\n")
 
     def get_tokens(self):
-        """Fetches dynamic Application IDs and Secrets from the internal bundle."""
         bundle = Bundle()
         self.app_id = bundle.get_app_id()
         self.secrets = [
             secret for secret in bundle.get_secrets().values() if secret
         ]  
 
-    async def download_from_id(self, item_id, album=True, alt_path=None, is_playlist=False, playlist_index=None):
-        """
-        Routes the item ID to the Downloader Engine, checking the SQLite database 
-        first to prevent duplicates (Smart Reverse Lookup).
-        """
+    async def download_from_id(self, item_id, album=True, alt_path=None, is_playlist=False, playlist_index=None,
+                                is_parallel=False, position_pool=None):
         if handle_download_id(self.downloads_db, item_id, add_id=False, quality=self.quality):
             logger.info(
                 f"{OFF}This release ID ({item_id}) was already downloaded "
@@ -175,22 +326,15 @@ class QobuzDL:
                 booklet_only=self.booklet_only,
                 playlist_as_albums=self.playlist_as_albums,
             )
-            # Assuming downloader handles sync operations or has been updated to await
-            await dloader.download_id_by_type(not album)
+            await dloader.download_id_by_type(not album, is_parallel=is_parallel, position_pool=position_pool)
         except (requests.exceptions.RequestException, NonStreamable) as e:
             logger.error(f"{RED}Error getting release: {e}. Skipping...")
             
-        # --- HUMAN BEHAVIOR DELAY ---
         if getattr(self, 'delay', 0) > 0:
             logger.info(f"{YELLOW}[*] Sleeping for {self.delay} seconds to prevent rate limiting...{OFF}")
             await asyncio.sleep(self.delay)
 
     async def handle_url(self, url):
-        """
-        Parses raw Qobuz URLs, resolving their type (Playlist, Artist, Album, Track) 
-        and forwarding the respective IDs to the download engine. 
-        Implements the Heuristic Engine for artist discographies and Flat Folder logic for playlists.
-        """
         possibles = {
             "playlist": {
                 "func": self.client.get_plist_meta,
@@ -247,23 +391,11 @@ class QobuzDL:
                     batch = chunk.get(type_dict["iterable_key"], {}).get("items", [])
                     items.extend(batch)
 
-            # --- NEW: INTERACTIVE RELEASE TYPE FILTER (LAZY STATIC MENU) ---
             if getattr(self, '_is_interactive_session', False) and url_type == "artist":
-                import pick
-                
                 options = ["Album", "EP", "Single", "Live", "Compilation"]
-                title_text = (
-                    f"Found {len(items)} total releases for {content_name}.\n"
-                    "Filter by release type [Use arrows to move, Space to select, Enter to confirm]:\n"
-                    "(The exact count per category will be resolved silently during download)"
-                )
+                title_text = f"Encontrados {len(items)} lançamentos para {content_name}. Filtre por tipo:"
                 
-                selected_types_raw = pick.pick(
-                    options, 
-                    title_text, 
-                    multiselect=True, 
-                    min_selection_count=1
-                )
+                selected_types_raw = await _tui_select(title_text, options, is_multi=True, item_category="filter")
                 
                 if selected_types_raw:
                     self.allowed_release_types = [opt[0].lower() for opt in selected_types_raw]
@@ -272,7 +404,6 @@ class QobuzDL:
                     items = []
             else:
                 self.allowed_release_types = None
-            # ---------------------------------------------------------------
 
             logger.debug(f"Number of chunks: {len(content)}")
             if content:
@@ -282,7 +413,6 @@ class QobuzDL:
             else:
                 logger.info(f"{YELLOW}{len(items)} downloads in queue{OFF}")
             
-            # --- START PLAYLIST LOGIC (Flat Folder) ---
             is_playlist = (url_type == "playlist")
             if is_playlist and not getattr(self, 'playlist_as_albums', False):
                 original_folder_format = self.folder_format
@@ -290,11 +420,22 @@ class QobuzDL:
                 
                 self.folder_format = "."
                 self.settings.multiple_disc_one_dir = True
-            # ------------------------------------------------
+
+            is_track_batch = (type_dict["iterable_key"] == "tracks")
+            batch_workers = int(getattr(self.settings, 'max_workers', 3))
+            can_parallelize = (
+                is_track_batch
+                and batch_workers > 1
+                and getattr(self, 'delay', 0) <= 0
+            )
+            position_pool = downloader._PositionPool(batch_workers) if can_parallelize else None
+            semaphore = asyncio.Semaphore(batch_workers) if can_parallelize else None
+            pending_tasks = []
+
+            if can_parallelize:
+                logger.info(f"{YELLOW}[*] Multithreading Enabled ({batch_workers} workers) for playlist tracks.{OFF}")
 
             for idx, item in enumerate(items, start=1):
-                
-                # --- NEW: ULTIMATE SMART RECONCILER (LAZY + HEURISTIC) ---
                 if getattr(self, 'allowed_release_types', None) and url_type == "artist":
                     try:
                         r_type = "unknown"
@@ -339,7 +480,6 @@ class QobuzDL:
                             
                     except Exception:
                         pass
-                # ---------------------------------------------------------    
                 
                 if getattr(self, 'blacklist_patterns', None):
                     base_title = item.get("title") or item.get("name") or ""
@@ -351,31 +491,41 @@ class QobuzDL:
                         logger.info(f"{YELLOW}[!] Skipped (Blacklisted): {display_name}{OFF}")
                         continue
 
-                await self.download_from_id(
-                    item["id"],
-                    True if type_dict["iterable_key"] == "albums" else False,
-                    new_path,
-                    is_playlist=is_playlist,
-                    playlist_index=idx
-                )
+                if can_parallelize:
+                    item_id_captured = item["id"]
+                    idx_captured = idx
 
-            # --- RESTORE SETTINGS ---
+                    async def _bounded_track_download(item_id=item_id_captured, idx=idx_captured):
+                        async with semaphore:
+                            await self.download_from_id(
+                                item_id, False, new_path,
+                                is_playlist=is_playlist, playlist_index=idx,
+                                is_parallel=True, position_pool=position_pool,
+                            )
+
+                    pending_tasks.append(_bounded_track_download())
+                else:
+                    await self.download_from_id(
+                        item["id"],
+                        True if type_dict["iterable_key"] == "albums" else False,
+                        new_path,
+                        is_playlist=is_playlist,
+                        playlist_index=idx
+                    )
+
+            if pending_tasks:
+                await asyncio.gather(*pending_tasks)
+
             if is_playlist and not getattr(self, 'playlist_as_albums', False):
                 self.folder_format = original_folder_format
                 self.settings.multiple_disc_one_dir = original_multi_disc_setting
-            # -------------------------------
 
             if url_type == "playlist" and not self.no_m3u_for_playlists:
                 make_m3u(new_path)
         else:
             await self.download_from_id(item_id, type_dict["album"])
 
-    # --- SMART RESUME / BATCH DOWNLOADER LOGIC ---
     def mark_url_done_in_file(self, txt_file, url_to_mark):
-        """
-        Appends a [DONE] tag next to a processed URL in a text file.
-        Enables the Stateful Batch Downloading feature.
-        """
         if not txt_file or not os.path.isfile(txt_file):
             return
         try:
@@ -392,11 +542,52 @@ class QobuzDL:
             logger.error(f"{RED}Failed to update text file status: {e}{OFF}")
 
     async def download_list_of_urls(self, urls, txt_file=None):
-        """Processes a raw list of URLs, routing Qobuz and Last.fm links accordingly."""
         if not urls or not isinstance(urls, list):
             logger.info(f"{OFF}Nothing to download")
             return
-        for url in urls:
+
+        batch_workers = int(getattr(self.settings, 'max_workers', 3))
+        can_parallelize = batch_workers > 1 and getattr(self, 'delay', 0) <= 0
+
+        track_urls = []   
+        other_urls = []   
+
+        if can_parallelize:
+            for i, url in enumerate(urls):
+                probe_url = url.replace("open.qobuz.com", "play.qobuz.com")
+                if "last.fm" in probe_url or os.path.isfile(probe_url):
+                    other_urls.append((i, url))
+                    continue
+                try:
+                    url_type, item_id = get_url_info(probe_url)
+                except (KeyError, IndexError):
+                    other_urls.append((i, url))
+                    continue
+                if url_type == "track":
+                    track_urls.append((i, url, item_id))
+                else:
+                    other_urls.append((i, url))
+        else:
+            other_urls = list(enumerate(urls))
+
+        if track_urls:
+            logger.info(f"{YELLOW}[*] Multithreading Enabled ({batch_workers} workers) for standalone track batch.{OFF}")
+            position_pool = downloader._PositionPool(batch_workers)
+            semaphore = asyncio.Semaphore(batch_workers)
+
+            async def _bounded_track_url(original_url, item_id):
+                async with semaphore:
+                    await self.download_from_id(
+                        item_id, False, is_parallel=True, position_pool=position_pool,
+                    )
+                self.mark_url_done_in_file(txt_file, original_url)
+
+            await asyncio.gather(*[
+                _bounded_track_url(original_url, item_id)
+                for _, original_url, item_id in track_urls
+            ])
+
+        for _, url in other_urls:
             original_url = url
             url = url.replace("open.qobuz.com", "play.qobuz.com")
             
@@ -410,10 +601,6 @@ class QobuzDL:
                 self.mark_url_done_in_file(txt_file, original_url)
 
     async def download_from_txt_file(self, txt_file):
-        """
-        Ingests a text file containing Qobuz URLs, filtering out completed items, 
-        comments, and invalid lines, before pushing them to the batch engine.
-        """
         try:
             valid_urls = []
             with open(txt_file, "r", encoding="utf-8") as txt:
@@ -444,10 +631,8 @@ class QobuzDL:
             f" urls from file: {txt_file}{OFF}"
         )
         await self.download_list_of_urls(valid_urls, txt_file=txt_file)
-    # ---------------------------------------------
 
     async def lucky_mode(self, query, download=True):
-        """Automatically fetches and downloads the top result for a given query."""
         if len(query) < 3:
             logger.info(f"{RED}Your search query is too short or invalid")
             return
@@ -464,11 +649,78 @@ class QobuzDL:
 
         return results
 
+    def _extract_rich_metadata(self, i, item_type, mode_dict, fav_subtype=None):
+        """Extrai metadados super detalhados para exibição."""
+        meta_data = {}
+        duration = i.get("duration", 0)
+        fmt_duration = format_duration(duration) if duration else "--:--"
+
+        if mode_dict.get("requires_extra") or item_type in ["album", "track"]:
+            artist = i.get("artist", {}).get("name") or i.get("performer", {}).get("name") or "Unknown"
+            title = i.get("title") or i.get("name") or "Unknown"
+            if i.get("version"):
+                title = f"{title} ({i.get('version')})"
+            if i.get("parental_warning"):
+                title = f"{title} [E]"
+            
+            year = str(i.get("release_date_original") or i.get("release_date") or "    ")[:4]
+            t_count = i.get("tracks_count", 0)
+            
+            gnr = i.get("genre", {}).get("name", "") if isinstance(i.get("genre"), dict) else i.get("genre", "")
+            lbl = i.get("label", {}).get("name", "") if isinstance(i.get("label"), dict) else i.get("label", "")
+            
+            raw_type = i.get("release_type") or i.get("product_type")
+            if not raw_type:
+                if item_type == "album" and (t_count or duration):
+                    if duration >= 1740 or t_count >= 7: raw_type = "Album"
+                    elif t_count == 1: raw_type = "Single"
+                    else: raw_type = "EP"
+                else:
+                    raw_type = item_type
+                    
+            rel_type = "EP" if raw_type.lower() == "ep" else raw_type.title()
+            
+            if i.get("hires_streamable"):
+                bit_depth = i.get("maximum_bit_depth", 24)
+                sampling_rate = i.get("maximum_sampling_rate", 96.0)
+                quality = f"[HI-RES] {bit_depth}b/{sampling_rate}kHz"
+            else:
+                quality = "[ CD ] 16b/44.1kHz"
+                
+            meta_data = {
+                "artist": artist,
+                "title": title,
+                "type": rel_type,
+                "year": year,
+                "quality": quality,
+                "duration": fmt_duration,
+                "tracks_count": t_count,
+                "genre": gnr,
+                "label": lbl,
+                "id": i.get("id")
+            }
+        else:
+            name = i.get("name", "Unknown")
+            count = i.get("albums_count") if "albums_count" in i else i.get("tracks_count", 0)
+            
+            if item_type == "playlist" or fav_subtype == "playlists":
+                owner = i.get("owner", {}).get("name", "Unknown")
+                meta_data = {
+                    "name": name,
+                    "owner": owner,
+                    "count": count,
+                    "duration": fmt_duration,
+                    "id": i.get("id")
+                }
+            else:
+                meta_data = {
+                    "name": name,
+                    "count": count,
+                    "id": i.get("id")
+                }
+        return meta_data
+
     async def search_by_type(self, query, item_type, limit=10, lucky=False, fav_subtype=None):
-        """
-        Routes text queries to the Qobuz API. Supports native search for Albums, 
-        Artists, Tracks, Playlists, and the authenticated user's private Favorites.
-        """
         if item_type != "favorites" and (not query or len(query) < 3):
             logger.info(f"{RED}Your search query is too short or invalid")
             return
@@ -510,93 +762,79 @@ class QobuzDL:
             mode_dict = possibles[item_type]
             
             if item_type == "favorites":
-                results = await mode_dict["func"](fav_type=fav_subtype, limit=limit)
-                iterable = results.get(fav_subtype, {}).get("items", [])
-                
-                if fav_subtype in ["artists", "playlists"]:
+                if fav_subtype == "playlists":
+                    # Fix para o Erro 400: Playlists criadas pelo usuário tem API separada no Qobuz
+                    iterable = []
+                    user_id = getattr(self.client, 'user_id', None)
+                    if not user_id and hasattr(self.client, 'user') and isinstance(self.client.user, dict):
+                        user_id = self.client.user.get("id")
+                        
+                    params = {"limit": limit}
+                    if user_id: params["user_id"] = user_id
+                    
+                    try:
+                        # 1. Tenta pegar as playlists completas primeiro
+                        p1 = params.copy()
+                        p1["request_ts"] = int(time.time())
+                        sig = self.client._modern_sig("playlist/getUserPlaylists", p1, self.client.sec)
+                        p1["request_sig"] = sig
+                        async with self.client.session.request("get", self.client.base + "playlist/getUserPlaylists", params=p1) as r1:
+                            res1 = await r1.json()
+                            
+                        if "playlists" in res1 and "items" in res1["playlists"]:
+                            iterable = res1["playlists"]["items"]
+                        else:
+                            # 2. Se falhar, usa getUserPlaylistIds (Sugerido)
+                            p2 = params.copy()
+                            p2["request_ts"] = int(time.time())
+                            sig2 = self.client._modern_sig("playlist/getUserPlaylistIds", p2, self.client.sec)
+                            p2["request_sig"] = sig2
+                            async with self.client.session.request("get", self.client.base + "playlist/getUserPlaylistIds", params=p2) as r2:
+                                res2 = await r2.json()
+                                
+                            ids = res2.get("playlist_ids", []) if isinstance(res2, dict) else []
+                            for p_id in ids:
+                                try:
+                                    p_params = {"playlist_id": p_id, "extra": "tracks"}
+                                    p_params["request_ts"] = int(time.time())
+                                    p_sig = self.client._modern_sig("playlist/get", p_params, self.client.sec)
+                                    p_params["request_sig"] = p_sig
+                                    async with self.client.session.request("get", self.client.base + "playlist/get", params=p_params) as rp:
+                                        p_data = await rp.json()
+                                        if "id" in p_data: iterable.append(p_data)
+                                except Exception:
+                                    pass
+                    except Exception as e:
+                        logger.error(f"{RED}Erro ao buscar playlists: {e}{OFF}")
+                        
                     mode_dict["requires_extra"] = False
                 else:
-                    mode_dict["requires_extra"] = True
+                    results = await mode_dict["func"](fav_type=fav_subtype, limit=limit)
+                    iterable = results.get(fav_subtype, {}).get("items", []) if isinstance(results, dict) else []
+                    mode_dict["requires_extra"] = (fav_subtype not in ["artists", "playlists"])
             else:
                 results = await mode_dict["func"](query, limit)
-                iterable = results[mode_dict["key"]]["items"]
+                iterable = results.get(mode_dict["key"], {}).get("items", []) if isinstance(results, dict) else []
             
             item_list = []
             
             for i in iterable:
-                if mode_dict["requires_extra"]:
-                    artist = i.get("artist", {}).get("name") or i.get("performer", {}).get("name") or "Unknown"
-                    
-                    title = i.get("title") or i.get("name") or "Unknown"
-                    if i.get("version"):
-                        title = f"{title} ({i.get('version')})"
-                    if i.get("parental_warning"):
-                        title = f"{title} [E]"
-                    
-                    year = str(i.get("release_date_original") or i.get("release_date") or "    ")[:4]
-                    
-                    raw_type = i.get("release_type") or i.get("product_type")
-                    if not raw_type:
-                        t_count = i.get("tracks_count", 0)
-                        duration = i.get("duration", 0) 
-                        
-                        if item_type == "album" and (t_count or duration):
-                            if duration >= 1740 or t_count >= 7:
-                                raw_type = "Album"
-                            elif t_count == 1:
-                                raw_type = "Single"
-                            else:
-                                raw_type = "EP"
-                        else:
-                            raw_type = item_type
-                            
-                    rel_type = "EP" if raw_type.lower() == "ep" else raw_type.title()
-                    
-                    if i.get("hires_streamable"):
-                        bit_depth = i.get("maximum_bit_depth", 24)
-                        sampling_rate = i.get("maximum_sampling_rate", 96.0)
-                        quality = f"[HI-RES] {bit_depth}b/{sampling_rate}kHz"
-                    else:
-                        quality = "[ CD ] 16b/44.1kHz"
-                        
-                    text = f"{_align_text(artist, 20)}   {_align_text(title, 35)}   {_align_text(rel_type, 8)}   {year}   {quality}"
-                else:
-                    name = i.get("name", "Unknown")
-                    count = i.get("albums_count") if "albums_count" in i else i.get("tracks_count", 0)
-                    desc = "albums" if "albums_count" in i else "tracks"
-                    
-                    text = f"{_align_text(name, 50)}   {count} {desc}"
-
-                if item_type == "favorites" and fav_subtype:
-                    url_category = fav_subtype[:-1]
-                else:
-                    url_category = item_type
-                    
+                if not isinstance(i, dict): continue
+                meta_data = self._extract_rich_metadata(i, item_type, mode_dict, fav_subtype)
+                
+                url_category = fav_subtype[:-1] if (item_type == "favorites" and fav_subtype) else item_type
                 url = "{}{}/{}".format(WEB_URL, url_category, i.get("id", ""))
-                item_list.append({"text": text, "url": url} if not lucky else url)
+                
+                item_list.append({"meta": meta_data, "url": url} if not lucky else url)
+                
             return item_list
             
-        except (KeyError, IndexError):
-            logger.info(f"{RED}Invalid type: {item_type}")
-            return
+        except Exception as e:
+            logger.info(f"{RED}Erro na busca: {e}{OFF}")
+            return []
 
     async def interactive(self, download=True):
-        """
-        Launches the Native Interactive Menu in the terminal.
-        """
         self._is_interactive_session = True
-        try:
-            import pick
-            if hasattr(pick, 'SYMBOL_CIRCLE_EMPTY'):
-                pick.SYMBOL_CIRCLE_EMPTY = '[ ]'
-                pick.SYMBOL_CIRCLE_FILLED = '[X]'
-        except (ImportError, ModuleNotFoundError):
-            if os.name == "nt":
-                sys.exit(
-                    "Please install curses with "
-                    '"pip3 install windows-curses" to continue'
-                )
-            raise
 
         qualities = [
             {"q_string": "320", "q": 5},
@@ -607,87 +845,102 @@ class QobuzDL:
 
         try:
             item_types = ["Albums", "Tracks", "Artists", "Playlists", "Favorites"]
-            
-            scelta_raw = pick.pick(item_types, "I'll search for:\n[press Intro]")[0]
+            scelta_raw, _ = await _tui_select("O que você deseja buscar?", item_types, is_multi=False, item_category="filter")
             
             if scelta_raw == "Favorites":
                 selected_type = "favorites"
             else:
                 selected_type = scelta_raw[:-1].lower() 
                 
-            logger.info(f"{YELLOW}Ok, we'll search for {selected_type}{RESET}")
             final_url_list = []
+            session = PromptSession()
             
             while True:
+                selected_fav = None
                 if selected_type == "favorites":
+                    # PLAYLISTS RETORNARAM E ESTÃO CORRIGIDAS!
                     fav_types = ["Albums", "Tracks", "Artists", "Playlists"]
-                    selected_fav = pick.pick(fav_types, "Which favorites do you want to browse?\n[press Intro]")[0].lower()
+                    selected_fav, _ = await _tui_select("Quais favoritos deseja explorar?", fav_types, is_multi=False, item_category="filter")
+                    selected_fav = selected_fav.lower()
                     
-                    logger.info(f"{YELLOW}Fetching your favorite {selected_fav}...{RESET}")
+                    logger.info(f"{YELLOW}Buscando seus favoritos ({selected_fav})...{RESET}")
                     options = await self.search_by_type(None, selected_type, limit=self.interactive_limit, fav_subtype=selected_fav)
-                    query_title = f"My Favorite {selected_fav.title()}"
+                    query_title = f"Meus Favoritos ({selected_fav.title()})"
+                    display_cat = selected_fav[:-1] # albums -> album
                 else:
-                    query = input(f"{CYAN}Enter your search: [Ctrl + c to quit]\n-{DF} ")
-                    logger.info(f"{YELLOW}Searching...{RESET}")
+                    sys.stdout.write("\033[2J\033[H")
+                    sys.stdout.flush()
+                    
+                    query = await session.prompt_async("Digite sua busca: [Ctrl + C para sair]\n> ")
+                    if not query.strip():
+                        continue
+                    
+                    logger.info(f"{YELLOW}Pesquisando...{RESET}")
                     options = await self.search_by_type(query, selected_type, self.interactive_limit)
                     query_title = query.title()
+                    display_cat = selected_type
                 
                 if not options:
-                    logger.info(f"{OFF}Nothing found{RESET}")
+                    logger.info(f"{OFF}Nada encontrado.{RESET}")
                     if selected_type == "favorites":
                         break
                     continue
                 
-                if selected_type in ["album", "track"] or (selected_type == "favorites" and selected_fav in ["albums", "tracks"]):
-                    artist_h = "ARTIST".ljust(20)
-                    title_h = "TITLE".ljust(35)
-                    type_h = "TYPE".ljust(8)
-                    year_h = "YEAR".ljust(4)
-                    
-                    table_header = (
-                        f"       {artist_h}   {title_h}   {type_h}   {year_h}   QUALITY\n"
-                        f"       {'-' * 88}"
-                    )
-                else:
-                    name_h = "NAME".ljust(50)
-                    table_header = (
-                        f"       {name_h}   RELEASES\n"
-                        f"       {'-' * 63}"
-                    )
-
-                title = (
-                    f'*** RESULTS FOR "{query_title}" ***\n\n'
-                    "[Use arrows to move, <Space> to select, <Enter> to confirm]\n"
-                    "Press Ctrl + C to quit. Don't select anything to try another search.\n\n"
-                    f"{table_header}"
-                )
-                
-                options_texts = [opt.get("text") for opt in options]
-                
-                selected_items = pick.pick(
-                    options_texts,
-                    title,
-                    multiselect=True,
-                    min_selection_count=0,
-                )
+                title = f'RESULTADOS PARA "{query_title}"'
+                selected_items = await _tui_select(title, options, is_multi=True, item_category=display_cat)
                 
                 if len(selected_items) > 0:
-                    [final_url_list.append(options[i[1]]["url"]) for i in selected_items]
                     
-                    y_n = pick.pick(["Yes", "No"], "Items were added to queue to be downloaded. Keep searching?")
-                    if y_n[0] == "No":
+                    # --- DRILL-DOWN: EXPLORAR CATÁLOGO DO ARTISTA ---
+                    if display_cat == "artist":
+                        action, _ = await _tui_select("Como deseja prosseguir com os artistas selecionados?", [
+                            "Explorar Álbuns (Selecionar manualmente o que baixar)",
+                            "Baixar Toda a Discografia (Sem filtro)"
+                        ], is_multi=False, item_category="filter")
+                        
+                        if action.startswith("Explorar"):
+                            for item in selected_items:
+                                art_id = item[0]["meta"]["id"]
+                                art_name = item[0]["meta"]["name"]
+                                
+                                logger.info(f"{YELLOW}Buscando catálogo de {art_name}...{RESET}")
+                                content = []
+                                async for chunk in self.client.get_artist_meta(art_id):
+                                    content.extend(chunk.get("albums", {}).get("items", []))
+                                
+                                if not content:
+                                    logger.info(f"{RED}Nenhum álbum encontrado para {art_name}.{OFF}")
+                                    continue
+                                    
+                                art_options = []
+                                for a in content:
+                                    meta_data = self._extract_rich_metadata(a, "album", {"requires_extra": True})
+                                    if meta_data["artist"] == "Unknown": meta_data["artist"] = art_name
+                                    url = f"{WEB_URL}album/{a.get('id')}"
+                                    art_options.append({"meta": meta_data, "url": url})
+                                
+                                art_title = f"Catálogo: {art_name}"
+                                art_selected = await _tui_select(art_title, art_options, is_multi=True, item_category="album")
+                                [final_url_list.append(a[0]["url"]) for a in art_selected]
+                        else:
+                            [final_url_list.append(item[0]["url"]) for item in selected_items]
+                    # ------------------------------------------------
+                    else:
+                        [final_url_list.append(item[0]["url"]) for item in selected_items]
+                    
+                    y_n, _ = await _tui_select("Itens adicionados à fila. Deseja buscar mais?", ["Sim", "Não"], is_multi=False, item_category="filter")
+                    if y_n == "Não":
                         break
                 else:
-                    logger.info(f"{YELLOW}Ok, try again...{RESET}")
+                    logger.info(f"{YELLOW}Ok, vamos tentar de novo...{RESET}")
                     if selected_type == "favorites":
                         break
                     continue
                     
             if final_url_list:
-                desc = "Select [intro] the quality (the quality will be automatically\ndowngraded if the selected is not found)"
                 qualities_texts = [q.get("q_string") for q in qualities]
-                selected_quality = pick.pick(qualities_texts, desc, default_index=1)
-                self.quality = qualities[selected_quality[1]]["q"]
+                selected_quality, sq_idx = await _tui_select("Selecione a qualidade máxima do download", qualities_texts, is_multi=False, item_category="filter")
+                self.quality = qualities[sq_idx]["q"]
 
                 if download:
                     await self.download_list_of_urls(final_url_list)
@@ -695,21 +948,15 @@ class QobuzDL:
                 return final_url_list
                 
         except KeyboardInterrupt:
-            logger.info(f"{YELLOW}Bye")
+            sys.stdout.write("\033[2J\033[H")
+            logger.info(f"{YELLOW}Operação cancelada pelo usuário. Tchau!{OFF}")
             return
 
     async def download_lastfm_pl(self, playlist_url):
-        """
-        Parses an external Last.fm playlist, queries the Qobuz database via Fuzzy Matching, 
-        and initiates a batch download of all matched tracks.
-        """
         from qobuz_dl.lastfm_parser import fetch_lastfm_playlist
         
         logger.info(f"{CYAN}[*] Last.fm URL detected! Initiating Last.fm integration...{OFF}")
         
-        # fetch_lastfm_playlist() e' sincrona/bloqueante (requests.get +
-        # parsing de HTML, timeout=15s) -- offload pra nao travar o event
-        # loop durante esse tempo.
         loop = asyncio.get_event_loop()
         tracks_list = await loop.run_in_executor(None, fetch_lastfm_playlist, playlist_url)
         
@@ -737,18 +984,47 @@ class QobuzDL:
         if not getattr(self, 'playlist_as_albums', False):
             self.folder_format = "."
             self.settings.multiple_disc_one_dir = True
-        
+
+        batch_workers = int(getattr(self.settings, 'max_workers', 3))
+        can_parallelize = batch_workers > 1 and getattr(self, 'delay', 0) <= 0
+        position_pool = downloader._PositionPool(batch_workers) if can_parallelize else None
+        semaphore = asyncio.Semaphore(batch_workers) if can_parallelize else None
+        pending_tasks = []
+
+        if can_parallelize:
+            logger.info(f"{YELLOW}[*] Multithreading Enabled ({batch_workers} workers) for playlist tracks.{OFF}")
+
         for idx, t_id in enumerate(track_ids, start=1):
-            try:
-                await self.download_from_id(
-                    t_id, 
-                    False, 
-                    pl_directory, 
-                    is_playlist=True, 
-                    playlist_index=idx
-                )
-            except Exception as e:
-                logger.error(f"{RED}[!] Failed to queue track ID {t_id}: {e}{OFF}")
+            if can_parallelize:
+                t_id_captured = t_id
+                idx_captured = idx
+
+                async def _bounded_track_download(t_id=t_id_captured, idx=idx_captured):
+                    async with semaphore:
+                        try:
+                            await self.download_from_id(
+                                t_id, False, pl_directory,
+                                is_playlist=True, playlist_index=idx,
+                                is_parallel=True, position_pool=position_pool,
+                            )
+                        except Exception as e:
+                            logger.error(f"{RED}[!] Failed to queue track ID {t_id}: {e}{OFF}")
+
+                pending_tasks.append(_bounded_track_download())
+            else:
+                try:
+                    await self.download_from_id(
+                        t_id, 
+                        False, 
+                        pl_directory, 
+                        is_playlist=True, 
+                        playlist_index=idx
+                    )
+                except Exception as e:
+                    logger.error(f"{RED}[!] Failed to queue track ID {t_id}: {e}{OFF}")
+
+        if pending_tasks:
+            await asyncio.gather(*pending_tasks)
 
         if not getattr(self, 'playlist_as_albums', False):
             self.folder_format = original_folder_format

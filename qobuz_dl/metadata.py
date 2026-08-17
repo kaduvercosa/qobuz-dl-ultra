@@ -115,8 +115,19 @@ def _format_genres(genres: list) -> str:
     return ", ".join(no_repeats)
 
 
-def _get_cover_path(root_dir):
-    """Auxiliary function to locate the embedded cover art path."""
+def _get_cover_path(root_dir, override=None):
+    """
+    Auxiliary function to locate the embedded cover art path.
+    FIX (paralelismo entre faixas de albuns diferentes): `override`
+    permite passar um caminho explicito de capa (usado quando varias
+    faixas de albuns DIFERENTES baixam ao mesmo tempo pra uma MESMA pasta
+    -- ex: playlist sem "--playlist-as-albums"). Sem isso, todas as
+    faixas concorrentes leriam o mesmo "embed_cover.jpg" compartilhado,
+    e uma faixa do Album X podia acabar com a capa do Album Y perto no
+    tempo. Ver Download.download_track() em downloader.py.
+    """
+    if override and os.path.isfile(override):
+        return override
     emb_image = os.path.join(root_dir, EMB_COVER_NAME)
     multi_emb_image = os.path.join(
         os.path.abspath(os.path.join(root_dir, os.pardir)), EMB_COVER_NAME
@@ -131,8 +142,8 @@ def _normalize_name(name: str) -> str:
     """Removes accents, invisible spaces, and converts to lowercase for strict duplicate checking."""
     return unicodedata.normalize('NFKD', str(name)).encode('ASCII', 'ignore').decode('utf-8').lower().strip()
 
-def _embed_flac_img(root_dir, audio: FLAC):
-    cover_image = _get_cover_path(root_dir)
+def _embed_flac_img(root_dir, audio: FLAC, cover_override=None):
+    cover_image = _get_cover_path(root_dir, override=cover_override)
 
     if not cover_image or not os.path.isfile(cover_image):
         logger.debug(f"Cover image not found to embed.")
@@ -156,8 +167,8 @@ def _embed_flac_img(root_dir, audio: FLAC):
         logger.error(f"Error embedding image: {e}", exc_info=True)
 
 
-def _embed_id3_img(root_dir, audio: id3.ID3):
-    cover_image = _get_cover_path(root_dir)
+def _embed_id3_img(root_dir, audio: id3.ID3, cover_override=None):
+    cover_image = _get_cover_path(root_dir, override=cover_override)
 
     if not cover_image or not os.path.isfile(cover_image):
         logger.debug(f"Cover image not found to embed.")
@@ -168,7 +179,8 @@ def _embed_id3_img(root_dir, audio: id3.ID3):
 
 
 def tag_flac(
-    filename, root_dir, final_name, d: dict, album, istrack=True, em_image=False, settings: QobuzDLSettings = None
+    filename, root_dir, final_name, d: dict, album, istrack=True, em_image=False, settings: QobuzDLSettings = None,
+    embed_cover_path=None
 ):
     audio = FLAC(filename)
 
@@ -194,7 +206,7 @@ def tag_flac(
     base_comment = f"Qobuz | {qobuz_item.get('maximum_bit_depth', 16)}b/{qobuz_item.get('maximum_sampling_rate', 44.1)}kHz | Rel: {qobuz_album.get('release_date_original', 'Unknown')} | Trk ID: {qobuz_item.get('id', 'Unknown')}"
     
     if em_image:
-        cover_path = _get_cover_path(root_dir)
+        cover_path = _get_cover_path(root_dir, override=embed_cover_path)
         if cover_path:
             img_size_bytes = os.path.getsize(cover_path)
             img_size_mb = img_size_bytes / (1024 * 1024)
@@ -212,7 +224,7 @@ def tag_flac(
             audio[k] = v
 
     if em_image:
-        _embed_flac_img(root_dir, audio)
+        _embed_flac_img(root_dir, audio, cover_override=embed_cover_path)
 
     for junk_tag in ["ENCODER", "ENCODED-BY", "ENCODED_BY"]:
         if junk_tag in audio:
@@ -225,7 +237,8 @@ def tag_flac(
     os.rename(filename, final_name)
 
 
-def tag_mp3(filename, root_dir, final_name, d, album, istrack=True, em_image=False, settings: QobuzDLSettings = None):
+def tag_mp3(filename, root_dir, final_name, d, album, istrack=True, em_image=False, settings: QobuzDLSettings = None,
+            embed_cover_path=None):
     try:
         audio = id3.ID3(filename)
     except ID3NoHeaderError:
@@ -244,7 +257,7 @@ def tag_mp3(filename, root_dir, final_name, d, album, istrack=True, em_image=Fal
     base_comment = f"Qobuz | {qobuz_item.get('maximum_bit_depth', 16)}b/{qobuz_item.get('maximum_sampling_rate', 44.1)}kHz | Rel: {qobuz_album.get('release_date_original', 'Unknown')} | Trk ID: {qobuz_item.get('id', 'Unknown')}"
     
     if em_image:
-        cover_path = _get_cover_path(root_dir)
+        cover_path = _get_cover_path(root_dir, override=embed_cover_path)
         if cover_path:
             img_size_bytes = os.path.getsize(cover_path)
             img_size_mb = img_size_bytes / (1024 * 1024)
@@ -271,7 +284,7 @@ def tag_mp3(filename, root_dir, final_name, d, album, istrack=True, em_image=Fal
                              text=f'{str(qobuz_item.get("media_number", "1"))}/{str(qobuz_album.get("media_count", "1"))}')
 
     if em_image:
-        _embed_id3_img(root_dir, audio)
+        _embed_id3_img(root_dir, audio, cover_override=embed_cover_path)
 
     audio.pop("TENC", None)
     audio.pop("TSSE", None)

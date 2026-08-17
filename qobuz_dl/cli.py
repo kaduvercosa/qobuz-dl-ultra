@@ -8,6 +8,8 @@ import os
 import getpass
 import hashlib
 import signal
+import shutil
+import textwrap
 import keyring
 import requests
 import asyncio
@@ -307,6 +309,138 @@ async def _handle_commands(qobuz, arguments):
         _remove_leftovers(qobuz.directory)
 
 
+# Fonte bitmap 5x5 propria (nao depende de nenhuma lib externa tipo
+# pyfiglet) usada so' pelas letras que aparecem em "QOBUZ-DL" / "ULTRA".
+# Desenhada e testada a mao pra garantir alinhamento perfeito -- cada
+# glifo tem exatamente 5 colunas de largura, sem excecao, entao toda
+# linha da logo sai com a MESMA largura total, garantindo que o bloco
+# nunca fica torto na hora de centralizar.
+_LOGO_FONT = {
+    "A": ["01110", "10001", "11111", "10001", "10001"],
+    "B": ["11110", "10001", "11110", "10001", "11110"],
+    "D": ["11110", "10001", "10001", "10001", "11110"],
+    "L": ["10000", "10000", "10000", "10000", "11111"],
+    "O": ["01110", "10001", "10001", "10001", "01110"],
+    "Q": ["01110", "10001", "10101", "10011", "01111"],
+    "R": ["11110", "10001", "11110", "10100", "10010"],
+    "T": ["11111", "00100", "00100", "00100", "00100"],
+    "U": ["10001", "10001", "10001", "10001", "01110"],
+    "Z": ["11111", "00010", "00100", "01000", "11111"],
+    "-": ["00000", "00000", "11111", "00000", "00000"],
+}
+_LOGO_BLOCK = "\u2588"
+
+
+def _render_logo_word(word):
+    """Retorna as 5 linhas (strings) da palavra em blocos, todas com a
+    mesma largura -- 1 espaco separa cada letra, sem espaco sobrando
+    depois da ultima."""
+    letters = list(word)
+    rows = ["" for _ in range(5)]
+    for i, ch in enumerate(letters):
+        glyph = _LOGO_FONT[ch]
+        for r in range(5):
+            rows[r] += "".join(_LOGO_BLOCK if px == "1" else " " for px in glyph[r])
+            if i != len(letters) - 1:
+                rows[r] += " "
+    return rows
+
+
+def _print_logo(cols):
+    """
+    Imprime a logo QOBUZ-DL-ULTRA, sempre centralizada em `cols`.
+    Acima de ~52 colunas usa a arte em blocos (2 linhas: "QOBUZ-DL" tem
+    47 colunas de largura, a mais larga das duas -- por isso o corte).
+    Abaixo disso (telas bem estreitas) cai pra uma unica linha de texto
+    simples, que cabe ate' no minimo de 32 colunas que o resto da tela
+    ja' garante.
+    """
+    line1 = _render_logo_word("QOBUZ-DL")
+    line2 = _render_logo_word("ULTRA")
+    art_width = len(line1[0])  # 47 -- a mais larga das duas palavras
+
+    if cols >= art_width + 5:
+        pad1 = " " * max((cols - art_width) // 2, 0)
+        pad2 = " " * max((cols - len(line2[0])) // 2, 0)
+        for row in line1:
+            print(f"{CYAN}{pad1}{row}{OFF}")
+        for row in line2:
+            print(f"{CYAN}{pad2}{row}{OFF}")
+    else:
+        fallback = "\u266a QOBUZ-DL-ULTRA \u266a"
+        pad = " " * max((cols - len(fallback)) // 2, 0)
+        print(f"{CYAN}{pad}{fallback}{OFF}")
+
+
+def _print_welcome_screen():
+    """
+    Tela inicial mostrada quando `qobuz-dl` roda sem nenhum argumento.
+    Troca o print_help() cru do argparse (que ignora a largura real do
+    terminal e derrama linha gigante em telas estreitas -- iPad em Split
+    View, a-Shell mini, etc.) por um layout que se adapta a QUALQUER
+    largura de terminal, igual o `_get_safe_ncols()` que o downloader.py
+    ja' usa pras barras de progresso.
+    """
+    from qobuz_dl import __version__
+
+    # Nunca deixa a largura ficar ridiculamente pequena (ex: terminal
+    # relatando 0 colunas em alguns pipes/CI) nem gigante demais pra
+    # leitura confortavel numa tela grande.
+    cols = max(min(shutil.get_terminal_size(fallback=(80, 24)).columns, 100), 32)
+    body_width = cols - 2  # 1 char de respiro em cada margem
+
+    # (comando, aliases, descricao breve)
+    COMMANDS = [
+        ("dl", None, "Baixa por URL de album, faixa, artista, label, playlist ou playlist do last.fm."),
+        ("interactive", "i, fun", "Busca interativa: procura faixas/albuns e escolhe o que baixar na hora."),
+        ("lucky", None, "Baixa os N primeiros resultados de uma busca no Qobuz, sem passar URL."),
+        ("lyrics", None, "Varre uma pasta ja' baixada e injeta letras/traducoes que estejam faltando."),
+        ("sync-playlist", "sp", "Sincroniza uma pasta local com uma playlist do Qobuz (baixa o que falta, remove o que saiu)."),
+    ]
+
+    FLAGS = [
+        ("-r, --reset", "cria/reseta o arquivo de configuracao"),
+        ("-p, --purge", "apaga o banco de downloads-ja-feitos"),
+        ("--sync-db [PATH]", "escaneia uma pasta local pra recuperar IDs do Qobuz perdidos no banco"),
+        ("-sc, --show-config", "mostra a configuracao atual"),
+    ]
+
+    def rule(ch="-"):
+        print(ch * cols)
+
+    def wrapped(text, indent):
+        pad = " " * indent
+        for line in textwrap.wrap(text, width=body_width - indent) or [""]:
+            print(f"{pad}{line}")
+
+    print()
+    _print_logo(cols)
+    version_line = f"v{__version__}"
+    print(f"{OFF}{version_line.center(cols)}{OFF}")
+    print()
+    rule("=")
+    print(f"{YELLOW}Uso:{OFF} qobuz-dl <comando> [opcoes]")
+    print(f"     qobuz-dl <comando> --help   (lista todas as opcoes daquele comando)")
+    print()
+
+    print(f"{YELLOW}Comandos:{OFF}")
+    for name, aliases, desc in COMMANDS:
+        label = name if not aliases else f"{name} ({aliases})"
+        print(f"  {GREEN}{label}{OFF}")
+        wrapped(desc, indent=4)
+    print()
+
+    print(f"{YELLOW}Flags globais:{OFF} (nao pertencem a nenhum comando especifico)")
+    for flag, desc in FLAGS:
+        print(f"  {CYAN}{flag}{OFF}")
+        wrapped(desc, indent=4)
+    print()
+
+    rule()
+    print(f"Exemplo: qobuz-dl dl https://open.qobuz.com/album/xxxxxxx")
+    rule()
+
+
 def _initial_checks():
     """Verifies the existence of the configuration file and basic CLI inputs."""
     if not os.path.isdir(CONFIG_PATH) or not os.path.isfile(CONFIG_FILE):
@@ -315,7 +449,8 @@ def _initial_checks():
             _reset_config(CONFIG_FILE)
 
     if len(sys.argv) < 2:
-        sys.exit(qobuz_dl_args().print_help())
+        _print_welcome_screen()
+        sys.exit(0)
 
 
 def check_for_updates():
@@ -374,7 +509,7 @@ async def async_main():
         
         artists = get_stats(QOBUZ_DB)
         
-        print(f"\n{CYAN}--- QOBUZ-DL ULTIMATE STATISTICS ---{OFF}")
+        print(f"\n{CYAN}[ QOBUZ-DL-ULTRA - STATISTICS ]{OFF}")
         if not artists:
             print(f"{YELLOW}No artist data found yet. Start downloading to populate your stats!{OFF}")
         else:
