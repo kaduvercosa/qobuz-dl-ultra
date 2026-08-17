@@ -52,11 +52,11 @@ def _align_text(text, width):
         return text[:width - 3] + "..."
     return text.ljust(width)
 
-# --- PROMPT_TOOLKIT CUSTOM APPLICATION ---
+# --- PROMPT_TOOLKIT CUSTOM APPLICATION COM ROLAGEM ESTÁVEL ---
 async def _tui_select(title, options_dicts, is_multi=False, item_category="album"):
     """
     Motor interativo customizado usando Prompt_Toolkit.
-    Garante [Espaço] para marcar, [Enter] para avançar e layout responsivo.
+    Garante rolagem suave sem perder o foco ou o destaque no final da lista.
     """
     bindings = KeyBindings()
     selected_indices = set()
@@ -108,11 +108,14 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
         res = []
         res.append(('class:title', f"=== {title} ===\n\n"))
         
-        if item_category in ["album", "track"] and is_table:
-            res.append(('class:meta', f"       {'ARTISTA'.ljust(20)} | {'TÍTULO'.ljust(35)} | {'TIPO'.ljust(8)} | {'ANO'.ljust(4)} | FAIXAS | DURAÇÃO | QUALIDADE\n"))
+        if item_category == "album" and is_table:
+            res.append(('class:meta', f"       {'ARTISTA'.ljust(20)} | {'ÁLBUM'.ljust(35)} | {'TIPO'.ljust(8)} | {'ANO'.ljust(4)} | FAIXAS | DURAÇÃO | QUALIDADE\n"))
             res.append(('class:meta', f"       {'-' * 110}\n"))
+        elif item_category == "track" and is_table:
+            res.append(('class:meta', f"       {'ARTISTA'.ljust(20)} | {'FAIXA'.ljust(35)} | {'ÁLBUM'.ljust(25)} | DURAÇÃO | QUALIDADE\n"))
+            res.append(('class:meta', f"       {'-' * 100}\n"))
         elif item_category == "playlist" and is_table_simple:
-            res.append(('class:meta', f"       {'NOME'.ljust(40)} | {'CRIADOR'.ljust(20)} | FAIXAS | DURAÇÃO\n"))
+            res.append(('class:meta', f"       {'NOME DA PLAYLIST'.ljust(40)} | {'CRIADOR'.ljust(20)} | FAIXAS | DURAÇÃO\n"))
             res.append(('class:meta', f"       {'-' * 85}\n"))
         elif item_category == "artist" and is_table_simple:
             res.append(('class:meta', f"       {'NOME DO ARTISTA'.ljust(50)} | LANÇAMENTOS\n"))
@@ -124,13 +127,25 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
             
             style = 'class:hovered' if hovered else ''
             title_style = 'class:hovered' if hovered else 'class:highlight'
-            
+
+            if hovered:
+                # Fragmento invisível ("zero-width") que diz ao prompt_toolkit
+                # onde fica o "cursor" lógico da lista neste render. É o
+                # próprio motor da Window que usa essa marca para rolar
+                # automaticamente e manter o item em destaque visível,
+                # respeitando o ScrollOffsets(top=1, bottom=1) lá embaixo.
+                # Diferente do scroll manual antigo (cursor_pos - 1), isso
+                # funciona corretamente com cabeçalho de tabela, itens que
+                # ocupam várias linhas (modo cartão) e quebra automática de
+                # linha em telas estreitas (iPhone/iSH) -- porque ele opera
+                # sobre as linhas já renderizadas, não sobre o índice do item.
+                res.append(('[SetCursorPosition]', ''))
+
             ptr = ">" if hovered else " "
             chk = "[x]" if checked else "[ ]"
             if not is_multi: chk = ""
             
             prefix = f" {ptr} {chk} " if is_multi else f" {ptr} "
-            
             res.append((style, prefix))
             
             if isinstance(opt, str):
@@ -139,7 +154,7 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
                 
             meta = opt.get("meta", {})
             
-            if item_category in ["album", "track"]:
+            if item_category == "album":
                 if is_table:
                     art = _align_text(meta.get('artist', ''), 20)
                     tit = _align_text(meta.get('title', ''), 35)
@@ -151,12 +166,27 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
                     res.append((style, f"{art} | {tit} | {typ} | {yr} | {fx} | {dur} | {ql}\n"))
                 else:
                     res.append((title_style, f"{meta.get('title', '')}\n"))
-                    res.append((style, f"       👤 {meta.get('artist', '')}  |  💿 {meta.get('type', '')}  |  📅 {meta.get('year', '')}\n"))
+                    res.append((style, f"       👤 Artista: {meta.get('artist', '')}  |  💿 {meta.get('type', '')}  |  📅 {meta.get('year', '')}\n"))
                     res.append((style, f"       🎧 {meta.get('quality', '')}  |  🎶 {meta.get('tracks_count', 0)} faixas  |  ⏱️ {meta.get('duration', '--:--')}\n"))
                     gnr = meta.get('genre', '')
                     lbl = meta.get('label', '')
                     if gnr or lbl:
                         res.append((style, f"       🎵 {gnr}  |  🏷️ {lbl}\n"))
+                    res.append((style, f"       {'-'*30}\n"))
+                    
+            elif item_category == "track":
+                if is_table:
+                    art = _align_text(meta.get('artist', ''), 20)
+                    tit = _align_text(meta.get('title', ''), 35)
+                    alb = _align_text(meta.get('album', ''), 25)
+                    dur = str(meta.get('duration', '')).ljust(7)
+                    ql = meta.get('quality', '')
+                    res.append((style, f"{art} | {tit} | {alb} | {dur} | {ql}\n"))
+                else:
+                    res.append((title_style, f"🎶 {meta.get('title', '')}\n"))
+                    res.append((style, f"       👤 Artista: {meta.get('artist', '')}\n"))
+                    res.append((style, f"       💿 Álbum: {meta.get('album', '')}  |  ⏱️ Duração: {meta.get('duration', '--:--')}\n"))
+                    res.append((style, f"       🎧 Qualidade: {meta.get('quality', '')}\n"))
                     res.append((style, f"       {'-'*30}\n"))
                     
             elif item_category == "playlist":
@@ -167,9 +197,9 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
                     dur = str(meta.get('duration', ''))
                     res.append((style, f"{n} | {o} | {c} | {dur}\n"))
                 else:
-                    res.append((title_style, f"{meta.get('name', '')}\n"))
+                    res.append((title_style, f"📋 {meta.get('name', '')}\n"))
                     res.append((style, f"       👤 Criador: {meta.get('owner', '')}\n"))
-                    res.append((style, f"       🎶 {meta.get('count', 0)} faixas  |  ⏱️ {meta.get('duration', '--:--')}\n"))
+                    res.append((style, f"       🎶 Total de faixas: {meta.get('count', 0)}  |  ⏱️ Duração total: {meta.get('duration', '--:--')}\n"))
                     res.append((style, f"       {'-'*30}\n"))
                     
             elif item_category == "artist":
@@ -178,8 +208,8 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
                     c = meta.get('count', '')
                     res.append((style, f"{n} | {c} álbuns\n"))
                 else:
-                    res.append((title_style, f"{meta.get('name', '')}\n"))
-                    res.append((style, f"       📦 {meta.get('count', '')} álbuns listados\n"))
+                    res.append((title_style, f"🎤 {meta.get('name', '')}\n"))
+                    res.append((style, f"       📦 Lançamentos listados: {meta.get('count', '')}\n"))
                     res.append((style, f"       {'-'*30}\n"))
             elif item_category == "filter":
                  res.append((style, f"{opt}\n"))
@@ -193,9 +223,26 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
             
         return res
 
-    layout = Layout(Window(content=FormattedTextControl(text=get_text), scroll_offsets=ScrollOffsets(top=2, bottom=2)))
+    window = Window(
+        # focusable=True garante que esta Window seja o alvo do foco do
+        # Application e, por consequência, que a rolagem automática baseada
+        # no [SetCursorPosition] acima realmente seja aplicada.
+        content=FormattedTextControl(text=get_text, focusable=True),
+        scroll_offsets=ScrollOffsets(top=1, bottom=1),
+        wrap_lines=True
+    )
+
+    layout = Layout(window)
     app = Application(layout=layout, key_bindings=bindings, full_screen=True, style=pt_style)
-    
+
+    # A rolagem agora é 100% responsabilidade do prompt_toolkit (via
+    # [SetCursorPosition] + ScrollOffsets), então não precisamos mais de uma
+    # task em background recalculando `window.vertical_scroll` a cada 30ms.
+    # Essa task antiga era a origem do bug: o cálculo `cursor_pos - 1`
+    # ignorava o cabeçalho da lista, os itens de várias linhas (modo cartão)
+    # e a quebra automática de linha em telas estreitas -- então, conforme
+    # você descia, a rolagem real ficava cada vez mais dessincronizada da
+    # posição do item, até sumir o destaque e não sobrar nada visível.
     res = await app.run_async()
     if isinstance(res, Exception):
         raise res
@@ -395,7 +442,8 @@ class QobuzDL:
                 options = ["Album", "EP", "Single", "Live", "Compilation"]
                 title_text = f"Encontrados {len(items)} lançamentos para {content_name}. Filtre por tipo:"
                 
-                selected_types_raw = await _tui_select(title_text, options, is_multi=True, item_category="filter")
+                sel_res = await _tui_select(title_text, options, is_multi=True, item_category="filter")
+                selected_types_raw = sel_res if sel_res else []
                 
                 if selected_types_raw:
                     self.allowed_release_types = [opt[0].lower() for opt in selected_types_raw]
@@ -687,9 +735,12 @@ class QobuzDL:
             else:
                 quality = "[ CD ] 16b/44.1kHz"
                 
+            album_name = i.get("album", {}).get("title", "Unknown Album") if isinstance(i.get("album"), dict) else "Unknown Album"
+                
             meta_data = {
                 "artist": artist,
                 "title": title,
+                "album": album_name,
                 "type": rel_type,
                 "year": year,
                 "quality": quality,
@@ -763,7 +814,6 @@ class QobuzDL:
             
             if item_type == "favorites":
                 if fav_subtype == "playlists":
-                    # Fix para o Erro 400: Playlists criadas pelo usuário tem API separada no Qobuz
                     iterable = []
                     user_id = getattr(self.client, 'user_id', None)
                     if not user_id and hasattr(self.client, 'user') and isinstance(self.client.user, dict):
@@ -773,7 +823,6 @@ class QobuzDL:
                     if user_id: params["user_id"] = user_id
                     
                     try:
-                        # 1. Tenta pegar as playlists completas primeiro
                         p1 = params.copy()
                         p1["request_ts"] = int(time.time())
                         sig = self.client._modern_sig("playlist/getUserPlaylists", p1, self.client.sec)
@@ -784,7 +833,6 @@ class QobuzDL:
                         if "playlists" in res1 and "items" in res1["playlists"]:
                             iterable = res1["playlists"]["items"]
                         else:
-                            # 2. Se falhar, usa getUserPlaylistIds (Sugerido)
                             p2 = params.copy()
                             p2["request_ts"] = int(time.time())
                             sig2 = self.client._modern_sig("playlist/getUserPlaylistIds", p2, self.client.sec)
@@ -845,7 +893,10 @@ class QobuzDL:
 
         try:
             item_types = ["Albums", "Tracks", "Artists", "Playlists", "Favorites"]
-            scelta_raw, _ = await _tui_select("O que você deseja buscar?", item_types, is_multi=False, item_category="filter")
+            scelta_res = await _tui_select("O que você deseja buscar?", item_types, is_multi=False, item_category="filter")
+            if not scelta_res:
+                return
+            scelta_raw, _ = scelta_res
             
             if scelta_raw == "Favorites":
                 selected_type = "favorites"
@@ -858,15 +909,17 @@ class QobuzDL:
             while True:
                 selected_fav = None
                 if selected_type == "favorites":
-                    # PLAYLISTS RETORNARAM E ESTÃO CORRIGIDAS!
                     fav_types = ["Albums", "Tracks", "Artists", "Playlists"]
-                    selected_fav, _ = await _tui_select("Quais favoritos deseja explorar?", fav_types, is_multi=False, item_category="filter")
+                    fav_res = await _tui_select("Quais favoritos deseja explorar?", fav_types, is_multi=False, item_category="filter")
+                    if not fav_res:
+                        break
+                    selected_fav, _ = fav_res
                     selected_fav = selected_fav.lower()
                     
                     logger.info(f"{YELLOW}Buscando seus favoritos ({selected_fav})...{RESET}")
                     options = await self.search_by_type(None, selected_type, limit=self.interactive_limit, fav_subtype=selected_fav)
                     query_title = f"Meus Favoritos ({selected_fav.title()})"
-                    display_cat = selected_fav[:-1] # albums -> album
+                    display_cat = selected_fav[:-1]
                 else:
                     sys.stdout.write("\033[2J\033[H")
                     sys.stdout.flush()
@@ -889,20 +942,50 @@ class QobuzDL:
                 title = f'RESULTADOS PARA "{query_title}"'
                 selected_items = await _tui_select(title, options, is_multi=True, item_category=display_cat)
                 
-                if len(selected_items) > 0:
+                if selected_items and len(selected_items) > 0:
                     
-                    # --- DRILL-DOWN: EXPLORAR CATÁLOGO DO ARTISTA ---
+                    # --- SUBSELEÇÃO (DRILL-DOWN) INTELIGENTE PARA ARTISTAS ---
                     if display_cat == "artist":
-                        action, _ = await _tui_select("Como deseja prosseguir com os artistas selecionados?", [
-                            "Explorar Álbuns (Selecionar manualmente o que baixar)",
-                            "Baixar Toda a Discografia (Sem filtro)"
+                        action_res = await _tui_select("O que você deseja explorar deste artista?", [
+                            "Explorar Álbuns/Lançamentos (Com filtro manual)",
+                            "Baixar Toda a Discografia (Sem filtro)",
+                            "Explorar Faixas Mais Populares (Top Tracks)"
                         ], is_multi=False, item_category="filter")
                         
-                        if action.startswith("Explorar"):
-                            for item in selected_items:
-                                art_id = item[0]["meta"]["id"]
-                                art_name = item[0]["meta"]["name"]
+                        if not action_res:
+                            continue
+                        action, _ = action_res
+                        
+                        for item in selected_items:
+                            art_id = item[0]["meta"]["id"]
+                            art_name = item[0]["meta"]["name"]
+                            
+                            if "Top Tracks" in action:
+                                logger.info(f"{YELLOW}Buscando faixas populares de {art_name}...{RESET}")
+                                top_tracks = []
+                                async for chunk in self.client.get_artist_meta(art_id):
+                                    tracks_data = chunk.get("tracks", {}).get("items", [])
+                                    top_tracks.extend(tracks_data)
+                                    
+                                if not top_tracks:
+                                    res_tracks = await self.client.search_tracks(art_name, limit=20)
+                                    top_tracks = res_tracks.get("tracks", {}).get("items", [])
+                                    
+                                if not top_tracks:
+                                    logger.info(f"{RED}Nenhuma faixa encontrada para {art_name}.{OFF}")
+                                    continue
+                                    
+                                track_options = []
+                                for t in top_tracks:
+                                    meta_data = self._extract_rich_metadata(t, "track", {"requires_extra": True})
+                                    url = f"{WEB_URL}track/{t.get('id')}"
+                                    track_options.append({"meta": meta_data, "url": url})
+                                    
+                                track_selected = await _tui_select(f"Faixas de {art_name}", track_options, is_multi=True, item_category="track")
+                                if track_selected:
+                                    [final_url_list.append(t[0]["url"]) for t in track_selected]
                                 
+                            else:
                                 logger.info(f"{YELLOW}Buscando catálogo de {art_name}...{RESET}")
                                 content = []
                                 async for chunk in self.client.get_artist_meta(art_id):
@@ -912,23 +995,35 @@ class QobuzDL:
                                     logger.info(f"{RED}Nenhum álbum encontrado para {art_name}.{OFF}")
                                     continue
                                     
-                                art_options = []
-                                for a in content:
-                                    meta_data = self._extract_rich_metadata(a, "album", {"requires_extra": True})
-                                    if meta_data["artist"] == "Unknown": meta_data["artist"] = art_name
-                                    url = f"{WEB_URL}album/{a.get('id')}"
-                                    art_options.append({"meta": meta_data, "url": url})
-                                
-                                art_title = f"Catálogo: {art_name}"
-                                art_selected = await _tui_select(art_title, art_options, is_multi=True, item_category="album")
-                                [final_url_list.append(a[0]["url"]) for a in art_selected]
-                        else:
-                            [final_url_list.append(item[0]["url"]) for item in selected_items]
-                    # ------------------------------------------------
+                                if "Com filtro" in action:
+                                    filter_opts = ["Album", "EP", "Single", "Live", "Compilation"]
+                                    selected_types_raw = await _tui_select(f"Filtros para {art_name}", filter_opts, is_multi=True, item_category="filter")
+                                    allowed = [opt[0].lower() for opt in selected_types_raw] if selected_types_raw else []
+                                    
+                                    art_options = []
+                                    for a in content:
+                                        r_type = (a.get("release_type") or "album").lower()
+                                        if allowed and r_type not in allowed:
+                                            continue
+                                        meta_data = self._extract_rich_metadata(a, "album", {"requires_extra": True})
+                                        if meta_data["artist"] == "Unknown": meta_data["artist"] = art_name
+                                        url = f"{WEB_URL}album/{a.get('id')}"
+                                        art_options.append({"meta": meta_data, "url": url})
+                                        
+                                    art_selected = await _tui_select(f"Álbuns de {art_name}", art_options, is_multi=True, item_category="album")
+                                    if art_selected:
+                                        [final_url_list.append(a[0]["url"]) for a in art_selected]
+                                else:
+                                    for a in content:
+                                        url = f"{WEB_URL}album/{a.get('id')}"
+                                        final_url_list.append(url)
                     else:
                         [final_url_list.append(item[0]["url"]) for item in selected_items]
                     
-                    y_n, _ = await _tui_select("Itens adicionados à fila. Deseja buscar mais?", ["Sim", "Não"], is_multi=False, item_category="filter")
+                    yn_res = await _tui_select("Itens adicionados à fila. Deseja buscar mais?", ["Sim", "Não"], is_multi=False, item_category="filter")
+                    if not yn_res:
+                        break
+                    y_n, _ = yn_res
                     if y_n == "Não":
                         break
                 else:
@@ -939,7 +1034,10 @@ class QobuzDL:
                     
             if final_url_list:
                 qualities_texts = [q.get("q_string") for q in qualities]
-                selected_quality, sq_idx = await _tui_select("Selecione a qualidade máxima do download", qualities_texts, is_multi=False, item_category="filter")
+                qual_res = await _tui_select("Selecione a qualidade máxima do download", qualities_texts, is_multi=False, item_category="filter")
+                if not qual_res:
+                    return
+                selected_quality, sq_idx = qual_res
                 self.quality = qualities[sq_idx]["q"]
 
                 if download:
