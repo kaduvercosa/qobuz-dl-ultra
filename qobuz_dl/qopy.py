@@ -364,7 +364,14 @@ class Client:
 
             val_id = kwargs.get('id')
             for k, v in kwargs.items():
-                if k not in ['id', 'sec', 'fmt_id']:
+                # PATCH: filtra kwargs com valor None antes de virarem query # param. multi_meta() (usado por artist/get, playlist/get e
+                #label/get) sempre chama api_call(..., type=None) quando o
+                # chamador nao precisa extrair uma sub-chave especifica --
+                # sem esse filtro, "type=None" ia direto pros params, e o
+                # yarl (usado pelo aiohttp) rejeita valores None na query
+                # string com TypeError: "Invalid variable type: value should
+                # be str, int or float, got None".
+                if k not in ['id', 'sec', 'fmt_id'] and v is not None:
                     params[k] = v
 
             if epoint == "album/get": params["album_id"] = val_id
