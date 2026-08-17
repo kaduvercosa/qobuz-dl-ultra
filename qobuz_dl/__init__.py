@@ -1,3 +1,3 @@
-__version__ = "2.3.7.5"
+__version__ = "2.3.7.6"
 from .qopy import Client
 from .cli import main

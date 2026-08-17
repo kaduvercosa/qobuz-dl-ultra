@@ -470,7 +470,17 @@ async def async_main():
             fetch_lyrics = False
             
         force_english = not getattr(arguments, 'native_lang', False)
-        no_credits_flag = getattr(arguments, 'no_credits', False) or no_credits_config 
+        # FIX: --with-credits existia no argparse (commands.py) e no README
+        # ("overrides config.ini"), mas nunca era lido aqui -- essa linha so'
+        # olhava --no-credits e o config.ini, entao se no_credits=true
+        # estivesse salvo no config.ini, NENHUMA flag de CLI conseguia
+        # reverter e o Digital Booklet.txt nunca era gerado. Agora
+        # --with-credits tem prioridade e forca no_credits_flag=False,
+        # exatamente como o help text sempre prometeu.
+        with_credits_flag = getattr(arguments, 'with_credits', False)
+        no_credits_flag = False if with_credits_flag else (
+            getattr(arguments, 'no_credits', False) or no_credits_config
+        )
         
     except (configparser.Error, KeyError) as error:
         arguments = qobuz_dl_args().parse_args()

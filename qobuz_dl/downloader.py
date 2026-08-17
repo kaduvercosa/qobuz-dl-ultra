@@ -1,5 +1,6 @@
 from .lyrics_engine import LyricsEngine
 import logging
+import textwrap
 import os
 import sys
 import time
