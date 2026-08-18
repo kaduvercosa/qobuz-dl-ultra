@@ -92,7 +92,7 @@ class Client:
                         self.secrets = list(b.get_secrets().values())
                         logger.info(
                             f"{GREEN}[+] App ID dynamically updated: {self.id}{OFF}"
-                    )
+                        )
                 except Exception:
                     pass
         else:
@@ -489,7 +489,7 @@ class Client:
                             "file/url",
                             "track/lyricsUrl",
                         ]
-                    and r.status_code == 400
+                        and r.status_code == 400
                 ):
                     body = r.json()
                     raise InvalidAppSecretError(
@@ -605,7 +605,7 @@ class Client:
                     for q_track in search_results["tracks"]["items"]:
                         q_artist_raw = q_track.get("performer", {}).get(
                             "name", "Unknown"
-                    )
+                        )
                         q_title_raw = q_track.get("title", "Unknown")
 
                         q_artist = q_artist_raw.lower()
@@ -627,10 +627,10 @@ class Client:
                     elif highest_ratio >= PROMPT_THRESHOLD and best_match_id:
                         print(
                             f"\n{YELLOW}[?] Borderline match detected ({highest_ratio*100:.0f}% similarity){OFF}"
-                    )
+                        )
                         print(
                             f"    Target (Last.fm): {item['artist']} - {item['title']}"
-                    )
+                        )
                         print(f"    Found  (Qobuz)  : {best_match_name}")
 
                         choice = (
@@ -639,7 +639,7 @@ class Client:
                             )
                             .strip()
                             .lower()
-                    )
+                        )
 
                         if choice == "y":
                             valid_track_ids.append(best_match_id)

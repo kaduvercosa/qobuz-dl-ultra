@@ -4,7 +4,6 @@ import os
 import shutil  # so' pra shutil.get_terminal_size() -- ver _get_safe_ncols()
 import sys
 import time
-import subprocess
 import re
 import threading
 import signal
@@ -13,8 +12,6 @@ from typing import Tuple
 import asyncio
 import aiohttp
 import aiofiles
-import concurrent.futures
-from concurrent.futures import ThreadPoolExecutor
 
 import requests
 # cryptography, nao pycryptodome: pycryptodome precisa carregar um
