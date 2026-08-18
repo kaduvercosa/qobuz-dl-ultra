@@ -33,8 +33,8 @@ def extract_track_id(file_path: str) -> str | None:
                 m = re.search(r"Trk ID:\s*([0-9a-zA-Z]+)", str(comment), re.IGNORECASE)
                 if m:
                     return m.group(1).strip()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Falha ao extrair Trk ID do COMMENT (FLAC), tag provavelmente ausente: {e}")
 
     elif ext == ".mp3":
         try:
@@ -51,8 +51,8 @@ def extract_track_id(file_path: str) -> str | None:
                 m = re.search(r"Trk ID:\s*([0-9a-zA-Z]+)", text, re.IGNORECASE)
                 if m:
                     return m.group(1).strip()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Falha ao extrair Trk ID do frame COMM (MP3), tag provavelmente ausente: {e}")
 
     return None
 
@@ -83,8 +83,8 @@ def inspect_existing_lyrics(file_path: str) -> dict:
             lang_vals = audio.get("LYRICS_LANG")
             if lang_vals:
                 embedded_lang = str(lang_vals[0]).strip().lower() or None
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Falha ao ler letra/idioma embutidos no FLAC: {e}")
     elif ext == ".mp3":
         try:
             audio = id3.ID3(file_path)
@@ -96,8 +96,8 @@ def inspect_existing_lyrics(file_path: str) -> dict:
                 if txxx.text:
                     embedded_lang = str(txxx.text[0]).strip().lower() or None
                     break
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Falha ao ler letra/idioma embutidos no MP3 (USLT/TXXX): {e}")
 
     file_lyrics = ""
     file_lang = None
@@ -108,14 +108,14 @@ def inspect_existing_lyrics(file_path: str) -> dict:
             m = re.search(r"\[la:\s*([a-zA-Z+\-]+)\s*\]", file_lyrics)
             if m:
                 file_lang = m.group(1).strip().lower()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Falha ao ler arquivo .lrc externo: {e}")
     elif os.path.exists(txt_path) and "Tracklist" not in txt_path:
         try:
             with open(txt_path, "r", encoding="utf-8", errors="ignore") as f:
                 file_lyrics = f.read()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Falha ao ler arquivo .txt de letra externo: {e}")
 
     lyrics_content = (embedded or file_lyrics).strip()
     has_lyrics = bool(lyrics_content)
@@ -179,7 +179,8 @@ async def fetch_qobuz_lyrics_raw(client, track_id, language=None):
             return None
 
         return await loop.run_in_executor(None, _download_signed_json)
-    except Exception:
+    except Exception as e:
+        logger.debug(f"Falha ao baixar/assinar JSON de letra: {e}")
         return None
 
 
@@ -236,16 +237,16 @@ async def process_retroactive_lyrics_async(directory_path, client, genius_token=
                 title = audio.get("TITLE", [""])[0]
                 artist = audio.get("ARTIST", [""])[0] or audio.get("ALBUMARTIST", [""])[0]
                 album = audio.get("ALBUM", [""])[0]
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Falha ao ler tags TITLE/ARTIST/ALBUM do FLAC pra identificar a faixa: {e}")
         elif ext == ".mp3":
             try:
                 audio = id3.ID3(file_path)
                 title = audio.get("TIT2").text[0] if audio.get("TIT2") else ""
                 artist = audio.get("TPE1").text[0] if audio.get("TPE1") else ""
                 album = audio.get("TALB").text[0] if audio.get("TALB") else ""
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Falha ao ler tags TIT2/TPE1/TALB do MP3 pra identificar a faixa: {e}")
 
         if not title:
             title = os.path.splitext(file_name)[0]
@@ -274,8 +275,8 @@ async def process_retroactive_lyrics_async(directory_path, client, genius_token=
                 # track_id_is_trusted permanece False: veio de busca por texto,
                 # não da tag do arquivo. Usado abaixo para evitar sobrescrever
                 # letras já existentes com base num match incerto.
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Falha ao casar faixa por busca textual na API (track_id permanece nao confiavel): {e}")
 
         # 3. Inspeciona o estado atual das letras
         lyrics_state = inspect_existing_lyrics(file_path)
@@ -478,7 +479,8 @@ async def inject_lyrics_retroactively(directory_path=None, client=None, genius_t
         if not directory_path:
             try:
                 directory_path = settings.raw_settings.get("download", "directory", fallback="QobuzDownloads")
-            except Exception:
+            except Exception as e:
+                logger.debug(f"Nao foi possivel ler 'directory' do config.ini, usando padrao: {e}")
                 directory_path = "QobuzDownloads"
 
     # 2. Expande caminhos com ~ (ex: ~/Documents no iOS a-Shell)

@@ -35,6 +35,19 @@ class QobuzDLSettings:
         self.track_format = kwargs.get('track_format')
         self.smart_discography = kwargs.get('smart_discography', False)
         self.legacy_charmap = kwargs.get('legacy_charmap', False)
+
+        # Verificacao de integridade pos-download (decodifica cada FLAC/MP3
+        # final com ffmpeg pra pegar corrupcao real, nao so' tag). Off por
+        # padrao porque adiciona tempo real a cada faixa -- em discografias
+        # grandes isso soma. Ver qobuz_dl/utils.py:verify_audio_integrity()
+        # e o uso em downloader.py.
+        self.verify_after_download = kwargs.get('verify_after_download', False)
+
+        # Emite uma linha JSON por evento de progresso em vez de (ou alem
+        # de) barra de progresso tqdm no terminal. Pensado pra frontends
+        # (GUI web, app) conseguirem acompanhar o progresso sem precisar
+        # fazer parsing de saida de terminal com barras ANSI.
+        self.progress_json = kwargs.get('progress_json', False)
         
         # tag options
         self.no_album_artist_tag = kwargs.get('no_album_artist_tag', False)
@@ -131,6 +144,8 @@ class QobuzDLSettings:
             'fallback_folder_format': arguments.fallback_folder_format or config.get(section, "fallback_folder_format", fallback=DEFAULT_FOLDER),
             'track_format': arguments.track_format or config.get(section, "track_format", fallback=DEFAULT_TRACK),
             'smart_discography': arguments.smart_discography or config.getboolean(section, "smart_discography", fallback=False),
+            'verify_after_download': getattr(arguments, 'verify_after_download', False) or config.getboolean(section, "verify_after_download", fallback=False),
+            'progress_json': getattr(arguments, 'progress_json', False) or config.getboolean(section, "progress_json", fallback=False),
             
             # cover options
             'embed_art': arguments.embed_art or config.getboolean(section, "embed_art", fallback=True),

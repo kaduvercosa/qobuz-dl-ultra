@@ -20,30 +20,28 @@ def read_file(fname):
     with open(fname, "r", encoding="utf-8") as f:
         return f.read()
 
-requirements = [
-    "pathvalidate",
-    "requests",
-    "charset_normalizer",
-    "mutagen",
-    "tqdm",
-    "beautifulsoup4",
-    "colorama",
-    # NOTE: cryptography was used in the original downloader, keeping it for safety
-    "cryptography",
-    "keyring",
-    "aiohttp",
-    "questionary",
-    # core.py importa isso incondicionalmente no topo do arquivo (fora de
-    # qualquer funcao) pra montar a TUI interativa. Sem essa linha aqui, um
-    # `pip install` limpo (a-Shell, Colab, venv novo) instala o pacote sem
-    # erro nenhum, mas o programa morre com sys.exit() no PRIMEIRO comando
-    # rodado, ate' num `--help`.
-    "prompt_toolkit",
-    # lyrics_engine.py importa isso com try/except (nao derruba o programa
-    # se faltar), mas sem declarar aqui o fallback de letras via Genius
-    # fica mudo silenciosamente pra quem instalar via pip puro.
-    "lyricsgenius",
-]
+def read_requirements():
+    """
+    Le requirements.txt em vez de manter uma segunda lista hardcoded aqui
+    dentro. Antes, setup.py e requirements.txt eram duas fontes de verdade
+    independentes -- por exemplo, esta lista nao tinha nenhuma versao
+    pinada mesmo depois de requirements.txt ganhar as versoes minimas
+    (>=), entao um "pip install ." (via setup.py) e um "pip install -r
+    requirements.txt" podiam instalar coisas diferentes sem ninguem notar.
+    Os comentarios que existiam aqui sobre prompt_toolkit/lyricsgenius
+    (por que cada um precisa estar na lista) foram movidos pra
+    requirements.txt, que agora e o unico lugar que precisa ser mantido.
+    """
+    req_path = os.path.join(os.path.dirname(__file__), "requirements.txt")
+    with open(req_path, "r", encoding="utf-8") as f:
+        return [
+            line.strip()
+            for line in f
+            if line.strip() and not line.strip().startswith("#")
+        ]
+
+
+requirements = read_requirements()
 
 setup(
     name=pkg_name,

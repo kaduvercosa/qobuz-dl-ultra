@@ -24,7 +24,7 @@ import qobuz_dl.metadata as metadata
 from qobuz_dl.color import OFF, GREEN, RED, YELLOW, CYAN
 from qobuz_dl.exceptions import NonStreamable
 from qobuz_dl.settings import QobuzDLSettings
-from qobuz_dl.utils import get_album_artist, clean_filename
+from qobuz_dl.utils import get_album_artist, clean_filename, verify_audio_integrity
 from qobuz_dl.db import handle_download_id
 from qobuz_dl.constants import DEFAULT_FOLDER, DEFAULT_TRACK, DEFAULT_MULTIPLE_DISC_TRACK, OK_MAX_CHARACTER_LENGTH
 
@@ -80,6 +80,31 @@ def safe_print(*args, **kwargs):
         text = " ".join(map(str, args))
         end = kwargs.get('end', '\n')
         tqdm.write(text, end=end)
+
+
+def emit_progress_json(settings, event, **fields):
+    """
+    Emite uma linha JSON em stdout descrevendo um evento de progresso
+    (inicio/fim de faixa), pra frontends (GUI web, app) conseguirem
+    acompanhar downloads sem precisar fazer parsing de barra tqdm/ANSI no
+    terminal. So' emite algo se settings.progress_json estiver ligado
+    (--progress-json / progress_json=true no config.ini); sem isso, e' um
+    no-op e o comportamento de sempre (so' tqdm + prints coloridos)
+    continua identico.
+
+    Cobre hoje os eventos "track_start" e "track_done" (ver chamadas em
+    download_track() e _download_and_tag()). Falha de faixa (exceptions
+    tratadas mais acima, em core.py) ainda NAO emite um evento
+    "track_failed" -- e' o proximo passo natural se isso for util.
+    """
+    if not getattr(settings, 'progress_json', False):
+        return
+    import json as _json
+    payload = {"event": event, "ts": time.time(), **fields}
+    with print_lock:
+        # Linha unica, sem cor ANSI, pra ficar facil de dar json.loads()
+        # por linha do lado de quem esta consumindo isso.
+        print(_json.dumps(payload, ensure_ascii=False), flush=True)
 
 # --- FIX ISSUE #216: Normalize Release Type ---
 def format_release_type(release_type: str) -> str:
@@ -228,15 +253,19 @@ class Download:
         if hasattr(self, "lyrics_engine"):
             try:
                 self.lyrics_engine.close()
-            except Exception:
-                pass
+            except Exception as e:
+                # Antes engolia silencioso. So' cleanup best-effort mesmo
+                # (nao interrompe o encerramento por causa disso), mas
+                # logar em debug ajuda a perceber se isso comeca a falhar
+                # sempre (ex.: engine mal inicializado).
+                logger.debug(f"Falha ao fechar lyrics_engine (ignorado): {e}")
 
         session = getattr(self, "http_session", None)
         if session is not None:
             try:
                 session.close()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Falha ao fechar http_session (ignorado): {e}")
 
     async def download_release(self):
         count = 0
@@ -302,9 +331,15 @@ class Download:
         
         delay_time = getattr(self.settings, 'delay', 0)
         if delay_time == 0 and '--delay' in sys.argv:
-            try: delay_time = int(sys.argv[sys.argv.index('--delay') + 1])
-            except: pass
-            
+            try:
+                delay_time = int(sys.argv[sys.argv.index('--delay') + 1])
+            except (ValueError, IndexError) as e:
+                # Antes era um "except: pass" cego (pegava ate' SystemExit/
+                # KeyboardInterrupt). Restrito ao que pode realmente
+                # acontecer aqui: --delay sem numero valido depois, ou sem
+                # nada depois dele na linha de comando.
+                logger.debug(f"--delay com valor invalido, ignorando: {e}")
+
         active_workers = int(getattr(self.settings, 'max_workers', 3))
         is_parallel = False
         
@@ -328,8 +363,11 @@ class Download:
                 abort_event.set()
                 raise KeyboardInterrupt
             signal.signal(signal.SIGINT, custom_sigint_handler)
-        except Exception:
-            pass
+        except Exception as e:
+            # So' falha em ambientes sem suporte a signal (ex.: threads
+            # secundarias no Windows) -- nesse caso Ctrl+C so' nao aborta
+            # tao graciosamente, mas nao deveria travar o download.
+            logger.debug(f"Nao foi possivel instalar handler de SIGINT: {e}")
 
         try:
             self._generate_tracklist(album_meta, dirn, album_title, file_format, bit_depth, sampling_rate)
@@ -409,8 +447,8 @@ class Download:
             try:
                 if original_sigint:
                     signal.signal(signal.SIGINT, original_sigint)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Nao foi possivel restaurar handler de SIGINT original: {e}")
                 
         if aborted_by_user:
             time.sleep(1.5)
@@ -455,6 +493,10 @@ class Download:
             track_title = _get_title(track_meta)
             artist = _safe_get(track_meta, "performer", "name")
             safe_print(f"{YELLOW}Baixando Faixa: {artist} - {track_title}{OFF}")
+            emit_progress_json(
+                self.settings, "track_start",
+                track_id=self.item_id, artist=artist, title=track_title,
+            )
             
             url = track_meta.get("album", {}).get("url", "")
             release_date = track_meta.get("release_date_original", "")
@@ -749,11 +791,39 @@ class Download:
 
             await loop.run_in_executor(None, _inject_lyrics_and_print)
 
+        emit_progress_json(
+            self.settings, "track_done",
+            track_id=self.item_id, path=final_file,
+        )
+
+        # Verificacao de integridade pos-download (opcional, off por padrao).
+        # Decodifica o arquivo final inteiro com ffmpeg pra pegar corrupcao
+        # real no stream de audio -- coisa que passa batido em downloads que
+        # cortam no meio mas ainda geram um arquivo com tags/tamanho
+        # plausiveis. Fica atras de um flag porque decodificar cada faixa
+        # adiciona tempo real numa discografia grande; quem quiser sempre
+        # ligado usa --verify-download (ver settings.py/cli.py) ou roda
+        # "python check_audio.py --verify-library" depois, em lote.
+        if getattr(self.settings, 'verify_after_download', False) and not abort_event.is_set():
+            def _run_verify():
+                return verify_audio_integrity(final_file)
+
+            ok, verify_message = await loop.run_in_executor(None, _run_verify)
+            if not ok:
+                with print_lock:
+                    tqdm.write(
+                        f"{RED}[!] Verificação de integridade falhou para "
+                        f"{os.path.basename(final_file)}: {verify_message}{OFF}"
+                    )
+                logger.debug(f"Falha de integridade em {final_file}: {verify_message}")
+
         delay_time = getattr(self.settings, 'delay', 0)
         if delay_time == 0 and '--delay' in sys.argv:
-            try: delay_time = int(sys.argv[sys.argv.index('--delay') + 1])
-            except: pass
-            
+            try:
+                delay_time = int(sys.argv[sys.argv.index('--delay') + 1])
+            except (ValueError, IndexError) as e:
+                logger.debug(f"--delay com valor invalido, ignorando: {e}")
+
         if delay_time > 0 and not abort_event.is_set():
             safe_print(f"{YELLOW}[*] Sleeping for {delay_time} seconds to prevent rate limiting...{OFF}")
             await asyncio.sleep(delay_time)
@@ -1224,8 +1294,8 @@ def tqdm_download(url_or_callable, fname, track_name, is_parallel=False, session
         if owns_session:
             try:
                 http.close()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Falha ao fechar sessao HTTP do download segmentado (ignorado): {e}")
         if is_parallel and position_pool:
             position_pool.release(position)
 
@@ -1293,7 +1363,14 @@ def tqdm_download_segments(track_url_dict, fname, track_name, is_parallel=False,
         try:
             r = http.head(url, timeout=5)
             return int(r.headers.get("content-length", 0))
-        except: return 0
+        except Exception as e:
+            # Antes retornava 0 sem dizer nada -- isso distorce silenciosamente
+            # o total_size calculado abaixo e a barra de progresso. Logado em
+            # debug pra dar pra distinguir "servidor realmente nao informou
+            # content-length" de "essa chamada HEAD falhou" quando o total
+            # bater estranho.
+            logger.debug(f"HEAD falhou para segmento (assumindo tamanho 0): {e}")
+            return 0
 
     total_size = 0
     with ThreadPoolExecutor(max_workers=workers) as ex:
@@ -1385,8 +1462,10 @@ def tqdm_download_segments(track_url_dict, fname, track_name, is_parallel=False,
             try: os.remove(tmp_fname)
             except OSError: pass
         if owns_session:
-            try: http.close()
-            except Exception: pass
+            try:
+                http.close()
+            except Exception as e:
+                logger.debug(f"Falha ao fechar sessao HTTP no cleanup final (ignorado): {e}")
         if is_parallel and position_pool:
             position_pool.release(position)
 

@@ -296,6 +296,59 @@ def format_duration(duration):
     return time.strftime("%H:%M:%S", time.gmtime(duration))
 
 
+def verify_audio_integrity(filepath, timeout=180):
+    """
+    Verifica se um arquivo de audio esta corrompido decodificando-o por
+    inteiro com o ffmpeg (nao so lendo os metadados/tags, que e o que
+    check_audio.py fazia ate agora via ffprobe -show_format/-show_streams).
+
+    Um FLAC/MP3 pode ter tags perfeitas e ainda assim ter o stream de audio
+    truncado ou corrompido no meio -- por exemplo, num download que caiu no
+    meio e o arquivo parcial passou despercebido. Decodificar o arquivo
+    inteiro (jogando a saida fora com "-f null -") e a unica forma
+    confiavel de pegar isso, na mesma linha do remux que ja existe em
+    downloader.py (mesmos flags: -nostdin, -v error).
+
+    Args:
+        filepath (str): Caminho do arquivo de audio a verificar.
+        timeout (int): Tempo maximo em segundos antes de desistir (arquivos
+            muito longos podem demorar; 180s cobre folgadamente um album
+            inteiro em FLAC hi-res numa maquina modesta).
+
+    Returns:
+        tuple[bool, str]: (True, "") se o arquivo decodifica sem erros.
+            (False, mensagem_de_erro) se o ffmpeg reportar corrupcao, o
+            arquivo nao existir, ou a checagem estourar o timeout/o ffmpeg
+            nao estiver instalado.
+    """
+    if not os.path.isfile(filepath):
+        return False, "Arquivo nao encontrado."
+
+    try:
+        result = subprocess.run(
+            [
+                "ffmpeg", "-nostdin", "-v", "error",
+                "-i", filepath,
+                "-f", "null", "-",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=timeout,
+        )
+    except FileNotFoundError:
+        return False, "ffmpeg nao encontrado no sistema (necessario para verificar integridade)."
+    except subprocess.TimeoutExpired:
+        return False, f"Verificacao excedeu o tempo limite de {timeout}s."
+
+    if result.returncode != 0 or result.stderr.strip():
+        # Qualquer linha em stderr com "-v error" indica problema real de
+        # decodificacao (nao so avisos), entao tratamos como corrompido.
+        return False, result.stderr.strip() or f"ffmpeg saiu com codigo {result.returncode}."
+
+    return True, ""
+
+
 def create_and_return_dir(directory):
     """
     Safely creates a directory path and returns its absolute path.

@@ -1,13 +1,27 @@
-pathvalidate
-requests
-charset_normalizer
-mutagen
-tqdm
-beautifulsoup4
-colorama
-cryptography
-keyring
-aiohttp
-questionary
-prompt_toolkit
-lyricsgenius
+# Versões mínimas fixadas (>=) em vez de deixar soltas.
+# Isso evita que uma major-version nova de alguma dependência
+# quebre o qobuz-dl-ultra silenciosamente em uma instalação nova
+# (ex.: "pip install -r requirements.txt" puxando algo incompatível).
+# Se precisar travar em uma versão exata por causa de algum bug
+# específico de upstream, troque o ">=" por "==" só nessa linha.
+pathvalidate>=3.0.0
+requests>=2.31.0
+charset_normalizer>=3.0.0
+mutagen>=1.47.0
+tqdm>=4.66.0
+beautifulsoup4>=4.12.0
+colorama>=0.4.6
+cryptography>=42.0.0
+keyring>=24.0.0
+aiohttp>=3.9.0
+questionary>=2.0.0
+# core.py importa isso incondicionalmente no topo do arquivo (fora de
+# qualquer função) para montar a TUI interativa. Sem essa linha, um
+# "pip install" limpo (a-Shell, Colab, venv novo) instala o pacote sem
+# erro nenhum, mas o programa morre com sys.exit() no PRIMEIRO comando
+# rodado, até num "--help".
+prompt_toolkit>=3.0.43
+# lyrics_engine.py importa isso com try/except (não derruba o programa
+# se faltar), mas sem declarar aqui o fallback de letras via Genius fica
+# mudo silenciosamente pra quem instalar via pip puro.
+lyricsgenius>=3.0.1

@@ -211,6 +211,30 @@ def add_common_arg(custom_parser, default_folder, default_quality):
         help="""Try to filter out spam-like albums when requesting an artist's discography.""",
     )
     custom_parser.add_argument(
+        "--verify-download",
+        dest="verify_after_download",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help=(
+            "decode each downloaded track with ffmpeg right after it finishes "
+            "to catch real audio corruption (not just tag/metadata checks). "
+            "Adds real time per track -- off by default. See also: "
+            "'python check_audio.py --verify-library' to scan an existing "
+            "library in bulk instead of during download."
+        ),
+    )
+    custom_parser.add_argument(
+        "--progress-json",
+        dest="progress_json",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help=(
+            "also emit one JSON line per track-start/track-done event on "
+            "stdout, meant for external frontends (web GUI, app) to follow "
+            "progress without parsing the tqdm terminal output."
+        ),
+    )
+    custom_parser.add_argument(
         "--delay",
         type=int,
         default=0,

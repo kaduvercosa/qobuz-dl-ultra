@@ -103,7 +103,15 @@ class Client:
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
             "X-App-Id": self.id,
         })
-        self.session = aiohttp.ClientSession(headers=headers)
+        # Timeout explicito em vez do default do aiohttp (5min no total, que
+        # tanto pode matar um download grande em rede lenta quanto deixar uma
+        # chamada de API travada por minutos sem dar erro nenhum). sock_connect
+        # cobre o tempo pra abrir a conexao; sock_read cobre o tempo maximo SEM
+        # receber nenhum byte novo (reseta a cada chunk recebido, entao nao
+        # incomoda downloads grandes que estao progredindo, so mata conexao
+        # realmente travada). total=None = sem teto artificial pro download inteiro.
+        client_timeout = aiohttp.ClientTimeout(total=None, sock_connect=15, sock_read=90)
+        self.session = aiohttp.ClientSession(headers=headers, timeout=client_timeout)
 
         self.base = "https://www.qobuz.com/api.json/0.2/"
         self.sec = None
@@ -373,7 +381,8 @@ class Client:
 
             val_id = kwargs.get('id')
             for k, v in kwargs.items():
-                # PATCH: filtra kwargs com valor None antes de virarem query # param. multi_meta() (usado por artist/get, playlist/get e
+                # PATCH: filtra kwargs com valor None antes de virarem query
+ # param. multi_meta() (usado por artist/get, playlist/get e
                 #label/get) sempre chama api_call(..., type=None) quando o
                 # chamador nao precisa extrair uma sub-chave especifica --
                 # sem esse filtro, "type=None" ia direto pros params, e o
@@ -400,28 +409,56 @@ class Client:
         else:
             method, req_kwargs = "get", {"params": params}
 
-        async with self.session.request(method, self.base + epoint, **req_kwargs) as r:
-            if epoint == "user/login" and r.status == 400:
-                text = await r.text()
-                if "invalid" in text.lower():
-                    raise AuthenticationError("Invalid email or password.")
-                else:
-                    logger.info(f"{GREEN}Logged: OK{OFF}")
-            elif (
-                epoint in ["track/getFileUrl", "favorite/getUserFavorites", "file/url", "track/lyricsUrl"]
-                and r.status == 400
-            ):
-                body = await r.json()
-                raise InvalidAppSecretError(f"Invalid app secret: {body}.\n" + RESET)
+        # Retry com backoff exponencial (1s, 3s, 6s) so para falhas de REDE
+        # transitorias -- conexao caiu, timeout, erro 5xx do servidor. Nao
+        # entra aqui erro de login invalido nem de app secret invalido
+        # (AuthenticationError/InvalidAppSecretError sao levantadas dentro do
+        # bloco e NAO sao subclasses de aiohttp.ClientError, entao propagam
+        # na hora sem retry -- nao faz sentido tentar de novo um login errado).
+        # Antes disso as buscas (search_albums/tracks/etc.) so tinham um
+        # "except Exception: return {}" -- qualquer soluco passageiro da API
+        # virava resultado vazio direto, sem nenhuma nova tentativa.
+        _retry_delays = (1, 3, 6)
+        last_network_error = None
 
-            if epoint == "user/get" and r.status == 400:
-                return {}
+        for attempt in range(len(_retry_delays) + 1):
+            if attempt > 0:
+                wait = _retry_delays[attempt - 1]
+                logger.debug(
+                    f"{YELLOW}[*] Falha de rede em '{epoint}' (tentativa "
+                    f"{attempt}/{len(_retry_delays)}): {last_network_error}. "
+                    f"Tentando de novo em {wait}s...{OFF}"
+                )
+                await asyncio.sleep(wait)
 
-            r.raise_for_status()
-            data = await r.json()
+            try:
+                async with self.session.request(method, self.base + epoint, **req_kwargs) as r:
+                    if epoint == "user/login" and r.status == 400:
+                        text = await r.text()
+                        if "invalid" in text.lower():
+                            raise AuthenticationError("Invalid email or password.")
+                        else:
+                            logger.info(f"{GREEN}Logged: OK{OFF}")
+                    elif (
+                        epoint in ["track/getFileUrl", "favorite/getUserFavorites", "file/url", "track/lyricsUrl"]
+                        and r.status == 400
+                    ):
+                        body = await r.json()
+                        raise InvalidAppSecretError(f"Invalid app secret: {body}.\n" + RESET)
 
-        # Apply string normalizer to the network call output
-        return self._normalize_json_strings(data)
+                    if epoint == "user/get" and r.status == 400:
+                        return {}
+
+                    r.raise_for_status()
+                    data = await r.json()
+
+                # Apply string normalizer to the network call output
+                return self._normalize_json_strings(data)
+
+            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                last_network_error = e
+                if attempt == len(_retry_delays):
+                    raise
 
     async def multi_meta(self, epoint, key, id, type):
         """
