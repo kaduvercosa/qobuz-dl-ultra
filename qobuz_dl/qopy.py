@@ -4,7 +4,6 @@ import hashlib
 import logging
 import time
 import unicodedata
-import json
 
 import aiohttp
 from cryptography.hazmat.primitives import hashes, padding
@@ -13,7 +12,6 @@ from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
 from qobuz_dl.exceptions import (
     AuthenticationError,
-    InvalidAppIdError,
     InvalidAppSecretError,
     InvalidQuality,
 )
@@ -26,12 +24,13 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+
 class Client:
     """
     The core Qobuz API client for Qobuz-DL Ultimate Edition.
 
-    Handles secure authentication, Anti-Ban Stealth Spoofing (WAF bypass), cryptographic 
-    token unwrapping for Web Player segment streams, and dynamic metadata fetching. 
+    Handles secure authentication, Anti-Ban Stealth Spoofing (WAF bypass), cryptographic
+    token unwrapping for Web Player segment streams, and dynamic metadata fetching.
     Supports both standard email/password authentication and secure user_auth_token injection.
 
     Fully async (aiohttp). Since network calls can't happen inside `__init__`,
@@ -45,7 +44,16 @@ class Client:
         self.session = None
 
     @classmethod
-    async def create(cls, email, pwd, app_id, secrets, user_auth_token=None, force_english=True, **kwargs):
+    async def create(
+        cls,
+        email,
+        pwd,
+        app_id,
+        secrets,
+        user_auth_token=None,
+        force_english=True,
+        **kwargs,
+    ):
         """
         Async factory. Initializes the API client and sets up the resilient session.
 
@@ -74,7 +82,9 @@ class Client:
                     if fresh_id:
                         self.id = fresh_id
                         self.secrets = list(b.get_secrets().values())
-                        logger.info(f"{GREEN}[+] App ID dynamically updated: {self.id}{OFF}")
+                        logger.info(
+                            f"{GREEN}[+] App ID dynamically updated: {self.id}{OFF}"
+                        )
                 except Exception:
                     pass
         else:
@@ -83,26 +93,30 @@ class Client:
         headers = {}
         # --- CONDITIONAL ENGLISH LANGUAGE OVERRIDE ---
         if self.force_english:
-            headers.update({
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-                "Accept": "application/json, text/plain, */*",
-                "Accept-Language": "en-US,en;q=0.9",
-                "X-App-Language": "en",
-                "X-App-Region": "US",
-                "Sec-Ch-Ua": "\"Chromium\";v=\"124\", \"Google Chrome\";v=\"124\", \"Not-A.Brand\";v=\"99\"",
-                "Sec-Ch-Ua-Mobile": "?0",
-                "Sec-Ch-Ua-Platform": "\"Windows\"",
-                "Sec-Fetch-Dest": "empty",
-                "Sec-Fetch-Mode": "cors",
-                "Sec-Fetch-Site": "same-site",
-                "X-App-Id": self.id,
-            })
+            headers.update(
+                {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+                    "Accept": "application/json, text/plain, */*",
+                    "Accept-Language": "en-US,en;q=0.9",
+                    "X-App-Language": "en",
+                    "X-App-Region": "US",
+                    "Sec-Ch-Ua": '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+                    "Sec-Ch-Ua-Mobile": "?0",
+                    "Sec-Ch-Ua-Platform": '"Windows"',
+                    "Sec-Fetch-Dest": "empty",
+                    "Sec-Fetch-Mode": "cors",
+                    "Sec-Fetch-Site": "same-site",
+                    "X-App-Id": self.id,
+                }
+            )
         # ---------------------------------------------
 
-        headers.update({
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "X-App-Id": self.id,
-        })
+        headers.update(
+            {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "X-App-Id": self.id,
+            }
+        )
         # Timeout explicito em vez do default do aiohttp (5min no total, que
         # tanto pode matar um download grande em rede lenta quanto deixar uma
         # chamada de API travada por minutos sem dar erro nenhum). sock_connect
@@ -110,7 +124,9 @@ class Client:
         # receber nenhum byte novo (reseta a cada chunk recebido, entao nao
         # incomoda downloads grandes que estao progredindo, so mata conexao
         # realmente travada). total=None = sem teto artificial pro download inteiro.
-        client_timeout = aiohttp.ClientTimeout(total=None, sock_connect=15, sock_read=90)
+        client_timeout = aiohttp.ClientTimeout(
+            total=None, sock_connect=15, sock_read=90
+        )
         self.session = aiohttp.ClientSession(headers=headers, timeout=client_timeout)
 
         self.base = "https://www.qobuz.com/api.json/0.2/"
@@ -162,7 +178,7 @@ class Client:
             if "..." in obj and "://" not in obj:
                 obj = obj.replace("...", "…")
             # --------------------------------------------------------------------
-            return unicodedata.normalize('NFC', obj)
+            return unicodedata.normalize("NFC", obj)
         elif isinstance(obj, dict):
             return {k: self._normalize_json_strings(v) for k, v in obj.items()}
         elif isinstance(obj, list):
@@ -187,14 +203,18 @@ class Client:
         else:
             usr_info = await self.api_call("user/login", email=email, pwd=pwd)
             if not usr_info.get("user", {}).get("credential", {}).get("parameters"):
-                logger.info(f"{YELLOW}[!] Free account detected or validation bypassed.{OFF}")
+                logger.info(
+                    f"{YELLOW}[!] Free account detected or validation bypassed.{OFF}"
+                )
             self.uat = usr_info["user_auth_token"]
 
         self.session.headers.update({"X-User-Auth-Token": self.uat})
 
         try:
             user_info = await self.api_call("user/get")
-            cred = user_info.get("credential") or user_info.get("user", {}).get("credential", {})
+            cred = user_info.get("credential") or user_info.get("user", {}).get(
+                "credential", {}
+            )
             self.label = cred.get("parameters", {}).get("short_label", "Studio")
 
             # --- FIX: Save user ID strictly required for favorites ---
@@ -276,7 +296,7 @@ class Client:
         """
         The central routing engine for all Qobuz API requests.
 
-        Dynamically handles HTTP methods (GET/POST), cryptographic signing, error parsing, 
+        Dynamically handles HTTP methods (GET/POST), cryptographic signing, error parsing,
         and automatic Unicode normalization for all responses.
 
         Args:
@@ -315,7 +335,7 @@ class Client:
             }
             # Use the old string method for MP3 compatibility
             unix = int(time.time())
-            sec_to_use = kwargs.get('sec', self.sec)
+            sec_to_use = kwargs.get("sec", self.sec)
             r_sig = f"trackgetFileUrlformat_id{fmt_id}intentstreamtrack_id{track_id}{unix}{sec_to_use}"
             params["request_ts"] = unix
             params["request_sig"] = hashlib.md5(r_sig.encode()).hexdigest()
@@ -361,8 +381,8 @@ class Client:
             r_sig_hashed = hashlib.md5(r_sig.encode("utf-8")).hexdigest()
             params = {
                 "app_id": self.id,
-                "user_auth_token": getattr(self, 'uat', None),
-                "user_id": getattr(self, 'user_id', None), 
+                "user_auth_token": getattr(self, "uat", None),
+                "user_id": getattr(self, "user_id", None),
                 "type": kwargs.get("fav_type", "albums"),
                 "limit": kwargs.get("limit", 100),
                 "offset": kwargs.get("offset", 0),
@@ -371,32 +391,40 @@ class Client:
             }
         else:
             # Restore behavior for standard calls like album/get
-            params = {'app_id': self.id}
+            params = {"app_id": self.id}
 
             # --- CONDITIONAL ENGLISH PARAMS OVERRIDE ---
-            if getattr(self, 'force_english', True):
-                params['lang'] = 'en'
-                params['locale'] = 'en_US'
+            if getattr(self, "force_english", True):
+                params["lang"] = "en"
+                params["locale"] = "en_US"
             # -------------------------------------------
 
-            val_id = kwargs.get('id')
+            val_id = kwargs.get("id")
             for k, v in kwargs.items():
                 # PATCH: filtra kwargs com valor None antes de virarem query
- # param. multi_meta() (usado por artist/get, playlist/get e
-                #label/get) sempre chama api_call(..., type=None) quando o
+                # param. multi_meta() (usado por artist/get, playlist/get e
+                # label/get) sempre chama api_call(..., type=None) quando o
                 # chamador nao precisa extrair uma sub-chave especifica --
                 # sem esse filtro, "type=None" ia direto pros params, e o
                 # yarl (usado pelo aiohttp) rejeita valores None na query
                 # string com TypeError: "Invalid variable type: value should
                 # be str, int or float, got None".
-                if k not in ['id', 'sec', 'fmt_id'] and v is not None:
+                if k not in ["id", "sec", "fmt_id"] and v is not None:
                     params[k] = v
 
-            if epoint == "album/get": params["album_id"] = val_id
-            elif epoint == "track/get": params["track_id"] = val_id
-            elif epoint == "playlist/get": params["playlist_id"] = val_id; params["extra"] = "tracks"
-            elif epoint == "artist/get": params["artist_id"] = val_id; params["extra"] = "albums"
-            elif epoint == "label/get": params["label_id"] = val_id; params["extra"] = "albums"
+            if epoint == "album/get":
+                params["album_id"] = val_id
+            elif epoint == "track/get":
+                params["track_id"] = val_id
+            elif epoint == "playlist/get":
+                params["playlist_id"] = val_id
+                params["extra"] = "tracks"
+            elif epoint == "artist/get":
+                params["artist_id"] = val_id
+                params["extra"] = "albums"
+            elif epoint == "label/get":
+                params["label_id"] = val_id
+                params["extra"] = "albums"
 
         # PATCH: Added favorite/create to POST methods
         if epoint in ["user/login", "favorite/create"]:
@@ -432,7 +460,9 @@ class Client:
                 await asyncio.sleep(wait)
 
             try:
-                async with self.session.request(method, self.base + epoint, **req_kwargs) as r:
+                async with self.session.request(
+                    method, self.base + epoint, **req_kwargs
+                ) as r:
                     if epoint == "user/login" and r.status == 400:
                         text = await r.text()
                         if "invalid" in text.lower():
@@ -440,11 +470,19 @@ class Client:
                         else:
                             logger.info(f"{GREEN}Logged: OK{OFF}")
                     elif (
-                        epoint in ["track/getFileUrl", "favorite/getUserFavorites", "file/url", "track/lyricsUrl"]
+                        epoint
+                        in [
+                            "track/getFileUrl",
+                            "favorite/getUserFavorites",
+                            "file/url",
+                            "track/lyricsUrl",
+                        ]
                         and r.status == 400
                     ):
                         body = await r.json()
-                        raise InvalidAppSecretError(f"Invalid app secret: {body}.\n" + RESET)
+                        raise InvalidAppSecretError(
+                            f"Invalid app secret: {body}.\n" + RESET
+                        )
 
                     if epoint == "user/get" and r.status == 400:
                         return {}
@@ -478,7 +516,9 @@ class Client:
         limit = 50
 
         while True:
-            j = await self.api_call(epoint, id=id, offset=offset, limit=limit, type=type)
+            j = await self.api_call(
+                epoint, id=id, offset=offset, limit=limit, type=type
+            )
             res = j[type] if type and type in j else j
 
             items_key = "tracks" if "playlist" in epoint else "albums"
@@ -525,15 +565,17 @@ class Client:
         from qobuz_dl.color import OFF, GREEN, RED, YELLOW, CYAN
         import difflib
 
-        print(f"{CYAN}[*] Matching Last.fm tracks with Qobuz database (Fuzzy matching & Interactive mode enabled)...{OFF}")
+        print(
+            f"{CYAN}[*] Matching Last.fm tracks with Qobuz database (Fuzzy matching & Interactive mode enabled)...{OFF}"
+        )
         valid_track_ids = []
 
         AUTO_ACCEPT_THRESHOLD = 0.75
         PROMPT_THRESHOLD = 0.60
 
         for item in tracks_list:
-            target_artist = item['artist'].lower()
-            target_title = item['title'].lower()
+            target_artist = item["artist"].lower()
+            target_title = item["title"].lower()
             query = f"{item['artist']} {item['title']}"
 
             try:
@@ -543,9 +585,15 @@ class Client:
                 best_match_name = ""
                 highest_ratio = 0.0
 
-                if search_results and "tracks" in search_results and search_results["tracks"]["items"]:
+                if (
+                    search_results
+                    and "tracks" in search_results
+                    and search_results["tracks"]["items"]
+                ):
                     for q_track in search_results["tracks"]["items"]:
-                        q_artist_raw = q_track.get("performer", {}).get("name", "Unknown")
+                        q_artist_raw = q_track.get("performer", {}).get(
+                            "name", "Unknown"
+                        )
                         q_title_raw = q_track.get("title", "Unknown")
 
                         q_artist = q_artist_raw.lower()
@@ -565,50 +613,82 @@ class Client:
                         valid_track_ids.append(best_match_id)
 
                     elif highest_ratio >= PROMPT_THRESHOLD and best_match_id:
-                        print(f"\n{YELLOW}[?] Borderline match detected ({highest_ratio*100:.0f}% similarity){OFF}")
-                        print(f"    Target (Last.fm): {item['artist']} - {item['title']}")
+                        print(
+                            f"\n{YELLOW}[?] Borderline match detected ({highest_ratio*100:.0f}% similarity){OFF}"
+                        )
+                        print(
+                            f"    Target (Last.fm): {item['artist']} - {item['title']}"
+                        )
                         print(f"    Found  (Qobuz)  : {best_match_name}")
 
-                        choice = input(f"{CYAN}    Do you want to download this track anyway? [y/n]: {OFF}").strip().lower()
+                        choice = (
+                            input(
+                                f"{CYAN}    Do you want to download this track anyway? [y/n]: {OFF}"
+                            )
+                            .strip()
+                            .lower()
+                        )
 
-                        if choice == 'y':
+                        if choice == "y":
                             valid_track_ids.append(best_match_id)
                             print(f"{GREEN}    [+] Track accepted manually.{OFF}")
                         else:
                             print(f"{RED}    [-] Track skipped manually.{OFF}")
 
                     else:
-                        print(f"{YELLOW}[!] Skipping: '{query}' (Best match was only {highest_ratio*100:.0f}% similar){OFF}")
+                        print(
+                            f"{YELLOW}[!] Skipping: '{query}' (Best match was only {highest_ratio*100:.0f}% similar){OFF}"
+                        )
 
                 else:
-                    print(f"{YELLOW}[!] Skipping (No results on Qobuz for): '{query}'{OFF}")
+                    print(
+                        f"{YELLOW}[!] Skipping (No results on Qobuz for): '{query}'{OFF}"
+                    )
 
             except Exception as e:
                 print(f"{RED}[!] Error searching for '{query}': {e}{OFF}")
 
-        print(f"\n{GREEN}[+] Successfully matched {len(valid_track_ids)} out of {len(tracks_list)} tracks!{OFF}")
+        print(
+            f"\n{GREEN}[+] Successfully matched {len(valid_track_ids)} out of {len(tracks_list)} tracks!{OFF}"
+        )
         return valid_track_ids
 
     # --- SEARCH FUNCTIONS (Crash-Proof) ---
     async def search_albums(self, query, limit=20):
         """Searches the Qobuz catalog for albums. Crash-proof against API timeouts."""
-        try: return await self.api_call("catalog/search", query=query, type="albums", limit=limit)
-        except Exception: return {}
+        try:
+            return await self.api_call(
+                "catalog/search", query=query, type="albums", limit=limit
+            )
+        except Exception:
+            return {}
 
     async def search_tracks(self, query, limit=20):
         """Searches the Qobuz catalog for tracks. Crash-proof against API timeouts."""
-        try: return await self.api_call("catalog/search", query=query, type="tracks", limit=limit)
-        except Exception: return {}
+        try:
+            return await self.api_call(
+                "catalog/search", query=query, type="tracks", limit=limit
+            )
+        except Exception:
+            return {}
 
     async def search_playlists(self, query, limit=20):
         """Searches the Qobuz catalog for playlists. Crash-proof against API timeouts."""
-        try: return await self.api_call("catalog/search", query=query, type="playlists", limit=limit)
-        except Exception: return {}
+        try:
+            return await self.api_call(
+                "catalog/search", query=query, type="playlists", limit=limit
+            )
+        except Exception:
+            return {}
 
     async def search_artists(self, query, limit=20):
         """Searches the Qobuz catalog for artists. Crash-proof against API timeouts."""
-        try: return await self.api_call("catalog/search", query=query, type="artists", limit=limit)
-        except Exception: return {}
+        try:
+            return await self.api_call(
+                "catalog/search", query=query, type="artists", limit=limit
+            )
+        except Exception:
+            return {}
 
     # --- NEW FAVORITES FUNCTION ---
     async def get_favorites(self, fav_type="albums", limit=100, offset=0):
@@ -624,7 +704,12 @@ class Client:
             dict: The API response containing the favorites list.
         """
         try:
-            return await self.api_call("favorite/getUserFavorites", fav_type=fav_type, limit=limit, offset=offset)
+            return await self.api_call(
+                "favorite/getUserFavorites",
+                fav_type=fav_type,
+                limit=limit,
+                offset=offset,
+            )
         except Exception as e:
             logger.error(f"{RED}[!] API Error fetching favorites: {e}{OFF}")
             return {}
@@ -640,10 +725,7 @@ class Client:
             dict: The API response acknowledging the addition.
         """
         return await self.api_call(
-            "favorite/create",
-            album_ids=str(album_id),
-            artist_ids="",
-            track_ids=""
+            "favorite/create", album_ids=str(album_id), artist_ids="", track_ids=""
         )
 
     # NEW GET_TRACK_URL (Patch 0004)
@@ -651,8 +733,8 @@ class Client:
         """
         Retrieves the streaming or download URL for a specific track.
 
-        Employs an intelligent fallback mechanism: attempts to fetch a fast Direct URL first, 
-        and if blocked by Qobuz CDNs, automatically falls back to the Segmented Web Player 
+        Employs an intelligent fallback mechanism: attempts to fetch a fast Direct URL first,
+        and if blocked by Qobuz CDNs, automatically falls back to the Segmented Web Player
         method (decrypting AES stream chunks).
 
         Args:
@@ -674,7 +756,7 @@ class Client:
                 if "url" in track:
                     return track
             except Exception:
-                pass # If Qobuz refuses to give the direct URL, fallback to segments automatically
+                pass  # If Qobuz refuses to give the direct URL, fallback to segments automatically
 
         # "WEB PLAYER" METHOD (SEGMENTED DOWNLOAD)
         if self.session_id is None:
@@ -720,9 +802,14 @@ class Client:
         """
         for secret in self.secrets:
             try:
-                await self.api_call("track/getFileUrl", id=5966783, fmt_id=5, sec=secret)
+                await self.api_call(
+                    "track/getFileUrl", id=5966783, fmt_id=5, sec=secret
+                )
                 self.sec = secret
                 break
-            except: continue
-        if not self.sec and self.secrets: self.sec = self.secrets[0]
-        if not self.sec: raise InvalidAppSecretError("No secret found.")
+            except Exception:
+                continue
+        if not self.sec and self.secrets:
+            self.sec = self.secrets[0]
+        if not self.sec:
+            raise InvalidAppSecretError("No secret found.")

@@ -79,13 +79,12 @@ LOCAL_GENRE_MAP = {
     "Fêtes": "Holiday",
 }
 
+
 def _get_title_with_version(title: str = "", version: str = "") -> str:
     item_title = title
     if version:
         item_title = (
-            f"{title} ({version})"
-            if version.lower() not in title.lower()
-            else title
+            f"{title} ({version})" if version.lower() not in title.lower() else title
         )
     return item_title
 
@@ -138,9 +137,17 @@ def _get_cover_path(root_dir, override=None):
         return multi_emb_image
     return None
 
+
 def _normalize_name(name: str) -> str:
     """Removes accents, invisible spaces, and converts to lowercase for strict duplicate checking."""
-    return unicodedata.normalize('NFKD', str(name)).encode('ASCII', 'ignore').decode('utf-8').lower().strip()
+    return (
+        unicodedata.normalize("NFKD", str(name))
+        .encode("ASCII", "ignore")
+        .decode("utf-8")
+        .lower()
+        .strip()
+    )
+
 
 def _embed_flac_img(root_dir, audio: FLAC, cover_override=None):
     cover_image = _get_cover_path(root_dir, override=cover_override)
@@ -179,8 +186,15 @@ def _embed_id3_img(root_dir, audio: id3.ID3, cover_override=None):
 
 
 def tag_flac(
-    filename, root_dir, final_name, d: dict, album, istrack=True, em_image=False, settings: QobuzDLSettings = None,
-    embed_cover_path=None
+    filename,
+    root_dir,
+    final_name,
+    d: dict,
+    album,
+    istrack=True,
+    em_image=False,
+    settings: QobuzDLSettings = None,
+    embed_cover_path=None,
 ):
     audio = FLAC(filename)
 
@@ -204,21 +218,27 @@ def tag_flac(
 
     # --- RICH COMMENT TAG INJECTION ---
     base_comment = f"Qobuz | {qobuz_item.get('maximum_bit_depth', 16)}b/{qobuz_item.get('maximum_sampling_rate', 44.1)}kHz | Rel: {qobuz_album.get('release_date_original', 'Unknown')} | Trk ID: {qobuz_item.get('id', 'Unknown')}"
-    
+
     if em_image:
         cover_path = _get_cover_path(root_dir, override=embed_cover_path)
         if cover_path:
             img_size_bytes = os.path.getsize(cover_path)
             img_size_mb = img_size_bytes / (1024 * 1024)
-            req_size = getattr(settings, 'embedded_art_size', 'unknown')
+            req_size = getattr(settings, "embedded_art_size", "unknown")
             is_org = "YES" if req_size == "org" else "NO"
-            base_comment += f" | Cover: {img_size_mb:.2f} MB (Req: {req_size}, Org: {is_org})"
-            
+            base_comment += (
+                f" | Cover: {img_size_mb:.2f} MB (Req: {req_size}, Org: {is_org})"
+            )
+
     tags["COMMENT"] = base_comment
 
     for k, v in tags.items():
         if v:
-            if getattr(settings, 'multi_value_tags', False) and k == "GENRE" and isinstance(v, str):
+            if (
+                getattr(settings, "multi_value_tags", False)
+                and k == "GENRE"
+                and isinstance(v, str)
+            ):
                 if ", " in v:
                     v = v.split(", ")
             audio[k] = v
@@ -229,16 +249,25 @@ def tag_flac(
     for junk_tag in ["ENCODER", "ENCODED-BY", "ENCODED_BY"]:
         if junk_tag in audio:
             del audio[junk_tag]
-            
-    if hasattr(audio, 'tags') and audio.tags is not None:
+
+    if hasattr(audio, "tags") and audio.tags is not None:
         audio.tags.vendor = ""
 
     audio.save(padding=lambda info: 8192)
     os.rename(filename, final_name)
 
 
-def tag_mp3(filename, root_dir, final_name, d, album, istrack=True, em_image=False, settings: QobuzDLSettings = None,
-            embed_cover_path=None):
+def tag_mp3(
+    filename,
+    root_dir,
+    final_name,
+    d,
+    album,
+    istrack=True,
+    em_image=False,
+    settings: QobuzDLSettings = None,
+    embed_cover_path=None,
+):
     try:
         audio = id3.ID3(filename)
     except ID3NoHeaderError:
@@ -255,16 +284,18 @@ def tag_mp3(filename, root_dir, final_name, d, album, istrack=True, em_image=Fal
 
     # --- RICH COMMENT TAG INJECTION ---
     base_comment = f"Qobuz | {qobuz_item.get('maximum_bit_depth', 16)}b/{qobuz_item.get('maximum_sampling_rate', 44.1)}kHz | Rel: {qobuz_album.get('release_date_original', 'Unknown')} | Trk ID: {qobuz_item.get('id', 'Unknown')}"
-    
+
     if em_image:
         cover_path = _get_cover_path(root_dir, override=embed_cover_path)
         if cover_path:
             img_size_bytes = os.path.getsize(cover_path)
             img_size_mb = img_size_bytes / (1024 * 1024)
-            req_size = getattr(settings, 'embedded_art_size', 'unknown')
+            req_size = getattr(settings, "embedded_art_size", "unknown")
             is_org = "YES" if req_size == "org" else "NO"
-            base_comment += f" | Cover: {img_size_mb:.2f} MB (Req: {req_size}, Org: {is_org})"
-            
+            base_comment += (
+                f" | Cover: {img_size_mb:.2f} MB (Req: {req_size}, Org: {is_org})"
+            )
+
     tags["COMMENT"] = base_comment
 
     for k, v in tags.items():
@@ -274,14 +305,18 @@ def tag_mp3(filename, root_dir, final_name, d, album, istrack=True, em_image=Fal
                 if id3tag == id3.TXXX:
                     audio.add(id3tag(encoding=3, desc=k, text=v))
                 elif id3tag == id3.COMM:
-                    audio.add(id3tag(encoding=3, lang='eng', desc='', text=[v]))
+                    audio.add(id3tag(encoding=3, lang="eng", desc="", text=[v]))
                 else:
                     audio[id3tag.__name__] = id3tag(encoding=3, text=v)
 
-    audio["TRCK"] = id3.TRCK(encoding=3,
-                             text=f'{str(qobuz_item.get("track_number", "1"))}/{str(qobuz_album.get("tracks_count", "1"))}')
-    audio["TPOS"] = id3.TPOS(encoding=3,
-                             text=f'{str(qobuz_item.get("media_number", "1"))}/{str(qobuz_album.get("media_count", "1"))}')
+    audio["TRCK"] = id3.TRCK(
+        encoding=3,
+        text=f'{str(qobuz_item.get("track_number", "1"))}/{str(qobuz_album.get("tracks_count", "1"))}',
+    )
+    audio["TPOS"] = id3.TPOS(
+        encoding=3,
+        text=f'{str(qobuz_item.get("media_number", "1"))}/{str(qobuz_album.get("media_count", "1"))}',
+    )
 
     if em_image:
         _embed_id3_img(root_dir, audio, cover_override=embed_cover_path)
@@ -293,41 +328,48 @@ def tag_mp3(filename, root_dir, final_name, d, album, istrack=True, em_image=Fal
     os.rename(filename, final_name)
 
 
-def _get_tags_to_add(qobuz_album: dict, qobuz_item : dict, settings: QobuzDLSettings = None):
+def _get_tags_to_add(
+    qobuz_album: dict, qobuz_item: dict, settings: QobuzDLSettings = None
+):
     tags = dict()
     if not qobuz_album or not qobuz_item:
         return tags
 
     # Basic Information
     if not settings.no_album_title_tag:
-        tags["ALBUM"] = _get_title_with_version(title=qobuz_album.get("title", ""),
-                                                version=qobuz_album.get("version", ""))
+        tags["ALBUM"] = _get_title_with_version(
+            title=qobuz_album.get("title", ""), version=qobuz_album.get("version", "")
+        )
     if not settings.no_track_title_tag:
-        tags["TITLE"] = _get_title_with_version(title=qobuz_item.get("title", ""),
-                                                version=qobuz_item.get("version", ""))
+        tags["TITLE"] = _get_title_with_version(
+            title=qobuz_item.get("title", ""), version=qobuz_item.get("version", "")
+        )
 
     # Artist Information
     if not settings.no_album_artist_tag:
         tags["ALBUMARTIST"] = get_album_artist(qobuz_album)
-        
+
     if not settings.no_track_artist_tag:
         artists = []
         seen_artists = set()
-        
+
         def add_unique_artist(name):
-            if not name: return
+            if not name:
+                return
             norm_name = _normalize_name(name)
             if norm_name and norm_name not in seen_artists:
                 seen_artists.add(norm_name)
                 artists.append(name)
 
-        main_artist_raw = qobuz_item.get("performer", {}).get("name", "") or qobuz_album.get("artist", {}).get("name", "")
-        
+        main_artist_raw = qobuz_item.get("performer", {}).get(
+            "name", ""
+        ) or qobuz_album.get("artist", {}).get("name", "")
+
         # Split just in case Qobuz sent a pre-merged string like "Jão, Danna Paola"
         if main_artist_raw:
             for part in main_artist_raw.split(","):
                 add_unique_artist(part.strip())
-        
+
         performers_str = qobuz_item.get("performers", "")
         if performers_str:
             for performer_block in performers_str.split(" - "):
@@ -335,10 +377,14 @@ def _get_tags_to_add(qobuz_album: dict, qobuz_item : dict, settings: QobuzDLSett
                 if len(parts) > 1:
                     name = parts[0]
                     roles = parts[1:]
-                    
-                    if "FeaturedArtist" in roles or "MainArtist" in roles or "PrimaryArtist" in roles:
+
+                    if (
+                        "FeaturedArtist" in roles
+                        or "MainArtist" in roles
+                        or "PrimaryArtist" in roles
+                    ):
                         add_unique_artist(name)
-        
+
         if len(artists) > 0:
             tags["ARTIST"] = ", ".join(artists)
         else:
@@ -347,18 +393,18 @@ def _get_tags_to_add(qobuz_album: dict, qobuz_item : dict, settings: QobuzDLSett
     if not settings.no_composer_tag:
         composers = []
         performers_str = qobuz_item.get("performers", "")
-        
+
         if performers_str:
             for performer_block in performers_str.split(" - "):
                 parts = [p.strip() for p in performer_block.split(", ")]
                 if len(parts) > 1:
                     name = parts[0]
                     roles = parts[1:]
-                    
+
                     if "Composer" in roles or "ComposerLyricist" in roles:
                         if name not in composers:
                             composers.append(name)
-                            
+
         if not composers:
             main_composer = qobuz_item.get("composer", {}).get("name", "")
             if main_composer:
@@ -372,32 +418,38 @@ def _get_tags_to_add(qobuz_album: dict, qobuz_item : dict, settings: QobuzDLSett
     # Release Information
     release_date = qobuz_album.get("release_date_original", "")
     if not settings.no_release_date_tag:
-        tags["DATE"] = release_date        
+        tags["DATE"] = release_date
     if not settings.no_genre_tag:
         raw_main_genre = qobuz_album.get("genre", {}).get("name")
-        main_genre = LOCAL_GENRE_MAP.get(raw_main_genre, raw_main_genre) if raw_main_genre else None
-        
+        main_genre = (
+            LOCAL_GENRE_MAP.get(raw_main_genre, raw_main_genre)
+            if raw_main_genre
+            else None
+        )
+
         raw_genres = qobuz_album.get("genres_list", [])
         if main_genre:
             if raw_genres:
                 raw_genres[0] = main_genre
             else:
                 raw_genres = [main_genre]
-                
+
         extracted_genres = re.findall(r"([^\u2192]+)", " \u2192 ".join(raw_genres))
-        
+
         final_genres = []
         for g in extracted_genres:
             clean_g = g.strip()
             translated = LOCAL_GENRE_MAP.get(clean_g, clean_g)
             if translated not in final_genres:
                 final_genres.append(translated)
-                
+
         tags["GENRE"] = ", ".join(final_genres)
     if not settings.no_label_tag:
         tags["COPYRIGHT"] = _format_copyright(qobuz_album.get("copyright", "n/a"))
     if not settings.no_label_tag:
-        tags["LABEL"] = re.sub(r'\s+',' ', qobuz_album.get("label", {}).get("name", ""))
+        tags["LABEL"] = re.sub(
+            r"\s+", " ", qobuz_album.get("label", {}).get("name", "")
+        )
     if not settings.no_isrc_tag:
         tags["ISRC"] = qobuz_item.get("isrc", "")
     if not settings.no_upc_tag:
@@ -407,15 +459,17 @@ def _get_tags_to_add(qobuz_album: dict, qobuz_item : dict, settings: QobuzDLSett
     if not settings.no_media_type_tag:
         tags["MEDIATYPE"] = qobuz_album.get("product_type", "").upper()
     if not settings.no_explicit_tag:
-        tags["ITUNESADVISORY"] = "1" if qobuz_item.get("parental_warning", False) else ""
+        tags["ITUNESADVISORY"] = (
+            "1" if qobuz_item.get("parental_warning", False) else ""
+        )
 
     # --- REPLAYGAIN TAGS ---
-    if not getattr(settings, 'no_replaygain_tag', False):
+    if not getattr(settings, "no_replaygain_tag", False):
         audio_info = qobuz_item.get("audio_info", {})
         if audio_info:
             rg_gain = audio_info.get("replaygain_track_gain")
             rg_peak = audio_info.get("replaygain_track_peak")
-            
+
             if rg_gain is not None:
                 tags["REPLAYGAIN_TRACK_GAIN"] = f"{rg_gain} dB"
             if rg_peak is not None:
@@ -423,44 +477,44 @@ def _get_tags_to_add(qobuz_album: dict, qobuz_item : dict, settings: QobuzDLSett
 
     # --- CLASSICAL MUSIC TAGS ---
     work = qobuz_item.get("work")
-    if work and not getattr(settings, 'no_work_tag', False):
+    if work and not getattr(settings, "no_work_tag", False):
         tags["WORK"] = work
 
     conductors = []
     ensembles = []
     performers_str = qobuz_item.get("performers", "")
-    
+
     if performers_str:
         for performer_block in performers_str.split(" - "):
             parts = [p.strip() for p in performer_block.split(", ")]
             if len(parts) > 1:
                 name = parts[0]
                 roles = parts[1:]
-                
+
                 if "Conductor" in roles:
                     conductors.append(name)
                 if any(role in roles for role in ["Orchestra", "Ensemble", "Choir"]):
                     ensembles.append(name)
 
-    if conductors and not getattr(settings, 'no_conductor_tag', False):
+    if conductors and not getattr(settings, "no_conductor_tag", False):
         tags["CONDUCTOR"] = conductors if len(conductors) > 1 else conductors[0]
-    if ensembles and not getattr(settings, 'no_ensemble_tag', False):
+    if ensembles and not getattr(settings, "no_ensemble_tag", False):
         tags["ENSEMBLE"] = ensembles if len(ensembles) > 1 else ensembles[0]
 
     # --- DB SYNC FEATURE: SAVE QOBUZ IDS ---
     track_id = qobuz_item.get("id")
     if track_id:
         tags["QOBUZTRACKID"] = str(track_id)
-        
+
     album_id = qobuz_album.get("id")
     if album_id:
         tags["QOBUZALBUMID"] = str(album_id)
 
     # --- DIRECT ALBUM URL TAGGING ---
-    if not getattr(settings, 'no_album_url_tag', False):
+    if not getattr(settings, "no_album_url_tag", False):
         if album_id:
             raw_title = str(qobuz_album.get("title", "album"))
-            slug = re.sub(r'[^a-z0-9]+', '-', raw_title.lower()).strip('-')
+            slug = re.sub(r"[^a-z0-9]+", "-", raw_title.lower()).strip("-")
             tags["QOBUZ ALBUM URL"] = f"https://www.qobuz.com/album/{slug}/{album_id}"
 
     return tags

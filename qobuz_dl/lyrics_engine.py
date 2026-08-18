@@ -1,7 +1,6 @@
 import os
 import re
 import requests
-import mutagen
 from mutagen.id3 import ID3, USLT, TXXX, ID3NoHeaderError
 from mutagen.flac import FLAC
 from tqdm import tqdm
@@ -38,7 +37,9 @@ class LyricsEngine:
         self.genius_token = genius_token
         self.genius = None
         if self.genius_token and lyricsgenius:
-            self.genius = lyricsgenius.Genius(self.genius_token, remove_section_headers=True)
+            self.genius = lyricsgenius.Genius(
+                self.genius_token, remove_section_headers=True
+            )
             self.genius.verbose = False
 
         self._owns_session = session is None
@@ -183,11 +184,13 @@ class LyricsEngine:
                 t_synced = self._qobuz_lines_to_lrc(t_lines)
                 t_plain = self._qobuz_lines_to_plain(t_lines)
                 if t_synced or t_plain:
-                    result["translations"].append({
-                        "language": translation_response.get("lang", "translated"),
-                        "plain": t_plain,
-                        "synced": t_synced,
-                    })
+                    result["translations"].append(
+                        {
+                            "language": translation_response.get("lang", "translated"),
+                            "plain": t_plain,
+                            "synced": t_synced,
+                        }
+                    )
 
         return result
 
@@ -202,18 +205,20 @@ class LyricsEngine:
         def parse_lrc(lrc_text, is_translation):
             parsed = []
             for line in lrc_text.splitlines():
-                tags = re.findall(r'\[\d{2,}:\d{2}\.\d{2,3}\]', line)
-                text = re.sub(r'\[\d{2,}:\d{2}\.\d{2,3}\]', '', line).strip()
+                tags = re.findall(r"\[\d{2,}:\d{2}\.\d{2,3}\]", line)
+                text = re.sub(r"\[\d{2,}:\d{2}\.\d{2,3}\]", "", line).strip()
 
                 if not text:
                     continue  # Ignora linhas vazias para nao sujar o player
 
                 for tag in tags:
                     try:
-                        m, s = tag.strip('[]').split(':')
-                        s, ms = s.split('.')
+                        m, s = tag.strip("[]").split(":")
+                        s, ms = s.split(".")
                         # Normaliza os milissegundos para manter uma ordenacao perfeita
-                        time_ms = int(m) * 60000 + int(s) * 1000 + int(ms.ljust(3, '0')[:3])
+                        time_ms = (
+                            int(m) * 60000 + int(s) * 1000 + int(ms.ljust(3, "0")[:3])
+                        )
                         parsed.append((time_ms, tag, text, is_translation))
                     except ValueError:
                         continue
@@ -242,9 +247,17 @@ class LyricsEngine:
     # ------------------------------------------------------------------
     # FLUXO PRINCIPAL
     # ------------------------------------------------------------------
-    def fetch_and_inject(self, file_path, artist, track, album, save_lrc=True,
-                          embed_lyrics=True, qobuz_lyrics_response=None,
-                          qobuz_translation_response=None):
+    def fetch_and_inject(
+        self,
+        file_path,
+        artist,
+        track,
+        album,
+        save_lrc=True,
+        embed_lyrics=True,
+        qobuz_lyrics_response=None,
+        qobuz_translation_response=None,
+    ):
         """
         Waterfall engine: first try Qobuz natively, then LRCLIB (for LRC format), then Genius.
 
@@ -268,7 +281,9 @@ class LyricsEngine:
                 qobuz_lyrics_response, qobuz_translation_response
             )
 
-            if qobuz_lyrics and (qobuz_lyrics.get("synced") or qobuz_lyrics.get("plain")):
+            if qobuz_lyrics and (
+                qobuz_lyrics.get("synced") or qobuz_lyrics.get("plain")
+            ):
                 original_sync = qobuz_lyrics.get("synced")
                 original_plain = qobuz_lyrics.get("plain")
                 translations = qobuz_lyrics.get("translations", [])
@@ -298,7 +313,9 @@ class LyricsEngine:
                 # Mesclagem Bilingue
                 if best_trans:
                     if original_sync and best_trans.get("synced"):
-                        final_sync = self._build_bilingual_lrc(original_sync, best_trans.get("synced"))
+                        final_sync = self._build_bilingual_lrc(
+                            original_sync, best_trans.get("synced")
+                        )
                     if original_plain and best_trans.get("plain"):
                         final_plain = f"{original_plain}\n\n--- TRADUCAO ({best_trans.get('language', 'pt').upper()}) ---\n\n{best_trans.get('plain')}"
 
@@ -308,45 +325,87 @@ class LyricsEngine:
                 source_label = "Qobuz"
 
                 if final_sync:
-                    is_bilingual = "BILINGUAL " if best_trans and best_trans.get("synced") else ""
+                    is_bilingual = (
+                        "BILINGUAL " if best_trans and best_trans.get("synced") else ""
+                    )
                     if embed_lyrics:
-                        self._inject_metadata(file_path, final_sync, source=source_label, language=lang_tag)
+                        self._inject_metadata(
+                            file_path,
+                            final_sync,
+                            source=source_label,
+                            language=lang_tag,
+                        )
                     if save_lrc:
-                        self._save_lrc_file(file_path, final_sync, source=source_label, language=lang_tag)
+                        self._save_lrc_file(
+                            file_path,
+                            final_sync,
+                            source=source_label,
+                            language=lang_tag,
+                        )
 
                     if embed_lyrics and save_lrc:
-                        tqdm.write(f"    ✅ Synchronized {is_bilingual}lyrics injected and saved as .lrc (via Qobuz)!")
+                        tqdm.write(
+                            f"    ✅ Synchronized {is_bilingual}lyrics injected and saved as .lrc (via Qobuz)!"
+                        )
                     elif save_lrc:
-                        tqdm.write(f"    ✅ Synchronized {is_bilingual}lyrics saved as .lrc (via Qobuz)!")
+                        tqdm.write(
+                            f"    ✅ Synchronized {is_bilingual}lyrics saved as .lrc (via Qobuz)!"
+                        )
                     elif embed_lyrics:
-                        tqdm.write(f"    ✅ Synchronized {is_bilingual}lyrics injected into metadata (via Qobuz)!")
+                        tqdm.write(
+                            f"    ✅ Synchronized {is_bilingual}lyrics injected into metadata (via Qobuz)!"
+                        )
                     return
 
                 elif final_plain:
-                    is_bilingual = "BILINGUAL " if best_trans and best_trans.get("plain") else ""
+                    is_bilingual = (
+                        "BILINGUAL " if best_trans and best_trans.get("plain") else ""
+                    )
                     if embed_lyrics:
-                        self._inject_metadata(file_path, final_plain, source=source_label, language=lang_tag)
+                        self._inject_metadata(
+                            file_path,
+                            final_plain,
+                            source=source_label,
+                            language=lang_tag,
+                        )
                     if save_lrc:
-                        self._save_lrc_file(file_path, final_plain, source=source_label, language=lang_tag)
+                        self._save_lrc_file(
+                            file_path,
+                            final_plain,
+                            source=source_label,
+                            language=lang_tag,
+                        )
 
                     if embed_lyrics and save_lrc:
-                        tqdm.write(f"    ✅ Standard {is_bilingual}lyrics injected and saved as .txt (via Qobuz)!")
+                        tqdm.write(
+                            f"    ✅ Standard {is_bilingual}lyrics injected and saved as .txt (via Qobuz)!"
+                        )
                     elif save_lrc:
-                        tqdm.write(f"    ✅ Standard {is_bilingual}lyrics saved as .txt (via Qobuz)!")
+                        tqdm.write(
+                            f"    ✅ Standard {is_bilingual}lyrics saved as .txt (via Qobuz)!"
+                        )
                     elif embed_lyrics:
-                        tqdm.write(f"    ✅ Standard {is_bilingual}lyrics injected into metadata (via Qobuz)!")
+                        tqdm.write(
+                            f"    ✅ Standard {is_bilingual}lyrics injected into metadata (via Qobuz)!"
+                        )
                     return
 
             # 2. Fallback to LRCLIB
             lrclib_url = "https://lrclib.net/api/get"
-            headers = {"User-Agent": "qobuz-dl-ultimate/1.0 (https://github.com/Sei969/qobuz-dl)"}
+            headers = {
+                "User-Agent": "qobuz-dl-ultimate/1.0 (https://github.com/Sei969/qobuz-dl)"
+            }
 
             params = {"artist_name": artist, "track_name": track, "album_name": album}
-            response = self.session.get(lrclib_url, params=params, headers=headers, timeout=12)
+            response = self.session.get(
+                lrclib_url, params=params, headers=headers, timeout=12
+            )
 
             if response.status_code != 200:
                 params = {"artist_name": artist, "track_name": track}
-                response = self.session.get(lrclib_url, params=params, headers=headers, timeout=12)
+                response = self.session.get(
+                    lrclib_url, params=params, headers=headers, timeout=12
+                )
 
             if response.status_code == 200:
                 data = response.json()
@@ -355,30 +414,56 @@ class LyricsEngine:
 
                 if synced_lyrics:
                     if embed_lyrics:
-                        self._inject_metadata(file_path, synced_lyrics, source="LRCLIB", language="unknown")
+                        self._inject_metadata(
+                            file_path,
+                            synced_lyrics,
+                            source="LRCLIB",
+                            language="unknown",
+                        )
                     if save_lrc:
-                        self._save_lrc_file(file_path, synced_lyrics, source="LRCLIB", language="unknown")
+                        self._save_lrc_file(
+                            file_path,
+                            synced_lyrics,
+                            source="LRCLIB",
+                            language="unknown",
+                        )
 
                     if embed_lyrics and save_lrc:
-                        tqdm.write(f"    ✅ Synchronized lyrics injected and saved as .lrc (via LRCLIB)!")
+                        tqdm.write(
+                            f"    ✅ Synchronized lyrics injected and saved as .lrc (via LRCLIB)!"
+                        )
                     elif save_lrc:
-                        tqdm.write(f"    ✅ Synchronized lyrics saved as .lrc (via LRCLIB)!")
+                        tqdm.write(
+                            f"    ✅ Synchronized lyrics saved as .lrc (via LRCLIB)!"
+                        )
                     elif embed_lyrics:
-                        tqdm.write(f"    ✅ Synchronized lyrics injected into metadata (via LRCLIB)!")
+                        tqdm.write(
+                            f"    ✅ Synchronized lyrics injected into metadata (via LRCLIB)!"
+                        )
                     return
 
                 elif plain_lyrics:
                     if embed_lyrics:
-                        self._inject_metadata(file_path, plain_lyrics, source="LRCLIB", language="unknown")
+                        self._inject_metadata(
+                            file_path, plain_lyrics, source="LRCLIB", language="unknown"
+                        )
                     if save_lrc:
-                        self._save_lrc_file(file_path, plain_lyrics, source="LRCLIB", language="unknown")
+                        self._save_lrc_file(
+                            file_path, plain_lyrics, source="LRCLIB", language="unknown"
+                        )
 
                     if embed_lyrics and save_lrc:
-                        tqdm.write(f"    ✅ Standard lyrics injected and saved as .txt (via LRCLIB)!")
+                        tqdm.write(
+                            f"    ✅ Standard lyrics injected and saved as .txt (via LRCLIB)!"
+                        )
                     elif save_lrc:
-                        tqdm.write(f"    ✅ Standard lyrics saved as .txt (via LRCLIB)!")
+                        tqdm.write(
+                            f"    ✅ Standard lyrics saved as .txt (via LRCLIB)!"
+                        )
                     elif embed_lyrics:
-                        tqdm.write(f"    ✅ Standard lyrics injected into metadata (via LRCLIB)!")
+                        tqdm.write(
+                            f"    ✅ Standard lyrics injected into metadata (via LRCLIB)!"
+                        )
                     return
 
             # 3. Fallback to Genius
@@ -386,14 +471,20 @@ class LyricsEngine:
                 song = self.genius.search_song(track, artist)
                 if song and song.lyrics:
                     if embed_lyrics:
-                        self._inject_metadata(file_path, song.lyrics, source="Genius", language="unknown")
+                        self._inject_metadata(
+                            file_path, song.lyrics, source="Genius", language="unknown"
+                        )
                     if save_lrc:
-                        self._save_lrc_file(file_path, song.lyrics, source="Genius", language="unknown")
+                        self._save_lrc_file(
+                            file_path, song.lyrics, source="Genius", language="unknown"
+                        )
 
                     if embed_lyrics and save_lrc:
                         tqdm.write(f"    ✅ Lyrics injected via Genius and saved!")
                     elif save_lrc:
-                        tqdm.write(f"    ✅ Lyrics saved via Genius (Embedding disabled)!")
+                        tqdm.write(
+                            f"    ✅ Lyrics saved via Genius (Embedding disabled)!"
+                        )
                     elif embed_lyrics:
                         tqdm.write(f"    ✅ Lyrics injected via Genius (Fallback)!")
                     return
@@ -403,7 +494,9 @@ class LyricsEngine:
         except Exception as e:
             tqdm.write(f"    ⚠️ Error during lyrics search: {e}")
 
-    def _save_lrc_file(self, audio_file_path, synced_lyrics, source=None, language=None):
+    def _save_lrc_file(
+        self, audio_file_path, synced_lyrics, source=None, language=None
+    ):
         """
         Creates the .lrc or .txt file next to the audio file.
 
@@ -423,9 +516,13 @@ class LyricsEngine:
         if language:
             header_lines.append(f"[la:{language}]")
 
-        content = ("\n".join(header_lines) + "\n" + synced_lyrics) if header_lines else synced_lyrics
+        content = (
+            ("\n".join(header_lines) + "\n" + synced_lyrics)
+            if header_lines
+            else synced_lyrics
+        )
 
-        with open(lrc_path, 'w', encoding='utf-8') as f:
+        with open(lrc_path, "w", encoding="utf-8") as f:
             f.write(content)
 
     def _inject_metadata(self, file_path, lyrics, source=None, language=None):
@@ -452,25 +549,25 @@ class LyricsEngine:
 
         ext = os.path.splitext(file_path)[1].lower()
         try:
-            if ext == '.flac':
+            if ext == ".flac":
                 audio = FLAC(file_path)
-                audio['LYRICS'] = lyrics
+                audio["LYRICS"] = lyrics
                 if source:
-                    audio['LYRICS_SOURCE'] = source
+                    audio["LYRICS_SOURCE"] = source
                 if language:
-                    audio['LYRICS_LANG'] = language
+                    audio["LYRICS_LANG"] = language
                 audio.save()
-            elif ext == '.mp3':
+            elif ext == ".mp3":
                 try:
                     audio = ID3(file_path)
                 except ID3NoHeaderError:
                     audio = ID3()
-                desc = source if source else ''
-                audio.add(USLT(encoding=3, lang='eng', desc=desc, text=lyrics))
+                desc = source if source else ""
+                audio.add(USLT(encoding=3, lang="eng", desc=desc, text=lyrics))
                 if language:
                     # Remove qualquer TXXX:LYRICS_LANG anterior antes de gravar o novo valor
-                    audio.delall('TXXX:LYRICS_LANG')
-                    audio.add(TXXX(encoding=3, desc='LYRICS_LANG', text=language))
+                    audio.delall("TXXX:LYRICS_LANG")
+                    audio.add(TXXX(encoding=3, desc="LYRICS_LANG", text=language))
                 audio.save(file_path)
         except Exception:
             pass

@@ -4,11 +4,8 @@ import os
 import logging
 import subprocess
 import time
-from qobuz_dl.color import GREEN, RED, YELLOW, CYAN, OFF
+from qobuz_dl.color import RED, YELLOW, CYAN, OFF
 import unicodedata
-
-from mutagen.mp3 import EasyMP3
-from mutagen.flac import FLAC
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -21,6 +18,7 @@ class PartialFormatter(string.Formatter):
     A custom string formatter that safely handles missing variables during string evaluation.
     Prevents KeyErrors when a requested metadata tag is missing from the API response.
     """
+
     def __init__(self, missing="n/a", bad_fmt="n/a"):
         self.missing, self.bad_fmt = missing, bad_fmt
 
@@ -41,12 +39,13 @@ class PartialFormatter(string.Formatter):
                 return self.bad_fmt
             raise
 
+
 def make_m3u(pl_directory, remote_items=None):
     """
     Generates a UTF-8 encoded .m3u8 playlist file.
-    
-    If remote_items (Qobuz API playlist order) is provided, it utilizes a robust O(1) 
-    4-pass matching algorithm (ID -> ISRC -> Title -> Filename) to preserve the exact 
+
+    If remote_items (Qobuz API playlist order) is provided, it utilizes a robust O(1)
+    4-pass matching algorithm (ID -> ISRC -> Title -> Filename) to preserve the exact
     online track order, completely ignoring physical local filenames.
 
     Args:
@@ -59,7 +58,7 @@ def make_m3u(pl_directory, remote_items=None):
     from mutagen.id3 import ID3
     from mutagen.flac import FLAC
     from mutagen import File
-    
+
     logger = logging.getLogger(__name__)
     EXTENSIONS = (".mp3", ".flac")
 
@@ -76,43 +75,43 @@ def make_m3u(pl_directory, remote_items=None):
             if os.path.splitext(f)[-1].lower() in EXTENSIONS:
                 audio_full_path = os.path.abspath(os.path.join(local, f))
                 info = {
-                    'path': audio_full_path, 
-                    'title': '', 
-                    'artist': '', 
-                    'isrc': '', 
-                    'qobuz_id': '',
-                    'duration': 0
+                    "path": audio_full_path,
+                    "title": "",
+                    "artist": "",
+                    "isrc": "",
+                    "qobuz_id": "",
+                    "duration": 0,
                 }
                 try:
                     # Generic length via mutagen.File
                     audio_gen = File(audio_full_path)
                     if audio_gen and audio_gen.info:
-                        info['duration'] = int(audio_gen.info.length)
+                        info["duration"] = int(audio_gen.info.length)
 
                     # Deep Tag Parsing
-                    if audio_full_path.lower().endswith('.flac'):
+                    if audio_full_path.lower().endswith(".flac"):
                         audio = FLAC(audio_full_path)
-                        info['qobuz_id'] = audio.get("QOBUZTRACKID", [None])[0]
-                        info['isrc'] = audio.get("ISRC", [None])[0]
-                        info['title'] = audio.get("TITLE", [""])[0]
-                        info['artist'] = audio.get("ARTIST", [""])[0]
+                        info["qobuz_id"] = audio.get("QOBUZTRACKID", [None])[0]
+                        info["isrc"] = audio.get("ISRC", [None])[0]
+                        info["title"] = audio.get("TITLE", [""])[0]
+                        info["artist"] = audio.get("ARTIST", [""])[0]
                     else:
                         audio = ID3(audio_full_path)
                         # Correct way to find custom TXXX frames in ID3
                         for frame in audio.getall("TXXX"):
                             if frame.desc.upper() == "QOBUZTRACKID":
-                                info['qobuz_id'] = frame.text[0]
+                                info["qobuz_id"] = frame.text[0]
                                 break
                         isrc_frame = audio.get("TSRC")
-                        info['isrc'] = isrc_frame.text[0] if isrc_frame else None
+                        info["isrc"] = isrc_frame.text[0] if isrc_frame else None
                         tit2 = audio.get("TIT2")
-                        info['title'] = tit2.text[0] if tit2 else ""
+                        info["title"] = tit2.text[0] if tit2 else ""
                         tpe1 = audio.get("TPE1")
-                        info['artist'] = tpe1.text[0] if tpe1 else ""
+                        info["artist"] = tpe1.text[0] if tpe1 else ""
                 except Exception as e:
                     logger.debug(f"Error reading tags for {f}: {e}")
-                    info['title'] = os.path.splitext(f)[0] # Fallback title
-                
+                    info["title"] = os.path.splitext(f)[0]  # Fallback title
+
                 local_files_info.append(info)
 
     ordered_files = []
@@ -120,10 +119,14 @@ def make_m3u(pl_directory, remote_items=None):
     # 2. Match with Qobuz API order (4-Pass Algorithm)
     if remote_items:
         # Pre-index the local files into dictionaries for O(1) single lookups
-        by_tid = {str(f['qobuz_id']): f for f in local_files_info if f.get('qobuz_id')}
-        by_isrc = {str(f['isrc']): f for f in local_files_info if f.get('isrc')}
-        by_title = {str(f['title']).strip().lower(): f for f in local_files_info if f.get('title')}
-        
+        by_tid = {str(f["qobuz_id"]): f for f in local_files_info if f.get("qobuz_id")}
+        by_isrc = {str(f["isrc"]): f for f in local_files_info if f.get("isrc")}
+        by_title = {
+            str(f["title"]).strip().lower(): f
+            for f in local_files_info
+            if f.get("title")
+        }
+
         missing_count = 0
         table_header = (
             f"\n{RED}{'━'*80}\n"
@@ -132,25 +135,33 @@ def make_m3u(pl_directory, remote_items=None):
             f"{CYAN}{'TITLE':<35} │ {'ARTIST':<25} │ {'ID':<12}{OFF}\n"
             f"{'─'*80}"
         )
-        
+
         for item in remote_items:
             tid = str(item.get("id", ""))
             isrc = str(item.get("isrc", ""))
             track_title = item.get("title", "Unknown Title")
             album_artist = item.get("album", {}).get("artist", {}).get("name")
             performer_name = item.get("performer", {}).get("name", "Unknown Artist")
-            final_artist = performer_name if album_artist in [None, "Various Artists"] else album_artist
-            
+            final_artist = (
+                performer_name
+                if album_artist in [None, "Various Artists"]
+                else album_artist
+            )
+
             # Pass 1-3: Fast dictionary lookups
-            best_match = by_tid.get(tid) or by_isrc.get(isrc) or by_title.get(track_title.strip().lower())
-            
+            best_match = (
+                by_tid.get(tid)
+                or by_isrc.get(isrc)
+                or by_title.get(track_title.strip().lower())
+            )
+
             # Pass 4: Fallback to filename substring match
             if not best_match and track_title != "Unknown Title":
                 for f_info in local_files_info:
-                    if track_title.lower() in os.path.basename(f_info['path']).lower():
+                    if track_title.lower() in os.path.basename(f_info["path"]).lower():
                         best_match = f_info
                         break
-            
+
             if best_match:
                 ordered_files.append(best_match)
                 # La riga available_files.remove(best_match) è stata rimossa
@@ -161,24 +172,31 @@ def make_m3u(pl_directory, remote_items=None):
                 row = f"{track_title[:35]:<35} │ {final_artist[:25]:<25} │ {tid:<12}"
                 logger.warning(f"{YELLOW}{row}{OFF}")
                 missing_count += 1
-                
+
         if missing_count > 0:
             logger.warning(f"{RED}{'━'*80}{OFF}\n")
 
     # 3. Fallback (Albums or failed matching): Natural sort
     if not remote_items or len(ordered_files) == 0:
+
         def natural_sort_key(s):
-            return [int(text) if text.isdigit() else text.lower() for text in re.split(r'(\d+)', s)]
-        
-        ordered_files = sorted(local_files_info, key=lambda x: natural_sort_key(os.path.basename(x['path'])))
+            return [
+                int(text) if text.isdigit() else text.lower()
+                for text in re.split(r"(\d+)", s)
+            ]
+
+        ordered_files = sorted(
+            local_files_info,
+            key=lambda x: natural_sort_key(os.path.basename(x["path"])),
+        )
 
     # 4. Generate M3U
     for f_info in ordered_files:
-        audio_rel_path = os.path.relpath(f_info['path'], pl_directory)
-        
-        disp_title = f_info['title'] or "Unknown Title"
-        disp_artist = f_info['artist'] or "Unknown Artist"
-        length = f_info['duration']
+        audio_rel_path = os.path.relpath(f_info["path"], pl_directory)
+
+        disp_title = f_info["title"] or "Unknown Title"
+        disp_artist = f_info["artist"] or "Unknown Artist"
+        length = f_info["duration"]
 
         index = f"#EXTINF:{length}, {disp_artist} - {disp_title}\n{audio_rel_path}"
         track_list.append(index)
@@ -193,7 +211,7 @@ def smart_discography_filter(
 ) -> list:
     """
     Heuristic Engine for intelligent discography filtering.
-    
+
     When downloading some artists' discography, many random and spam-like
     albums can get downloaded. This filters out duplicates and unwanted releases.
 
@@ -286,10 +304,10 @@ def smart_discography_filter(
 def format_duration(duration):
     """
     Formats a duration given in seconds into a HH:MM:SS string.
-    
+
     Args:
         duration (int): The duration in seconds.
-        
+
     Returns:
         str: The formatted time string.
     """
@@ -327,9 +345,15 @@ def verify_audio_integrity(filepath, timeout=180):
     try:
         result = subprocess.run(
             [
-                "ffmpeg", "-nostdin", "-v", "error",
-                "-i", filepath,
-                "-f", "null", "-",
+                "ffmpeg",
+                "-nostdin",
+                "-v",
+                "error",
+                "-i",
+                filepath,
+                "-f",
+                "null",
+                "-",
             ],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
@@ -337,14 +361,20 @@ def verify_audio_integrity(filepath, timeout=180):
             timeout=timeout,
         )
     except FileNotFoundError:
-        return False, "ffmpeg nao encontrado no sistema (necessario para verificar integridade)."
+        return (
+            False,
+            "ffmpeg nao encontrado no sistema (necessario para verificar integridade).",
+        )
     except subprocess.TimeoutExpired:
         return False, f"Verificacao excedeu o tempo limite de {timeout}s."
 
     if result.returncode != 0 or result.stderr.strip():
         # Qualquer linha em stderr com "-v error" indica problema real de
         # decodificacao (nao so avisos), entao tratamos como corrompido.
-        return False, result.stderr.strip() or f"ffmpeg saiu com codigo {result.returncode}."
+        return (
+            False,
+            result.stderr.strip() or f"ffmpeg saiu com codigo {result.returncode}.",
+        )
 
     return True, ""
 
@@ -352,10 +382,10 @@ def verify_audio_integrity(filepath, timeout=180):
 def create_and_return_dir(directory):
     """
     Safely creates a directory path and returns its absolute path.
-    
+
     Args:
         directory (str): The desired directory path.
-        
+
     Returns:
         str: The absolute path of the created directory.
     """
@@ -373,10 +403,10 @@ def get_url_info(url):
         https://open.qobuz.com/{type}/{id}
         https://play.qobuz.com/{type}/{id}
         /us-en/{type}/-/{id}
-        
+
     Args:
         url (str): The input URL string.
-        
+
     Returns:
         tuple: A tuple containing the extracted type (e.g., 'album', 'track') and the ID.
     """
@@ -391,12 +421,12 @@ def get_url_info(url):
 def get_album_artist(qobuz_album: dict) -> list:
     """
     Extracts the album's main artists from the Qobuz API response.
-    Returns a list of strings to ensure true Native Multi-Artist Tagging 
+    Returns a list of strings to ensure true Native Multi-Artist Tagging
     (discrete Vorbis Comments for FLAC files).
-    
+
     Args:
         qobuz_album (dict): Qobuz API response dictionary.
-        
+
     Returns:
         list: A list of the album's main artists.
     """
@@ -407,16 +437,20 @@ def get_album_artist(qobuz_album: dict) -> list:
             return [single_artist] if single_artist else []
 
         # Filtra l'array isolando solo chi ha il ruolo 'main-artist'
-        main_artists = list(filter(lambda a: "main-artist" in a.get("roles", []),
-                                   qobuz_album.get("artists", [])))
-        
+        main_artists = list(
+            filter(
+                lambda a: "main-artist" in a.get("roles", []),
+                qobuz_album.get("artists", []),
+            )
+        )
+
         # Estrae i nomi puri e li restituisce come lista separata
         if main_artists:
             return [a["name"] for a in main_artists]
         else:
             single_artist = qobuz_album.get("artist", {}).get("name", "")
             return [single_artist] if single_artist else []
-            
+
     except Exception as e:
         logger.error(f"Error getting album artist: {str(e)}")
         single_artist = qobuz_album.get("artist", {}).get("name", "")
@@ -427,29 +461,29 @@ def apply_legacy_charmap(filename: str) -> str:
     """
     Applies legacy character replacement rules for Windows path compatibility.
     Specifically requested for users who prefer standard ASCII over Unicode fullwidth characters.
-    
+
     Args:
         filename (str): The raw string.
-        
+
     Returns:
         str: The sanitized string utilizing basic ASCII replacements.
     """
     # Specific rules requested by the community (JosiahDanger)
-    filename = filename.replace(':', '-')
-    filename = filename.replace('?', '')
-    
+    filename = filename.replace(":", "-")
+    filename = filename.replace("?", "")
+
     # Standard legacy replacements for other invalid Windows characters
-    filename = filename.replace('/', '-')
-    filename = filename.replace('\\', '-')
-    filename = filename.replace('*', '-')
+    filename = filename.replace("/", "-")
+    filename = filename.replace("\\", "-")
+    filename = filename.replace("*", "-")
     filename = filename.replace('"', "'")
-    filename = filename.replace('<', '[')
-    filename = filename.replace('>', ']')
-    filename = filename.replace('|', '-')
-    
+    filename = filename.replace("<", "[")
+    filename = filename.replace(">", "]")
+    filename = filename.replace("|", "-")
+
     # Clean up potential double dashes created by multiple replacements (e.g., "A / B" -> "A - B")
-    filename = re.sub(r'\s*-\s*-+', ' -', filename)
-    
+    filename = re.sub(r"\s*-\s*-+", " -", filename)
+
     return filename
 
 
@@ -457,41 +491,40 @@ def clean_filename(filename: str, legacy_charmap: bool = False) -> str:
     """
     Cleans up redundant special characters, spaces, and separators in filenames.
     Normalizes Unicode characters to NFC form to ensure cross-platform safety.
-    
+
     Args:
         filename (str): The raw string to clean.
         legacy_charmap (bool, optional): If True, uses basic ASCII replacements instead of Unicode full-width characters. Defaults to False.
-        
+
     Returns:
         str: The fully sanitized filename string.
     """
     # First normalize the Unicode string to NFC form
-    filename = unicodedata.normalize('NFC', filename)
-    
+    filename = unicodedata.normalize("NFC", filename)
+
     # Clean up redundant spaces, separators, and brackets
 
     # Merge multiple separators (supports spaces, commas, periods, Chinese commas, colons, semicolons, vertical bars, slashes, backslashes, underscores. Does not support the - symbol) into one
-    filename = re.sub(r'(?:\s*([,\.\:\;\|/\\_])\s*){2,}', r'\1 ', filename)
+    filename = re.sub(r"(?:\s*([,\.\:\;\|/\\_])\s*){2,}", r"\1 ", filename)
 
     # Define all paired bracket patterns
     patterns = [
         # Handle paired brackets containing only special characters
-        (r'\(\s*\W*\s*\)', ''),  # (...)
-        (r'\[\s*\W*\s*\]', ''),  # [...]
-        (r'\{\s*\W*\s*\}', ''),  # {...}
-        (r'<\s*\W*\s*>', ''),  # <...>
-        (r'《\s*\W*\s*》', ''),  # 《...》
-        (r'〈\s*\W*\s*〉', ''),  # 〈...〉
-        (r'「\s*\W*\s*」', ''),  # 「...」
-        (r'『\s*\W*\s*』', ''),  # 『...』
-        (r'（\s*\W*\s*）', ''),  # （...）
-        (r'［\s*\W*\s*］', ''),  # ［...］
-        (r'【\s*\W*\s*】', ''),  # 【...】
-
+        (r"\(\s*\W*\s*\)", ""),  # (...)
+        (r"\[\s*\W*\s*\]", ""),  # [...]
+        (r"\{\s*\W*\s*\}", ""),  # {...}
+        (r"<\s*\W*\s*>", ""),  # <...>
+        (r"《\s*\W*\s*》", ""),  # 《...》
+        (r"〈\s*\W*\s*〉", ""),  # 〈...〉
+        (r"「\s*\W*\s*」", ""),  # 「...」
+        (r"『\s*\W*\s*』", ""),  # 『...』
+        (r"（\s*\W*\s*）", ""),  # （...）
+        (r"［\s*\W*\s*］", ""),  # ［...］
+        (r"【\s*\W*\s*】", ""),  # 【...】
         # Handle edge cases - remove all special characters and spaces at boundaries
         # If a left bracket is followed by a separator, or a separator is followed by a right bracket, remove them
-        (r'(?<=[\(\[\{<《〈「『（［【])(\s*[,\.\:\;\|/\\_]\s*)\b', ''),
-        (r'\b(\s*[,\.\:\;\|/\\_]\s*)(?=[】］）』」〉》>\}\]\)])', ''),
+        (r"(?<=[\(\[\{<《〈「『（［【])(\s*[,\.\:\;\|/\\_]\s*)\b", ""),
+        (r"\b(\s*[,\.\:\;\|/\\_]\s*)(?=[】］）』」〉》>\}\]\)])", ""),
     ]
 
     # Apply each pattern sequentially
@@ -499,11 +532,11 @@ def clean_filename(filename: str, legacy_charmap: bool = False) -> str:
         filename = re.sub(pattern, replacement, filename)
 
     # Merge multiple spaces
-    filename = re.sub(r'\s+', ' ', filename)
-    
+    filename = re.sub(r"\s+", " ", filename)
+
     # Strip trailing dots and spaces
     filename = filename.strip().strip(".").strip()
-    
+
     # --- NEW LOGIC FOR LEGACY CHARMAP ---
     if legacy_charmap:
         return apply_legacy_charmap(filename)
@@ -514,24 +547,24 @@ def clean_filename(filename: str, legacy_charmap: bool = False) -> str:
 def invalid_chars_to_fullwidth(filename):
     """
     Converts illegal Windows filename characters to visually similar full-width Unicode characters.
-    
+
     Args:
         filename (str): The raw string.
-        
+
     Returns:
         str: The safely converted string.
     """
     # Illegal characters to full-width characters
     invalid_to_fullwidth = {
-        '/': '／',
-        '\\': '＼',
-        ':': '：',
-        '*': '＊',
-        '?': '？',
-        '"': '＂',
-        '<': '＜',
-        '>': '＞',
-        '|': '｜',
+        "/": "／",
+        "\\": "＼",
+        ":": "：",
+        "*": "＊",
+        "?": "？",
+        '"': "＂",
+        "<": "＜",
+        ">": "＞",
+        "|": "｜",
     }
 
     for invalid_char, fullwidth_char in invalid_to_fullwidth.items():

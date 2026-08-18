@@ -22,7 +22,7 @@ def fun_args(subparsers, default_limit):
         "interactive",
         description="Interactively search for tracks and albums.",
         help="interactive mode",
-        aliases=["i", "fun"]
+        aliases=["i", "fun"],
     )
     interactive.add_argument(
         "-l",
@@ -109,7 +109,7 @@ def sync_playlist_args(subparsers):
         "sync-playlist",
         aliases=["sp"],
         description="Synchronize a local folder with a Qobuz playlist. "
-                    "Downloads missing tracks and removes tracks no longer in the playlist.",
+        "Downloads missing tracks and removes tracks no longer in the playlist.",
         help="sync a local folder with a Qobuz playlist",
     )
     sync_pl.add_argument(
@@ -117,7 +117,8 @@ def sync_playlist_args(subparsers):
         help="Qobuz playlist URL (e.g. https://play.qobuz.com/playlist/12345)",
     )
     sync_pl.add_argument(
-        "--yes", "-y",
+        "--yes",
+        "-y",
         action="store_true",
         help="Skip confirmation prompt before deleting/downloading",
     )
@@ -146,7 +147,7 @@ def add_common_arg(custom_parser, default_folder, default_quality):
         metavar="int",
         type=int,
         default=default_quality,
-        choices=[5,6,7,27],
+        choices=[5, 6, 7, 27],
         help=(
             'audio "quality" (5, 6, 7, 27)\n'
             f"[320, LOSSLESS, 24B<=96KHZ, 24B>96KHZ] (default: {default_quality})"
@@ -188,7 +189,7 @@ def add_common_arg(custom_parser, default_folder, default_quality):
     custom_parser.add_argument(
         "-fbff",
         "--fallback-folder-format",
-        metavar="PATTERN", 
+        metavar="PATTERN",
         help="""fallback pattern for formatting folder names when the main pattern fails.""",
     )
     custom_parser.add_argument(
@@ -285,42 +286,126 @@ def add_common_arg(custom_parser, default_folder, default_quality):
         help="force the generation of the Digital Booklet.txt (overrides config.ini)",
     )
 
-    tag_group = custom_parser.add_argument_group('tag options')
-    tag_group.add_argument("--no-album-artist-tag", action="store_true", help="don't add album artist tag")
-    tag_group.add_argument("--no-album-title-tag", action="store_true", help="don't add album title tag")
-    tag_group.add_argument("--no-track-artist-tag", action="store_true", help="don't add track artist tag")
-    tag_group.add_argument("--no-track-title-tag", action="store_true", help="don't add track title tag")
-    tag_group.add_argument("--no-release-date-tag", action="store_true", help="don't add release date tag")
-    tag_group.add_argument("--no-media-type-tag", action="store_true", help="don't add media type tag")
-    tag_group.add_argument("--no-genre-tag", action="store_true", help="don't add genre tag")
-    tag_group.add_argument("--no-replaygain-tag", action="store_true", help="Do not add ReplayGain tags to the audio files.")
-    tag_group.add_argument("--no-album-url-tag", action="store_true", help="Do not add the QOBUZ ALBUM URL tag to the audio files.")
-    tag_group.add_argument("--no-track-number-tag", action="store_true", help="don't add track number tag")
-    tag_group.add_argument("--no-track-total-tag", action="store_true", help="don't add total tracks tag")
-    tag_group.add_argument("--no-disc-number-tag", action="store_true", help="don't add disc number tag")
-    tag_group.add_argument("--no-disc-total-tag", action="store_true", help="don't add total discs tag")
-    tag_group.add_argument("--no-composer-tag", action="store_true", help="don't add composer tag")
-    tag_group.add_argument("--no-explicit-tag", action="store_true", help="don't add explicit advisory tag")
-    tag_group.add_argument("--no-copyright-tag", action="store_true", help="don't add copyright tag")
-    tag_group.add_argument("--no-label-tag", action="store_true", help="don't add label tag")
-    tag_group.add_argument("--no-upc-tag", action="store_true", help="don't add UPC/barcode tag")
-    tag_group.add_argument("--no-isrc-tag", action="store_true", help="don't add ISRC tag")
+    tag_group = custom_parser.add_argument_group("tag options")
+    tag_group.add_argument(
+        "--no-album-artist-tag", action="store_true", help="don't add album artist tag"
+    )
+    tag_group.add_argument(
+        "--no-album-title-tag", action="store_true", help="don't add album title tag"
+    )
+    tag_group.add_argument(
+        "--no-track-artist-tag", action="store_true", help="don't add track artist tag"
+    )
+    tag_group.add_argument(
+        "--no-track-title-tag", action="store_true", help="don't add track title tag"
+    )
+    tag_group.add_argument(
+        "--no-release-date-tag", action="store_true", help="don't add release date tag"
+    )
+    tag_group.add_argument(
+        "--no-media-type-tag", action="store_true", help="don't add media type tag"
+    )
+    tag_group.add_argument(
+        "--no-genre-tag", action="store_true", help="don't add genre tag"
+    )
+    tag_group.add_argument(
+        "--no-replaygain-tag",
+        action="store_true",
+        help="Do not add ReplayGain tags to the audio files.",
+    )
+    tag_group.add_argument(
+        "--no-album-url-tag",
+        action="store_true",
+        help="Do not add the QOBUZ ALBUM URL tag to the audio files.",
+    )
+    tag_group.add_argument(
+        "--no-track-number-tag", action="store_true", help="don't add track number tag"
+    )
+    tag_group.add_argument(
+        "--no-track-total-tag", action="store_true", help="don't add total tracks tag"
+    )
+    tag_group.add_argument(
+        "--no-disc-number-tag", action="store_true", help="don't add disc number tag"
+    )
+    tag_group.add_argument(
+        "--no-disc-total-tag", action="store_true", help="don't add total discs tag"
+    )
+    tag_group.add_argument(
+        "--no-composer-tag", action="store_true", help="don't add composer tag"
+    )
+    tag_group.add_argument(
+        "--no-explicit-tag", action="store_true", help="don't add explicit advisory tag"
+    )
+    tag_group.add_argument(
+        "--no-copyright-tag", action="store_true", help="don't add copyright tag"
+    )
+    tag_group.add_argument(
+        "--no-label-tag", action="store_true", help="don't add label tag"
+    )
+    tag_group.add_argument(
+        "--no-upc-tag", action="store_true", help="don't add UPC/barcode tag"
+    )
+    tag_group.add_argument(
+        "--no-isrc-tag", action="store_true", help="don't add ISRC tag"
+    )
 
-    artwork_group = custom_parser.add_argument_group('cover artwork options')
-    artwork_group.add_argument("-e", "--embed-art", action="store_true", help="embed cover art into audio files")
-    artwork_group.add_argument("--og-cover", action="store_true", help="download cover art in original quality")
-    artwork_group.add_argument("--no-cover", action="store_true", help="don't download cover art")
-    artwork_group.add_argument("--embedded-art-size", choices=["50", "100", "150", "300", "600", "max", "org"], default="org", help="size of embedded artwork (default: org)")
-    artwork_group.add_argument("--saved-art-size", choices=["50", "100", "150", "300", "600", "max", "org"], default="org", help="size of saved artwork (default: org)")
+    artwork_group = custom_parser.add_argument_group("cover artwork options")
+    artwork_group.add_argument(
+        "-e",
+        "--embed-art",
+        action="store_true",
+        help="embed cover art into audio files",
+    )
+    artwork_group.add_argument(
+        "--og-cover", action="store_true", help="download cover art in original quality"
+    )
+    artwork_group.add_argument(
+        "--no-cover", action="store_true", help="don't download cover art"
+    )
+    artwork_group.add_argument(
+        "--embedded-art-size",
+        choices=["50", "100", "150", "300", "600", "max", "org"],
+        default="org",
+        help="size of embedded artwork (default: org)",
+    )
+    artwork_group.add_argument(
+        "--saved-art-size",
+        choices=["50", "100", "150", "300", "600", "max", "org"],
+        default="org",
+        help="size of saved artwork (default: org)",
+    )
 
-    multiple_disc_group = custom_parser.add_argument_group('multiple disc options')
-    multiple_disc_group.add_argument("--multiple-disc-prefix", default="CD", metavar="PREFIX", help="Setting folder prefix for multiple discs album (default: CD)")
-    multiple_disc_group.add_argument("--multiple-disc-one-dir", action="store_true", help="store multiple disc releases in one directory")
-    multiple_disc_group.add_argument("--multiple-disc-track-format", metavar="FORMAT", help='track format for multiple disc releases')
+    multiple_disc_group = custom_parser.add_argument_group("multiple disc options")
+    multiple_disc_group.add_argument(
+        "--multiple-disc-prefix",
+        default="CD",
+        metavar="PREFIX",
+        help="Setting folder prefix for multiple discs album (default: CD)",
+    )
+    multiple_disc_group.add_argument(
+        "--multiple-disc-one-dir",
+        action="store_true",
+        help="store multiple disc releases in one directory",
+    )
+    multiple_disc_group.add_argument(
+        "--multiple-disc-track-format",
+        metavar="FORMAT",
+        help="track format for multiple disc releases",
+    )
 
-    parallel_group = custom_parser.add_argument_group('parallel download options')
-    parallel_group.add_argument("--max-workers", type=int, metavar="N", help="maximum number of parallel downloads (default: 3)")
-    parallel_group.add_argument("--segment-workers", type=int, metavar="N", help="threads used inside segmented-download fallback")
+    parallel_group = custom_parser.add_argument_group("parallel download options")
+    parallel_group.add_argument(
+        "--max-workers",
+        type=int,
+        metavar="N",
+        help="maximum number of parallel downloads (default: 3)",
+    )
+    parallel_group.add_argument(
+        "--segment-workers",
+        type=int,
+        metavar="N",
+        help="threads used inside segmented-download fallback",
+    )
 
 
 def qobuz_dl_args(default_quality=6, default_limit=20, default_folder=None):
@@ -336,10 +421,25 @@ def qobuz_dl_args(default_quality=6, default_limit=20, default_folder=None):
         ),
         formatter_class=argparse.RawTextHelpFormatter,
     )
-    parser.add_argument("-r", "--reset", action="store_true", help="create/reset config file")
-    parser.add_argument("-p", "--purge", action="store_true", help="purge/delete downloaded-IDs database")
-    parser.add_argument("--sync-db", metavar="PATH", nargs="?", const="DEFAULT", help="scan local directory to restore missing Qobuz IDs into the database")
-    parser.add_argument("-sc", "--show-config", action="store_true", help="show configuration")
+    parser.add_argument(
+        "-r", "--reset", action="store_true", help="create/reset config file"
+    )
+    parser.add_argument(
+        "-p",
+        "--purge",
+        action="store_true",
+        help="purge/delete downloaded-IDs database",
+    )
+    parser.add_argument(
+        "--sync-db",
+        metavar="PATH",
+        nargs="?",
+        const="DEFAULT",
+        help="scan local directory to restore missing Qobuz IDs into the database",
+    )
+    parser.add_argument(
+        "-sc", "--show-config", action="store_true", help="show configuration"
+    )
 
     subparsers = parser.add_subparsers(
         title="commands",

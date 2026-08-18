@@ -7,6 +7,7 @@ from qobuz_dl.color import CYAN, GREEN, RED, YELLOW, OFF
 
 logger = logging.getLogger(__name__)
 
+
 def _scan_local_tracks(directory):
     """
     Scans a local directory recursively to map existing audio files using their embedded Qobuz IDs.
@@ -24,20 +25,26 @@ def _scan_local_tracks(directory):
 
     for root, _, files in os.walk(directory):
         for fname in files:
-            if not fname.lower().endswith(('.flac', '.mp3')):
+            if not fname.lower().endswith((".flac", ".mp3")):
                 continue
 
             fpath = os.path.join(root, fname)
             track_id = None
 
             try:
-                if fpath.lower().endswith('.flac'):
+                if fpath.lower().endswith(".flac"):
                     audio = FLAC(fpath)
-                    track_id_list = audio.get("QDL_TRACK_ID") or audio.get("QOBUZTRACKID") or [None]
+                    track_id_list = (
+                        audio.get("QDL_TRACK_ID") or audio.get("QOBUZTRACKID") or [None]
+                    )
                     track_id = track_id_list[0]
                 else:
                     audio = ID3(fpath)
-                    track_txxx = audio.get("TXXX:QDL_TRACK_ID") or audio.get("TXXX:qdl_track_id") or audio.get("TXXX:QOBUZTRACKID")
+                    track_txxx = (
+                        audio.get("TXXX:QDL_TRACK_ID")
+                        or audio.get("TXXX:qdl_track_id")
+                        or audio.get("TXXX:QOBUZTRACKID")
+                    )
                     if track_txxx:
                         track_id = track_txxx.text[0]
             except Exception as e:
@@ -49,6 +56,7 @@ def _scan_local_tracks(directory):
                 untagged_files.append(fpath)
 
     return local_tracks, untagged_files
+
 
 async def _fetch_remote_tracks(client, playlist_id):
     """
@@ -75,6 +83,7 @@ async def _fetch_remote_tracks(client, playlist_id):
         all_items.extend(items)
     return playlist_name, all_items
 
+
 def _sanitize_dirname(name):
     """
     Removes illegal characters to create safe directory names across different operating systems.
@@ -87,8 +96,9 @@ def _sanitize_dirname(name):
     """
     invalid_chars = '<>:"/\\|?*'
     for char in invalid_chars:
-        name = name.replace(char, '_')
+        name = name.replace(char, "_")
     return name.strip()
+
 
 def _clean_empty_dirs(base_directory, exclude_dirs=None):
     """
@@ -114,12 +124,13 @@ def _clean_empty_dirs(base_directory, exclude_dirs=None):
             except OSError:
                 pass
 
+
 async def sync_playlist(qobuz_dl, url, folder, auto_confirm=False):
     """
     The main Bidirectional Playlist Synchronization engine.
 
-    Mirrors a Qobuz playlist locally by identifying missing tracks (to be downloaded) 
-    and orphan tracks (to be physically deleted, along with associated .lrc files). 
+    Mirrors a Qobuz playlist locally by identifying missing tracks (to be downloaded)
+    and orphan tracks (to be physically deleted, along with associated .lrc files).
     Maintains a "Flat Folder" architecture and automatically updates the .m3u playlist file.
 
     Args:
@@ -147,9 +158,13 @@ async def sync_playlist(qobuz_dl, url, folder, auto_confirm=False):
     logger.info(f"{YELLOW}URL : {url}{OFF}")
 
     logger.info(f"{CYAN}[1/4] Fetching playlist from Qobuz...{OFF}")
-    playlist_name, remote_items = await _fetch_remote_tracks(qobuz_dl.client, playlist_id)
+    playlist_name, remote_items = await _fetch_remote_tracks(
+        qobuz_dl.client, playlist_id
+    )
     remote_ids = {str(item["id"]): item for item in remote_items}
-    logger.info(f"{CYAN}      Found {len(remote_ids)} tracks in the Qobuz playlist.{OFF}")
+    logger.info(
+        f"{CYAN}      Found {len(remote_ids)} tracks in the Qobuz playlist.{OFF}"
+    )
 
     if not remote_ids:
         logger.info(f"{YELLOW}The Qobuz playlist is empty. Nothing to sync.{OFF}")
@@ -157,7 +172,7 @@ async def sync_playlist(qobuz_dl, url, folder, auto_confirm=False):
 
     safe_playlist_name = _sanitize_dirname(playlist_name)
     base_name = os.path.basename(os.path.normpath(folder))
-    
+
     if base_name == safe_playlist_name:
         target_folder = folder
     else:
@@ -188,10 +203,12 @@ async def sync_playlist(qobuz_dl, url, folder, auto_confirm=False):
 
     if not to_download_ids and not to_delete_ids:
         logger.info(f"\n{GREEN}✓ Folder is already in sync with the playlist!{OFF}")
-        
-        if not getattr(qobuz_dl, 'no_m3u_for_playlists', False):
+
+        if not getattr(qobuz_dl, "no_m3u_for_playlists", False):
             make_m3u(target_folder, remote_items)
-            logger.info(f"{CYAN}✓ Playlist .m3u file updated with latest track order.{OFF}")
+            logger.info(
+                f"{CYAN}✓ Playlist .m3u file updated with latest track order.{OFF}"
+            )
         return
 
     if to_delete_ids:
@@ -205,14 +222,18 @@ async def sync_playlist(qobuz_dl, url, folder, auto_confirm=False):
             item = remote_ids[tid]
             album_artist = item.get("album", {}).get("artist", {}).get("name")
             performer_name = item.get("performer", {}).get("name", "Unknown")
-            artist = performer_name if album_artist in [None, "Various Artists"] else album_artist
+            artist = (
+                performer_name
+                if album_artist in [None, "Various Artists"]
+                else album_artist
+            )
             title = item.get("title", "Unknown")
             logger.info(f"  {GREEN}↓ {artist} -- {title}{OFF}")
 
     if not auto_confirm:
         try:
             answer = input(f"\n{YELLOW}Proceed with sync? [y/N]: {OFF}").strip().lower()
-            if answer != 'y':
+            if answer != "y":
                 logger.info(f"{YELLOW}Sync cancelled by user.{OFF}")
                 return
         except (KeyboardInterrupt, EOFError):
@@ -269,7 +290,7 @@ async def sync_playlist(qobuz_dl, url, folder, auto_confirm=False):
     qobuz_dl.folder_format = original_folder_format
     qobuz_dl.settings.multiple_disc_one_dir = original_multi_disc
 
-    if not getattr(qobuz_dl, 'no_m3u_for_playlists', False):
+    if not getattr(qobuz_dl, "no_m3u_for_playlists", False):
         make_m3u(target_folder, remote_items)
 
     logger.info(f"\n{GREEN}━━━ SYNC COMPLETE ━━━{OFF}")

@@ -17,13 +17,13 @@ async def setup_client(config, section):
     resultante nunca funcionava corretamente. Agora usa o mesmo caminho
     assincrono que o resto do app usa (ver cli.py/core.py).
     """
-    app_id = config.get(section, 'app_id')
+    app_id = config.get(section, "app_id")
     # secrets no config.ini e' uma string separada por virgula -- precisa
     # virar lista, igual ao resto do app faz (ver cli.py).
-    secrets = [s for s in config.get(section, 'secrets', fallback='').split(",") if s]
-    auth_token = config.get(section, 'auth_token', fallback='')
-    email = config.get(section, 'email', fallback="") or None
-    pwd = config.get(section, 'password', fallback="") or None
+    secrets = [s for s in config.get(section, "secrets", fallback="").split(",") if s]
+    auth_token = config.get(section, "auth_token", fallback="")
+    email = config.get(section, "email", fallback="") or None
+    pwd = config.get(section, "password", fallback="") or None
 
     api = await Client.create(email, pwd, app_id, secrets, user_auth_token=auth_token)
     return api
@@ -31,8 +31,8 @@ async def setup_client(config, section):
 
 async def get_or_save_rss_link(config_path, config, section):
     """Retrieves the RSS link or asks the user for it on first run."""
-    if config.has_option(section, 'musicbutler_rss'):
-        rss_link = config.get(section, 'musicbutler_rss').strip()
+    if config.has_option(section, "musicbutler_rss"):
+        rss_link = config.get(section, "musicbutler_rss").strip()
         if rss_link:
             return rss_link
 
@@ -40,11 +40,13 @@ async def get_or_save_rss_link(config_path, config, section):
     # ask_async() em vez de ask() -- nao bloqueia o event loop enquanto
     # espera o usuario digitar (relevante se, no futuro, algo mais estiver
     # rodando concorrentemente).
-    rss_link = await questionary.text("Paste your private MusicButler RSS link here:").ask_async()
+    rss_link = await questionary.text(
+        "Paste your private MusicButler RSS link here:"
+    ).ask_async()
 
     if rss_link:
-        config.set(section, 'musicbutler_rss', rss_link)
-        with open(config_path, 'w') as configfile:
+        config.set(section, "musicbutler_rss", rss_link)
+        with open(config_path, "w") as configfile:
             config.write(configfile)
         print(f"{GREEN}[+] Link permanently saved to config!{OFF}\n")
 
@@ -55,7 +57,9 @@ def _fetch_rss_releases_sync(rss_url):
     """Downloads and parses the RSS/Atom feed ignoring XML namespaces (blocking)."""
     print(f"{CYAN}[*] Syncing with MusicButler...{OFF}")
     try:
-        req = urllib.request.Request(rss_url, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'})
+        req = urllib.request.Request(
+            rss_url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+        )
         with urllib.request.urlopen(req) as response:
             xml_data = response.read()
 
@@ -63,12 +67,12 @@ def _fetch_rss_releases_sync(rss_url):
         releases = []
 
         for elem in root.iter():
-            tag = elem.tag.split('}')[-1]
+            tag = elem.tag.split("}")[-1]
 
-            if tag in ['item', 'entry']:
+            if tag in ["item", "entry"]:
                 for child in elem.iter():
-                    child_tag = child.tag.split('}')[-1]
-                    if child_tag == 'title' and child.text:
+                    child_tag = child.tag.split("}")[-1]
+                    if child_tag == "title" and child.text:
                         releases.append(child.text.strip())
                         break
 
@@ -126,7 +130,9 @@ async def run_radar():
             print(f"{YELLOW}[!] No new releases found in the feed.{OFF}")
             return
 
-        print(f"{GREEN}[+] Found {len(releases)} new releases! Searching on Qobuz...{OFF}\n")
+        print(
+            f"{GREEN}[+] Found {len(releases)} new releases! Searching on Qobuz...{OFF}\n"
+        )
 
         # 4. Search on Qobuz and prepare the UI menu
         # Sequencial de proposito (nao paralelizado): evita disparar muitas
@@ -137,7 +143,11 @@ async def run_radar():
         for release_title in releases:
             search_result = await api.search_albums(release_title, limit=1)
 
-            if search_result and "albums" in search_result and search_result["albums"]["items"]:
+            if (
+                search_result
+                and "albums" in search_result
+                and search_result["albums"]["items"]
+            ):
                 album_data = search_result["albums"]["items"][0]
                 album_id = album_data["id"]
 
@@ -150,14 +160,16 @@ async def run_radar():
                 print(f"{YELLOW}[!] Not found on Qobuz: {release_title}{OFF}")
 
         if not choices:
-            print(f"{YELLOW}\n[!] None of the releases in the feed are currently available on Qobuz.{OFF}")
+            print(
+                f"{YELLOW}\n[!] None of the releases in the feed are currently available on Qobuz.{OFF}"
+            )
             return
 
         # 5. Interactive UI Menu
         print("\n")
         selected_album_ids = await questionary.checkbox(
             "🎧 Select releases to add to Favorites (Space to select, Enter to confirm):",
-            choices=choices
+            choices=choices,
         ).ask_async()
 
         if not selected_album_ids:
@@ -165,7 +177,9 @@ async def run_radar():
             return
 
         # 6. Add to Favorites
-        print(f"\n{CYAN}[*] Adding {len(selected_album_ids)} albums to favorites...{OFF}")
+        print(
+            f"\n{CYAN}[*] Adding {len(selected_album_ids)} albums to favorites...{OFF}"
+        )
         for album_id in selected_album_ids:
             try:
                 await api.add_favorite_album(album_id)
@@ -173,7 +187,9 @@ async def run_radar():
             except Exception as e:
                 print(f"{RED}  [-] Error with ID {album_id}: {e}{OFF}")
 
-        print(f"\n{GREEN}✅ Operation complete! You can now run qobuz-dl to download them.{OFF}")
+        print(
+            f"\n{GREEN}✅ Operation complete! You can now run qobuz-dl to download them.{OFF}"
+        )
     finally:
         if api is not None:
             try:
