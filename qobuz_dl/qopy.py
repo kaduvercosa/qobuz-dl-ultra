@@ -5,7 +5,7 @@ import logging
 import time
 import unicodedata
 
-import httpx
+import aiohttp
 # cryptography, nao pycryptodome: pycryptodome precisa de um framework
 # nativo compilado (_cpuid_c) pra deteccao de CPU que o a-Shell nao
 # empacota -- OSError garantido ao importar Crypto.Cipher la', nao um
@@ -132,9 +132,10 @@ class Client:
         # receber nenhum byte novo (reseta a cada chunk recebido, entao nao
         # incomoda downloads grandes que estao progredindo, so mata conexao
         # realmente travada). total=None = sem teto artificial pro download inteiro.
-        client_timeout = httpx.Timeout(15.0, read=90.0, connect=15.0)
-        limits = httpx.Limits(max_keepalive_connections=200, max_connections=200)
-        self.session = httpx.AsyncClient(headers=headers, timeout=client_timeout, http2=True, limits=limits)
+        client_timeout = aiohttp.ClientTimeout(
+            total=None, sock_connect=15, sock_read=90
+        )
+        self.session = aiohttp.ClientSession(headers=headers, timeout=client_timeout)
 
         self.base = "https://www.qobuz.com/api.json/0.2/"
         self.sec = None
@@ -160,7 +161,7 @@ class Client:
     async def close(self):
         """Closes the underlying aiohttp session. Always call this (or use `async with`) when done."""
         if self.session is not None:
-            await self.session.aclose()
+            await self.session.close()
 
     async def __aenter__(self):
         return self
@@ -455,7 +456,7 @@ class Client:
         # transitorias -- conexao caiu, timeout, erro 5xx do servidor. Nao
         # entra aqui erro de login invalido nem de app secret invalido
         # (AuthenticationError/InvalidAppSecretError sao levantadas dentro do
-        # bloco e NAO sao subclasses de httpx.HTTPError, entao propagam
+        # bloco e NAO sao subclasses de aiohttp.ClientError, entao propagam
         # na hora sem retry -- nao faz sentido tentar de novo um login errado).
         # Antes disso as buscas (search_albums/tracks/etc.) so tinham um
         # "except Exception: return {}" -- qualquer soluco passageiro da API
@@ -474,14 +475,16 @@ class Client:
                 await asyncio.sleep(wait)
 
             try:
-                r = await self.session.request(method, self.base + epoint, **req_kwargs)
-                if epoint == "user/login" and r.status_code == 400:
-                    text = r.text
-                    if "invalid" in text.lower():
-                        raise AuthenticationError("Invalid email or password.")
-                    else:
-                        logger.info(f"{GREEN}Logged: OK{OFF}")
-                elif (
+                async with self.session.request(
+                    method, self.base + epoint, **req_kwargs
+                ) as r:
+                    if epoint == "user/login" and r.status == 400:
+                        text = await r.text()
+                        if "invalid" in text.lower():
+                            raise AuthenticationError("Invalid email or password.")
+                        else:
+                            logger.info(f"{GREEN}Logged: OK{OFF}")
+                    elif (
                         epoint
                         in [
                             "track/getFileUrl",
@@ -489,23 +492,23 @@ class Client:
                             "file/url",
                             "track/lyricsUrl",
                         ]
-                        and r.status_code == 400
-                ):
-                    body = r.json()
-                    raise InvalidAppSecretError(
-                        f"Invalid app secret: {body}.\n" + RESET
-                    )
+                        and r.status == 400
+                    ):
+                        body = await r.json()
+                        raise InvalidAppSecretError(
+                            f"Invalid app secret: {body}.\n" + RESET
+                        )
 
-                if epoint == "user/get" and r.status_code == 400:
-                    return {}
+                    if epoint == "user/get" and r.status == 400:
+                        return {}
 
-                r.raise_for_status()
-                data = r.json()
+                    r.raise_for_status()
+                    data = await r.json()
 
                 # Apply string normalizer to the network call output
                 return self._normalize_json_strings(data)
 
-            except (httpx.HTTPError, asyncio.TimeoutError) as e:
+            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
                 last_network_error = e
                 if attempt == len(_retry_delays):
                     raise

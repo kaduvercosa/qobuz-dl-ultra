@@ -4,14 +4,15 @@ import os
 import shutil  # so' pra shutil.get_terminal_size() -- ver _get_safe_ncols()
 import sys
 import time
+import subprocess
 import re
 import threading
 import signal
 import textwrap
 from typing import Tuple
 import asyncio
-import aiohttp
-import aiofiles
+import concurrent.futures
+from concurrent.futures import ThreadPoolExecutor
 
 import requests
 # cryptography, nao pycryptodome: pycryptodome precisa carregar um
@@ -244,7 +245,15 @@ class Download:
         self.no_credits = no_credits
         self.booklet_only = booklet_only
 
-        self.http_session = None
+        self.http_session = requests.Session()
+        self.http_session.headers.update(
+            {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "Accept": "audio/webm,audio/ogg,audio/wav,audio/*;q=0.9,*/*;q=0.5",
+                "Connection": "keep-alive",
+            }
+        )
+
         self.fetch_lyrics = fetch_lyrics
         self.no_lrc_files = no_lrc_files
         if self.fetch_lyrics:
@@ -268,14 +277,6 @@ class Download:
     async def download_id_by_type(
         self, track=True, is_parallel=False, position_pool=None
     ):
-        self.http_session = aiohttp.ClientSession(
-            connector=aiohttp.TCPConnector(limit=200),
-            headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                "Accept": "audio/webm,audio/ogg,audio/wav,audio/*;q=0.9,*/*;q=0.5",
-                "Connection": "keep-alive",
-            }
-        )
         self.folder_format = self._original_folder_format
         self.track_format = self._original_track_format
         if self.settings:
@@ -291,9 +292,9 @@ class Download:
                     is_parallel=is_parallel, position_pool=position_pool
                 )
         finally:
-            await self.close_session()
+            self.close_session()
 
-    async def close_session(self):
+    def close_session(self):
         if hasattr(self, "lyrics_engine"):
             try:
                 self.lyrics_engine.close()
@@ -307,7 +308,7 @@ class Download:
         session = getattr(self, "http_session", None)
         if session is not None:
             try:
-                await session.close()
+                session.close()
             except Exception as e:
                 logger.debug(f"Falha ao fechar http_session (ignorado): {e}")
 
@@ -450,27 +451,33 @@ class Download:
             if self.settings.no_cover and not self.settings.embed_art:
                 pass
             else:
-                await _get_cover_and_embed(
-                    album_meta["image"]["large"],
-                    dirn,
-                    save_cover=not self.settings.no_cover,
-                    embed_art=self.settings.embed_art,
-                    saved_name="cover.jpg",
-                    embed_name=EMB_COVER_NAME,
-                    saved_art_size=self.settings.saved_art_size,
-                    embedded_art_size=self.settings.embedded_art_size,
-                    session=self.http_session,
-                    is_parallel=is_parallel,
-                    position_pool=position_pool,
+                await loop.run_in_executor(
+                    None,
+                    lambda: _get_cover_and_embed(
+                        album_meta["image"]["large"],
+                        dirn,
+                        save_cover=not self.settings.no_cover,
+                        embed_art=self.settings.embed_art,
+                        saved_name="cover.jpg",
+                        embed_name=EMB_COVER_NAME,
+                        saved_art_size=self.settings.saved_art_size,
+                        embedded_art_size=self.settings.embedded_art_size,
+                        session=self.http_session,
+                        is_parallel=is_parallel,
+                        position_pool=position_pool,
+                    ),
                 )
 
             if "goodies" in album_meta:
-                await _download_goodies(
-                    album_meta,
-                    dirn,
-                    session=self.http_session,
-                    is_parallel=is_parallel,
-                    position_pool=position_pool,
+                await loop.run_in_executor(
+                    None,
+                    lambda: _download_goodies(
+                        album_meta,
+                        dirn,
+                        session=self.http_session,
+                        is_parallel=is_parallel,
+                        position_pool=position_pool,
+                    ),
                 )
 
             if getattr(self, "booklet_only", False):
@@ -695,18 +702,21 @@ class Download:
             save_cover_now = not skip_saved_cover and not self.settings.no_cover
             if save_cover_now or self.settings.embed_art:
                 async with _get_dir_lock(dirn):
-                    await _get_cover_and_embed(
-                        track_meta["album"]["image"]["large"],
-                        dirn,
-                        save_cover=save_cover_now,
-                        embed_art=self.settings.embed_art,
-                        saved_name="cover.jpg",
-                        embed_name=(embed_cover_path and os.path.basename(embed_cover_path)) or "",
-                        saved_art_size=self.settings.saved_art_size,
-                        embedded_art_size=self.settings.embedded_art_size,
-                        session=self.http_session,
-                        is_parallel=is_parallel,
-                        position_pool=position_pool,
+                    await loop.run_in_executor(
+                        None,
+                        lambda: _get_cover_and_embed(
+                            track_meta["album"]["image"]["large"],
+                            dirn,
+                            save_cover=save_cover_now,
+                            embed_art=self.settings.embed_art,
+                            saved_name="cover.jpg",
+                            embed_name=(embed_cover_path and os.path.basename(embed_cover_path)) or "",
+                            saved_art_size=self.settings.saved_art_size,
+                            embedded_art_size=self.settings.embedded_art_size,
+                            session=self.http_session,
+                            is_parallel=is_parallel,
+                            position_pool=position_pool,
+                        ),
                     )
 
             is_mp3 = True if int(self.quality) == 5 else False
@@ -903,13 +913,16 @@ class Download:
 
                 if "url" in fresh_track_dict:
                     try:
-                        await tqdm_download(
-                            fresh_track_dict["url"],
-                            filename,
-                            desc,
-                            is_parallel=is_parallel,
-                            session=self.http_session,
-                            position_pool=position_pool,
+                        await loop.run_in_executor(
+                            None,
+                            lambda: tqdm_download(
+                                fresh_track_dict["url"],
+                                filename,
+                                desc,
+                                is_parallel=is_parallel,
+                                session=self.http_session,
+                                position_pool=position_pool,
+                            ),
                         )
                         success = True
                         final_fmt = attempt_fmt
@@ -923,16 +936,19 @@ class Download:
                         fresh_track_dict = await get_fresh_url(force_segments=True)
 
                 if "url_template" in fresh_track_dict:
-                    await tqdm_download_segments(
-                        fresh_track_dict,
-                        filename,
-                        desc,
-                        is_parallel=is_parallel,
-                        session=self.http_session,
-                        segment_workers=getattr(
-                            self.settings, "segment_workers", None
+                    await loop.run_in_executor(
+                        None,
+                        lambda: tqdm_download_segments(
+                            fresh_track_dict,
+                            filename,
+                            desc,
+                            is_parallel=is_parallel,
+                            session=self.http_session,
+                            segment_workers=getattr(
+                                self.settings, "segment_workers", None
+                            ),
+                            position_pool=position_pool,
                         ),
-                        position_pool=position_pool,
                     )
                     success = True
                     final_fmt = attempt_fmt
@@ -1467,12 +1483,12 @@ class Download:
                 "track/lyricsUrl", params, self.client.sec
             )
 
-            r = await self.client.session.request(
+            async with self.client.session.request(
                 "get", self.client.base + "track/lyricsUrl", params=params
-            )
-            if r.status_code != 200:
-                return None
-            lyrics_url_meta = r.json()
+            ) as r:
+                if r.status != 200:
+                    return None
+                lyrics_url_meta = await r.json()
 
             lyrics_json_url = None
             if isinstance(lyrics_url_meta, dict):
@@ -1488,13 +1504,17 @@ class Download:
             if not lyrics_json_url:
                 return None
 
-            resp = await self.http_session.get(lyrics_json_url, timeout=aiohttp.ClientTimeout(total=12))
+            loop = asyncio.get_event_loop()
+            resp = await loop.run_in_executor(
+                None,
+                lambda: self.http_session.get(lyrics_json_url, timeout=12),
+            )
 
-            if resp.status in (403, 404):
+            if resp.status_code in (403, 404):
                 return None
 
             resp.raise_for_status()
-            return await resp.json()
+            return resp.json()
         except Exception:
             return None
 
@@ -1562,7 +1582,7 @@ def _get_description(item: dict, track_title, multiple=None):
     return downloading_title
 
 
-async def tqdm_download(
+def tqdm_download(
     url_or_callable,
     fname,
     track_name,
@@ -1606,7 +1626,7 @@ async def tqdm_download(
     backoff_delays = [2, 4, 8, 16, 32]
 
     owns_session = session is None
-    http = session or aiohttp.ClientSession(connector=aiohttp.TCPConnector(limit=200))
+    http = session or requests.Session()
 
     try:
         for attempt in range(max_retries):
@@ -1624,17 +1644,18 @@ async def tqdm_download(
                     headers["Range"] = "bytes=0-"
                     mode = "wb"
 
-                r = await http.get(
+                r = http.get(
                     url,
                     allow_redirects=True,
+                    stream=True,
                     headers=headers,
-                    timeout=aiohttp.ClientTimeout(total=60, connect=10),
+                    timeout=(10, 60),
                 )
 
-                if r.status == 416:
+                if r.status_code == 416:
                     return
-                if r.status not in [200, 206]:
-                    raise Exception(f"Status Server: {r.status}")
+                if r.status_code not in [200, 206]:
+                    raise Exception(f"Status Server: {r.status_code}")
 
                 if total_size == 0:
                     total_size = downloaded_size + int(
@@ -1647,7 +1668,7 @@ async def tqdm_download(
                         f"{C}[+] In progress: {track_name} [{size_mb:.1f} MB]{O}"
                     )
 
-                bar = tqdm(
+                with open(fname, mode) as file, tqdm(
                     total=total_size,
                     unit="iB",
                     unit_scale=True,
@@ -1660,17 +1681,15 @@ async def tqdm_download(
                     ncols=ncols,
                     dynamic_ncols=dynamic_ncols,
                     disable=is_parallel,
-                )
-                async with aiofiles.open(fname, mode) as file:
-                    async for data in r.content.iter_chunked(1048576):
+                ) as bar:
+
+                    for data in r.iter_content(chunk_size=65536):
                         if abort_event.is_set():
-                            bar.close()
                             return
                         if data:
-                            size = await file.write(data)
+                            size = file.write(data)
                             downloaded_size += size
                             bar.update(size)
-                bar.close()
 
                 if downloaded_size >= total_size:
                     safe_print(f"{G}  L Completed: {track_name}{O}")
@@ -1687,7 +1706,7 @@ async def tqdm_download(
                     safe_print(
                         f"\n{Y}[!] Server block. Retrying in {wait}s ({attempt+1}/{max_retries}) | Error details: {e}{O}"
                     )
-                    await asyncio.sleep(wait)
+                    time.sleep(wait)
                 else:
                     if os.path.exists(fname):
                         os.remove(fname)
@@ -1702,7 +1721,7 @@ async def tqdm_download(
     finally:
         if owns_session:
             try:
-                await http.close()
+                http.close()
             except Exception as e:
                 logger.debug(
                     f"Falha ao fechar sessao HTTP do download segmentado (ignorado): {e}"
@@ -1738,7 +1757,7 @@ def _resolve_art_url(item, art_size, og_quality=False):
     return item
 
 
-async def _get_extra(
+def _get_extra(
     item,
     dirn,
     extra="cover.jpg",
@@ -1759,7 +1778,7 @@ async def _get_extra(
     item = _resolve_art_url(item, art_size, og_quality)
 
     try:
-        await tqdm_download(
+        tqdm_download(
             item,
             extra_file,
             extra,
@@ -1773,7 +1792,7 @@ async def _get_extra(
         )
 
 
-async def _get_cover_and_embed(
+def _get_cover_and_embed(
     item,
     dirn,
     save_cover,
@@ -1807,7 +1826,7 @@ async def _get_cover_and_embed(
     embed_url = _resolve_art_url(item, embedded_art_size) if embed_art else None
 
     if save_cover:
-        await _get_extra(
+        _get_extra(
             item, dirn, extra=saved_name, art_size=saved_art_size,
             session=session, label="cover art",
             is_parallel=is_parallel, position_pool=position_pool,
@@ -1832,7 +1851,7 @@ async def _get_cover_and_embed(
             logger.debug(f"Falha ao copiar cover.jpg pra embed, baixando de novo: {e}")
             # cai pro download normal abaixo
 
-    await _get_extra(
+    _get_extra(
         item, dirn, extra=embed_name, art_size=embedded_art_size,
         session=session, label="embedded cover art",
         is_parallel=is_parallel, position_pool=position_pool,
@@ -1863,7 +1882,7 @@ def _safe_get(d: dict, *keys, default=None):
     return res
 
 
-async def tqdm_download_segments(
+def tqdm_download_segments(
     track_url_dict,
     fname,
     track_name,
@@ -1884,25 +1903,36 @@ async def tqdm_download_segments(
     workers = segment_workers if segment_workers else 4
 
     owns_session = session is None
-    http = session or aiohttp.ClientSession(connector=aiohttp.TCPConnector(limit=200))
+    http = session or requests.Session()
 
-    async def get_seg_size(seg_num):
+    def get_seg_size(seg_num):
         if abort_event.is_set():
             return 0
         url = url_template.replace("$SEGMENT$", str(seg_num))
         try:
-            r = await http.head(url, timeout=aiohttp.ClientTimeout(total=5))
+            r = http.head(url, timeout=5)
             return int(r.headers.get("content-length", 0))
         except Exception as e:
+            # Antes retornava 0 sem dizer nada -- isso distorce silenciosamente
+            # o total_size calculado abaixo e a barra de progresso. Logado em
+            # debug pra dar pra distinguir "servidor realmente nao informou
+            # content-length" de "essa chamada HEAD falhou" quando o total
+            # bater estranho.
             logger.debug(f"HEAD falhou para segmento (assumindo tamanho 0): {e}")
             return 0
 
     total_size = 0
-    tasks_size = [get_seg_size(i) for i in range(n_segments + 1)]
-    results = await asyncio.gather(*tasks_size)
-    if abort_event.is_set():
-        return
-    total_size = sum(results)
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        futures_size = [ex.submit(get_seg_size, i) for i in range(n_segments + 1)]
+        for f in futures_size:
+            while True:
+                if abort_event.is_set():
+                    return
+                try:
+                    total_size += f.result(timeout=1.0)
+                    break
+                except concurrent.futures.TimeoutError:
+                    continue
 
     position = position_pool.acquire() if (is_parallel and position_pool) else 0
 
@@ -1926,15 +1956,15 @@ async def tqdm_download_segments(
         ncols = None
         dynamic_ncols = True
 
-    async def fetch_segment_fluid(seg_num):
+    def fetch_segment_fluid(seg_num):
         if abort_event.is_set():
             return bytearray()
         url = url_template.replace("$SEGMENT$", str(seg_num))
-        r = await http.get(url, timeout=aiohttp.ClientTimeout(total=15))
+        r = http.get(url, stream=True, timeout=15)
         r.raise_for_status()
         seg_data = bytearray()
 
-        async for chunk in r.content.iter_chunked(1048576):
+        for chunk in r.iter_content(chunk_size=65536):
             if abort_event.is_set():
                 return bytearray()
             seg_data.extend(chunk)
@@ -1942,7 +1972,7 @@ async def tqdm_download_segments(
         return seg_data
 
     try:
-        bar = tqdm(
+        with open(tmp_fname, "wb") as file, tqdm(
             total=total_size,
             unit="iB",
             unit_scale=True,
@@ -1954,62 +1984,64 @@ async def tqdm_download_segments(
             ncols=ncols,
             dynamic_ncols=dynamic_ncols,
             disable=is_parallel,
-        )
-        async with aiofiles.open(tmp_fname, "wb") as file:
+        ) as bar:
+
             segment_uuid = None
             for i in range(2):
-                seg_data = await fetch_segment_fluid(i)
+                seg_data = fetch_segment_fluid(i)
                 if abort_event.is_set():
-                    bar.close()
                     return
                 if i == 1:
                     segment_uuid = _get_qobuz_segment_uuid(seg_data)
                     if segment_uuid is None:
                         raise ConnectionError(f"Cannot find segment UUID for {fname}")
 
-                await file.write(_decrypt_qobuz_segment(seg_data, raw_key, segment_uuid))
+                file.write(_decrypt_qobuz_segment(seg_data, raw_key, segment_uuid))
 
             if n_segments >= 2:
-                # To limit concurrency but fetch concurrently, we can use a semaphore or gather batches
-                sem = asyncio.Semaphore(workers)
-
-                async def fetch_and_write(i):
-                    async with sem:
-                        seg_data = await fetch_segment_fluid(i)
-                        return seg_data
-
-                # For audio segments, writing them out of order to the file will corrupt the FLAC file unless we seek.
-                # Since we don't know the exact size of decrypted segments beforehand, we must decrypt and write sequentially.
-                tasks_seg = [asyncio.create_task(fetch_and_write(i)) for i in range(2, n_segments + 1)]
-                for task in tasks_seg:
-                    seg_data = await task
-                    if not abort_event.is_set():
-                        await file.write(_decrypt_qobuz_segment(seg_data, raw_key, segment_uuid))
-
-        bar.close()
+                with ThreadPoolExecutor(max_workers=workers) as executor:
+                    futures_seg = [
+                        executor.submit(fetch_segment_fluid, i)
+                        for i in range(2, n_segments + 1)
+                    ]
+                    for f in futures_seg:
+                        while True:
+                            if abort_event.is_set():
+                                return
+                            try:
+                                seg_data = f.result(timeout=1.0)
+                                break
+                            except concurrent.futures.TimeoutError:
+                                continue
+                        if not abort_event.is_set():
+                            file.write(
+                                _decrypt_qobuz_segment(seg_data, raw_key, segment_uuid)
+                            )
 
         if abort_event.is_set():
             return
         if not is_parallel:
             safe_print(f" {G}  > Assembling the final FLAC file...{O}")
 
-        remux = await asyncio.create_subprocess_exec(
-            "ffmpeg",
-            "-nostdin",
-            "-v",
-            "error",
-            "-y",
-            "-i",
-            tmp_fname,
-            "-c:a",
-            "copy",
-            "-f",
-            "flac",
-            fname,
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.PIPE,
+        remux = subprocess.run(
+            [
+                "ffmpeg",
+                "-nostdin",
+                "-v",
+                "error",
+                "-y",
+                "-i",
+                tmp_fname,
+                "-c:a",
+                "copy",
+                "-f",
+                "flac",
+                fname,
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            text=True,
         )
-        await remux.communicate()
         if remux.returncode != 0:
             raise ConnectionError(f"FFmpeg remux failed for {fname}")
 
@@ -2023,7 +2055,7 @@ async def tqdm_download_segments(
                 pass
         if owns_session:
             try:
-                await http.close()
+                http.close()
             except Exception as e:
                 logger.debug(
                     f"Falha ao fechar sessao HTTP no cleanup final (ignorado): {e}"
@@ -2099,7 +2131,7 @@ def _decrypt_qobuz_segment(segment_data, raw_key, segment_uuid):
     return bytes(buf)
 
 
-async def _download_goodies(
+def _download_goodies(
     album_meta, dirn, session=None, is_parallel=False, position_pool=None
 ):
     if abort_event.is_set():
@@ -2113,7 +2145,7 @@ async def _download_goodies(
             goody_name = sanitize_filename(
                 clean_filename(f'{album_meta.get("title")} ({goody.get("id")}).pdf')
             )
-            await _get_extra(
+            _get_extra(
                 goody.get("url"),
                 dirn,
                 extra=goody_name,

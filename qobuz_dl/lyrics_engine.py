@@ -43,13 +43,7 @@ class LyricsEngine:
             self.genius.verbose = False
 
         self._owns_session = session is None
-        if session:
-            self.session = session
-        else:
-            self.session = requests.Session()
-            adapter = requests.adapters.HTTPAdapter(pool_connections=20, pool_maxsize=20)
-            self.session.mount("http://", adapter)
-            self.session.mount("https://", adapter)
+        self.session = session or requests.Session()
 
     def close(self):
         """
