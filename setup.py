@@ -20,29 +20,6 @@ def read_file(fname):
     with open(fname, "r", encoding="utf-8") as f:
         return f.read()
 
-def read_requirements():
-    """
-    Le requirements.txt em vez de manter uma segunda lista hardcoded aqui
-    dentro. Antes, setup.py e requirements.txt eram duas fontes de verdade
-    independentes -- por exemplo, esta lista nao tinha nenhuma versao
-    pinada mesmo depois de requirements.txt ganhar as versoes minimas
-    (>=), entao um "pip install ." (via setup.py) e um "pip install -r
-    requirements.txt" podiam instalar coisas diferentes sem ninguem notar.
-    Os comentarios que existiam aqui sobre prompt_toolkit/lyricsgenius
-    (por que cada um precisa estar na lista) foram movidos pra
-    requirements.txt, que agora e o unico lugar que precisa ser mantido.
-    """
-    req_path = os.path.join(os.path.dirname(__file__), "requirements.txt")
-    with open(req_path, "r", encoding="utf-8") as f:
-        return [
-            line.strip()
-            for line in f
-            if line.strip() and not line.strip().startswith("#")
-        ]
-
-
-requirements = read_requirements()
-
 setup(
     name=pkg_name,
     # 2. VERSION READ AUTOMATICALLY FROM __init__.py
@@ -62,7 +39,22 @@ setup(
         "Bug Tracker": "https://github.com/kaduvercosa/qobuz-dl-ultra/issues",
     },
     
-    install_requires=requirements,
+    # Dependências fixadas diretamente como uma lista Python
+    install_requires=[
+        "pathvalidate>=3.0.0",
+        "requests>=2.31.0",
+        "charset_normalizer>=3.0.0",
+        "mutagen>=1.47.0",
+        "tqdm>=4.66.0",
+        "beautifulsoup4>=4.12.0",
+        "colorama>=0.4.6",
+        "cryptography>=42.0.0",
+        "keyring>=24.0.0",
+        "aiohttp>=3.9.0",
+        "questionary>=2.0.0",
+        "prompt_toolkit>=3.0.43",
+        "lyricsgenius>=3.0.1"
+    ],
     entry_points={
         "console_scripts": [
             # Keeping the original command names for backward compatibility
