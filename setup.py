@@ -48,7 +48,7 @@ setup(
         "tqdm>=4.66.0",
         "beautifulsoup4>=4.12.0",
         "colorama>=0.4.6",
-        "cryptography>=42.0.0",
+        "cryptography",  # ver qopy.py: pycryptodome quebra no a-Shell (framework nativo ausente)
         "keyring>=24.0.0",
         "aiohttp>=3.9.0",
         "questionary>=2.0.0",

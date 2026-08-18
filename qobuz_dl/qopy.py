@@ -6,9 +6,17 @@ import time
 import unicodedata
 
 import aiohttp
+# cryptography, nao pycryptodome: pycryptodome precisa de um framework
+# nativo compilado (_cpuid_c) pra deteccao de CPU que o a-Shell nao
+# empacota -- OSError garantido ao importar Crypto.Cipher la', nao um
+# problema de instalacao. A troca anterior partiu da premissa de que o
+# a-Shell emula Alpine via Rust (isso e' o iSH, um app diferente) e
+# precisaria compilar "cryptography" do zero; na pratica "cryptography"
+# ja' tinha rodado nesse mesmo a-Shell sem problema nenhum antes dessa
+# troca, entao voltando pra ela.
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.primitives import hashes, padding
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
 from qobuz_dl.exceptions import (
     AuthenticationError,
@@ -265,12 +273,18 @@ class Client:
             bytes: The 16-byte derived session key.
         """
         salt, info = self.session_infos.split(".")
-        return HKDF(
+        # API da "cryptography": HKDF(algorithm, length, salt, info) --
+        # RFC 5869 igualzinho ao HKDF do pycryptodome, so' com nomes de
+        # parametro diferentes (key_len->length, context->info,
+        # hashmod->algorithm). .derive(master) no lugar de passar o master
+        # como primeiro argumento posicional.
+        hkdf = HKDF(
             algorithm=hashes.SHA256(),
             length=16,
             salt=self._b64url_decode(salt),
             info=self._b64url_decode(info),
-        ).derive(bytes.fromhex(self.sec))
+        )
+        return hkdf.derive(bytes.fromhex(self.sec))
 
     def _unwrap_track_key(self, key_token):
         """
@@ -284,10 +298,11 @@ class Client:
         """
         _, wrapped, iv = key_token.split(".")
         decryptor = Cipher(
-            algorithms.AES(self.session_key),
-            modes.CBC(self._b64url_decode(iv)),
+            algorithms.AES(self.session_key), modes.CBC(self._b64url_decode(iv))
         ).decryptor()
         padded = decryptor.update(self._b64url_decode(wrapped)) + decryptor.finalize()
+        # padding.PKCS7(128) = bloco de 16 bytes (128 bits), mesmo padding
+        # que o unpad(data, 16) do pycryptodome fazia.
         unpadder = padding.PKCS7(128).unpadder()
         return unpadder.update(padded) + unpadder.finalize()
 

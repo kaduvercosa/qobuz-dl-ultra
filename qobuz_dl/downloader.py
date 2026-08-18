@@ -15,6 +15,12 @@ import concurrent.futures
 from concurrent.futures import ThreadPoolExecutor
 
 import requests
+# cryptography, nao pycryptodome: pycryptodome precisa carregar um
+# framework nativo (_cpuid_c) pra deteccao de CPU (AES-NI/CLMUL), e o
+# a-Shell nao empacota esse binario -- e' um OSError garantido, nao um
+# problema de configuracao (ver qopy.py pro historico completo da troca
+# de volta). "cryptography" ja' rodou nesse mesmo a-Shell antes, sem
+# precisar compilar nada com Rust.
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from pathvalidate import sanitize_filename, sanitize_filepath
 from tqdm import tqdm
@@ -441,30 +447,22 @@ class Download:
 
             if self.settings.no_cover:
                 safe_print(f"{OFF}[*] Skipping cover{OFF}")
+
+            if self.settings.no_cover and not self.settings.embed_art:
+                pass
             else:
                 await loop.run_in_executor(
                     None,
-                    lambda: _get_extra(
+                    lambda: _get_cover_and_embed(
                         album_meta["image"]["large"],
                         dirn,
-                        art_size=self.settings.saved_art_size,
+                        save_cover=not self.settings.no_cover,
+                        embed_art=self.settings.embed_art,
+                        saved_name="cover.jpg",
+                        embed_name=EMB_COVER_NAME,
+                        saved_art_size=self.settings.saved_art_size,
+                        embedded_art_size=self.settings.embedded_art_size,
                         session=self.http_session,
-                        label="cover art",
-                        is_parallel=is_parallel,
-                        position_pool=position_pool,
-                    ),
-                )
-
-            if self.settings.embed_art:
-                await loop.run_in_executor(
-                    None,
-                    lambda: _get_extra(
-                        album_meta["image"]["large"],
-                        dirn,
-                        extra=EMB_COVER_NAME,
-                        art_size=self.settings.embedded_art_size,
-                        session=self.http_session,
-                        label="embedded cover art",
                         is_parallel=is_parallel,
                         position_pool=position_pool,
                     ),
@@ -684,49 +682,42 @@ class Download:
 
             loop = asyncio.get_event_loop()
 
-            if getattr(self, "is_playlist", False) and not getattr(
+            skip_saved_cover = getattr(self, "is_playlist", False) and not getattr(
                 self, "playlist_as_albums", False
-            ):
+            )
+            if skip_saved_cover:
                 safe_print(
                     f"{OFF}[*] Skipping standard cover save to keep playlist folder clean{OFF}"
                 )
             elif self.settings.no_cover:
                 safe_print(f"{OFF}[*] Skipping cover{OFF}")
-            else:
-                async with _get_dir_lock(dirn):
-                    await loop.run_in_executor(
-                        None,
-                        lambda: _get_extra(
-                            track_meta["album"]["image"]["large"],
-                            dirn,
-                            art_size=self.settings.saved_art_size,
-                            session=self.http_session,
-                            label="cover art",
-                            is_parallel=is_parallel,
-                            position_pool=position_pool,
-                        ),
-                    )
 
             embed_cover_path = None
             if self.settings.embed_art:
                 unique_embed_name = f".embed_{self.item_id}.jpg"
                 embed_cover_path = os.path.join(dirn, unique_embed_name)
-
-                await loop.run_in_executor(
-                    None,
-                    lambda: _get_extra(
-                        track_meta["album"]["image"]["large"],
-                        dirn,
-                        extra=unique_embed_name,
-                        art_size=self.settings.embedded_art_size,
-                        session=self.http_session,
-                        label="embedded cover art",
-                        is_parallel=is_parallel,
-                        position_pool=position_pool,
-                    ),
-                )
             else:
                 safe_print(f"{OFF}[*] Skipping embedded art{OFF}")
+
+            save_cover_now = not skip_saved_cover and not self.settings.no_cover
+            if save_cover_now or self.settings.embed_art:
+                async with _get_dir_lock(dirn):
+                    await loop.run_in_executor(
+                        None,
+                        lambda: _get_cover_and_embed(
+                            track_meta["album"]["image"]["large"],
+                            dirn,
+                            save_cover=save_cover_now,
+                            embed_art=self.settings.embed_art,
+                            saved_name="cover.jpg",
+                            embed_name=(embed_cover_path and os.path.basename(embed_cover_path)) or "",
+                            saved_art_size=self.settings.saved_art_size,
+                            embedded_art_size=self.settings.embedded_art_size,
+                            session=self.http_session,
+                            is_parallel=is_parallel,
+                            position_pool=position_pool,
+                        ),
+                    )
 
             is_mp3 = True if int(self.quality) == 5 else False
 
@@ -1751,6 +1742,21 @@ def _get_title(item_dict):
     return item_title
 
 
+def _resolve_art_url(item, art_size, og_quality=False):
+    """
+    Aplica a mesma substituicao de resolucao que _get_extra() sempre fez
+    internamente (troca o "_600." da URL pelo tamanho pedido). Extraido pra
+    funcao separada pra dar pra COMPARAR duas URLs resolvidas -- por
+    exemplo, saved_art_size vs embedded_art_size -- sem ter que duplicar
+    essa logica de substituicao em outro lugar.
+    """
+    if og_quality:
+        art_size = "org"
+    if art_size in ["50", "100", "150", "300", "600", "max", "org"]:
+        return item.replace("_600.", f"_{art_size}.")
+    return item
+
+
 def _get_extra(
     item,
     dirn,
@@ -1769,10 +1775,7 @@ def _get_extra(
         safe_print(f"{CYAN}[*] Skipping {label}: {extra} (Already downloaded){OFF}")
         return
 
-    if og_quality:
-        art_size = "org"
-    if art_size in ["50", "100", "150", "300", "600", "max", "org"]:
-        item = item.replace("_600.", f"_{art_size}.")
+    item = _resolve_art_url(item, art_size, og_quality)
 
     try:
         tqdm_download(
@@ -1787,6 +1790,72 @@ def _get_extra(
         safe_print(
             f"  {YELLOW}[!] Skipping {label} '{extra}': URL unreachable ({e}){OFF}"
         )
+
+
+def _get_cover_and_embed(
+    item,
+    dirn,
+    save_cover,
+    embed_art,
+    saved_name,
+    embed_name,
+    saved_art_size,
+    embedded_art_size,
+    session=None,
+    is_parallel=False,
+    position_pool=None,
+):
+    """
+    Baixa a capa salva (cover.jpg) e a capa de embed, evitando baixar a
+    MESMA imagem duas vezes quando saved_art_size e embedded_art_size
+    resolvem pra' URL identica (que e' o caso mais comum -- por padrao
+    ambos vem "org" do template de config.ini gerado por cli.py). Antes,
+    _get_extra() era chamado duas vezes sempre que embed_art estava
+    ligado, sem checar se a segunda chamada ia baixar bytes identicos aos
+    da primeira.
+
+    Quando os tamanhos realmente diferem (usuario configurou resoluções
+    diferentes de proposito), baixa os dois de verdade -- nao ha' como
+    reaproveitar sem redimensionar a imagem localmente, e o projeto nao
+    tem Pillow como dependencia pra isso.
+    """
+    if abort_event.is_set():
+        return
+
+    saved_url = _resolve_art_url(item, saved_art_size) if save_cover else None
+    embed_url = _resolve_art_url(item, embedded_art_size) if embed_art else None
+
+    if save_cover:
+        _get_extra(
+            item, dirn, extra=saved_name, art_size=saved_art_size,
+            session=session, label="cover art",
+            is_parallel=is_parallel, position_pool=position_pool,
+        )
+
+    if not embed_art:
+        return
+
+    saved_file = os.path.join(dirn, saved_name)
+    embed_file = os.path.join(dirn, embed_name)
+
+    if os.path.isfile(embed_file):
+        safe_print(f"{CYAN}[*] Skipping embedded cover art: {embed_name} (Already downloaded){OFF}")
+        return
+
+    if save_cover and saved_url == embed_url and os.path.isfile(saved_file):
+        try:
+            shutil.copyfile(saved_file, embed_file)
+            safe_print(f"{CYAN}[*] Reusing cover art for embed (same resolution, avoided duplicate download){OFF}")
+            return
+        except OSError as e:
+            logger.debug(f"Falha ao copiar cover.jpg pra embed, baixando de novo: {e}")
+            # cai pro download normal abaixo
+
+    _get_extra(
+        item, dirn, extra=embed_name, art_size=embedded_art_size,
+        session=session, label="embedded cover art",
+        is_parallel=is_parallel, position_pool=position_pool,
+    )
 
 
 def _clean_format_str(folder: str, track: str, file_format: str) -> Tuple[str, str]:
@@ -2042,13 +2111,21 @@ def _decrypt_qobuz_segment(segment_data, raw_key, segment_uuid):
                     counter = bytes(buf[pointer : pointer + counter_len]) + (
                         b"\x00" * (16 - counter_len)
                     )
+                    # modes.CTR(counter) da "cryptography" toma o bloco de
+                    # 16 bytes INTEIRO como contador inicial e incrementa
+                    # como inteiro big-endian a cada bloco -- exatamente
+                    # equivalente ao Counter.new(128, initial_value=X,
+                    # little_endian=False) do pycryptodome, so' que sem
+                    # precisar montar o objeto Counter separado: o `counter`
+                    # (bytes) IS o X em forma binaria. Mesmo esquema de DRM
+                    # do Qobuz de antes, nada muda no resultado.
                     decryptor = Cipher(
                         algorithms.AES(raw_key), modes.CTR(counter)
                     ).decryptor()
-                    buf[frame_start:data_end] = (
-                        decryptor.update(bytes(buf[frame_start:data_end]))
-                        + decryptor.finalize()
-                    )
+                    plaintext = decryptor.update(
+                        bytes(buf[frame_start:data_end])
+                    ) + decryptor.finalize()
+                    buf[frame_start:data_end] = plaintext
                 pointer += counter_len
         pos += size
     return bytes(buf)
