@@ -35,6 +35,17 @@ from qobuz_dl.utils import (
 )
 from qobuz_dl.settings import QobuzDLSettings
 
+# Atraso (em segundos) entre a "largada" de cada item nos primeiros
+# workers de um download em lote paralelo (playlist, discografia, lote de
+# URLs, Last.fm). Sem isso, os N primeiros itens comecam quase juntos (o
+# semaforo libera todos os slots de uma vez em t=0) e todos os cabecalhos
+# completos aparecem empilhados de uma vez, poluindo o terminal. Com o
+# atraso, so' o 1o item comeca na hora (feedback imediato de que esta'
+# funcionando), e os proximos vao entrando aos poucos. So' se aplica aos
+# primeiros `batch_workers` itens -- depois disso, cada slot novo so' abre
+# quando uma faixa de verdade termina, o que ja' escalona naturalmente.
+HEADER_STAGGER_DELAY = 1.5
+
 # --- UI STYLE FOR PROMPT_TOOLKIT (100% CONTRAST FIX) ---
 pt_style = Style.from_dict(
     {
@@ -427,6 +438,7 @@ class QobuzDL:
         playlist_index=None,
         is_parallel=False,
         position_pool=None,
+        suppress_header=False,
     ):
         if handle_download_id(
             self.downloads_db, item_id, add_id=False, quality=self.quality
@@ -462,7 +474,10 @@ class QobuzDL:
                 playlist_as_albums=self.playlist_as_albums,
             )
             await dloader.download_id_by_type(
-                not album, is_parallel=is_parallel, position_pool=position_pool
+                not album,
+                is_parallel=is_parallel,
+                position_pool=position_pool,
+                suppress_header=suppress_header,
             )
         except (requests.exceptions.RequestException, NonStreamable) as e:
             logger.error(f"{RED}Error getting release: {e}. Skipping...")
@@ -510,10 +525,6 @@ class QobuzDL:
                 )
                 return
             content_name = content[0]["name"]
-            logger.info(
-                f"{YELLOW}Downloading all the music from {content_name} "
-                f"({url_type})!"
-            )
             new_path = create_and_return_dir(
                 os.path.join(self.directory, sanitize_filename(content_name))
             )
@@ -558,8 +569,6 @@ class QobuzDL:
                 logger.info(
                     f"{YELLOW}[*] Evaluating {len(items)} releases (unwanted types will be skipped silently)...{OFF}"
                 )
-            else:
-                logger.info(f"{YELLOW}{len(items)} downloads in queue{OFF}")
 
             is_playlist = url_type == "playlist"
             if is_playlist and not getattr(self, "playlist_as_albums", False):
@@ -570,9 +579,15 @@ class QobuzDL:
                 self.settings.multiple_disc_one_dir = True
 
             is_track_batch = type_dict["iterable_key"] == "tracks"
-            batch_workers = int(getattr(self.settings, "max_workers", 3))
+            batch_workers = int(getattr(self.settings, "max_workers", 1))
+            # Paralelo so' compensa com >1 item pra baixar ao mesmo tempo --
+            # com 1 so' item, cai pro modo sequencial (barra de progresso ao
+            # vivo em vez da linha "silenciosa" do modo multithread).
             can_parallelize = (
-                is_track_batch and batch_workers > 1 and getattr(self, "delay", 0) <= 0
+                is_track_batch
+                and batch_workers > 1
+                and len(items) > 1
+                and getattr(self, "delay", 0) <= 0
             )
             position_pool = (
                 downloader._PositionPool(batch_workers) if can_parallelize else None
@@ -580,10 +595,32 @@ class QobuzDL:
             semaphore = asyncio.Semaphore(batch_workers) if can_parallelize else None
             pending_tasks = []
 
-            if can_parallelize:
-                logger.info(
-                    f"{YELLOW}[*] Multithreading Enabled ({batch_workers} workers).{OFF}"
+            mode_label = (
+                f"Paralelo ({batch_workers} workers)" if can_parallelize else "Sequencial"
+            )
+
+            # --- INÍCIO DA MODIFICAÇÃO DO CABEÇALHO ---
+            if is_playlist:
+                from qobuz_dl.downloader import print_download_header
+                from qobuz_dl.utils import format_duration
+
+                p_name = content_name
+                p_owner = content[0].get("owner", {}).get("name", "Unknown") if content else "Unknown"
+                p_count = str(len(items))
+                dur_raw = content[0].get("duration", 0) if content else 0
+                p_dur = format_duration(dur_raw) if dur_raw else "--:--"
+
+                print_download_header(
+                    "PLAYLIST",
+                    [
+                        ("Nome", p_name),
+                        ("Criador", p_owner),
+                        ("Faixas", p_count),
+                        ("Duração", p_dur),
+                        ("Modo", mode_label),
+                    ]
                 )
+            # --- FIM DA MODIFICAÇÃO DO CABEÇALHO ---
 
             for idx, item in enumerate(items, start=1):
                 if (
@@ -675,6 +712,9 @@ class QobuzDL:
                     async def _bounded_track_download(
                         item_id=item_id_captured, idx=idx_captured
                     ):
+                        stagger_index = idx - 1
+                        if stagger_index < batch_workers:
+                            await asyncio.sleep(stagger_index * HEADER_STAGGER_DELAY)
                         async with semaphore:
                             await self.download_from_id(
                                 item_id,
@@ -684,6 +724,7 @@ class QobuzDL:
                                 playlist_index=idx,
                                 is_parallel=True,
                                 position_pool=position_pool,
+                                suppress_header=is_playlist,
                             )
 
                     pending_tasks.append(_bounded_track_download())
@@ -694,6 +735,7 @@ class QobuzDL:
                         new_path,
                         is_playlist=is_playlist,
                         playlist_index=idx,
+                        suppress_header=is_playlist,
                     )
 
             if pending_tasks:
@@ -729,51 +771,68 @@ class QobuzDL:
             logger.info(f"{OFF}Nothing to download")
             return
 
-        batch_workers = int(getattr(self.settings, "max_workers", 3))
-        can_parallelize = batch_workers > 1 and getattr(self, "delay", 0) <= 0
+        batch_workers = int(getattr(self.settings, "max_workers", 1))
+        parallel_allowed = batch_workers > 1 and getattr(self, "delay", 0) <= 0
 
+        # Classifica sempre (independente de paralelo estar ligado) so' pra
+        # saber quantas sao faixas avulsas -- a decisao de paralelizar vem
+        # depois, com a contagem em maos.
         track_urls = []
         other_urls = []
+        for i, url in enumerate(urls):
+            probe_url = url.replace("open.qobuz.com", "play.qobuz.com")
+            if "last.fm" in probe_url or os.path.isfile(probe_url):
+                other_urls.append((i, url))
+                continue
+            try:
+                url_type, item_id = get_url_info(probe_url)
+            except (KeyError, IndexError):
+                other_urls.append((i, url))
+                continue
+            if url_type == "track":
+                track_urls.append((i, url, item_id))
+            else:
+                other_urls.append((i, url))
 
-        if can_parallelize:
-            for i, url in enumerate(urls):
-                probe_url = url.replace("open.qobuz.com", "play.qobuz.com")
-                if "last.fm" in probe_url or os.path.isfile(probe_url):
-                    other_urls.append((i, url))
-                    continue
-                try:
-                    url_type, item_id = get_url_info(probe_url)
-                except (KeyError, IndexError):
-                    other_urls.append((i, url))
-                    continue
-                if url_type == "track":
-                    track_urls.append((i, url, item_id))
-                else:
-                    other_urls.append((i, url))
-        else:
-            other_urls = list(enumerate(urls))
+        total_track_urls = len(track_urls)
+
+        # So' compensa paralelizar com >1 faixa avulsa pra baixar ao mesmo
+        # tempo -- com 1 so', melhor cair pro caminho sequencial normal
+        # (handle_url), que mostra a barra de progresso ao vivo.
+        use_parallel = parallel_allowed and total_track_urls > 1
+        if not use_parallel and track_urls:
+            other_urls.extend([(i, u) for i, u, _ in track_urls])
+            other_urls.sort(key=lambda pair: pair[0])
+            track_urls = []
+
+        mode_label = (
+            f"Paralelo ({batch_workers} workers)" if use_parallel else "Sequencial"
+        )
+        # Removido: resumo do lote (LOTE DE URLS) por decisao explicita do
+        # usuario -- agora cada item (faixa avulsa ou "outro") mostra seu
+        # proprio cabeçalho completo, sem nenhum resumo por cima.
 
         if track_urls:
-            logger.info(
-                f"{YELLOW}[*] Multithreading Enabled ({batch_workers} workers).{OFF}"
-            )
             position_pool = downloader._PositionPool(batch_workers)
             semaphore = asyncio.Semaphore(batch_workers)
 
-            async def _bounded_track_url(original_url, item_id):
+            async def _bounded_track_url(original_url, item_id, stagger_index=0):
+                if stagger_index < batch_workers:
+                    await asyncio.sleep(stagger_index * HEADER_STAGGER_DELAY)
                 async with semaphore:
                     await self.download_from_id(
                         item_id,
                         False,
                         is_parallel=True,
                         position_pool=position_pool,
+                        suppress_header=False,
                     )
                 self.mark_url_done_in_file(txt_file, original_url)
 
             await asyncio.gather(
                 *[
-                    _bounded_track_url(original_url, item_id)
-                    for _, original_url, item_id in track_urls
+                    _bounded_track_url(original_url, item_id, stagger_index=i)
+                    for i, (_, original_url, item_id) in enumerate(track_urls)
                 ]
             )
 
@@ -1382,10 +1441,6 @@ class QobuzDL:
         pl_title = sanitize_filename(f"LastFM_Playlist_{pl_id}")
         pl_directory = os.path.join(self.directory, pl_title)
 
-        logger.info(
-            f"{YELLOW}Downloading playlist: {pl_title} ({len(tracks_list)} tracks){RESET}"
-        )
-
         track_ids = await self.client.get_track_ids_from_list(tracks_list)
 
         if not track_ids:
@@ -1399,18 +1454,39 @@ class QobuzDL:
             self.folder_format = "."
             self.settings.multiple_disc_one_dir = True
 
-        batch_workers = int(getattr(self.settings, "max_workers", 3))
-        can_parallelize = batch_workers > 1 and getattr(self, "delay", 0) <= 0
+        batch_workers = int(getattr(self.settings, "max_workers", 1))
+        # Idem aos outros caminhos: paralelo so' com >1 faixa encontrada.
+        can_parallelize = (
+            batch_workers > 1
+            and len(track_ids) > 1
+            and getattr(self, "delay", 0) <= 0
+        )
         position_pool = (
             downloader._PositionPool(batch_workers) if can_parallelize else None
         )
         semaphore = asyncio.Semaphore(batch_workers) if can_parallelize else None
         pending_tasks = []
 
-        if can_parallelize:
-            logger.info(
-                f"{YELLOW}[*] Multithreading Enabled ({batch_workers} workers).{OFF}"
-            )
+        mode_label = (
+            f"Paralelo ({batch_workers} workers)" if can_parallelize else "Sequencial"
+        )
+        # Removido: resumo do lote (LAST.FM PLAYLIST) por decisao explicita
+        # do usuario -- agora cada faixa mostra seu proprio cabeçalho
+        # completo, sem nenhum resumo por cima. As info que estavam aqui
+        # (total encontrado na Last.fm / quantas casaram no Qobuz) ja'
+        # foram logadas antes deste ponto (get_track_ids_from_list).
+
+        # --- INÍCIO DA MODIFICAÇÃO DO CABEÇALHO ---
+        from qobuz_dl.downloader import print_download_header
+        print_download_header(
+            "LAST.FM PLAYLIST",
+            [
+                ("Playlist", pl_title),
+                ("Faixas", str(len(track_ids))),
+                ("Modo", mode_label),
+            ]
+        )
+        # --- FIM DA MODIFICAÇÃO DO CABEÇALHO ---
 
         for idx, t_id in enumerate(track_ids, start=1):
             if can_parallelize:
@@ -1418,6 +1494,9 @@ class QobuzDL:
                 idx_captured = idx
 
                 async def _bounded_track_download(t_id=t_id_captured, idx=idx_captured):
+                    stagger_index = idx - 1
+                    if stagger_index < batch_workers:
+                        await asyncio.sleep(stagger_index * HEADER_STAGGER_DELAY)
                     async with semaphore:
                         try:
                             await self.download_from_id(
@@ -1428,6 +1507,7 @@ class QobuzDL:
                                 playlist_index=idx,
                                 is_parallel=True,
                                 position_pool=position_pool,
+                                suppress_header=True,
                             )
                         except Exception as e:
                             logger.error(
@@ -1438,7 +1518,12 @@ class QobuzDL:
             else:
                 try:
                     await self.download_from_id(
-                        t_id, False, pl_directory, is_playlist=True, playlist_index=idx
+                        t_id,
+                        False,
+                        pl_directory,
+                        is_playlist=True,
+                        playlist_index=idx,
+                        suppress_header=True,
                     )
                 except Exception as e:
                     logger.error(f"{RED}[!] Failed to queue track ID {t_id}: {e}{OFF}")

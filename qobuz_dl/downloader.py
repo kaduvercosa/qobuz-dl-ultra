@@ -26,7 +26,7 @@ from pathvalidate import sanitize_filename, sanitize_filepath
 from tqdm import tqdm
 
 import qobuz_dl.metadata as metadata
-from qobuz_dl.color import OFF, GREEN, RED, YELLOW, CYAN
+from qobuz_dl.color import OFF, GREEN, RED, YELLOW, CYAN, RESET
 from qobuz_dl.exceptions import NonStreamable
 from qobuz_dl.settings import QobuzDLSettings
 from qobuz_dl.utils import get_album_artist, clean_filename, verify_audio_integrity
@@ -93,6 +93,55 @@ def safe_print(*args, **kwargs):
         text = " ".join(map(str, args))
         end = kwargs.get("end", "\n")
         tqdm.write(text, end=end)
+
+
+def print_download_header(kind: str, rows: list) -> None:
+    """
+    Cabecalho padronizado impresso uma unica vez, no inicio de qualquer
+    download (album, faixa unica, playlist ou lote de urls). Mesmo formato
+    pros 4 tipos -- so' as linhas (rows) mudam -- pra ficar facil escanear
+    visualmente o que vai ser baixado antes das linhas de progresso comecarem.
+
+    kind: rotulo do topo ("ALBUM", "FAIXA", "PLAYLIST", "LOTE DE URLS"...) --
+          impresso entre colchetes (ex: "[ÁLBUM]"), com uma linha em branco
+          logo depois pra separar visualmente do bloco de dados.
+    rows: lista de tuplas (label, valor) exibidas alinhadas, ex.:
+          [("Artista", "Daft Punk"), ("Faixas", "14")]
+
+    Cor: usa RESET (Style.RESET_ALL) apos cada trecho colorido, nao OFF
+    (Style.DIM) -- DIM so' reduz o brilho, nao limpa a cor de fato, entao o
+    ciano "vazava" pro resto da linha (inclusive os valores, que nunca
+    tinham cor propria). RESET limpa de verdade, os valores voltam a usar a
+    cor padrao do terminal.
+
+    Barra: largura calculada com base no conteudo real (maior linha entre o
+    "[kind]" e as rows), com teto de 44 e piso de 20 -- antes era sempre 44
+    fixo, estourando a tela em telas estreitas (ex: A-Shell no iPhone) mesmo
+    quando o conteudo era bem mais curto que isso.
+    """
+    label_width = max((len(label) for label, _ in rows), default=8)
+    BOLD = "\033[1m"  # Código ANSI para negrito
+
+    header_line = f" [{kind}]"
+    row_lines = [f" {label.upper():<{label_width}}  {value}" for label, value in rows]
+    content_width = max([len(header_line)] + [len(l) for l in row_lines], default=20)
+    bar_width = max(20, min(content_width, 44))
+    bar = "━" * bar_width
+
+    # [FAIXA] em negrito com a cor padrão (branco/preto). Linhas divisórias em Ciano.
+    lines = [
+        f"\n{CYAN}{bar}{RESET}",
+        f"{BOLD} [{kind}]{RESET}",
+        ""
+    ]
+
+    # Rótulo em Ciano, Valor na cor padrão (branco/preto)
+    for label, value in rows:
+        lines.append(f" {CYAN}{label.upper():<{label_width}}{RESET}  {value}")
+
+    # Linha divisória final com a quebra de linha extra (\n) para espaçamento
+    lines.append(f"{CYAN}{bar}{RESET}\n")
+    safe_print("\n".join(lines))
 
 
 def emit_progress_json(settings, event, **fields):
@@ -275,7 +324,7 @@ class Download:
         )
 
     async def download_id_by_type(
-        self, track=True, is_parallel=False, position_pool=None
+        self, track=True, is_parallel=False, position_pool=None, suppress_header=False
     ):
         self.folder_format = self._original_folder_format
         self.track_format = self._original_track_format
@@ -286,10 +335,12 @@ class Download:
 
         try:
             if not track:
-                await self.download_release()
+                await self.download_release(suppress_header=suppress_header)
             else:
                 await self.download_track(
-                    is_parallel=is_parallel, position_pool=position_pool
+                    is_parallel=is_parallel,
+                    position_pool=position_pool,
+                    suppress_header=suppress_header,
                 )
         finally:
             self.close_session()
@@ -312,7 +363,7 @@ class Download:
             except Exception as e:
                 logger.debug(f"Falha ao fechar http_session (ignorado): {e}")
 
-    async def download_release(self):
+    async def download_release(self, suppress_header=False):
         album_meta = await self.client.get_album_meta(self.item_id)
 
         if not album_meta.get("streamable"):
@@ -338,9 +389,9 @@ class Download:
             )
             return
 
-        safe_print(
-            f"\n{YELLOW}Baixando Álbum: {album_title} | Qualidade: {file_format} ({bit_depth}/{sampling_rate}){OFF}"
-        )
+        track_count = len(album_meta.get("tracks", {}).get("items", []))
+        artist_name = _safe_get(album_meta, "artist", "name", default="")
+        release_year = str(album_meta.get("release_date_original", ""))[:4]
 
         album_attr = self._get_album_attr(
             album_meta, album_title, file_format, bit_depth, sampling_rate
@@ -403,18 +454,32 @@ class Download:
                 # nada depois dele na linha de comando.
                 logger.debug(f"--delay com valor invalido, ignorando: {e}")
 
-        active_workers = int(getattr(self.settings, "max_workers", 3))
+        active_workers = int(getattr(self.settings, "max_workers", 1))
         is_parallel = False
+        mode_label = "Sequencial"
 
         if delay_time > 0:
-            safe_print(
-                f"{YELLOW}[*] Safety Delay active: Multithreading disabled (Sequential mode).{OFF}"
-            )
             active_workers = 1
-        elif active_workers > 1:
+            mode_label = "Sequencial (Safety Delay ativo)"
+        elif active_workers > 1 and track_count > 1:
+            # So' vale a pena paralelizar quando ha' mais de 1 faixa pra
+            # baixar ao mesmo tempo -- com 1 faixa so', paralelo nao ganha
+            # nada e so' troca a barra de progresso ao vivo pela linha
+            # "silenciosa" do modo multithread.
             is_parallel = True
-            safe_print(
-                f"{YELLOW}[*] Multithreading Enabled ({active_workers} workers).{OFF}"
+            mode_label = f"Paralelo ({active_workers} workers)"
+
+        if not suppress_header:
+            print_download_header(
+                "ÁLBUM",
+                [
+                    ("Álbum", album_title),
+                    ("Artista", artist_name),
+                    ("Ano", release_year or "--"),
+                    ("Faixas", str(track_count)),
+                    ("Qualidade", f"{file_format} ({bit_depth}bit/{float(sampling_rate):g}kHz)" if bit_depth else file_format),
+                    ("Modo", mode_label),
+                ],
             )
 
         position_pool = _PositionPool(active_workers) if is_parallel else None
@@ -614,9 +679,13 @@ class Download:
         )
 
         if failed_tracks == 0:
-            safe_print(f"{GREEN}Completed{OFF}")
+            safe_print(f"{GREEN}Completed: {track_count} faixas -- {album_title}{OFF}")
+        else:
+            safe_print(
+                f"{YELLOW}Completed with {failed_tracks} failed track(s) -- {album_title}{OFF}"
+            )
 
-    async def download_track(self, is_parallel=False, position_pool=None):
+    async def download_track(self, is_parallel=False, position_pool=None, suppress_header=False):
         parse = await self.client.get_track_url(self.item_id, self.quality)
         if "sample" not in parse and parse.get("sampling_rate"):
             track_meta = await self.client.get_track_meta(self.item_id)
@@ -630,14 +699,7 @@ class Download:
 
             track_title = _get_title(track_meta)
             artist = _safe_get(track_meta, "performer", "name")
-            safe_print(f"\n{YELLOW}Baixando Faixa: {artist} - {track_title}{OFF}")
-            emit_progress_json(
-                self.settings,
-                "track_start",
-                track_id=self.item_id,
-                artist=artist,
-                title=track_title,
-            )
+            album_name = track_meta.get("album", {}).get("title", "--")
 
             url = track_meta.get("album", {}).get("url", "")
             release_date = track_meta.get("release_date_original", "")
@@ -645,6 +707,24 @@ class Download:
                 track_meta, is_track_id=True, track_url_dict=parse
             )
             file_format, quality_met, bit_depth, sampling_rate = format_info
+
+            if not suppress_header:
+                print_download_header(
+                    "FAIXA",
+                    [
+                        ("Faixa", track_title),
+                        ("Artista", artist),
+                        ("Álbum", album_name),
+                        ("Qualidade", f"{file_format} ({bit_depth}bit/{float(sampling_rate):g}kHz)" if bit_depth else file_format),
+                    ],
+                )
+            emit_progress_json(
+                self.settings,
+                "track_start",
+                track_id=self.item_id,
+                artist=artist,
+                title=track_title,
+            )
 
             folder_format, track_format = _clean_format_str(
                 self.folder_format, self.track_format, str(bit_depth)
@@ -686,9 +766,11 @@ class Download:
                 self, "playlist_as_albums", False
             )
             if skip_saved_cover:
-                safe_print(
-                    f"{OFF}[*] Skipping standard cover save to keep playlist folder clean{OFF}"
-                )
+                # Imprime o aviso apenas na primeira faixa da playlist
+                if getattr(self, "playlist_track_number", 1) == 1:
+                    safe_print(
+                        f"{OFF}[*] Skipping standard cover save to keep playlist folder clean{OFF}"
+                    )
             elif self.settings.no_cover:
                 safe_print(f"{OFF}[*] Skipping cover{OFF}")
 
@@ -1665,7 +1747,7 @@ def tqdm_download(
                 if is_parallel and downloaded_size == 0 and attempt == 0:
                     size_mb = total_size / (1024 * 1024)
                     safe_print(
-                        f"{C}[+] In progress: {track_name} [{size_mb:.1f} MB]{O}"
+                        f"{C}[+] Em Progresso: {track_name} [{size_mb:.1f} MB]{O}"
                     )
 
                 with open(fname, mode) as file, tqdm(
@@ -1949,7 +2031,7 @@ def tqdm_download_segments(
         ncols = position_pool.ncols if position_pool else _get_safe_ncols()
         dynamic_ncols = False
     else:
-        safe_print(f"{C}[+] In progress: {track_name}{O}")
+        safe_print(f"{C}[+] Em Progresso: {track_name}{O}")
         tqdm_desc = f" {G}Segmented Download{O}"
         b_format = "{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]"
         ncols = None

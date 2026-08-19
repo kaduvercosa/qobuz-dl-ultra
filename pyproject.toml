@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "qobuz-dl-ultra"
+# Declaramos que a versão e as dependências serão puxadas dinamicamente
+dynamic = ["version", "dependencies"]
+description = "Um fork aprimorado e repleto de recursos do projeto original qobuz-dl, projetado para a melhor experiência audiófila. Ele inclui um mecanismo de download resiliente com filtragem inteligente anti-spam, personalização profunda para manter sua biblioteca perfeitamente organizada e suporte nativo abrangente para metadados de música clássica."
+readme = "README.md"
+requires-python = ">=3.6"
+license = { file = "LICENSE" }
+
+[project.scripts]
+# Aponta para o entry point do CLI. Baseado na estrutura, o comando qobuz-dl vai rodar o qobuz_dl/__main__.py
+qobuz-dl = "qobuz_dl.__main__:main"
+
+# Configuração dinâmica do Setuptools
+[tool.setuptools.dynamic]
+# Puxa a variável __version__ de dentro de qobuz_dl/__init__.py
+version = {attr = "qobuz_dl.__version__"}
+# Lê as dependências diretamente do seu arquivo requirements.txt
+dependencies = {file = ["requirements.txt"]}
+
+# Garante que ele empacote a pasta qobuz_dl corretamente
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["qobuz_dl*"]
+exclude = ["tests*", "docs*"]

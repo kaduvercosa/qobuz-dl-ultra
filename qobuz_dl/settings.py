@@ -98,7 +98,7 @@ class QobuzDLSettings:
         )
 
         # Add parallel download thread count option
-        self.max_workers = int(kwargs.get("max_workers", 3))
+        self.max_workers = int(kwargs.get("max_workers", 1))
 
         # Threads usados DENTRO do fallback de download segmentado (uma
         # unica faixa, quando o CDN normal bloqueia/Akamai). Antes era um
@@ -235,7 +235,7 @@ class QobuzDLSettings:
             or config.getboolean(section, "no_album_url_tag", fallback=False),
             # Add parallel download thread count configuration
             "max_workers": arguments.max_workers
-            or config.get(section, "max_workers", fallback="3"),
+            or config.get(section, "max_workers", fallback="1"),
             # Threads do fallback de download segmentado -- "0"/ausente =
             # auto-detect adaptativo por dispositivo (ver settings.py).
             "segment_workers": getattr(arguments, "segment_workers", None)

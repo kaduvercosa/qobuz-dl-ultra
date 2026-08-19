@@ -315,7 +315,7 @@ def _reset_config(config_file):
         "multiple_disc_track_format"
     ] = "{disc_number}.{track_number} - {track_title}"
 
-    config["qobuz"]["max_workers"] = "3"
+    config["qobuz"]["max_workers"] = "1"
     config["qobuz"]["user_auth_token"] = ""
 
     with open(config_file, "w") as configfile:

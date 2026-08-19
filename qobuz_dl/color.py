@@ -2,10 +2,12 @@ from colorama import Style, Fore, init
 
 init(autoreset=True)
 
+# STYLE
 DF = Style.NORMAL
 BG = Style.BRIGHT
 RESET = Style.RESET_ALL
 OFF = Style.DIM
+# FORE
 RED = Fore.RED
 BLUE = Fore.BLUE
 GREEN = Fore.GREEN

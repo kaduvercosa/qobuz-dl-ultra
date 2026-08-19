@@ -398,7 +398,8 @@ def add_common_arg(custom_parser, default_folder, default_quality):
         "--max-workers",
         type=int,
         metavar="N",
-        help="maximum number of parallel downloads (default: 3)",
+        help="maximum number of parallel downloads (default: 1 -- sequential; "
+        "only kicks in with >1 track queued at once)",
     )
     parallel_group.add_argument(
         "--segment-workers",
