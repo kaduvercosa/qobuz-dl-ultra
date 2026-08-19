@@ -1,7 +1,30 @@
-# qobuz-dl Edição Ultra
-[![Versão PyPI](https://img.shields.io/pypi/v/qobuz-dl-ultra.svg)](https://pypi.org/project/qobuz-dl-ultra/) [![Downloads PyPI](https://static.pepy.tech/personalized-badge/qobuz-dl-ultra?period=total&units=INTERNATIONAL_SYSTEM&left_color=BLACK&right_color=GREEN&left_text=downloads)](https://pepy.tech/projects/qobuz-dl-ultra) ![Docker Image CI](https://github.com/kaduvercosa/qobuz-dl-ultra/actions/workflows/docker.yml/badge.svg) [![Abrir no Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Sei969/qobuz-dl/blob/master/Qobuz_Ultimate_Colab.ipynb)
+# 𝗤𝗢𝗕𝗨𝗭-𝗗𝗟 𝗨𝗟𝗧𝗥𝗔
+[![Versão PyPI](https://img.shields.io/pypi/v/qobuz-dl-ultra.svg)](https://pypi.org/project/qobuz-dl-ultra/) [![Downloads PyPI](https://static.pepy.tech/personalized-badge/qobuz-dl-ultra?period=total&units=INTERNATIONAL_SYSTEM&left_color=BLACK&right_color=GREEN&left_text=downloads)](https://pepy.tech/projects/qobuz-dl-ultra) ![Docker Image CI](https://github.com/kaduvercosa/qobuz-dl-ultra/actions/workflows/docker.yml/badge.svg)
 
-Pesquise, explore e baixe músicas Lossless e Hi-Res do [Qobuz](https://www.qobuz.com/).
+## 📑 Índice
+
+* [✨ Funcionalidades](#-funcionalidades)
+  * [🎧 Mecanismo Audiófilo e de Metadados](#-mecanismo-audiófilo-e-de-metadados)
+  * [🚀 Mecanismo de Download Resiliente](#-mecanismo-de-download-resiliente)
+  * [📁 Formatação Avançada e Armazenamento](#-formatação-avançada-e-armazenamento)
+  * [❤️ Sincronização Nativa de Favoritos e Menu Interativo](#️-sincronização-nativa-de-favoritos-e-menu-interativo)
+  * [🌉 Integração Inteligente com Last.fm e Modo Interativo](#-integração-inteligente-com-lastfm-e-modo-interativo)
+  * [📡 Radar RSS do MusicButler](#-radar-rss-do-musicbutler-sincronização-automatizada-de-favoritos)
+  * [🛡️ Gerenciamento de Pastas À Prova de Falhas e Retomada Inteligente](#️-gerenciamento-de-pastas-à-prova-de-falhas-e-retomada-inteligente)
+* [📥 Instalação e Configuração](#-instalação-e-configuração)
+  * [Opção A: 📦 Pacote PyPI (Recomendado)](#opção-a--pacote-pypi-recomendado-para-todas-as-plataformas)
+  * [Opção B: Código-fonte Python (Avançado)](#opção-b-código-fonte-python-avançado)
+  * [Opção C: 🐳 Uso com Docker](#opção-c--uso-com-docker-nas-e-servidores-caseiros)
+  * [⚙️ Configuração e Caminhos Personalizados](#️-configuração-e-caminhos-personalizados)
+  * [🔑 Como obter seu Auth Token](#-como-obter-seu-auth-token)
+* [💻 Uso e Exemplos Rápidos](#-uso-e-exemplos-rápidos)
+  * [🗄️ Gerenciamento de Banco de Dados e Biblioteca](#️-gerenciamento-de-banco-de-dados-e-biblioteca)
+  * [🛠️ Principais Variáveis de Formatação](#️-principais-variáveis-de-formatação)
+* [🔧 Solução de Problemas: Ambientes Headless e Servidores](#-solução-de-problemas-ambientes-headless-e-servidores)
+* [🏆 Créditos](#-créditos)
+* [⚠️ Isenção de Responsabilidade (Aviso Legal)](#️-isenção-de-responsabilidade-aviso-legal)
+
+__Pesquise, explore e baixe músicas Lossless e Hi-Res do [Qobuz](https://www.qobuz.com/).__
 
 **Este é um fork aprimorado e repleto de recursos do projeto original qobuz-dl, projetado para a melhor experiência audiófila. Ele inclui um mecanismo de download resiliente com filtragem inteligente anti-spam, personalização profunda para manter sua biblioteca perfeitamente organizada e suporte nativo abrangente para metadados de música clássica.**
 
@@ -46,7 +69,7 @@ Pesquise, explore e baixe músicas Lossless e Hi-Res do [Qobuz](https://www.qobu
 
 ### 📁 Formatação Avançada e Armazenamento
 
-O Qobuz-DL Ultimate permite profunda personalização da estrutura da sua biblioteca usando variáveis.
+O Qobuz-DL Ultra permite profunda personalização da estrutura da sua biblioteca usando variáveis.
 
 * **Suporte a Playlists Reais (Nativo):** Lida perfeitamente com playlists do Qobuz e Last.fm com uma lógica especializada projetada para organização de biblioteca (Resolve a issue #257).
 * **Estrutura de Pasta Plana (Flat):** Baixa automaticamente todas as faixas em um único diretório nomeado com o título da playlist, evitando a criação de dezenas de subpastas de álbuns dispersas.
@@ -102,26 +125,20 @@ Diga adeus a bibliotecas desorganizadas e downloads corrompidos. O baixador agor
 ### Opção A: 📦 Pacote PyPI (Recomendado para todas as plataformas)
 A maneira mais fácil e oficial de instalar a Edição Ultimate. Abra seu terminal e execute:
 ```bash
-pip install qobuz-dl-ultimate
+pip install qobuz-dl-ultra
 ```
 *Após a instalação, você pode iniciar o programa de qualquer pasta no seu computador digitando simplesmente `qobuz-dl` ou `qdl`.*
 
-### Opção B: Binários Pré-compilados (Windows x64)
-A maneira mais fácil de executar o programa no Windows sem precisar instalar o Python.
-👉 **[Baixe o ZIP mais recente aqui](https://github.com/kaduvercosa/qobuz-dl-ultra/releases/latest)**
-* **Portátil:** Nenhuma instalação necessária.
-* **Importante:** Apenas extraia o `.zip` e certifique-se de que `ffmpeg.exe` e `qobuz-dl-ultimate.exe` estejam na mesma pasta.
-
-### Opção C: Código-fonte Python (Avançado)
+### Opção B: Código-fonte Python (Avançado)
 Clone este repositório e instale as dependências necessárias:
 ```bash
 git clone https://github.com/kaduvercosa/qobuz-dl-ultra.git
-cd qobuz-dl
+cd qobuz-dl-ultra
 pip3 install -r requirements.txt
 ```
 *Execute o programa usando:* `python -m qobuz_dl`
 
-### Opção D: 🐳 Uso com Docker (NAS e Servidores Caseiros)
+### Opção C: 🐳 Uso com Docker (NAS e Servidores Caseiros)
 A Edição Ultimate é totalmente conteinerizada e inclui todas as dependências (Python, FFmpeg). Este é o método de instalação recomendado para Synology, QNAP, Unraid e servidores headless.
 ```bash
 # Baixar a imagem oficial mais recente
@@ -132,14 +149,6 @@ docker run -it —rm \
   -v /caminho/para/suas/musicas/no/nas:/app/QobuzDownloads \
   ghcr.io/kaduvercosa/qobuz-dl:latest dl “https://play.qobuz.com/album/...”
 ```
-
-### Opção E: ☁️ Google Colab (Nuvem e Google Drive)
-A maneira mais rápida de baixar diretamente para o seu Google Drive em velocidades de Gigabit, contornando limitações da rede local. Nenhuma instalação necessária.
-
-[![Abrir no Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Sei969/qobuz-dl/blob/master/Qobuz_Ultimate_Colab.ipynb)
-
-* **Zero Configuração:** Executa inteiramente no seu navegador (funciona perfeitamente em smartphones e tablets também).
-* **Uso:** Clique no badge acima, execute as células de configuração para montar seu Google Drive, cole seu Token de Autenticação do Qobuz e comece a baixar diretamente para a nuvem.
 
 ### ⚙️ Configuração e Caminhos Personalizados
 Se você deseja definir uma pasta de download personalizada, pode editar seu arquivo `config.ini` e usar a chave `directory`. Caminhos absolutos e o operador `~` (para macOS/Linux) são totalmente suportados!
@@ -220,7 +229,7 @@ python -m qobuz_dl radar
 ```bash
 python -m qobuz_dl sp “URL” -d “C:\Caminho\Para\Pasta\Local\Da\Playlist”
 ```
-                            
+                         
 **Download Básico de Álbum/Playlist:**
 ```bash
 python -m qobuz_dl dl https://play.qobuz.com/album/qxjbxh1dc3xyb
@@ -294,7 +303,7 @@ python -m qobuz_dl dl “URL” —no-replaygain-tag
 ```
 
 ### 🗄️ Gerenciamento de Banco de Dados e Biblioteca
-A Edição Ultimate inclui poderosos gerenciadores de biblioteca local para acompanhar seus downloads, evitar duplicatas e corrigir seus metadados retroativamente.
+A Edição Ultra inclui poderosos gerenciadores de biblioteca local para acompanhar seus downloads, evitar duplicatas e corrigir seus metadados retroativamente.
 
 * **Sincronização Inteligente de Biblioteca (`—sync-db`):**
   Já possui uma biblioteca local de FLACs baixados? Não precisa começar do zero. Execute este comando para realizar uma *Busca Reversa* no seu diretório de downloads. O mecanismo escaneará seus arquivos existentes e os injetará automaticamente no banco de dados local para evitar downloads duplicados no futuro.
@@ -310,7 +319,8 @@ A Edição Ultimate inclui poderosos gerenciadores de biblioteca local para acom
   ```
 
 * **Tagger Retroativo de Letras (`lyrics`):**
-  Tem uma biblioteca de músicas local existente que não possui letras sincronizadas? O novo comando `lyrics` funciona como um mecanismo autônomo de metadados. Ele varre recursivamente qualquer diretório local, detecta arquivos FLAC/MP3 sem letras e as injeta de forma inteligente nos arquivos de áudio usando o LRCLIB (e a API do Genius) sem baixar novamente nenhuma música.
+  Tem uma biblioteca de músicas local existente que não possui letras sincronizadas? O novo comando `lyrics` funciona como um mecanismo autônomo de metadados. Ele varre recursivamente qualquer diretório local, detecta arquivos FLAC/MP3 sem letras e as injeta de forma inteligente nos arquivos de áudio usando letras nativas do Qobuz (e quando disponível também injeta a tradução) tendo como Fallback o LRCLIB e a API do Genius sem baixar novamente nenhuma música.
+  Atualmente o comando lê a pasta raiz configurada no ’config.ini’
   ```bash
   python -m qobuz_dl lyrics “/caminho/para/sua/pasta/local/de/musica”
   ```
@@ -331,45 +341,45 @@ A Edição Ultimate inclui poderosos gerenciadores de biblioteca local para acom
 
 Você pode personalizar profundamente seu `config.ini` ou usar as flags CLI `-ff` (Formato de Pasta) e `-tf` (Formato de Faixa) usando as variáveis abaixo. Você também pode usar o caractere `/` para criar subdiretórios aninhados automaticamente!
 
-#### 📝 Complete Variables Reference Table
+#### 📝 Tabela de Referência de Variáveis Completas
 
-| Variable | Description | Example Output |
+| Variável | Descrição | Exemplo de Saída |
 | :--- | :--- | :--- |
-| **Artists & Composers** | | |
-| `{album_artist}` | The main artist of the album (handles compilations gracefully). | `Daft Punk` |
-| `{artist}` / `{track_artist}` | The performing artist of the specific track. | `Pharrell Williams` |
-| `{album_composer}` | The composer of the entire album/work. | `Thomas Bangalter` |
-| `{track_composer}` | The composer of the specific track. | `Guy-Manuel de Homem-Christo` |
-| **Titles & Versions** | | |
-| `{album}` / `{album_title}` | Album title (includes version like "Remastered" if present). | `Random Access Memories (Deluxe)` |
-| `{album_title_base}` | Base album title strictly *without* the version details. | `Random Access Memories` |
-| `{track_title}` / `{tracktitle}`| Track title (includes version if present). | `Get Lucky (Radio Edit)` |
-| `{track_title_base}` | Base track title strictly *without* the version details. | `Get Lucky` |
-| `{version}` / `{album_version}` | Just the version string. | `Deluxe` |
-| `{version_tag}` | Smart version tag (prepends a dash: ` - Deluxe`). Leaves no trailing spaces if empty! | ` - Deluxe` |
-| **Numbers & Dates** | | |
-| `{track_number}` | The track number (always padded with leading zero). | `08` |
-| `{disc_number}` | The disc media number (padded with leading zero). | `01` |
-| `{track_count}` | Total number of tracks in the album. | `13` |
-| `{disc_count}` | Total number of discs in the album. | `1` |
-| `{year}` | The release year. | `2013` |
-| `{release_date}` | The full original release date. | `2013-05-17` |
-| **Technical Specs** | | |
-| `{media_type}` | Raw product type extracted from the API (capitalized). | `Album` |
-| `{quality_tag}` | Smart tag combining format and bit depth (clean MP3 fallback). | `FLAC 24` |
-| `{album_url}` | The official Qobuz URL of the release. | `https://play.qobuz.com/...` |
-| `{bit_depth}` | The audio bit depth. | `24` |
-| `{sampling_rate}` | The audio sampling rate in kHz. | `88.2` |
-| `{format}` | The downloaded file format. | `FLAC` |
+| **Artistas & Compositores** | | |
+| `{album_artist}` | O principal artista do álbum (lida com compilações graciosamente). | `Daft Punk` |
+| `{artist}` / `{track_artist}` | O artista performático da faixa específica. | `Pharrell Williams` |
+| `{album_composer}` | O compositor de todo o álbum/trabalho. | `Thomas Bangalter` |
+| `{track_composer}` | O compositor da faixa específica. | `Guy-Manuel de Homem-Christo` |
+| **Títulos e Versões** | | |
+| `{album}` / `{album_title}` | Título do álbum (inclui versão como "Remasterizado", se presente). | `Random Access Memories (Deluxe)` |
+| `{album_title_base}` | Título do álbum base estritamente *sem* os detalhes da versão. | `Random Access Memories` |
+| `{track_title}` / `{tracktitle}`| Título da faixa (inclui versão, se presente). | `Get Lucky (Radio Edit)` |
+| `{track_title_base}` | Título da faixa base estritamente *sem* os detalhes da versão. | `Get Lucky` |
+| `{version}` / `{album_version}` | Apenas a string da versão. | `Deluxe` |
+| `{version_tag}` | Tag de versão inteligente (prepende um traço: ` - Deluxe`). Não deixa espaços de fuga se estiver vazio! | ` - Deluxe` |
+| **Números e Datas** | | |
+| `{track_number}` | O número da faixa (sempre acolchoado com zero inicial). | `08` |
+| `{disc_number}` | O número de mídia do disco (acolchoado com zero inicial). | `01` |
+| `{track_count}` | Número total de faixas no álbum. | `13` |
+| `{disc_count}` | Número total de discos no álbum. | `1` |
+| `{year}` | O ano de lançamento. | `2013` |
+| `{release_date}` | A data de lançamento original completa. | `2013-05-17` |
+| **Especificações Técnicas** | | |
+| `{media_type}` | Tipo de produto bruto extraído da API (capitalizado). | `Album` |
+| `{quality_tag}` | Tag inteligente combinando formato e profundidade de bits (fallback MP3 limpo). | `FLAC 24` |
+| `{album_url}` | A URL oficial do Qobuz do lançamento. | `https://play.qobuz.com/...` |
+| `{bit_depth}` | A profundidade do bit de áudio. | `24` |
+| `{sampling_rate}` | A taxa de amostragem de áudio em kHz. | `88.2` |
+| `{format}` | O formato de arquivo baixado. | `FLAC` |
 | **Metadata & IDs** | | |
-| `{release_type}` | Smart release type classification (`Album`, `EP`, `Single`). | `Album` |
-| `{explicit}` / `{ExplicitFlag}`| Adds an `[E]` tag if parental advisory is active (empty if clean). | `[E]` |
-| `{album_genre}` | Primary genre of the release. | `Electronic` |
-| `{label}` | The record label name. | `Columbia` |
-| `{copyright}` | Copyright string. | `℗ 2013 Daft Life` |
-| `{barcode}` / `{upc}` | The global UPC/Barcode of the release. | `888837168618` |
-| `{isrc}` | The unique ISRC identifier of the track. | `USSM11302305` |
-| `{album_id}` / `{track_id}` | Qobuz internal database IDs. | `123456789` |
+| `{release_type}` | Classificação do tipo de lançamento inteligente (`Álbum`, `EP`, `Single`). | `Album` |
+| `{explicit}` / `{ExplicitFlag}`| Adiciona uma tag `[E]` se o aviso dos pais estiver ativo (vazio se estiver limpo). | `[E]` |
+| `{album_genre}` | Gênero principal do lançamento. | `Electronic` |
+| `{label}` | O nome da gravadora. | `Columbia` |
+| `{copyright}` | String de direitos autorais. | `℗ 2013 Daft Life` |
+| `{barcode}` / `{upc}` | O UPC/Código de Barras global da versão. | `888837168618` |
+| `{isrc}` | O identificador ISRC exclusivo da faixa. | `USSM11302305` |
+| `{album_id}` / `{track_id}` | IDs de banco de dados internos do Qobuz. | `123456789` |
 
 #### 💡 Exemplos Práticos
 
@@ -394,13 +404,6 @@ Se você estiver executando o `qobuz-dl` em um NAS, Docker ou em um sistema Linu
 Ao executar `python -m qobuz_dl -r`, o assistente de configuração agora perguntará: 
 `”Disable OS Keyring and save tokens in config.ini?”` (Desativar Keyring do SO e salvar tokens no config.ini?)
 Selecione **`yes`** se estiver em um ambiente de servidor ou NAS. Isso ignorará o chaveiro do sistema e garantirá que seus tokens persistam no arquivo `config.ini`, garantindo 100% de estabilidade na autenticação.
-
-## 👨‍💻 Para Desenvolvedores: Usando o Qobuz-DL como Biblioteca Python
-
-Você está criando seus próprios scripts de automação musical, bots de Telegram ou integrações com o Discord?
-Você pode importar nossos mecanismos principais (Downloader Segmentado AES, Tagger Audiófilo e Cliente WAF-Bypass) diretamente em seus próprios projetos Python!
-
-📚 **[Leia o Guia Oficial da API para Desenvolvedores em nossa Wiki](https://github.com/Sei969/qobuz-dl/wiki/Developer-Guide-(Python-API))**
 
 ## 🏆 Créditos
 * **[vitiko98](https://github.com/vitiko98/qobuz-dl)**: Criador do projeto original.
