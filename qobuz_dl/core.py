@@ -814,7 +814,7 @@ class QobuzDL:
             print_download_header(
                 "LOTE DE FAIXAS",
                 [
-                    ("Total de Faixas", str(total_tracks_urls)),
+                    ("Total de Faixas", str(total_track_urls)),
                     ("Modo", mode_label),
                 ]
             )
@@ -832,7 +832,7 @@ class QobuzDL:
                         False,
                         is_parallel=True,
                         position_pool=position_pool,
-                        suppress_header=(total_tracks_urls > 1),
+                        suppress_header=(total_track_urls > 1),
                     )
                 self.mark_url_done_in_file(txt_file, original_url)
 
