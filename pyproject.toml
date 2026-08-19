@@ -1,29 +1,61 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
+requires = ["setuptools>=61", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "qobuz-dl-ultra"
-# Declaramos que a versão e as dependências serão puxadas dinamicamente
-dynamic = ["version", "dependencies"]
-description = "Um fork aprimorado e repleto de recursos do projeto original qobuz-dl, projetado para a melhor experiência audiófila. Ele inclui um mecanismo de download resiliente com filtragem inteligente anti-spam, personalização profunda para manter sua biblioteca perfeitamente organizada e suporte nativo abrangente para metadados de música clássica."
+dynamic = ["version"]
+description = "The Ultimate Lossless and Hi-Res music downloader for Qobuz with ReplayGain and Classical metadata"
 readme = "README.md"
 requires-python = ">=3.6"
-license = { file = "LICENSE" }
+license = { text = "GPL-3.0-or-later" }
+
+authors = [
+    { name = "Eduardo (kaduvercosa)", email = "kaduvercosa@users.noreply.github.com" }
+]
+
+keywords = [
+    "qobuz",
+    "music",
+    "downloader",
+    "flac",
+    "hi-res",
+    "lossless"
+]
+
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: GNU General Public License (GPL)",
+    "Operating System :: OS Independent"
+]
+
+dependencies = [
+    "pathvalidate>=3.0.0",
+    "requests>=2.31.0",
+    "charset_normalizer>=3.0.0",
+    "mutagen>=1.47.0",
+    "tqdm>=4.66.0",
+    "beautifulsoup4>=4.12.0",
+    "colorama",
+    "cryptography",
+    "keyring>=24.0.0",
+    "aiohttp",
+    "questionary>=2.0.0",
+    "prompt_toolkit>=3.0.43",
+    "lyricsgenius"
+]
+
+[project.urls]
+Homepage = "https://github.com/kaduvercosa/qobuz-dl-ultra"
+Repository = "https://github.com/kaduvercosa/qobuz-dl-ultra"
+Issues = "https://github.com/kaduvercosa/qobuz-dl-ultra/issues"
 
 [project.scripts]
-# Aponta para o entry point do CLI. Baseado na estrutura, o comando qobuz-dl vai rodar o qobuz_dl/__main__.py
-qobuz-dl = "qobuz_dl.__main__:main"
+qobuz-dl = "qobuz_dl:main"
+qdl = "qobuz_dl:main"
 
-# Configuração dinâmica do Setuptools
 [tool.setuptools.dynamic]
-# Puxa a variável __version__ de dentro de qobuz_dl/__init__.py
-version = {attr = "qobuz_dl.__version__"}
-# Lê as dependências diretamente do seu arquivo requirements.txt
-dependencies = {file = ["requirements.txt"]}
+version = { attr = "qobuz_dl.__version__" }
 
-# Garante que ele empacote a pasta qobuz_dl corretamente
 [tool.setuptools.packages.find]
-where = ["."]
 include = ["qobuz_dl*"]
-exclude = ["tests*", "docs*"]

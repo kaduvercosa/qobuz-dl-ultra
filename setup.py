@@ -47,13 +47,13 @@ setup(
         "mutagen>=1.47.0",
         "tqdm>=4.66.0",
         "beautifulsoup4>=4.12.0",
-        "colorama>=0.4.6",
-        "cryptography",  # ver qopy.py: pycryptodome quebra no a-Shell (framework nativo ausente)
+        "colorama",
+        "cryptography",
         "keyring>=24.0.0",
-        "aiohttp>=3.9.0",
+        "aiohttp",
         "questionary>=2.0.0",
         "prompt_toolkit>=3.0.43",
-        "lyricsgenius>=3.0.1"
+        "lyricsgenius"
     ],
     entry_points={
         "console_scripts": [
