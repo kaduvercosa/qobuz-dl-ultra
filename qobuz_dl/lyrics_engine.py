@@ -274,7 +274,7 @@ class LyricsEngine:
             return
 
         try:
-            tqdm.write(f"    🔍 Searching lyrics for: {track}...")
+            tqdm.write(f"    🔍 procurando letras para: {track}...")
 
             # 1. Tenta as letras nativas do Qobuz (Original + Bilingue se houver traducao)
             qobuz_lyrics = self.extract_qobuz_lyrics(
@@ -345,15 +345,15 @@ class LyricsEngine:
 
                     if embed_lyrics and save_lrc:
                         tqdm.write(
-                            f"    ✅ Synchronized {is_bilingual}lyrics injected and saved as .lrc (via Qobuz)!"
+                            f"    ✅ Letras {is_bilingual}sincronizadas injetadas e salvas em .lrc (via Qobuz)!"
                         )
                     elif save_lrc:
                         tqdm.write(
-                            f"    ✅ Synchronized {is_bilingual}lyrics saved as .lrc (via Qobuz)!"
+                            f"    ✅ Letras {is_bilingual}sincronizadas salvas as .lrc (via Qobuz)!"
                         )
                     elif embed_lyrics:
                         tqdm.write(
-                            f"    ✅ Synchronized {is_bilingual}lyrics injected into metadata (via Qobuz)!"
+                            f"    ✅ Letras {is_bilingual}sincronizadas injetadas no metadata (via Qobuz)!"
                         )
                     return
 
@@ -378,22 +378,22 @@ class LyricsEngine:
 
                     if embed_lyrics and save_lrc:
                         tqdm.write(
-                            f"    ✅ Standard {is_bilingual}lyrics injected and saved as .txt (via Qobuz)!"
+                            f"    ✅ Letras {is_bilingual}padrão injetadas e salvas em .txt (via Qobuz)!"
                         )
                     elif save_lrc:
                         tqdm.write(
-                            f"    ✅ Standard {is_bilingual}lyrics saved as .txt (via Qobuz)!"
+                            f"    ✅ Letras {is_bilingual}padrão salvas em .txt (via Qobuz)!"
                         )
                     elif embed_lyrics:
                         tqdm.write(
-                            f"    ✅ Standard {is_bilingual}lyrics injected into metadata (via Qobuz)!"
+                            f"    ✅ Letras {is_bilingual}padrão injetadas no metadata (via Qobuz)!"
                         )
                     return
 
             # 2. Fallback to LRCLIB
             lrclib_url = "https://lrclib.net/api/get"
             headers = {
-                "User-Agent": "qobuz-dl-ultimate/1.0 (https://github.com/Sei969/qobuz-dl)"
+                "User-Agent": "qobuz-dl-ultra/1.0 (https://github.com/kaduvercosa/qobuz-dl-ultra)"
             }
 
             params = {"artist_name": artist, "track_name": track, "album_name": album}
@@ -430,15 +430,15 @@ class LyricsEngine:
 
                     if embed_lyrics and save_lrc:
                         tqdm.write(
-                            f"    ✅ Synchronized lyrics injected and saved as .lrc (via LRCLIB)!"
+                            f"    ✅ Letras sincronizadas injetadas e salvas como .lrc (via LRCLIB)!"
                         )
                     elif save_lrc:
                         tqdm.write(
-                            f"    ✅ Synchronized lyrics saved as .lrc (via LRCLIB)!"
+                            f"    ✅ Letras sincronizadas salvas como .lrc (via LRCLIB)!"
                         )
                     elif embed_lyrics:
                         tqdm.write(
-                            f"    ✅ Synchronized lyrics injected into metadata (via LRCLIB)!"
+                            f"    ✅ Letras sincronizadas injetadas no metadata (via LRCLIB)!"
                         )
                     return
 
@@ -454,15 +454,15 @@ class LyricsEngine:
 
                     if embed_lyrics and save_lrc:
                         tqdm.write(
-                            f"    ✅ Standard lyrics injected and saved as .txt (via LRCLIB)!"
+                            f"    ✅ Letras padrão injetadas e salvas como .txt(via LRCLIB)!"
                         )
                     elif save_lrc:
                         tqdm.write(
-                            f"    ✅ Standard lyrics saved as .txt (via LRCLIB)!"
+                            f"    ✅ Letras padrão salvas como .txt (via LRCLIB)!"
                         )
                     elif embed_lyrics:
                         tqdm.write(
-                            f"    ✅ Standard lyrics injected into metadata (via LRCLIB)!"
+                            f"    ✅ Letras padrão salvas no metadata (via LRCLIB)!"
                         )
                     return
 
@@ -489,10 +489,10 @@ class LyricsEngine:
                         tqdm.write(f"    ✅ Lyrics injected via Genius (Fallback)!")
                     return
 
-            tqdm.write(f"    ❌ No lyrics found for this track.")
+            tqdm.write(f"    ❌ Nenhuma letra encontrada para esta faixa.")
 
         except Exception as e:
-            tqdm.write(f"    ⚠️ Error during lyrics search: {e}")
+            tqdm.write(f"    ⚠️ Erro durante a pesquisa de letras: {e}")
 
     def _save_lrc_file(
         self, audio_file_path, synced_lyrics, source=None, language=None

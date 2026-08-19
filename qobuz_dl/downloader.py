@@ -414,7 +414,7 @@ class Download:
         elif active_workers > 1:
             is_parallel = True
             safe_print(
-                f"{YELLOW}[*] Multithreading Enabled ({active_workers} workers): tracks are downloading in parallel.{OFF}"
+                f"{YELLOW}[*] Multithreading Enabled ({active_workers} workers).{OFF}"
             )
 
         position_pool = _PositionPool(active_workers) if is_parallel else None
@@ -630,7 +630,7 @@ class Download:
 
             track_title = _get_title(track_meta)
             artist = _safe_get(track_meta, "performer", "name")
-            safe_print(f"{YELLOW}Baixando Faixa: {artist} - {track_title}{OFF}")
+            safe_print(f"\n{YELLOW}Baixando Faixa: {artist} - {track_title}{OFF}")
             emit_progress_json(
                 self.settings,
                 "track_start",
@@ -1839,17 +1839,16 @@ def _get_cover_and_embed(
     embed_file = os.path.join(dirn, embed_name)
 
     if os.path.isfile(embed_file):
-        safe_print(f"{CYAN}[*] Skipping embedded cover art: {embed_name} (Already downloaded){OFF}")
+        safe_print(f"{YELLOW}[*] Skipping embedded cover art: {embed_name} (Already downloaded){OFF}")
         return
 
     if save_cover and saved_url == embed_url and os.path.isfile(saved_file):
         try:
             shutil.copyfile(saved_file, embed_file)
-            safe_print(f"{CYAN}[*] Reusing cover art for embed (same resolution, avoided duplicate download){OFF}")
+            safe_print(f"{OFF}  [*] Reusing cover art for embed.{OFF}")
             return
         except OSError as e:
             logger.debug(f"Falha ao copiar cover.jpg pra embed, baixando de novo: {e}")
-            # cai pro download normal abaixo
 
     _get_extra(
         item, dirn, extra=embed_name, art_size=embedded_art_size,
@@ -1938,7 +1937,7 @@ def tqdm_download_segments(
 
     if is_parallel:
         size_mb = total_size / (1024 * 1024)
-        safe_print(f"{C}[+] In progress: {track_name} [{size_mb:.1f} MB]{O}")
+        safe_print(f"{C}[+] In progresso: {track_name} [{size_mb:.1f} MB]{O}")
         desc_len = position_pool.desc_len if position_pool else 14
         short_name = (
             track_name

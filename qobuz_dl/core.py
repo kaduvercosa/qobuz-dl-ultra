@@ -582,7 +582,7 @@ class QobuzDL:
 
             if can_parallelize:
                 logger.info(
-                    f"{YELLOW}[*] Multithreading Enabled ({batch_workers} workers) for playlist tracks.{OFF}"
+                    f"{YELLOW}[*] Multithreading Enabled ({batch_workers} workers).{OFF}"
                 )
 
             for idx, item in enumerate(items, start=1):
@@ -755,7 +755,7 @@ class QobuzDL:
 
         if track_urls:
             logger.info(
-                f"{YELLOW}[*] Multithreading Enabled ({batch_workers} workers) for standalone track batch.{OFF}"
+                f"{YELLOW}[*] Multithreading Enabled ({batch_workers} workers).{OFF}"
             )
             position_pool = downloader._PositionPool(batch_workers)
             semaphore = asyncio.Semaphore(batch_workers)
@@ -1409,7 +1409,7 @@ class QobuzDL:
 
         if can_parallelize:
             logger.info(
-                f"{YELLOW}[*] Multithreading Enabled ({batch_workers} workers) for playlist tracks.{OFF}"
+                f"{YELLOW}[*] Multithreading Enabled ({batch_workers} workers).{OFF}"
             )
 
         for idx, t_id in enumerate(track_ids, start=1):
