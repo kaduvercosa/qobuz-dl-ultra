@@ -816,6 +816,8 @@ class QobuzDL:
                 [
                     ("Total de Faixas", str(total_tracks_urls)),
                     ("Modo", mode_label),
+                ]
+            )
 
         if track_urls:
             position_pool = downloader._PositionPool(batch_workers)
