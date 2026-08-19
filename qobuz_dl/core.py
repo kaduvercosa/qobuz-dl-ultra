@@ -808,9 +808,14 @@ class QobuzDL:
         mode_label = (
             f"Paralelo ({batch_workers} workers)" if use_parallel else "Sequencial"
         )
-        # Removido: resumo do lote (LOTE DE URLS) por decisao explicita do
-        # usuario -- agora cada item (faixa avulsa ou "outro") mostra seu
-        # proprio cabeçalho completo, sem nenhum resumo por cima.
+
+        if total_track_urls > 1:
+            from qobuz_dl.downloader import print_download_header
+            print_download_header(
+                "LOTE DE FAIXAS",
+                [
+                    ("Total de Faixas", str(total_tracks_urls)),
+                    ("Modo", mode_label),
 
         if track_urls:
             position_pool = downloader._PositionPool(batch_workers)
@@ -825,7 +830,7 @@ class QobuzDL:
                         False,
                         is_parallel=True,
                         position_pool=position_pool,
-                        suppress_header=False,
+                        suppress_header=(total_tracks_urls > 1),
                     )
                 self.mark_url_done_in_file(txt_file, original_url)
 
