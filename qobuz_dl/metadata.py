@@ -235,9 +235,9 @@ def tag_flac(
     for k, v in tags.items():
         if v:
             if (
-                getattr(settings, "multi_value_tags", False)
-                and k == "GENRE"
-                and isinstance(v, str)
+                getattr(settings, "multi_value_tags", False) and
+                k == "GENRE" and
+                isinstance(v, str)
             ):
                 if ", " in v:
                     v = v.split(", ")
@@ -379,9 +379,9 @@ def _get_tags_to_add(
                     roles = parts[1:]
 
                     if (
-                        "FeaturedArtist" in roles
-                        or "MainArtist" in roles
-                        or "PrimaryArtist" in roles
+                        "FeaturedArtist" in roles or
+                        "MainArtist" in roles or
+                        "PrimaryArtist" in roles
                     ):
                         add_unique_artist(name)
 

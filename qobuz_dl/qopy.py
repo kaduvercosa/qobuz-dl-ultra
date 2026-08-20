@@ -23,7 +23,13 @@ from qobuz_dl.exceptions import (
     InvalidAppSecretError,
     InvalidQuality,
 )
-from qobuz_dl.color import GREEN, YELLOW, RED, OFF, RESET
+# CYAN/YELLOW importados como INFO/WARNING renomeados: mesma cor de
+# YELLOW (mantida por convencao), mas CYAN agora e' LIGHTBLUE_EX --
+# visivel em terminal claro E escuro (CYAN puro quase some em fundo
+# branco). Ver comentario completo em qobuz_dl/color.py. Zero mudanca
+# de codigo neste arquivo: toda f-string que ja usa {CYAN}/{YELLOW}
+# continua funcionando, so' a cor de fato renderizada muda.
+from qobuz_dl.color import GREEN, WARNING as YELLOW, RED, OFF, RESET
 
 try:
     from qobuz_dl.bundle import Bundle
@@ -491,8 +497,8 @@ class Client:
                             "favorite/getUserFavorites",
                             "file/url",
                             "track/lyricsUrl",
-                        ]
-                        and r.status == 400
+                        ] and
+                        r.status == 400
                     ):
                         body = await r.json()
                         raise InvalidAppSecretError(
@@ -577,7 +583,7 @@ class Client:
         Returns:
             list: A list of successfully matched Qobuz track IDs.
         """
-        from qobuz_dl.color import OFF, GREEN, RED, YELLOW, CYAN
+        from qobuz_dl.color import OFF, GREEN, RED, WARNING as YELLOW, INFO as CYAN
         import difflib
 
         print(
@@ -601,9 +607,9 @@ class Client:
                 highest_ratio = 0.0
 
                 if (
-                    search_results
-                    and "tracks" in search_results
-                    and search_results["tracks"]["items"]
+                    search_results and
+                    "tracks" in search_results and
+                    search_results["tracks"]["items"]
                 ):
                     for q_track in search_results["tracks"]["items"]:
                         q_artist_raw = q_track.get("performer", {}).get(
@@ -629,7 +635,7 @@ class Client:
 
                     elif highest_ratio >= PROMPT_THRESHOLD and best_match_id:
                         print(
-                            f"\n{YELLOW}[?] Borderline match detected ({highest_ratio*100:.0f}% similarity){OFF}"
+                            f"\n{YELLOW}[?] Borderline match detected ({highest_ratio * 100:.0f}% similarity){OFF}"
                         )
                         print(
                             f"    Target (Last.fm): {item['artist']} - {item['title']}"
@@ -652,7 +658,7 @@ class Client:
 
                     else:
                         print(
-                            f"{YELLOW}[!] Skipping: '{query}' (Best match was only {highest_ratio*100:.0f}% similar){OFF}"
+                            f"{YELLOW}[!] Skipping: '{query}' (Best match was only {highest_ratio * 100:.0f}% similar){OFF}"
                         )
 
                 else:

@@ -4,7 +4,13 @@ import os
 import logging
 import subprocess
 import time
-from qobuz_dl.color import RED, YELLOW, CYAN, OFF
+# CYAN/YELLOW importados como INFO/WARNING renomeados: mesma cor de
+# YELLOW (mantida por convencao), mas CYAN agora e' LIGHTBLUE_EX --
+# visivel em terminal claro E escuro (CYAN puro quase some em fundo
+# branco). Ver comentario completo em qobuz_dl/color.py. Zero mudanca
+# de codigo neste arquivo: toda f-string que ja usa {CYAN}/{YELLOW}
+# continua funcionando, so' a cor de fato renderizada muda.
+from qobuz_dl.color import RED, WARNING as YELLOW, INFO as CYAN, OFF
 import unicodedata
 
 logger = logging.getLogger(__name__)
@@ -129,11 +135,11 @@ def make_m3u(pl_directory, remote_items=None):
 
         missing_count = 0
         table_header = (
-            f"\n{RED}{'━'*80}\n"
+            f"\n{RED}{'━' * 80}\n"
             f"{YELLOW}{'MISSING LOCAL TRACKS':^80}\n"
-            f"{RED}{'━'*80}{OFF}\n"
+            f"{RED}{'━' * 80}{OFF}\n"
             f"{CYAN}{'TITLE':<35} │ {'ARTIST':<25} │ {'ID':<12}{OFF}\n"
-            f"{'─'*80}"
+            f"{'─' * 80}"
         )
 
         for item in remote_items:
@@ -150,9 +156,9 @@ def make_m3u(pl_directory, remote_items=None):
 
             # Pass 1-3: Fast dictionary lookups
             best_match = (
-                by_tid.get(tid)
-                or by_isrc.get(isrc)
-                or by_title.get(track_title.strip().lower())
+                by_tid.get(tid) or
+                by_isrc.get(isrc) or
+                by_title.get(track_title.strip().lower())
             )
 
             # Pass 4: Fallback to filename substring match
@@ -174,7 +180,7 @@ def make_m3u(pl_directory, remote_items=None):
                 missing_count += 1
 
         if missing_count > 0:
-            logger.warning(f"{RED}{'━'*80}{OFF}\n")
+            logger.warning(f"{RED}{'━' * 80}{OFF}\n")
 
     # 3. Fallback (Albums or failed matching): Natural sort
     if not remote_items or len(ordered_files) == 0:
@@ -282,12 +288,12 @@ def smart_discography_filter(
 
         def is_valid(album: dict) -> bool:
             return (
-                album["maximum_bit_depth"] == best_bit_depth
-                and album["maximum_sampling_rate"] == best_sampling_rate
-                and album["artist"]["name"] == requested_artist
-                and not (  # states that are not allowed
-                    (remaster_exists and not is_type("remaster", album))
-                    or (skip_extras and is_type("extra", album))
+                album["maximum_bit_depth"] == best_bit_depth and
+                album["maximum_sampling_rate"] == best_sampling_rate and
+                album["artist"]["name"] == requested_artist and
+                not (  # states that are not allowed
+                    (remaster_exists and not is_type("remaster", album)) or
+                    (skip_extras and is_type("extra", album))
                 )
             )
 

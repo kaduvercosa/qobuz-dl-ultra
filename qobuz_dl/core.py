@@ -23,7 +23,13 @@ except ImportError:
 
 from qobuz_dl.bundle import Bundle
 from qobuz_dl import downloader, qopy
-from qobuz_dl.color import CYAN, OFF, RED, YELLOW, RESET
+# CYAN/YELLOW importados como INFO/WARNING renomeados: mesma cor de
+# YELLOW (mantida por convencao), mas CYAN agora e' LIGHTBLUE_EX --
+# visivel em terminal claro E escuro (CYAN puro quase some em fundo
+# branco). Ver comentario completo em qobuz_dl/color.py. Zero mudanca
+# de codigo neste arquivo: toda f-string que ja usa {CYAN}/{YELLOW}
+# continua funcionando, so' a cor de fato renderizada muda.
+from qobuz_dl.color import INFO as CYAN, OFF, RED, WARNING as YELLOW, RESET
 from qobuz_dl.exceptions import NonStreamable
 from qobuz_dl.db import create_db, handle_download_id
 from qobuz_dl.utils import (
@@ -52,7 +58,8 @@ pt_style = Style.from_dict(
         "title": "ansicyan bold",
         "pointer": "ansiyellow bold",
         "checkbox": "ansigreen",
-        "hovered": "bg:#cccccc fg:#000000 bold",  # Fundo Cinza Claro e Texto Preto! Impossível de não ver no claro ou escuro.
+        # Fundo Cinza Claro e Texto Preto! Impossível de não ver no claro ou escuro.
+        "hovered": "bg:#cccccc fg:#000000 bold",
         "meta": "",
         "highlight": "ansicyan bold",
         "footer": "ansiyellow",
@@ -221,7 +228,7 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
                     lbl = meta.get("label", "")
                     if gnr or lbl:
                         res.append((style, f"       🎵 {gnr}  |  🏷️ {lbl}\n"))
-                    res.append((style, f"       {'-'*30}\n"))
+                    res.append((style, f"       {'-' * 30}\n"))
 
             elif item_category == "track":
                 if is_table:
@@ -245,7 +252,7 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
                     res.append(
                         (style, f"       🎧 Qualidade: {meta.get('quality', '')}\n")
                     )
-                    res.append((style, f"       {'-'*30}\n"))
+                    res.append((style, f"       {'-' * 30}\n"))
 
             elif item_category == "playlist":
                 if is_table_simple:
@@ -263,7 +270,7 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
                             f"       🎶 Total de faixas: {meta.get('count', 0)}  |  ⏱️ Duração total: {meta.get('duration', '--:--')}\n",
                         )
                     )
-                    res.append((style, f"       {'-'*30}\n"))
+                    res.append((style, f"       {'-' * 30}\n"))
 
             elif item_category == "artist":
                 if is_table_simple:
@@ -278,7 +285,7 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
                             f"       📦 Lançamentos listados: {meta.get('count', '')}\n",
                         )
                     )
-                    res.append((style, f"       {'-'*30}\n"))
+                    res.append((style, f"       {'-' * 30}\n"))
             elif item_category == "filter":
                 res.append((style, f"{opt}\n"))
 
@@ -481,6 +488,19 @@ class QobuzDL:
             )
         except (requests.exceptions.RequestException, NonStreamable) as e:
             logger.error(f"{RED}Error getting release: {e}. Skipping...")
+        except Exception as e:
+            # Rede de seguranca ampla: os 3 pontos que chamam download_from_id
+            # em lote (asyncio.gather, em album/playlist/discografia) NAO usam
+            # return_exceptions=True -- ou seja, qualquer excecao que escape
+            # daqui sem ser pega derruba o lote INTEIRO, cancelando as outras
+            # faixas que ainda estavam baixando em paralelo, nao so essa. Os
+            # dois tipos acima (RequestException/NonStreamable) ja cobriam os
+            # casos esperados, mas qualquer bug ou caso extremo nao previsto
+            # tinha esse raio de explosao enorme. Pega tudo aqui, loga com
+            # o ID do item pra dar pra investigar, e segue pra proxima faixa.
+            logger.error(
+                f"{RED}Erro inesperado baixando item {item_id}: {e}. Pulando...{OFF}")
+            logger.debug("Detalhes do erro inesperado:", exc_info=True)
 
         if getattr(self, "delay", 0) > 0:
             logger.info(
@@ -584,10 +604,10 @@ class QobuzDL:
             # com 1 so' item, cai pro modo sequencial (barra de progresso ao
             # vivo em vez da linha "silenciosa" do modo multithread).
             can_parallelize = (
-                is_track_batch
-                and batch_workers > 1
-                and len(items) > 1
-                and getattr(self, "delay", 0) <= 0
+                is_track_batch and
+                batch_workers > 1 and
+                len(items) > 1 and
+                getattr(self, "delay", 0) <= 0
             )
             position_pool = (
                 downloader._PositionPool(batch_workers) if can_parallelize else None
@@ -605,7 +625,8 @@ class QobuzDL:
                 from qobuz_dl.utils import format_duration
 
                 p_name = content_name
-                p_owner = content[0].get("owner", {}).get("name", "Unknown") if content else "Unknown"
+                p_owner = content[0].get("owner", {}).get(
+                    "name", "Unknown") if content else "Unknown"
                 p_count = str(len(items))
                 dur_raw = content[0].get("duration", 0) if content else 0
                 p_dur = format_duration(dur_raw) if dur_raw else "--:--"
@@ -624,8 +645,8 @@ class QobuzDL:
 
             for idx, item in enumerate(items, start=1):
                 if (
-                    getattr(self, "allowed_release_types", None)
-                    and url_type == "artist"
+                    getattr(self, "allowed_release_types", None) and
+                    url_type == "artist"
                 ):
                     try:
                         r_type = "unknown"
@@ -638,9 +659,9 @@ class QobuzDL:
 
                         if full_meta:
                             r_type = (
-                                full_meta.get("release_type")
-                                or full_meta.get("product_type")
-                                or "unknown"
+                                full_meta.get("release_type") or
+                                full_meta.get("product_type") or
+                                "unknown"
                             ).lower()
 
                         base_title = str(item.get("title", "")).lower()
@@ -648,9 +669,9 @@ class QobuzDL:
                         t_count = item.get("tracks_count", 0)
 
                         if (
-                            "live" in version_tag
-                            or "(live" in base_title
-                            or "- live" in base_title
+                            "live" in version_tag or
+                            "(live" in base_title or
+                            "- live" in base_title
                         ):
                             r_type = "live"
                         elif any(
@@ -915,9 +936,9 @@ class QobuzDL:
 
         if mode_dict.get("requires_extra") or item_type in ["album", "track"]:
             artist = (
-                i.get("artist", {}).get("name")
-                or i.get("performer", {}).get("name")
-                or "Unknown"
+                i.get("artist", {}).get("name") or
+                i.get("performer", {}).get("name") or
+                "Unknown"
             )
             title = i.get("title") or i.get("name") or "Unknown"
             if i.get("version"):
@@ -1050,9 +1071,9 @@ class QobuzDL:
                     iterable = []
                     user_id = getattr(self.client, "user_id", None)
                     if (
-                        not user_id
-                        and hasattr(self.client, "user")
-                        and isinstance(self.client.user, dict)
+                        not user_id and
+                        hasattr(self.client, "user") and
+                        isinstance(self.client.user, dict)
                     ):
                         user_id = self.client.user.get("id")
 
@@ -1464,9 +1485,9 @@ class QobuzDL:
         batch_workers = int(getattr(self.settings, "max_workers", 1))
         # Idem aos outros caminhos: paralelo so' com >1 faixa encontrada.
         can_parallelize = (
-            batch_workers > 1
-            and len(track_ids) > 1
-            and getattr(self, "delay", 0) <= 0
+            batch_workers > 1 and
+            len(track_ids) > 1 and
+            getattr(self, "delay", 0) <= 0
         )
         position_pool = (
             downloader._PositionPool(batch_workers) if can_parallelize else None

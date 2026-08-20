@@ -1,3 +1,4 @@
+from qobuz_dl.utils import get_config_paths
 import sys
 import difflib
 import string
@@ -13,7 +14,13 @@ import requests
 import asyncio
 
 from qobuz_dl.bundle import Bundle
-from qobuz_dl.color import GREEN, YELLOW, OFF, CYAN
+# CYAN/YELLOW importados como INFO/WARNING renomeados: mesma cor de
+# YELLOW (mantida por convencao), mas CYAN agora e' LIGHTBLUE_EX --
+# visivel em terminal claro E escuro (CYAN puro quase some em fundo
+# branco). Ver comentario completo em qobuz_dl/color.py. Zero mudanca
+# de codigo neste arquivo: toda f-string que ja usa {CYAN}/{YELLOW}
+# continua funcionando, so' a cor de fato renderizada muda.
+from qobuz_dl.color import GREEN, WARNING as YELLOW, OFF, INFO as CYAN
 from qobuz_dl.commands import qobuz_dl_args
 from qobuz_dl.core import QobuzDL
 from qobuz_dl.downloader import DEFAULT_FOLDER, DEFAULT_TRACK
@@ -28,7 +35,6 @@ logging.basicConfig(
 # Deteccao cross-platform centralizada em utils.get_config_paths() -- ver
 # la' os detalhes de cada plataforma (Windows, Linux/macOS, iOS/a-Shell).
 # radar.py usa a mesma funcao, entao os dois ficam sempre sincronizados.
-from qobuz_dl.utils import get_config_paths
 
 _config_paths = get_config_paths()
 CONFIG_DIR = _config_paths["config_dir"]
@@ -244,18 +250,18 @@ def _reset_config(config_file):
         config["qobuz"]["genius_token"] = genius_token
 
     config["qobuz"]["directory"] = (
-        input("Download folder (press Enter for 'Qobuz Downloads')\n- ")
-        or "Qobuz Downloads"
+        input("Download folder (press Enter for 'Qobuz Downloads')\n- ") or
+        "Qobuz Downloads"
     )
 
     config["qobuz"]["folder_format"] = (
-        input(f"Folder format (press Enter for '{DEFAULT_FOLDER}')\n- ")
-        or DEFAULT_FOLDER
+        input(f"Folder format (press Enter for '{DEFAULT_FOLDER}')\n- ") or
+        DEFAULT_FOLDER
     )
 
     config["qobuz"]["default_quality"] = (
-        input("Download quality (5:MP3, 6:FLAC, 7:24b<96, 27:24b>96) [Default 27]\n- ")
-        or "27"
+        input("Download quality (5:MP3, 6:FLAC, 7:24b<96, 27:24b>96) [Default 27]\n- ") or
+        "27"
     )
 
     config["qobuz"]["default_limit"] = "500"
@@ -912,8 +918,8 @@ async def async_main():
         settings=settings,
         booklet_only=getattr(arguments, "booklet_only", False),
         blacklist=getattr(arguments, "blacklist", None) or blacklist_config,
-        playlist_as_albums=getattr(arguments, "playlist_as_albums", False)
-        or playlist_as_albums_config,
+        playlist_as_albums=getattr(arguments, "playlist_as_albums", False) or
+        playlist_as_albums_config,
     )
 
     await qobuz.initialize_client(email, password, app_id, secrets)

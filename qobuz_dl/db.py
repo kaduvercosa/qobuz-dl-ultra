@@ -1,7 +1,13 @@
 import logging
 import sqlite3
 
-from qobuz_dl.color import YELLOW, RED, OFF
+# CYAN/YELLOW importados como INFO/WARNING renomeados: mesma cor de
+# YELLOW (mantida por convencao), mas CYAN agora e' LIGHTBLUE_EX --
+# visivel em terminal claro E escuro (CYAN puro quase some em fundo
+# branco). Ver comentario completo em qobuz_dl/color.py. Zero mudanca
+# de codigo neste arquivo: toda f-string que ja usa {CYAN}/{YELLOW}
+# continua funcionando, so' a cor de fato renderizada muda.
+from qobuz_dl.color import WARNING as YELLOW, RED, OFF
 
 logger = logging.getLogger(__name__)
 

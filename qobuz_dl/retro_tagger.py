@@ -8,7 +8,13 @@ import mutagen.id3 as id3
 
 from qobuz_dl.settings import QobuzDLSettings
 from qobuz_dl.lyrics_engine import LyricsEngine
-from qobuz_dl.color import CYAN, GREEN, YELLOW, RED, OFF
+# CYAN/YELLOW importados como INFO/WARNING renomeados: mesma cor de
+# YELLOW (mantida por convencao), mas CYAN agora e' LIGHTBLUE_EX --
+# visivel em terminal claro E escuro (CYAN puro quase some em fundo
+# branco). Ver comentario completo em qobuz_dl/color.py. Zero mudanca
+# de codigo neste arquivo: toda f-string que ja usa {CYAN}/{YELLOW}
+# continua funcionando, so' a cor de fato renderizada muda.
+from qobuz_dl.color import INFO as CYAN, GREEN, WARNING as YELLOW, RED, OFF
 
 logger = logging.getLogger(__name__)
 
@@ -284,7 +290,10 @@ async def process_retroactive_lyrics_async(
                 search_query = f"{artist} {title}".strip()
                 res = await client.search_tracks(search_query, limit=5)
                 items = res.get("tracks", {}).get("items", [])
-                norm = lambda s: re.sub(r"[^a-z0-9]", "", s.lower())
+
+                def norm(s):
+                    return re.sub(r"[^a-z0-9]", "", s.lower())
+
                 target_title = norm(title)
                 for item in items:
                     item_title = norm(str(item.get("title", "")))
@@ -357,9 +366,9 @@ async def process_retroactive_lyrics_async(
                         )
                     )
                 elif (
-                    not existing_lang
-                    or existing_lang == "unknown"
-                    or existing_lang != expected_lang
+                    not existing_lang or
+                    existing_lang == "unknown" or
+                    existing_lang != expected_lang
                 ) and track_id_is_trusted:
                     # Sabemos com certeza (tag própria) que o idioma gravado está
                     # errado, ausente ou veio de fallback (unknown), e o track_id é confiável -> corrige.
@@ -411,9 +420,9 @@ async def process_retroactive_lyrics_async(
                         )
                     )
                 elif (
-                    not existing_lang
-                    or existing_lang == "unknown"
-                    or existing_lang != expected_lang
+                    not existing_lang or
+                    existing_lang == "unknown" or
+                    existing_lang != expected_lang
                 ) and track_id_is_trusted:
                     engine.fetch_and_inject(
                         file_path=file_path,
@@ -468,9 +477,9 @@ async def process_retroactive_lyrics_async(
                     )
 
                 elif (
-                    not existing_lang
-                    or existing_lang == "unknown"
-                    or existing_lang != expected_lang
+                    not existing_lang or
+                    existing_lang == "unknown" or
+                    existing_lang != expected_lang
                 ) and track_id_is_trusted:
                     # Cobre tanto "idioma original errado", fallback, ou "faltando a
                     # metade da tradução" (ex: tag diz só 'es', deveria ser 'es+pt')
@@ -582,9 +591,9 @@ async def process_retroactive_lyrics_async(
     # =========================================================================
     # RELATÓRIO DETALHADO FINAL
     # =========================================================================
-    print(f"\n{'='*75}")
+    print(f"\n{'=' * 75}")
     print(f"{GREEN}{'RELATÓRIO DETALHADO DE ATUALIZAÇÃO DE LETRAS (QOBUZ)':^75}{OFF}")
-    print(f"{'='*75}\n")
+    print(f"{'=' * 75}\n")
 
     for name, status, desc in report_items:
         if "ATUALIZADO" in status:
@@ -600,14 +609,14 @@ async def process_retroactive_lyrics_async(
         print(f"     Status: {color}{status}{OFF} ➔ {desc}\n")
 
     total_updates = (
-        stats["updated_new_original"]
-        + stats["updated_new_pt"]
-        + stats["updated_to_bilingual"]
-        + stats["updated_bilingual_direct"]
-        + stats["updated_fallback"]
+        stats["updated_new_original"] +
+        stats["updated_new_pt"] +
+        stats["updated_to_bilingual"] +
+        stats["updated_bilingual_direct"] +
+        stats["updated_fallback"]
     )
 
-    print(f"{'='*75}")
+    print(f"{'=' * 75}")
     print(f"{CYAN}RESUMO GERAL:{OFF}")
     print(f"  • Total de arquivos analisados: {stats['total']}")
     print(f"  • Total de arquivos {GREEN}atualizados{OFF}: {total_updates}")
@@ -634,7 +643,7 @@ async def process_retroactive_lyrics_async(
         f"  • Total {CYAN}sem alterações necessárias{OFF}: {stats['unchanged_already_bilingual'] + stats['unchanged_already_pt'] + stats['unchanged_no_trans_yet']}"
     )
     print(f"  • Total {YELLOW}sem letra/tradução encontrada{OFF}: {stats['not_found']}")
-    print(f"{'='*75}\n")
+    print(f"{'=' * 75}\n")
 
 
 async def inject_lyrics_retroactively(

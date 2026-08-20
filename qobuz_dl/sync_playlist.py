@@ -3,7 +3,13 @@ import logging
 from mutagen.flac import FLAC
 from mutagen.id3 import ID3
 
-from qobuz_dl.color import CYAN, GREEN, RED, YELLOW, OFF
+# CYAN/YELLOW importados como INFO/WARNING renomeados: mesma cor de
+# YELLOW (mantida por convencao), mas CYAN agora e' LIGHTBLUE_EX --
+# visivel em terminal claro E escuro (CYAN puro quase some em fundo
+# branco). Ver comentario completo em qobuz_dl/color.py. Zero mudanca
+# de codigo neste arquivo: toda f-string que ja usa {CYAN}/{YELLOW}
+# continua funcionando, so' a cor de fato renderizada muda.
+from qobuz_dl.color import INFO as CYAN, GREEN, RED, WARNING as YELLOW, OFF
 
 logger = logging.getLogger(__name__)
 
@@ -41,9 +47,9 @@ def _scan_local_tracks(directory):
                 else:
                     audio = ID3(fpath)
                     track_txxx = (
-                        audio.get("TXXX:QDL_TRACK_ID")
-                        or audio.get("TXXX:qdl_track_id")
-                        or audio.get("TXXX:QOBUZTRACKID")
+                        audio.get("TXXX:QDL_TRACK_ID") or
+                        audio.get("TXXX:qdl_track_id") or
+                        audio.get("TXXX:QOBUZTRACKID")
                     )
                     if track_txxx:
                         track_id = track_txxx.text[0]

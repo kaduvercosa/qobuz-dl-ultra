@@ -4,7 +4,13 @@ import xml.etree.ElementTree as ET
 import asyncio
 import questionary
 from qobuz_dl.qopy import Client
-from qobuz_dl.color import GREEN, YELLOW, RED, CYAN, OFF
+# CYAN/YELLOW importados como INFO/WARNING renomeados: mesma cor de
+# YELLOW (mantida por convencao), mas CYAN agora e' LIGHTBLUE_EX --
+# visivel em terminal claro E escuro (CYAN puro quase some em fundo
+# branco). Ver comentario completo em qobuz_dl/color.py. Zero mudanca
+# de codigo neste arquivo: toda f-string que ja usa {CYAN}/{YELLOW}
+# continua funcionando, so' a cor de fato renderizada muda.
+from qobuz_dl.color import GREEN, WARNING as YELLOW, RED, INFO as CYAN, OFF
 from qobuz_dl.utils import get_config_paths
 
 
@@ -144,9 +150,9 @@ async def run_radar():
             search_result = await api.search_albums(release_title, limit=1)
 
             if (
-                search_result
-                and "albums" in search_result
-                and search_result["albums"]["items"]
+                search_result and
+                "albums" in search_result and
+                search_result["albums"]["items"]
             ):
                 album_data = search_result["albums"]["items"][0]
                 album_id = album_data["id"]

@@ -1,6 +1,12 @@
 import requests
 from bs4 import BeautifulSoup
-from qobuz_dl.color import OFF, GREEN, RED, YELLOW, CYAN
+# CYAN/YELLOW importados como INFO/WARNING renomeados: mesma cor de
+# YELLOW (mantida por convencao), mas CYAN agora e' LIGHTBLUE_EX --
+# visivel em terminal claro E escuro (CYAN puro quase some em fundo
+# branco). Ver comentario completo em qobuz_dl/color.py. Zero mudanca
+# de codigo neste arquivo: toda f-string que ja usa {CYAN}/{YELLOW}
+# continua funcionando, so' a cor de fato renderizada muda.
+from qobuz_dl.color import OFF, GREEN, RED, WARNING as YELLOW, INFO as CYAN
 
 
 def fetch_lastfm_playlist(url: str) -> list:

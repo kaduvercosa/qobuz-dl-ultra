@@ -4,7 +4,13 @@ import asyncio
 from mutagen.flac import FLAC
 from mutagen.id3 import ID3
 from qobuz_dl.db import handle_download_id
-from qobuz_dl.color import GREEN, RED, YELLOW, CYAN, OFF
+# CYAN/YELLOW importados como INFO/WARNING renomeados: mesma cor de
+# YELLOW (mantida por convencao), mas CYAN agora e' LIGHTBLUE_EX --
+# visivel em terminal claro E escuro (CYAN puro quase some em fundo
+# branco). Ver comentario completo em qobuz_dl/color.py. Zero mudanca
+# de codigo neste arquivo: toda f-string que ja usa {CYAN}/{YELLOW}
+# continua funcionando, so' a cor de fato renderizada muda.
+from qobuz_dl.color import GREEN, RED, WARNING as YELLOW, INFO as CYAN, OFF
 
 logger = logging.getLogger(__name__)
 
@@ -74,17 +80,17 @@ async def sync_database(directory, db_path, client):
 
                     # --- RICERCA GERARCHICA MP3 (Stealth -> Legacy) ---
                     track_txxx = (
-                        audio.get("TXXX:QDL_TRACK_ID")
-                        or audio.get("TXXX:qdl_track_id")
-                        or audio.get("TXXX:QOBUZTRACKID")
+                        audio.get("TXXX:QDL_TRACK_ID") or
+                        audio.get("TXXX:qdl_track_id") or
+                        audio.get("TXXX:QOBUZTRACKID")
                     )
                     if track_txxx:
                         track_id = track_txxx.text[0]
 
                     album_txxx = (
-                        audio.get("TXXX:QDL_ALBUM_ID")
-                        or audio.get("TXXX:qdl_album_id")
-                        or audio.get("TXXX:QOBUZALBUMID")
+                        audio.get("TXXX:QDL_ALBUM_ID") or
+                        audio.get("TXXX:qdl_album_id") or
+                        audio.get("TXXX:QOBUZALBUMID")
                     )
                     if album_txxx:
                         album_id = album_txxx.text[0]

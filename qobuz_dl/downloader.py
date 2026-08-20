@@ -1,3 +1,11 @@
+from qobuz_dl.settings import QobuzDLSettings
+from qobuz_dl.constants import (
+    DEFAULT_FOLDER,
+    DEFAULT_TRACK,
+    DEFAULT_MULTIPLE_DISC_TRACK,
+)
+from qobuz_dl.db import handle_download_id
+from qobuz_dl.utils import get_album_artist, clean_filename, verify_audio_integrity
 from .lyrics_engine import LyricsEngine
 import logging
 import os
@@ -26,16 +34,32 @@ from pathvalidate import sanitize_filename, sanitize_filepath
 from tqdm import tqdm
 
 import qobuz_dl.metadata as metadata
-from qobuz_dl.color import OFF, GREEN, RED, YELLOW, CYAN, RESET
+# CYAN/YELLOW importados como INFO/WARNING renomeados: mesma cor de
+# YELLOW (mantida por convencao), mas CYAN agora e' LIGHTBLUE_EX --
+# visivel em terminal claro E escuro (CYAN puro quase some em fundo
+# branco). Ver comentario completo em qobuz_dl/color.py. Zero mudanca
+# de codigo neste arquivo: toda f-string que ja usa {CYAN}/{YELLOW}
+# continua funcionando, so' a cor de fato renderizada muda.
+from qobuz_dl.color import OFF, GREEN, RED, WARNING as YELLOW, INFO as CYAN, RESET
 from qobuz_dl.exceptions import NonStreamable
-from qobuz_dl.settings import QobuzDLSettings
-from qobuz_dl.utils import get_album_artist, clean_filename, verify_audio_integrity
-from qobuz_dl.db import handle_download_id
-from qobuz_dl.constants import (
-    DEFAULT_FOLDER,
-    DEFAULT_TRACK,
-    DEFAULT_MULTIPLE_DISC_TRACK,
-)
+
+
+class _PermanentDownloadError(Exception):
+    """
+    Erro de download que NAO deve ser tentado de novo -- 401 (nao
+    autenticado), 403 (sem licenca/regiao bloqueada), 404 (nao existe),
+    451 (indisponivel por motivo legal). Tentar de novo um desses e'
+    tempo perdido, sempre vai falhar do mesmo jeito -- diferente de um
+    timeout ou erro 5xx, que pode ser so' uma soneca passageira do
+    servidor. Antes disso, qualquer erro nao-404 (incluindo 403/401)
+    caia no mesmo loop de retry com backoff de ate' ~62s e imprimia
+    "[!] Server block. Retrying..." repetidas vezes -- poluindo o
+    terminal e dando a falsa impressao de que a conexao estava
+    instavel quando na verdade a faixa so' nao estava disponivel
+    mesmo (ex.: bloqueio de regiao, direito autoral).
+    """
+    pass
+
 
 # UI Lock to prevent text scrambling during multithreading
 print_lock = threading.Lock()
@@ -370,8 +394,8 @@ class Download:
             raise NonStreamable("This release is not streamable")
 
         if self.albums_only and (
-            album_meta.get("release_type") != "album"
-            or album_meta.get("artist").get("name") == "Various Artists"
+            album_meta.get("release_type") != "album" or
+            album_meta.get("artist").get("name") == "Various Artists"
         ):
             safe_print(f'{OFF}Ignoring Single/EP/VA: {album_meta.get("title", "n/a")}')
             return
@@ -477,7 +501,8 @@ class Download:
                     ("Artista", artist_name),
                     ("Ano", release_year or "--"),
                     ("Faixas", str(track_count)),
-                    ("Qualidade", f"{file_format} ({bit_depth}bit/{float(sampling_rate):g}kHz)" if bit_depth else file_format),
+                    ("Qualidade",
+                     f"{file_format} ({bit_depth}bit/{float(sampling_rate):g}kHz)" if bit_depth else file_format),
                     ("Modo", mode_label),
                 ],
             )
@@ -691,9 +716,9 @@ class Download:
             track_meta = await self.client.get_track_meta(self.item_id)
 
             if (
-                getattr(self, "is_playlist", False)
-                and not getattr(self, "playlist_as_albums", False)
-                and getattr(self, "playlist_track_number", None)
+                getattr(self, "is_playlist", False) and
+                not getattr(self, "playlist_as_albums", False) and
+                getattr(self, "playlist_track_number", None)
             ):
                 track_meta["track_number"] = self.playlist_track_number
 
@@ -715,7 +740,8 @@ class Download:
                         ("Faixa", track_title),
                         ("Artista", artist),
                         ("Álbum", album_name),
-                        ("Qualidade", f"{file_format} ({bit_depth}bit/{float(sampling_rate):g}kHz)" if bit_depth else file_format),
+                        ("Qualidade",
+                         f"{file_format} ({bit_depth}bit/{float(sampling_rate):g}kHz)" if bit_depth else file_format),
                     ],
                 )
             emit_progress_json(
@@ -792,7 +818,8 @@ class Download:
                             save_cover=save_cover_now,
                             embed_art=self.settings.embed_art,
                             saved_name="cover.jpg",
-                            embed_name=(embed_cover_path and os.path.basename(embed_cover_path)) or "",
+                            embed_name=(embed_cover_path and os.path.basename(
+                                embed_cover_path)) or "",
                             saved_art_size=self.settings.saved_art_size,
                             embedded_art_size=self.settings.embedded_art_size,
                             session=self.http_session,
@@ -1009,6 +1036,21 @@ class Download:
                         success = True
                         final_fmt = attempt_fmt
                         break
+                    except _PermanentDownloadError as e:
+                        # Erro permanente (401/403/404/451): a faixa nao esta
+                        # disponivel de verdade (regiao/licenca/sessao), nao
+                        # e' um bloqueio passageiro de CDN. Tentar o fallback
+                        # segmentado ou cair pra outra qualidade nunca vai
+                        # resolver isso -- e' a mesma autorizacao em qualquer
+                        # tier. Desiste da faixa inteira aqui, em vez de
+                        # cascatear por ate' 4 tiers de qualidade, cada um
+                        # tentando de novo (o que antes gerava uma parede de
+                        # mensagens "Akamai block detected" enganosas pra uma
+                        # faixa que so' nao estava disponivel mesmo).
+                        if abort_event.is_set():
+                            return False
+                        safe_print(f"{YELLOW}[!] Faixa indisponível, pulando: {e}{OFF}")
+                        return False
                     except Exception:
                         if abort_event.is_set():
                             return False
@@ -1038,6 +1080,14 @@ class Download:
                 elif not success:
                     raise Exception("No valid format returned by the server.")
 
+            except _PermanentDownloadError as e:
+                # Mesmo raciocinio do except interno acima: se o fallback
+                # segmentado tambem bateu num erro permanente, nao adianta
+                # cascatear pelos tiers de qualidade restantes.
+                if abort_event.is_set():
+                    return False
+                safe_print(f"{YELLOW}[!] Faixa indisponível, pulando: {e}{OFF}")
+                return False
             except Exception:
                 pass
 
@@ -1074,9 +1124,9 @@ class Download:
             safe_print(f"{RED}[!] Error tagging: {e}{OFF}")
 
         if (
-            getattr(self, "fetch_lyrics", False)
-            and hasattr(self, "lyrics_engine")
-            and not abort_event.is_set()
+            getattr(self, "fetch_lyrics", False) and
+            hasattr(self, "lyrics_engine") and
+            not abort_event.is_set()
         ):
             album_artist = _safe_get(track_metadata, "album", "artist", "name")
             performer_name = _safe_get(
@@ -1105,9 +1155,9 @@ class Download:
 
             translation_note = None
             if (
-                translation_lang
-                and not qobuz_translation_response
-                and isinstance(qobuz_lyrics_response, dict)
+                translation_lang and
+                not qobuz_translation_response and
+                isinstance(qobuz_lyrics_response, dict)
             ):
                 original_block = qobuz_lyrics_response.get("original")
                 original_lang = (
@@ -1154,8 +1204,8 @@ class Download:
         # ligado usa --verify-download (ver settings.py/cli.py) ou roda
         # "python check_audio.py --verify-library" depois, em lote.
         if (
-            getattr(self.settings, "verify_after_download", False)
-            and not abort_event.is_set()
+            getattr(self.settings, "verify_after_download", False) and
+            not abort_event.is_set()
         ):
 
             def _run_verify():
@@ -1736,6 +1786,13 @@ def tqdm_download(
 
                 if r.status_code == 416:
                     return
+                if r.status_code == 404:
+                    raise _PermanentDownloadError("HTTP 404: File not found on server.")
+                if r.status_code in (401, 403, 451):
+                    raise _PermanentDownloadError(
+                        f"HTTP {r.status_code}: faixa indisponível (bloqueio de "
+                        f"região, direitos autorais ou sessão expirada)."
+                    )
                 if r.status_code not in [200, 206]:
                     raise Exception(f"Status Server: {r.status_code}")
 
@@ -1777,16 +1834,27 @@ def tqdm_download(
                     safe_print(f"{G}  L Completed: {track_name}{O}")
                     return
 
+            except _PermanentDownloadError as e:
+                if os.path.exists(fname):
+                    os.remove(fname)
+                safe_print(f"{Y}[!] Indisponível: {track_name} ({e}){O}")
+                raise
+
             except Exception as e:
                 if "404" in str(e):
+                    # Mantido como rede de seguranca: cobre um 404 que chegue
+                    # de outro jeito (ex.: excecao de rede que menciona "404"
+                    # no texto sem ter passado pelo check de status_code
+                    # acima). O caso normal ja' e' pego por
+                    # _PermanentDownloadError antes de chegar aqui.
                     if os.path.exists(fname):
                         os.remove(fname)
-                    raise Exception("HTTP 404: File not found on server.")
+                    raise _PermanentDownloadError("HTTP 404: File not found on server.")
 
                 if attempt < max_retries - 1:
                     wait = backoff_delays[attempt]
                     safe_print(
-                        f"\n{Y}[!] Server block. Retrying in {wait}s ({attempt+1}/{max_retries}) | Error details: {e}{O}"
+                        f"\n{Y}[!] Falha de rede. Tentando de novo em {wait}s ({attempt + 1}/{max_retries}) | Detalhes: {e}{O}"
                     )
                     time.sleep(wait)
                 else:
@@ -1921,7 +1989,8 @@ def _get_cover_and_embed(
     embed_file = os.path.join(dirn, embed_name)
 
     if os.path.isfile(embed_file):
-        safe_print(f"{YELLOW}[*] Skipping embedded cover art: {embed_name} (Already downloaded){OFF}")
+        safe_print(
+            f"{YELLOW}[*] Skipping embedded cover art: {embed_name} (Already downloaded){OFF}")
         return
 
     if save_cover and saved_url == embed_url and os.path.isfile(saved_file):
@@ -2148,12 +2217,12 @@ def tqdm_download_segments(
 def _get_qobuz_segment_uuid(segment_data):
     pos = 0
     while pos + 24 <= len(segment_data):
-        size = int.from_bytes(segment_data[pos : pos + 4], "big")
+        size = int.from_bytes(segment_data[pos: pos + 4], "big")
         if size <= 0 or pos + size > len(segment_data):
             break
 
-        if bytes(segment_data[pos + 4 : pos + 8]) == b"uuid":
-            return bytes(segment_data[pos + 8 : pos + 24])
+        if bytes(segment_data[pos + 4: pos + 8]) == b"uuid":
+            return bytes(segment_data[pos + 8: pos + 24])
         pos += size
     return None
 
@@ -2165,31 +2234,31 @@ def _decrypt_qobuz_segment(segment_data, raw_key, segment_uuid):
     buf = bytearray(segment_data)
     pos = 0
     while pos + 8 <= len(buf):
-        size = int.from_bytes(buf[pos : pos + 4], "big")
+        size = int.from_bytes(buf[pos: pos + 4], "big")
         if size <= 0 or pos + size > len(buf):
             break
 
         if (
-            bytes(buf[pos + 4 : pos + 8]) == b"uuid"
-            and bytes(buf[pos + 8 : pos + 24]) == segment_uuid
+            bytes(buf[pos + 4: pos + 8]) == b"uuid" and
+            bytes(buf[pos + 8: pos + 24]) == segment_uuid
         ):
             pointer = pos + 28
-            data_end = pos + int.from_bytes(buf[pointer : pointer + 4], "big")
+            data_end = pos + int.from_bytes(buf[pointer: pointer + 4], "big")
             pointer += 4
             counter_len = buf[pointer]
             pointer += 1
-            frame_count = int.from_bytes(buf[pointer : pointer + 3], "big")
+            frame_count = int.from_bytes(buf[pointer: pointer + 3], "big")
             pointer += 3
 
             for _ in range(frame_count):
-                frame_len = int.from_bytes(buf[pointer : pointer + 4], "big")
+                frame_len = int.from_bytes(buf[pointer: pointer + 4], "big")
                 pointer += 6
-                flags = int.from_bytes(buf[pointer : pointer + 2], "big")
+                flags = int.from_bytes(buf[pointer: pointer + 2], "big")
                 pointer += 2
                 frame_start, data_end = data_end, data_end + frame_len
 
                 if flags:
-                    counter = bytes(buf[pointer : pointer + counter_len]) + (
+                    counter = bytes(buf[pointer: pointer + counter_len]) + (
                         b"\x00" * (16 - counter_len)
                     )
                     # modes.CTR(counter) da "cryptography" toma o bloco de
