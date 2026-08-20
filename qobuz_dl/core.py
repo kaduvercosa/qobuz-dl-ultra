@@ -16,6 +16,7 @@ try:
     from prompt_toolkit.layout.layout import Layout
     from prompt_toolkit.styles import Style
     from prompt_toolkit import PromptSession
+    from prompt_toolkit.application.current import get_app
 except ImportError:
     sys.exit(
         "Erro: Por favor, instale o prompt_toolkit executando: pip install prompt_toolkit"
@@ -55,13 +56,12 @@ HEADER_STAGGER_DELAY = 1.5
 # --- UI STYLE FOR PROMPT_TOOLKIT (100% CONTRAST FIX) ---
 pt_style = Style.from_dict(
     {
-        "title": "ansicyan bold",
+        "title": "fg:#5fa8d3 bold",
         "pointer": "ansiyellow bold",
-        "checkbox": "ansigreen",
-        # Fundo Cinza Claro e Texto Preto! Impossível de não ver no claro ou escuro.
-        "hovered": "bg:#cccccc fg:#000000 bold",
+        "checkbox": "fg:#5fa8d3",
+        "hovered": "fg:#5fa8d3 reverse bold",
         "meta": "",
-        "highlight": "ansicyan bold",
+        "highlight": "fg:#5fa8d3 bold",
         "footer": "ansiyellow",
     }
 )
@@ -127,9 +127,47 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
         event.app.exit(exception=KeyboardInterrupt)
 
     def get_text():
-        columns, lines = shutil.get_terminal_size((80, 24))
-        is_table = columns >= 105
-        is_table_simple = columns >= 75
+        # Captura as larguras exatas do terminal dinamicamente pelo motor do
+        # prompt_toolkit
+        try:
+            app_instance = get_app()
+            columns = app_instance.output.get_size().columns
+        except Exception:
+            columns, _ = shutil.get_terminal_size((80, 24))
+
+        is_mobile = columns < 70
+        is_table = columns >= 70
+
+        prefix_len = 7 if is_multi else 3
+        hdr_pref = " " * prefix_len
+
+        # CÁLCULOS DINÂMICOS DE ÁREA SEGURA (SAFE AREA)
+        safe_columns = columns - 2  # Deixa 2 espaços de margem de manobra
+
+        # 1. Matemática da Tabela de FAIXAS (Track)
+        # Fixos: prefixo + separadores(12) + duração(5) + qualidade(12)
+        fixed_trk = prefix_len + 29
+        flex_trk = max(15, safe_columns - fixed_trk)
+        trk_art_w = max(10, int(flex_trk * 0.25))  # 25%
+        trk_alb_w = max(10, int(flex_trk * 0.30))  # 30%
+        trk_tit_w = flex_trk - trk_art_w - trk_alb_w  # O resto (45%)
+        dash_trk = flex_trk + 29
+
+        # 2. Matemática da Tabela de ÁLBUNS
+        # Fixos: prefixo + separadores(18) + tipo(6) + ano(4) + faixas(6) + dur(5) + qual(12)
+        fixed_alb = prefix_len + 51
+        flex_alb = max(10, safe_columns - fixed_alb)
+        alb_art_w = max(10, int(flex_alb * 0.35))  # 35%
+        alb_tit_w = flex_alb - alb_art_w          # 65%
+        dash_alb = flex_alb + 51
+
+        # 3. Matemática da Tabela Simples (Playlists)
+        # Fixos: prefixo + separadores(9) + faixas(6) + dur(5)
+        fixed_pl = prefix_len + 20
+        flex_pl = max(10, safe_columns - fixed_pl)
+        pl_own_w = max(10, int(flex_pl * 0.30))
+        pl_nom_w = flex_pl - pl_own_w
+        dash_pl = flex_pl + 20
 
         res = []
         res.append(("class:title", f"=== {title} ===\n\n"))
@@ -138,31 +176,51 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
             res.append(
                 (
                     "class:meta",
-                    f"       {'ARTISTA'.ljust(20)} | {'ÁLBUM'.ljust(35)} | {'TIPO'.ljust(8)} | {'ANO'.ljust(4)} | FAIXAS | DURAÇÃO | QUALIDADE\n",
+                    f"{hdr_pref}{
+                        'ARTISTA'.ljust(alb_art_w)} | {
+                        'ÁLBUM'.ljust(alb_tit_w)} | {
+                        'TIPO'.ljust(6)} | {
+                        'ANO'.ljust(4)} | {
+                        'FAIXAS'.ljust(6)} | {
+                        'DURAÇÃO'.ljust(5)} | {
+                            'QUALIDADE'.ljust(12)}\n",
                 )
             )
-            res.append(("class:meta", f"       {'-' * 110}\n"))
+            res.append(("class:meta", f"{hdr_pref}{'-' * dash_alb}\n"))
+
         elif item_category == "track" and is_table:
             res.append(
                 (
                     "class:meta",
-                    f"       {'ARTISTA'.ljust(20)} | {'FAIXA'.ljust(35)} | {'ÁLBUM'.ljust(25)} | DURAÇÃO | QUALIDADE\n",
+                    f"{hdr_pref}{
+                        'ARTISTA'.ljust(trk_art_w)} | {
+                        'FAIXA'.ljust(trk_tit_w)} | {
+                        'ÁLBUM'.ljust(trk_alb_w)} | {
+                        'DURAÇÃO'.ljust(5)}  | {
+                        'QUALIDADE'.ljust(12)}\n",
                 )
             )
-            res.append(("class:meta", f"       {'-' * 100}\n"))
-        elif item_category == "playlist" and is_table_simple:
+            res.append(("class:meta", f"{hdr_pref}{'-' * dash_trk}\n"))
+
+        elif item_category == "playlist" and is_table:
             res.append(
                 (
                     "class:meta",
-                    f"       {'NOME DA PLAYLIST'.ljust(40)} | {'CRIADOR'.ljust(20)} | FAIXAS | DURAÇÃO\n",
+                    f"{hdr_pref}{
+                        'NOME DA PLAYLIST'.ljust(pl_nom_w)} | {
+                        'CRIADOR'.ljust(pl_own_w)} | {
+                        'FAIXAS'.ljust(6)}  | {
+                        'DURAÇÃO'.ljust(5)}\n",
                 )
             )
-            res.append(("class:meta", f"       {'-' * 85}\n"))
-        elif item_category == "artist" and is_table_simple:
+            res.append(("class:meta", f"{hdr_pref}{'-' * dash_pl}\n"))
+
+        elif item_category == "artist" and is_table:
             res.append(
-                ("class:meta", f"       {'NOME DO ARTISTA'.ljust(50)} | LANÇAMENTOS\n")
+                ("class:meta",
+                 f"{hdr_pref}{'NOME DO ARTISTA'.ljust(50)} | LANÇAMENTOS\n")
             )
-            res.append(("class:meta", f"       {'-' * 65}\n"))
+            res.append(("class:meta", f"{hdr_pref}{'-' * 65}\n"))
 
         for i, opt in enumerate(options_dicts):
             hovered = i == cursor_pos
@@ -172,16 +230,6 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
             title_style = "class:hovered" if hovered else "class:highlight"
 
             if hovered:
-                # Fragmento invisível ("zero-width") que diz ao prompt_toolkit
-                # onde fica o "cursor" lógico da lista neste render. É o
-                # próprio motor da Window que usa essa marca para rolar
-                # automaticamente e manter o item em destaque visível,
-                # respeitando o ScrollOffsets(top=1, bottom=1) lá embaixo.
-                # Diferente do scroll manual antigo (cursor_pos - 1), isso
-                # funciona corretamente com cabeçalho de tabela, itens que
-                # ocupam várias linhas (modo cartão) e quebra automática de
-                # linha em telas estreitas (iPhone/iSH) -- porque ele opera
-                # sobre as linhas já renderizadas, não sobre o índice do item.
                 res.append(("[SetCursorPosition]", ""))
 
             ptr = ">" if hovered else " "
@@ -200,91 +248,112 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
 
             if item_category == "album":
                 if is_table:
-                    art = _align_text(meta.get("artist", ""), 20)
-                    tit = _align_text(meta.get("title", ""), 35)
-                    typ = _align_text(meta.get("type", ""), 8)
+                    art = _align_text(meta.get("artist", ""), alb_art_w)
+                    tit = _align_text(meta.get("title", ""), alb_tit_w)
+                    typ = _align_text(meta.get("type", ""), 6)
                     yr = _align_text(meta.get("year", ""), 4)
                     fx = str(meta.get("tracks_count", "")).ljust(6)
-                    dur = str(meta.get("duration", "")).ljust(7)
-                    ql = meta.get("quality", "")
+                    dur = str(meta.get("duration", "")).ljust(5)
+                    ql = meta.get("quality", "").ljust(12)
+
+                    ql_color = "fg:#c59b27 bold" if "24b" in ql else "ansicyan"
+                    # Se estiver em Hover, o estilo do hover assume tudo, evitando o
+                    # contraste ruim
+                    ql_final_style = style if hovered else ql_color
+
                     res.append(
-                        (style, f"{art} | {tit} | {typ} | {yr} | {fx} | {dur} | {ql}\n")
-                    )
+                        (style, f"{art} | {tit} | {typ} | {yr} | {fx} | {dur} | "))
+                    res.append((ql_final_style, f"{ql}\n"))
                 else:
                     res.append((title_style, f"{meta.get('title', '')}\n"))
+                    res.append((style, f"       👤 Artista: {meta.get('artist', '')}\n"))
                     res.append(
-                        (
-                            style,
-                            f"       👤 Artista: {meta.get('artist', '')}  |  💿 {meta.get('type', '')}  |  📅 {meta.get('year', '')}\n",
-                        )
-                    )
+                        (style, f"       💿 {
+                            meta.get(
+                                'type', '')}  |  📅 {
+                            meta.get(
+                                'year', '')}\n"))
+                    res.append((style, f"       🎧 {meta.get('quality', '')}\n"))
                     res.append(
-                        (
-                            style,
-                            f"       🎧 {meta.get('quality', '')}  |  🎶 {meta.get('tracks_count', 0)} faixas  |  ⏱️ {meta.get('duration', '--:--')}\n",
-                        )
-                    )
+                        (style,
+                         f"       🎶 {
+                             meta.get(
+                                 'tracks_count',
+                                 0)} faixas  |  ⏱️ {
+                             meta.get(
+                                 'duration',
+                                 '--:--')}\n"))
                     gnr = meta.get("genre", "")
                     lbl = meta.get("label", "")
                     if gnr or lbl:
-                        res.append((style, f"       🎵 {gnr}  |  🏷️ {lbl}\n"))
+                        if gnr:
+                            res.append((style, f"       🎵 {gnr}\n"))
+                        if lbl:
+                            res.append((style, f"       🏷️ {lbl}\n"))
                     res.append((style, f"       {'-' * 30}\n"))
 
             elif item_category == "track":
                 if is_table:
-                    art = _align_text(meta.get("artist", ""), 20)
-                    tit = _align_text(meta.get("title", ""), 35)
-                    alb = _align_text(meta.get("album", ""), 25)
-                    dur = str(meta.get("duration", "")).ljust(7)
-                    ql = meta.get("quality", "")
-                    res.append((style, f"{art} | {tit} | {alb} | {dur} | {ql}\n"))
+                    art = _align_text(meta.get("artist", ""), trk_art_w)
+                    tit = _align_text(meta.get("title", ""), trk_tit_w)
+                    alb = _align_text(meta.get("album", ""), trk_alb_w)
+                    dur = str(meta.get("duration", "")).ljust(5)
+                    ql = meta.get("quality", "").ljust(12)
+
+                    ql_color = "fg:#c59b27 bold" if "24b" in ql else "ansicyan"
+                    ql_final_style = style if hovered else ql_color
+
+                    res.append((style, f"{art} | {tit} | {alb} | {dur} | "))
+                    res.append((ql_final_style, f"{ql}\n"))
                 else:
                     res.append((title_style, f"🎶 {meta.get('title', '')}\n"))
+                    res.append((style, f"       👤 Artista: {meta.get('artist', '')}\n"))
+                    res.append((style, f"        💿 Álbum: {meta.get('album', '')}\n"))
                     res.append(
-                        (style, f"       👤 Artista: {meta.get('artist', '')}\n")
-                    )
+                        (style,
+                         f"        ⏱️ Duração: {
+                             meta.get(
+                                 'duration',
+                                 '--:--')}\n"))
                     res.append(
-                        (
-                            style,
-                            f"       💿 Álbum: {meta.get('album', '')}  |  ⏱️ Duração: {meta.get('duration', '--:--')}\n",
-                        )
-                    )
-                    res.append(
-                        (style, f"       🎧 Qualidade: {meta.get('quality', '')}\n")
-                    )
+                        (style, f"       🎧 Qualidade: {
+                            meta.get(
+                                'quality', '')}\n"))
                     res.append((style, f"       {'-' * 30}\n"))
 
             elif item_category == "playlist":
-                if is_table_simple:
-                    n = _align_text(meta.get("name", ""), 40)
-                    o = _align_text(meta.get("owner", ""), 20)
+                if is_table:
+                    n = _align_text(meta.get("name", ""), pl_nom_w)
+                    o = _align_text(meta.get("owner", ""), pl_own_w)
                     c = str(meta.get("count", "")).ljust(6)
-                    dur = str(meta.get("duration", ""))
+                    dur = str(meta.get("duration", "")).ljust(5)
+
                     res.append((style, f"{n} | {o} | {c} | {dur}\n"))
                 else:
                     res.append((title_style, f"📋 {meta.get('name', '')}\n"))
                     res.append((style, f"       👤 Criador: {meta.get('owner', '')}\n"))
+                    res.append((style, f"        🎶 Faixas: {meta.get('count', 0)}\n"))
                     res.append(
-                        (
-                            style,
-                            f"       🎶 Total de faixas: {meta.get('count', 0)}  |  ⏱️ Duração total: {meta.get('duration', '--:--')}\n",
-                        )
-                    )
+                        (style,
+                         f"        ⏱️ Duração: {
+                             meta.get(
+                                 'duration',
+                                 '--:--')}\n"))
                     res.append((style, f"       {'-' * 30}\n"))
 
             elif item_category == "artist":
-                if is_table_simple:
+                if is_table:
                     n = _align_text(meta.get("name", ""), 50)
                     c = meta.get("count", "")
                     res.append((style, f"{n} | {c} álbuns\n"))
                 else:
                     res.append((title_style, f"🎤 {meta.get('name', '')}\n"))
                     res.append(
-                        (
-                            style,
-                            f"       📦 Lançamentos listados: {meta.get('count', '')}\n",
-                        )
-                    )
+                        (style,
+                         f"       📦 Lançamentos listados: {
+                             meta.get(
+                                 'count',
+                                 '')}\n"))
                     res.append((style, f"       {'-' * 30}\n"))
             elif item_category == "filter":
                 res.append((style, f"{opt}\n"))
@@ -311,7 +380,7 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
         # no [SetCursorPosition] acima realmente seja aplicada.
         content=FormattedTextControl(text=get_text, focusable=True),
         scroll_offsets=ScrollOffsets(top=1, bottom=1),
-        wrap_lines=True,
+        wrap_lines=False,
     )
 
     layout = Layout(window)
@@ -319,14 +388,6 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
         layout=layout, key_bindings=bindings, full_screen=True, style=pt_style
     )
 
-    # A rolagem agora é 100% responsabilidade do prompt_toolkit (via
-    # [SetCursorPosition] + ScrollOffsets), então não precisamos mais de uma
-    # task em background recalculando `window.vertical_scroll` a cada 30ms.
-    # Essa task antiga era a origem do bug: o cálculo `cursor_pos - 1`
-    # ignorava o cabeçalho da lista, os itens de várias linhas (modo cartão)
-    # e a quebra automática de linha em telas estreitas -- então, conforme
-    # você descia, a rolagem real ficava cada vez mais dessincronizada da
-    # posição do item, até sumir o destaque e não sobrar nada visível.
     res = await app.run_async()
     if isinstance(res, Exception):
         raise res
@@ -489,15 +550,6 @@ class QobuzDL:
         except (requests.exceptions.RequestException, NonStreamable) as e:
             logger.error(f"{RED}Error getting release: {e}. Skipping...")
         except Exception as e:
-            # Rede de seguranca ampla: os 3 pontos que chamam download_from_id
-            # em lote (asyncio.gather, em album/playlist/discografia) NAO usam
-            # return_exceptions=True -- ou seja, qualquer excecao que escape
-            # daqui sem ser pega derruba o lote INTEIRO, cancelando as outras
-            # faixas que ainda estavam baixando em paralelo, nao so essa. Os
-            # dois tipos acima (RequestException/NonStreamable) ja cobriam os
-            # casos esperados, mas qualquer bug ou caso extremo nao previsto
-            # tinha esse raio de explosao enorme. Pega tudo aqui, loga com
-            # o ID do item pra dar pra investigar, e segue pra proxima faixa.
             logger.error(
                 f"{RED}Erro inesperado baixando item {item_id}: Pulando...{OFF}")
             logger.debug("Detalhes do erro inesperado:", exc_info=True)
@@ -563,7 +615,8 @@ class QobuzDL:
 
             if getattr(self, "_is_interactive_session", False) and url_type == "artist":
                 options = ["Album", "EP", "Single", "Live", "Compilation"]
-                title_text = f"Encontrados {len(items)} lançamentos para {content_name}. Filtre por tipo:"
+                title_text = f"Encontrados {
+                    len(items)} lançamentos para {content_name}. Filtre por tipo:"
 
                 sel_res = await _tui_select(
                     title_text, options, is_multi=True, item_category="filter"
@@ -583,11 +636,18 @@ class QobuzDL:
             logger.debug(f"Number of chunks: {len(content)}")
             if content:
                 logger.debug(
-                    f"Items in first chunk: {len(content[0].get(type_dict['iterable_key'], {}).get('items', []))}"
+                    f"Items in first chunk: {
+                        len(
+                            content[0].get(
+                                type_dict['iterable_key'],
+                                {}).get(
+                                'items',
+                                []))}"
                 )
             if getattr(self, "allowed_release_types", None) is not None:
                 logger.info(
-                    f"{YELLOW}[*] Evaluating {len(items)} releases (unwanted types will be skipped silently)...{OFF}"
+                    f"{YELLOW}[*] Evaluating {
+                        len(items)} releases (unwanted types will be skipped silently)...{OFF}"
                 )
 
             is_playlist = url_type == "playlist"
@@ -600,9 +660,6 @@ class QobuzDL:
 
             is_track_batch = type_dict["iterable_key"] == "tracks"
             batch_workers = int(getattr(self.settings, "max_workers", 1))
-            # Paralelo so' compensa com >1 item pra baixar ao mesmo tempo --
-            # com 1 so' item, cai pro modo sequencial (barra de progresso ao
-            # vivo em vez da linha "silenciosa" do modo multithread).
             can_parallelize = (
                 is_track_batch and
                 batch_workers > 1 and
@@ -979,9 +1036,9 @@ class QobuzDL:
             if i.get("hires_streamable"):
                 bit_depth = i.get("maximum_bit_depth", 24)
                 sampling_rate = i.get("maximum_sampling_rate", 96.0)
-                quality = f"[HI-RES] {bit_depth}b/{sampling_rate}kHz"
+                quality = f"{bit_depth}b/{sampling_rate}kHz"
             else:
-                quality = "[ CD ] 16b/44.1kHz"
+                quality = "16b/44.1kHz"
 
             album_name = (
                 i.get("album", {}).get("title", "Unknown Album")

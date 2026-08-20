@@ -163,7 +163,8 @@ def validate_config_formats(formats_to_check):
                     )
                     if similar_keys:
                         print(
-                            f"    {C_GRE}-> Did you mean '{{{similar_keys[0]}}}'?{C_OFF}"
+                            f"    {C_GRE}-> Did you mean '{{{
+                                similar_keys[0]}}}'?{C_OFF}"
                         )
 
                     print(
@@ -537,8 +538,6 @@ def _print_welcome_screen():
     print()
 
     rule()
-    print(f"Exemplo: qobuz-dl dl https://open.qobuz.com/album/xxxxxxx")
-    rule()
 
 
 def _initial_checks():
@@ -586,7 +585,8 @@ async def async_main():
     """The main asynchronous entry point for the CLI logic."""
     _initial_checks()
 
-    # Dispara a checagem de atualizacao em background como coroutine compativel com Python 3.13
+    # Dispara a checagem de atualizacao em background como coroutine
+    # compativel com Python 3.13
     async def _async_check_updates():
         try:
             loop = asyncio.get_running_loop()
@@ -794,7 +794,8 @@ async def async_main():
         from qobuz_dl.retro_tagger import inject_lyrics_retroactively
         from qobuz_dl.qopy import Client
 
-        # 1. Se nenhum diretório foi digitado, usa a pasta raiz do config.ini (default_folder)
+        # 1. Se nenhum diretório foi digitado, usa a pasta raiz do config.ini
+        # (default_folder)
         target_dir = getattr(arguments, "DIR", None) or default_folder
         target_dir = os.path.expanduser(target_dir)
 
