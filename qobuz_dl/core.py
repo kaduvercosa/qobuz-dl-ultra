@@ -499,7 +499,7 @@ class QobuzDL:
             # tinha esse raio de explosao enorme. Pega tudo aqui, loga com
             # o ID do item pra dar pra investigar, e segue pra proxima faixa.
             logger.error(
-                f"{RED}Erro inesperado baixando item {item_id}: {e}. Pulando...{OFF}")
+                f"{RED}Erro inesperado baixando item {item_id}: Pulando...{OFF}")
             logger.debug("Detalhes do erro inesperado:", exc_info=True)
 
         if getattr(self, "delay", 0) > 0:

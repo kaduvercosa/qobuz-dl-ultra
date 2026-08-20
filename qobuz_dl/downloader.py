@@ -9,7 +9,7 @@ from qobuz_dl.utils import get_album_artist, clean_filename, verify_audio_integr
 from .lyrics_engine import LyricsEngine
 import logging
 import os
-import shutil  # so' pra shutil.get_terminal_size() -- ver _get_safe_ncols()
+import shutil
 import sys
 import time
 import subprocess
@@ -23,25 +23,64 @@ import concurrent.futures
 from concurrent.futures import ThreadPoolExecutor
 
 import requests
-# cryptography, nao pycryptodome: pycryptodome precisa carregar um
-# framework nativo (_cpuid_c) pra deteccao de CPU (AES-NI/CLMUL), e o
-# a-Shell nao empacota esse binario -- e' um OSError garantido, nao um
-# problema de configuracao (ver qopy.py pro historico completo da troca
-# de volta). "cryptography" ja' rodou nesse mesmo a-Shell antes, sem
-# precisar compilar nada com Rust.
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from pathvalidate import sanitize_filename, sanitize_filepath
 from tqdm import tqdm
 
 import qobuz_dl.metadata as metadata
-# CYAN/YELLOW importados como INFO/WARNING renomeados: mesma cor de
-# YELLOW (mantida por convencao), mas CYAN agora e' LIGHTBLUE_EX --
-# visivel em terminal claro E escuro (CYAN puro quase some em fundo
-# branco). Ver comentario completo em qobuz_dl/color.py. Zero mudanca
-# de codigo neste arquivo: toda f-string que ja usa {CYAN}/{YELLOW}
-# continua funcionando, so' a cor de fato renderizada muda.
 from qobuz_dl.color import OFF, GREEN, RED, WARNING as YELLOW, INFO as CYAN, RESET
 from qobuz_dl.exceptions import NonStreamable
+
+# Ordem de qualidades para fallback apenas em falhas de conexão
+FALLBACK_TIERS = [27, 7, 6, 5]
+
+
+def is_track_streamable(track: dict) -> tuple[bool, str]:
+    """
+    [OPÇÃO A] Checagem prévia se a faixa está liberada para streaming completo.
+    """
+    streamable = track.get("streamable", False)
+    sampleable = track.get("sampleable", False)
+    purchasable = track.get("purchasable", False)
+
+    if not streamable:
+        if sampleable:
+            return False, "Apenas amostra/demo (30s)"
+        elif purchasable:
+            return False, "Disponível apenas para compra avulsa"
+        return False, "Não disponível na região"
+
+    return True, ""
+
+
+def create_missing_placeholder(track: dict, folder_path: str, reason: str):
+    """
+    [OPÇÃO C] Cria o arquivo .missing.txt na pasta do álbum
+    """
+    try:
+        track_num = str(track.get("track_number", 0)).zfill(2)
+        title = track.get("title", "Faixa").replace("/", "-").replace("\\", "-")
+        artist = track.get(
+            "performer",
+            {}).get(
+            "name",
+            track.get(
+                "artist",
+                {}).get(
+                "name",
+                "Desconhecido"))
+
+        filename = f"{track_num}. {title} [INDISPONÍVEL].missing.txt"
+        file_path = os.path.join(folder_path, filename)
+
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write(f"Faixa: {track_num}. {title}\n")
+            f.write(f"Artista: {artist}\n")
+            f.write(f"Duração: {track.get('duration', 0)}s\n")
+            f.write(f"Motivo: {reason}\n")
+            f.write("Status: Faixa indisponível para streaming na conta/região.\n")
+    except Exception:
+        pass
 
 
 class _PermanentDownloadError(Exception):
@@ -589,17 +628,30 @@ class Download:
                 if abort_event.is_set():
                     return False
                 async with semaphore:
+                    t_num = str(i.get("track_number", idx + 1)).zfill(2)
+                    t_title = i.get("title", "Faixa Desconhecida")
+
+                    # -------------------------------------------------------------
+                    # [OPÇÃO A + B + C]: Pre-check ANTES de fazer chamada na API
+                    # -------------------------------------------------------------
+                    streamable, reason = is_track_streamable(i)
+                    if not streamable:
+                        safe_print(
+                            f"{CYAN}[PULADA]{RESET} Faixa {t_num} - {t_title} ({YELLOW}{reason}{RESET})")
+                        create_missing_placeholder(i, dirn, reason)
+                        return "skipped"
+                    # -------------------------------------------------------------
+
                     try:
                         parse = await self.client.get_track_url(
                             i["id"], fmt_id=self.quality
                         )
                     except Exception as e:
                         safe_print(
-                            f"{RED}[!] API Error for track {i.get('track_number', 'unknown')} (ID: {i['id']}): {e}{OFF}"
+                            f"{RED}[!] Erro de API na faixa {t_num} (ID: {
+                                i['id']}): {e}{OFF}"
                         )
-                        safe_print(
-                            f"{YELLOW}[*] Skipping track and continuing with the album...{OFF}"
-                        )
+                        create_missing_placeholder(i, dirn, f"Erro de API: {e}")
                         return False
 
                     if "sample" not in parse and parse.get("sampling_rate"):
@@ -618,14 +670,31 @@ class Download:
                         )
                         return res
                     else:
-                        safe_print(f"{OFF}[*] Demo. Skipping{OFF}")
-                        return False
+                        safe_print(
+                            f"{CYAN}[PULADA]{RESET} Faixa {t_num} - {t_title} ({YELLOW}Apenas amostra/demo{RESET})")
+                        create_missing_placeholder(i, dirn, "Apenas amostra/demo (30s)")
+                        return "skipped"
 
-            tasks = [
-                process_track(idx, i)
+                        # Cria tarefas gerenciáveis no asyncio
+            task_objs = [
+                asyncio.create_task(process_track(idx, i))
                 for idx, i in enumerate(album_meta["tracks"]["items"])
             ]
-            results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            try:
+                results = await asyncio.gather(*task_objs, return_exceptions=True)
+            except (KeyboardInterrupt, asyncio.CancelledError):
+                abort_event.set()
+                aborted_by_user = True
+                # Cancela imediatamente todas as outras faixas que estão na fila
+                for t in task_objs:
+                    if not t.done():
+                        t.cancel()
+                try:
+                    self.http_session.close()  # Força o fechamento imediato de todos os sockets abertos
+                except Exception:
+                    pass
+                raise
 
             for res in results:
                 if res is False or isinstance(res, Exception):
@@ -703,14 +772,24 @@ class Download:
             album=db_album,
         )
 
-        if failed_tracks == 0:
-            safe_print(f"{GREEN}Completed: {track_count} faixas -- {album_title}{OFF}")
-        else:
-            safe_print(
-                f"{YELLOW}Completed with {failed_tracks} failed track(s) -- {album_title}{OFF}"
-            )
+        # [OPÇÃO C]: Sumário Final Formatado
+        skipped_count = sum(1 for r in results if r == "skipped")
+        real_failed = sum(1 for r in results if r is False)
+        downloaded_count = sum(1 for r in results if r is True)
 
-    async def download_track(self, is_parallel=False, position_pool=None, suppress_header=False):
+        safe_print(f"\n{CYAN}{'━' * 44}{RESET}")
+        safe_print(f"📊 {GREEN}RESUMO DO DOWNLOAD:{RESET} {album_title}")
+        safe_print(
+            f"   • Baixadas com sucesso : {GREEN}{downloaded_count}/{track_count}{RESET}")
+        if skipped_count > 0:
+            safe_print(
+                f"   • Faixas puladas (Demo/Indisponível) : {YELLOW}{skipped_count}{RESET} (marcadas em .missing.txt)")
+        if real_failed > 0:
+            safe_print(f"   • Falhas de rede/download : {RED}{real_failed}{RESET}")
+        safe_print(f"{CYAN}{'━' * 44}{RESET}\n")
+
+    async def download_track(self, is_parallel=False,
+                             position_pool=None, suppress_header=False):
         parse = await self.client.get_track_url(self.item_id, self.quality)
         if "sample" not in parse and parse.get("sampling_rate"):
             track_meta = await self.client.get_track_meta(self.item_id)
@@ -954,7 +1033,8 @@ class Download:
 
         if os.path.exists(final_file):
             safe_print(
-                f"{CYAN}[*] Skipping: {os.path.basename(final_file)} (Already exists){OFF}"
+                f"{CYAN}[*] Skipping: {
+                    os.path.basename(final_file)} (Already exists){OFF}"
             )
             return True
 
@@ -1009,7 +1089,8 @@ class Download:
 
             if attempt_fmt != int(self.quality):
                 safe_print(
-                    f"{YELLOW}[!] Automatic downgrade: Attempting to save in {TIER_NAMES[attempt_fmt]}...{OFF}"
+                    f"{YELLOW}[!] Automatic downgrade: Attempting to save in {
+                        TIER_NAMES[attempt_fmt]}...{OFF}"
                 )
 
             async def get_fresh_url(fmt=attempt_fmt, force_segments=False):
@@ -1019,6 +1100,14 @@ class Download:
 
             try:
                 fresh_track_dict = await get_fresh_url(force_segments=False)
+
+                # [OPÇÃO E]: Se a API entregar amostra, não faz fallback inútil para outras qualidades
+                if fresh_track_dict.get("sample") is True:
+                    safe_print(
+                        f"{CYAN}[PULADA]{RESET} Faixa {track_no} - {track_title} ({YELLOW}URL retornada é apenas amostra{RESET})")
+                    create_missing_placeholder(
+                        track_metadata, root_dir, "URL retornada é apenas amostra")
+                    return False
 
                 if "url" in fresh_track_dict:
                     try:
@@ -1167,9 +1256,11 @@ class Download:
                 )
                 if original_lang:
                     if original_lang.lower() == translation_lang.lower():
-                        translation_note = f"    ℹ️  Lyrics already in {translation_lang.upper()} -- no translation needed."
+                        translation_note = f"    ℹ️  Lyrics already in {
+                            translation_lang.upper()} -- no translation needed."
                     else:
-                        translation_note = f"    ℹ️  No {translation_lang.upper()} translation available on Qobuz yet for this track."
+                        translation_note = f"    ℹ️  No {
+                            translation_lang.upper()} translation available on Qobuz yet for this track."
 
             def _inject_lyrics_and_print():
                 with print_lock:
@@ -1483,7 +1574,9 @@ class Download:
                         )
                     else:
                         if is_multiple and not self.settings.multiple_disc_one_dir:
-                            disc_dir = f"{self.settings.multiple_disc_prefix} {track_metadata['media_number']:02}"
+                            disc_dir = f"{
+                                self.settings.multiple_disc_prefix} {
+                                track_metadata['media_number']:02}"
                             os.path.join(root_dir, disc_dir)
 
                         track_path = sanitize_filename(
@@ -1840,13 +1933,28 @@ def tqdm_download(
                 safe_print(f"{Y}[!] Indisponível: {track_name} ({e}){O}")
                 raise
 
+            except (KeyboardInterrupt, SystemExit):
+                # Se o usuário apertar Ctrl+C, aborta IMEDIATAMENTE sem esperar nem
+                # tentar de novo
+                abort_event.set()
+                if os.path.exists(fname):
+                    try:
+                        os.remove(fname)
+                    except OSError:
+                        pass
+                return
+
             except Exception as e:
+                # Se o usuário já pediu para parar, não tenta reconectar
+                if abort_event.is_set():
+                    if os.path.exists(fname):
+                        try:
+                            os.remove(fname)
+                        except OSError:
+                            pass
+                        return
+
                 if "404" in str(e):
-                    # Mantido como rede de seguranca: cobre um 404 que chegue
-                    # de outro jeito (ex.: excecao de rede que menciona "404"
-                    # no texto sem ter passado pelo check de status_code
-                    # acima). O caso normal ja' e' pego por
-                    # _PermanentDownloadError antes de chegar aqui.
                     if os.path.exists(fname):
                         os.remove(fname)
                     raise _PermanentDownloadError("HTTP 404: File not found on server.")
@@ -1854,15 +1962,16 @@ def tqdm_download(
                 if attempt < max_retries - 1:
                     wait = backoff_delays[attempt]
                     safe_print(
-                        f"\n{Y}[!] Falha de rede. Tentando de novo em {wait}s ({attempt + 1}/{max_retries}) | Detalhes: {e}{O}"
+                        f"\n{Y}[!] Falha de rede. Tentando de novo em {wait}s ({
+                            attempt + 1}/{max_retries}) | Detalhes: {e}{O}"
                     )
                     time.sleep(wait)
+
                 else:
                     if os.path.exists(fname):
                         os.remove(fname)
-                    raise Exception(
-                        f"Definitive timeout after {max_retries} attempts. Last error: {e}"
-                    )
+                    raise Exception(f"Definitive timeout after {max_retries} attempts. Last error: {e}"
+                                    )
 
         if downloaded_size < total_size and not abort_event.is_set():
             if os.path.exists(fname):
