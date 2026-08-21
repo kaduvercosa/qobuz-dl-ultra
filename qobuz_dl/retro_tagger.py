@@ -371,7 +371,8 @@ async def process_retroactive_lyrics_async(
                     existing_lang != expected_lang
                 ) and track_id_is_trusted:
                     # Sabemos com certeza (tag própria) que o idioma gravado está
-                    # errado, ausente ou veio de fallback (unknown), e o track_id é confiável -> corrige.
+                    # errado, ausente ou veio de fallback (unknown), e o track_id é
+                    # confiável -> corrige.
                     engine.fetch_and_inject(
                         file_path=file_path,
                         artist=artist,
@@ -397,7 +398,8 @@ async def process_retroactive_lyrics_async(
                         (display_name, "SEM ALTERAÇÃO", "Letra já presente e em PT")
                     )
 
-            # REGRA 2: Letra original existe em outro idioma, mas Qobuz NÃO tem tradução PT
+            # REGRA 2: Letra original existe em outro idioma, mas Qobuz NÃO tem
+            # tradução PT
             elif not qobuz_trans_block:
                 expected_lang = orig_lang
                 if not has_lyrics:
@@ -416,7 +418,8 @@ async def process_retroactive_lyrics_async(
                         (
                             display_name,
                             "ATUALIZADO",
-                            f"Letra original ({orig_lang.upper()}) inserida (sem tradução PT no Qobuz)",
+                            f"Letra original ({
+                                orig_lang.upper()}) inserida (sem tradução PT no Qobuz)",
                         )
                     )
                 elif (
@@ -621,26 +624,33 @@ async def process_retroactive_lyrics_async(
     print(f"  • Total de arquivos analisados: {stats['total']}")
     print(f"  • Total de arquivos {GREEN}atualizados{OFF}: {total_updates}")
     print(
-        f"      - Convertidos para Bilíngue (adição de tradução PT): {stats['updated_to_bilingual']}"
+        f"      - Convertidos para Bilíngue (adição de tradução PT): {
+            stats['updated_to_bilingual']}"
     )
     print(
-        f"      - Novas letras Bilíngues completas inseridas: {stats['updated_bilingual_direct']}"
+        f"      - Novas letras Bilíngues completas inseridas: {
+            stats['updated_bilingual_direct']}"
     )
     print(
         f"      - Novas letras em Português nativo inseridas: {stats['updated_new_pt']}"
     )
     print(
-        f"      - Novas letras originais inseridas (sem tradução PT no Qobuz): {stats['updated_new_original']}"
+        f"      - Novas letras originais inseridas (sem tradução PT no Qobuz): {
+            stats['updated_new_original']}"
     )
     print(
         f"      - Inseridas via fallback (LRCLIB/Genius): {stats['updated_fallback']}"
     )
     if stats["corrected_wrong_language"] > 0:
         print(
-            f"  • Total {YELLOW}corrigidas por idioma incorreto{OFF}: {stats['corrected_wrong_language']}"
+            f"  • Total {YELLOW}corrigidas por idioma incorreto{OFF}: {
+                stats['corrected_wrong_language']}"
         )
     print(
-        f"  • Total {CYAN}sem alterações necessárias{OFF}: {stats['unchanged_already_bilingual'] + stats['unchanged_already_pt'] + stats['unchanged_no_trans_yet']}"
+        f"  • Total {CYAN}sem alterações necessárias{OFF}: {
+            stats['unchanged_already_bilingual'] +
+            stats['unchanged_already_pt'] +
+            stats['unchanged_no_trans_yet']}"
     )
     print(f"  • Total {YELLOW}sem letra/tradução encontrada{OFF}: {stats['not_found']}")
     print(f"{'=' * 75}\n")

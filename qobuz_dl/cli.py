@@ -10,7 +10,7 @@ import signal
 import shutil
 import textwrap
 import keyring
-import requests
+import httpx
 import asyncio
 
 from qobuz_dl.bundle import Bundle
@@ -30,6 +30,25 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(message)s",
 )
+
+# O httpx (ao contrario do requests/aiohttp que usavamos antes) loga CADA
+# requisicao HTTP em nivel INFO por padrao -- uma linha tipo
+# 'HTTP Request: GET https://... "HTTP/1.1 200 OK"' pra cada chamada. Com
+# basicConfig(level=INFO) acima aplicado globalmente, isso significa uma
+# linha de log a mais por segmento baixado (um album Hi-Res facilmente
+# gera dezenas dessas por faixa) -- e o httpcore, biblioteca por baixo do
+# httpx, e' ainda mais verboso nesse nivel com eventos de abertura/
+# fechamento de conexao. Isso e' o que aparecia como mensagens de
+# "conexao"/"desconexao" poluindo a tela.
+#
+# A causa nao estava espalhada pelo projeto -- e' esse UNICO ponto aqui
+# (o unico logging.basicConfig do projeto inteiro) que define o nivel
+# efetivo pra qualquer logger sem nivel proprio, incluindo os do httpx/
+# httpcore. Erros e avisos de verdade dessas libs (nivel WARNING pra
+# cima) continuam aparecendo normalmente -- so o log rotineiro de "fiz
+# uma requisicao" e' que fica quieto.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 # --- iOS / a-Shell support ---
 # Deteccao cross-platform centralizada em utils.get_config_paths() -- ver
@@ -553,12 +572,12 @@ def _initial_checks():
 
 
 def check_for_updates():
-    """Queries the GitHub API to notify the user of new Qobuz-DL Ultimate Edition releases."""
+    """Queries the GitHub API to notify the user of new Qobuz-DL Ultra Edition releases."""
     try:
         from qobuz_dl import __version__
 
-        url = "https://api.github.com/repos/Sei969/qobuz-dl/releases/latest"
-        response = requests.get(url, timeout=2)
+        url = "https://api.github.com/repos/kaduvercosa/qobuz-dl-ultra/releases/latest"
+        response = httpx.get(url, timeout=2)
         response.raise_for_status()
 
         latest_version_str = response.json().get("tag_name", "").replace("v", "")
@@ -569,13 +588,10 @@ def check_for_updates():
 
         if latest_tuple > current_tuple:
             print(
-                f"\n{YELLOW}[*] UPDATE AVAILABLE: Ultimate Edition v{latest_version_str} is out!{OFF}"
+                f"\n{YELLOW}[*] UPDATE AVAILABLE: Ultra Edition v{latest_version_str} is out!{OFF}"
             )
-            print(f"{YELLOW}    - PyPI: run 'pip install -U qobuz-dl-ultimate'{OFF}")
+            print(f"{YELLOW}    - PyPI: run 'pip install -U qobuz-dl-ultra'{OFF}")
             print(f"{YELLOW}    - Docker: pull the latest image{OFF}")
-            print(
-                f"{YELLOW}    - Standalone: download the new release from GitHub{OFF}\n"
-            )
 
     except Exception:
         pass

@@ -6,10 +6,12 @@ import json
 from qobuz_dl.qopy import Client
 from qobuz_dl.utils import get_url_info
 
+
 async def main():
     print("\n--- TESTADOR DE ENDPOINT track/lyricsUrl (QOBUZ) ---")
     url = input("Cole o link da faixa do Qobuz (Track): ").strip()
-    if not url: return
+    if not url:
+        return
 
     # Arruma o domínio caso venha do app novo
     url = url.replace("open.qobuz.com", "play.qobuz.com")
@@ -51,18 +53,20 @@ async def main():
         # sozinho para esse endpoint. Não precisamos fazer nada manual aqui.
         lyrics_url_meta = await client.api_call("track/lyricsUrl", track_id=item_id)
 
-        print("\n" + "="*60)
+        print("\n" + "=" * 60)
         print("🕵️  INSPEÇÃO BRUTA DO JSON RETORNADO PELO ENDPOINT")
-        print("="*60)
+        print("=" * 60)
         print(json.dumps(lyrics_url_meta, indent=2, ensure_ascii=False))
-        print("="*60)
+        print("=" * 60)
 
         # Procura qualquer chave que pareça conter a URL da letra
         suspect_keys = [
             k for k in lyrics_url_meta.keys()
             if "lyric" in k.lower() or "url" in k.lower()
         ]
-        print(f"\nChaves suspeitas encontradas: {suspect_keys if suspect_keys else 'Nenhuma'}")
+        print(
+            f"\nChaves suspeitas encontradas: {
+                suspect_keys if suspect_keys else 'Nenhuma'}")
 
     except Exception as e:
         # Se o secret estiver errado ou o endpoint mudar, o erro aparece aqui

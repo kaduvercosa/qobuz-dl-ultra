@@ -156,5 +156,6 @@ async def sync_database(directory, db_path, client):
         )
 
     logger.info(
-        f"{GREEN}[+] Sync complete! Restored {added_tracks} tracks and {len(added_albums)} albums into the local database.{OFF}"
+        f"{GREEN}[+] Sync complete! Restored {added_tracks} tracks and {
+            len(added_albums)} albums into the local database.{OFF}"
     )

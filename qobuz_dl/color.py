@@ -48,8 +48,10 @@ MAGENTA = Fore.MAGENTA
 ERROR = Fore.RED
 SUCCESS = Fore.GREEN
 HIGHLIGHT = "\033[38;2;95;168;211m"          # nomes de faixa/album em destaque, IDs
-INFO = "\033[38;2;95;168;211m"                  # substitui CYAN em texto de progresso/status
-PROGRESS = "\033[38;2;95;168;211m"               # alias de INFO, mais claro no contexto de download
+# substitui CYAN em texto de progresso/status
+INFO = "\033[38;2;95;168;211m"
+# alias de INFO, mais claro no contexto de download
+PROGRESS = "\033[38;2;95;168;211m"
 WARNING = Fore.YELLOW             # ver ressalva no comentario acima
 WARNING_SAFE = Fore.LIGHTRED_EX   # troca de emergencia se YELLOW nao aparecer bem
 MUTED = Style.DIM                 # texto secundario -- relativo ao brilho do

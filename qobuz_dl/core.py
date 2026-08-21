@@ -5,7 +5,7 @@ import time
 import asyncio
 import shutil
 
-import requests
+import httpx
 from pathvalidate import sanitize_filename
 
 try:
@@ -547,7 +547,7 @@ class QobuzDL:
                 position_pool=position_pool,
                 suppress_header=suppress_header,
             )
-        except (requests.exceptions.RequestException, NonStreamable) as e:
+        except (httpx.RequestError, NonStreamable) as e:
             logger.error(f"{RED}Error getting release: {e}. Skipping...")
         except Exception as e:
             logger.error(
@@ -1497,13 +1497,15 @@ class QobuzDL:
                 self.quality = qualities[sq_idx]["q"]
 
                 if download:
+                    sys.stdout.write("\033[2J\033[H")
+                    sys.stdout.flush()
                     await self.download_list_of_urls(final_url_list)
 
                 return final_url_list
 
         except KeyboardInterrupt:
             sys.stdout.write("\033[2J\033[H")
-            logger.info(f"{YELLOW}Operação cancelada pelo usuário. Tchau!{OFF}")
+            logger.info(f"{YELLOW}Operação cancelada pelo usuário.{OFF}")
             return
 
     async def download_lastfm_pl(self, playlist_url):

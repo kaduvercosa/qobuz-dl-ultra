@@ -487,7 +487,8 @@ def apply_legacy_charmap(filename: str) -> str:
     filename = filename.replace(">", "]")
     filename = filename.replace("|", "-")
 
-    # Clean up potential double dashes created by multiple replacements (e.g., "A / B" -> "A - B")
+    # Clean up potential double dashes created by multiple replacements (e.g.,
+    # "A / B" -> "A - B")
     filename = re.sub(r"\s*-\s*-+", " -", filename)
 
     return filename
@@ -510,7 +511,9 @@ def clean_filename(filename: str, legacy_charmap: bool = False) -> str:
 
     # Clean up redundant spaces, separators, and brackets
 
-    # Merge multiple separators (supports spaces, commas, periods, Chinese commas, colons, semicolons, vertical bars, slashes, backslashes, underscores. Does not support the - symbol) into one
+    # Merge multiple separators (supports spaces, commas, periods, Chinese
+    # commas, colons, semicolons, vertical bars, slashes, backslashes,
+    # underscores. Does not support the - symbol) into one
     filename = re.sub(r"(?:\s*([,\.\:\;\|/\\_])\s*){2,}", r"\1 ", filename)
 
     # Define all paired bracket patterns
@@ -528,7 +531,8 @@ def clean_filename(filename: str, legacy_charmap: bool = False) -> str:
         (r"［\s*\W*\s*］", ""),  # ［...］
         (r"【\s*\W*\s*】", ""),  # 【...】
         # Handle edge cases - remove all special characters and spaces at boundaries
-        # If a left bracket is followed by a separator, or a separator is followed by a right bracket, remove them
+        # If a left bracket is followed by a separator, or a separator is followed
+        # by a right bracket, remove them
         (r"(?<=[\(\[\{<《〈「『（［【])(\s*[,\.\:\;\|/\\_]\s*)\b", ""),
         (r"\b(\s*[,\.\:\;\|/\\_]\s*)(?=[】］）』」〉》>\}\]\)])", ""),
     ]

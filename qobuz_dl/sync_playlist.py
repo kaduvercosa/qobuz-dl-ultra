@@ -192,7 +192,8 @@ async def sync_playlist(qobuz_dl, url, folder, auto_confirm=False):
     logger.info(f"{CYAN}      Found {len(local_tracks)} tagged tracks locally.{OFF}")
     if untagged:
         logger.info(
-            f"{YELLOW}      {len(untagged)} files have no QOBUZTRACKID tag and will be ignored.{OFF}"
+            f"{YELLOW}      {
+                len(untagged)} files have no QOBUZTRACKID tag and will be ignored.{OFF}"
         )
 
     local_id_set = set(local_tracks.keys())

@@ -5,7 +5,7 @@ import logging
 import time
 import unicodedata
 
-import aiohttp
+import httpx
 # cryptography, nao pycryptodome: pycryptodome precisa de um framework
 # nativo compilado (_cpuid_c) pra deteccao de CPU que o a-Shell nao
 # empacota -- OSError garantido ao importar Crypto.Cipher la', nao um
@@ -47,10 +47,10 @@ class Client:
     token unwrapping for Web Player segment streams, and dynamic metadata fetching.
     Supports both standard email/password authentication and secure user_auth_token injection.
 
-    Fully async (aiohttp). Since network calls can't happen inside `__init__`,
+    Fully async (httpx). Since network calls can't happen inside `__init__`,
     construct instances with `await Client.create(...)` instead of `Client(...)`.
     Call `await client.close()` (or use `async with Client.create(...) as client:`)
-    when done, to release the underlying aiohttp session/connections.
+    when done, to release the underlying httpx session/connections.
     """
 
     def __init__(self):
@@ -131,17 +131,15 @@ class Client:
                 "X-App-Id": self.id,
             }
         )
-        # Timeout explicito em vez do default do aiohttp (5min no total, que
-        # tanto pode matar um download grande em rede lenta quanto deixar uma
-        # chamada de API travada por minutos sem dar erro nenhum). sock_connect
-        # cobre o tempo pra abrir a conexao; sock_read cobre o tempo maximo SEM
-        # receber nenhum byte novo (reseta a cada chunk recebido, entao nao
-        # incomoda downloads grandes que estao progredindo, so mata conexao
-        # realmente travada). total=None = sem teto artificial pro download inteiro.
-        client_timeout = aiohttp.ClientTimeout(
-            total=None, sock_connect=15, sock_read=90
-        )
-        self.session = aiohttp.ClientSession(headers=headers, timeout=client_timeout)
+        # Timeout explicito em vez do default do httpx (total=None no httpx significa None)
+        # sock_connect -> connect, sock_read -> read
+        client_timeout = httpx.Timeout(None, connect=15.0, read=90.0)
+
+        # Limits: mantem conexoes concorrentes controladas
+        limits = httpx.Limits(max_keepalive_connections=10, max_connections=50)
+
+        self.session = httpx.AsyncClient(
+            headers=headers, timeout=client_timeout, limits=limits)
 
         self.base = "https://www.qobuz.com/api.json/0.2/"
         self.sec = None
@@ -165,9 +163,9 @@ class Client:
         return self
 
     async def close(self):
-        """Closes the underlying aiohttp session. Always call this (or use `async with`) when done."""
+        """Closes the underlying httpx session. Always call this (or use `async with`) when done."""
         if self.session is not None:
-            await self.session.close()
+            await self.session.aclose()
 
     async def __aenter__(self):
         return self
@@ -222,7 +220,10 @@ class Client:
                 )
             self.uat = usr_info["user_auth_token"]
 
-        self.session.headers.update({"X-User-Auth-Token": self.uat})
+        # Atualiza header da sessao (httpx AsyncClient suporta manipulacao de
+        # headers dinamica)
+        if self.session is not None:
+            self.session.headers.update({"X-User-Auth-Token": self.uat})
 
         try:
             user_info = await self.api_call("user/get")
@@ -279,11 +280,6 @@ class Client:
             bytes: The 16-byte derived session key.
         """
         salt, info = self.session_infos.split(".")
-        # API da "cryptography": HKDF(algorithm, length, salt, info) --
-        # RFC 5869 igualzinho ao HKDF do pycryptodome, so' com nomes de
-        # parametro diferentes (key_len->length, context->info,
-        # hashmod->algorithm). .derive(master) no lugar de passar o master
-        # como primeiro argumento posicional.
         hkdf = HKDF(
             algorithm=hashes.SHA256(),
             length=16,
@@ -307,8 +303,6 @@ class Client:
             algorithms.AES(self.session_key), modes.CBC(self._b64url_decode(iv))
         ).decryptor()
         padded = decryptor.update(self._b64url_decode(wrapped)) + decryptor.finalize()
-        # padding.PKCS7(128) = bloco de 16 bytes (128 bits), mesmo padding
-        # que o unpad(data, 16) do pycryptodome fazia.
         unpadder = padding.PKCS7(128).unpadder()
         return unpadder.update(padded) + unpadder.finalize()
 
@@ -354,7 +348,6 @@ class Client:
                 "format_id": fmt_id,
                 "intent": "stream",
             }
-            # Use the old string method for MP3 compatibility
             unix = int(time.time())
             sec_to_use = kwargs.get("sec", self.sec)
             r_sig = f"trackgetFileUrlformat_id{fmt_id}intentstreamtrack_id{track_id}{unix}{sec_to_use}"
@@ -382,12 +375,6 @@ class Client:
                 epoint, params, kwargs.get("sec", self.sec)
             )
         elif epoint == "track/lyricsUrl":
-            # NOVO BLOCO: track/lyricsUrl também é um endpoint protegido e exige
-            # request_ts + request_sig. Antes ele caía no "else" genérico (sem
-            # assinatura), por isso a URL saía sem esses dois parâmetros.
-            # Usamos o mesmo esquema de assinatura moderno (_modern_sig) usado
-            # por session/start e file/url: objeto+método + params ordenados
-            # + timestamp + secret, tudo em MD5.
             track_id = kwargs["track_id"]
             params = {
                 "track_id": track_id,
@@ -422,14 +409,6 @@ class Client:
 
             val_id = kwargs.get("id")
             for k, v in kwargs.items():
-                # PATCH: filtra kwargs com valor None antes de virarem query
-                # param. multi_meta() (usado por artist/get, playlist/get e
-                # label/get) sempre chama api_call(..., type=None) quando o
-                # chamador nao precisa extrair uma sub-chave especifica --
-                # sem esse filtro, "type=None" ia direto pros params, e o
-                # yarl (usado pelo aiohttp) rejeita valores None na query
-                # string com TypeError: "Invalid variable type: value should
-                # be str, int or float, got None".
                 if k not in ["id", "sec", "fmt_id"] and v is not None:
                     params[k] = v
 
@@ -458,15 +437,6 @@ class Client:
         else:
             method, req_kwargs = "get", {"params": params}
 
-        # Retry com backoff exponencial (1s, 3s, 6s) so para falhas de REDE
-        # transitorias -- conexao caiu, timeout, erro 5xx do servidor. Nao
-        # entra aqui erro de login invalido nem de app secret invalido
-        # (AuthenticationError/InvalidAppSecretError sao levantadas dentro do
-        # bloco e NAO sao subclasses de aiohttp.ClientError, entao propagam
-        # na hora sem retry -- nao faz sentido tentar de novo um login errado).
-        # Antes disso as buscas (search_albums/tracks/etc.) so tinham um
-        # "except Exception: return {}" -- qualquer soluco passageiro da API
-        # virava resultado vazio direto, sem nenhuma nova tentativa.
         _retry_delays = (1, 3, 6)
         last_network_error = None
 
@@ -481,40 +451,40 @@ class Client:
                 await asyncio.sleep(wait)
 
             try:
-                async with self.session.request(
-                    method, self.base + epoint, **req_kwargs
-                ) as r:
-                    if epoint == "user/login" and r.status == 400:
-                        text = await r.text()
-                        if "invalid" in text.lower():
-                            raise AuthenticationError("Invalid email or password.")
-                        else:
-                            logger.info(f"{GREEN}Logged: OK{OFF}")
-                    elif (
-                        epoint
-                        in [
-                            "track/getFileUrl",
-                            "favorite/getUserFavorites",
-                            "file/url",
-                            "track/lyricsUrl",
-                        ] and
-                        r.status == 400
-                    ):
-                        body = await r.json()
-                        raise InvalidAppSecretError(
-                            f"Invalid app secret: {body}.\n" + RESET
-                        )
+                # httpx AsyncClient returns a Response object from request()
+                resp = await self.session.request(method, self.base + epoint, **req_kwargs)
 
-                    if epoint == "user/get" and r.status == 400:
-                        return {}
+                if epoint == "user/login" and resp.status_code == 400:
+                    text = resp.text
+                    if "invalid" in text.lower():
+                        raise AuthenticationError("Invalid email or password.")
+                    else:
+                        logger.info(f"{GREEN}Logged: OK{OFF}")
+                elif (
+                    epoint
+                    in [
+                        "track/getFileUrl",
+                        "favorite/getUserFavorites",
+                        "file/url",
+                        "track/lyricsUrl",
+                    ] and
+                    resp.status_code == 400
+                ):
+                    body = resp.json()
+                    raise InvalidAppSecretError(
+                        f"Invalid app secret: {body}.\n" + RESET
+                    )
 
-                    r.raise_for_status()
-                    data = await r.json()
+                if epoint == "user/get" and resp.status_code == 400:
+                    return {}
+
+                resp.raise_for_status()
+                data = resp.json()
 
                 # Apply string normalizer to the network call output
                 return self._normalize_json_strings(data)
 
-            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+            except (httpx.RequestError, asyncio.TimeoutError) as e:
                 last_network_error = e
                 if attempt == len(_retry_delays):
                     raise
@@ -635,7 +605,8 @@ class Client:
 
                     elif highest_ratio >= PROMPT_THRESHOLD and best_match_id:
                         print(
-                            f"\n{YELLOW}[?] Borderline match detected ({highest_ratio * 100:.0f}% similarity){OFF}"
+                            f"\n{YELLOW}[?] Borderline match detected ({
+                                highest_ratio * 100:.0f}% similarity){OFF}"
                         )
                         print(
                             f"    Target (Last.fm): {item['artist']} - {item['title']}"
@@ -658,7 +629,8 @@ class Client:
 
                     else:
                         print(
-                            f"{YELLOW}[!] Skipping: '{query}' (Best match was only {highest_ratio * 100:.0f}% similar){OFF}"
+                            f"{YELLOW}[!] Skipping: '{query}' (Best match was only {
+                                highest_ratio * 100:.0f}% similar){OFF}"
                         )
 
                 else:
@@ -670,7 +642,9 @@ class Client:
                 print(f"{RED}[!] Error searching for '{query}': {e}{OFF}")
 
         print(
-            f"\n{GREEN}[+] Successfully matched {len(valid_track_ids)} out of {len(tracks_list)} tracks!{OFF}"
+            f"\n{GREEN}[+] Successfully matched {
+                len(valid_track_ids)} out of {
+                len(tracks_list)} tracks!{OFF}"
         )
         return valid_track_ids
 
@@ -782,13 +756,12 @@ class Client:
         # "WEB PLAYER" METHOD (SEGMENTED DOWNLOAD)
         if self.session_id is None:
             async with self._session_init_lock:
-                # Reconfere depois de pegar o lock: se outra faixa paralela
-                # ja' inicializou enquanto esperavamos, nao faz de novo.
                 if self.session_id is None:
                     session = await self.api_call("session/start")
                     self.session_id = session["session_id"]
                     self.session_infos = session["infos"]
                     self.session_key = self._derive_session_key()
+                    # httpx AsyncClient headers can be updated dynamically
                     self.session.headers.update({"X-Session-Id": self.session_id})
 
         track = await self.api_call("file/url", id=id, fmt_id=fmt_id)

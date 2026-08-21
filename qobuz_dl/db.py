@@ -170,7 +170,7 @@ def handle_download_id(
                 # Inject artist and album dynamically into the database
                 conn.execute(
                     """
-                    INSERT INTO downloads (id, media_type, quality, file_format, quality_met, bit_depth, 
+                    INSERT INTO downloads (id, media_type, quality, file_format, quality_met, bit_depth,
                     sampling_rate, saved_path, url, release_date, status, artist, album) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         item_id,

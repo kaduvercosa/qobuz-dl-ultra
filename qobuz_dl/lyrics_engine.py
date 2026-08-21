@@ -1,6 +1,6 @@
 import os
 import re
-import requests
+import httpx  # antes: requests -- ver downloader.py/qopy.py, mesmo motivo
 from mutagen.id3 import ID3, USLT, TXXX, ID3NoHeaderError
 from mutagen.flac import FLAC
 from tqdm import tqdm
@@ -27,7 +27,7 @@ class LyricsEngine:
 
         Args:
             genius_token (str, optional): The user's Genius API token. Defaults to None.
-            session (requests.Session, optional): A shared HTTP session to reuse for
+            session (httpx.Client, optional): A shared HTTP session to reuse for
                 LRCLIB requests (connection pooling / keep-alive). If not provided,
                 a dedicated session is created and owned by this instance. Note: the
                 Genius client (lyricsgenius) manages its own internal session
@@ -43,7 +43,10 @@ class LyricsEngine:
             self.genius.verbose = False
 
         self._owns_session = session is None
-        self.session = session or requests.Session()
+        # follow_redirects=True: requests seguia redirect por padrao, o
+        # httpx.Client nao segue a menos que a gente peca (ver mesmo
+        # comentario em downloader.py).
+        self.session = session or httpx.Client(follow_redirects=True)
 
     def close(self):
         """
@@ -276,7 +279,8 @@ class LyricsEngine:
         try:
             tqdm.write(f"    🔍 procurando letras para: {track}...")
 
-            # 1. Tenta as letras nativas do Qobuz (Original + Bilingue se houver traducao)
+            # 1. Tenta as letras nativas do Qobuz (Original + Bilingue se houver
+            # traducao)
             qobuz_lyrics = self.extract_qobuz_lyrics(
                 qobuz_lyrics_response, qobuz_translation_response
             )
@@ -317,7 +321,10 @@ class LyricsEngine:
                             original_sync, best_trans.get("synced")
                         )
                     if original_plain and best_trans.get("plain"):
-                        final_plain = f"{original_plain}\n\n--- TRADUCAO ({best_trans.get('language', 'pt').upper()}) ---\n\n{best_trans.get('plain')}"
+                        final_plain = f"{original_plain}\n\n--- TRADUCAO ({
+                            best_trans.get(
+                                'language', 'pt').upper()}) ---\n\n{
+                            best_trans.get('plain')}"
 
                 # 'source' fica marcado em toda a cadeia (print + tags no arquivo)
                 # para deixar claro, tanto no terminal quanto no arquivo, que a
@@ -565,7 +572,8 @@ class LyricsEngine:
                 desc = source if source else ""
                 audio.add(USLT(encoding=3, lang="eng", desc=desc, text=lyrics))
                 if language:
-                    # Remove qualquer TXXX:LYRICS_LANG anterior antes de gravar o novo valor
+                    # Remove qualquer TXXX:LYRICS_LANG anterior antes de gravar o novo
+                    # valor
                     audio.delall("TXXX:LYRICS_LANG")
                     audio.add(TXXX(encoding=3, desc="LYRICS_LANG", text=language))
                 audio.save(file_path)

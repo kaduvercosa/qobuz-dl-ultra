@@ -217,7 +217,19 @@ def tag_flac(
         tags["DISCTOTAL"] = str(qobuz_album.get("media_count", "1"))
 
     # --- RICH COMMENT TAG INJECTION ---
-    base_comment = f"Qobuz | {qobuz_item.get('maximum_bit_depth', 16)}b/{qobuz_item.get('maximum_sampling_rate', 44.1)}kHz | Rel: {qobuz_album.get('release_date_original', 'Unknown')} | Trk ID: {qobuz_item.get('id', 'Unknown')}"
+    base_comment = f"Qobuz | {
+        qobuz_item.get(
+            'maximum_bit_depth',
+            16)}b/{
+        qobuz_item.get(
+            'maximum_sampling_rate',
+            44.1)}kHz | Rel: {
+        qobuz_album.get(
+            'release_date_original',
+            'Unknown')} | Trk ID: {
+        qobuz_item.get(
+            'id',
+            'Unknown')}"
 
     if em_image:
         cover_path = _get_cover_path(root_dir, override=embed_cover_path)
@@ -283,7 +295,19 @@ def tag_mp3(
     tags = _get_tags_to_add(qobuz_album, qobuz_item, settings=settings)
 
     # --- RICH COMMENT TAG INJECTION ---
-    base_comment = f"Qobuz | {qobuz_item.get('maximum_bit_depth', 16)}b/{qobuz_item.get('maximum_sampling_rate', 44.1)}kHz | Rel: {qobuz_album.get('release_date_original', 'Unknown')} | Trk ID: {qobuz_item.get('id', 'Unknown')}"
+    base_comment = f"Qobuz | {
+        qobuz_item.get(
+            'maximum_bit_depth',
+            16)}b/{
+        qobuz_item.get(
+            'maximum_sampling_rate',
+            44.1)}kHz | Rel: {
+        qobuz_album.get(
+            'release_date_original',
+            'Unknown')} | Trk ID: {
+        qobuz_item.get(
+            'id',
+            'Unknown')}"
 
     if em_image:
         cover_path = _get_cover_path(root_dir, override=embed_cover_path)
@@ -311,11 +335,15 @@ def tag_mp3(
 
     audio["TRCK"] = id3.TRCK(
         encoding=3,
-        text=f'{str(qobuz_item.get("track_number", "1"))}/{str(qobuz_album.get("tracks_count", "1"))}',
+        text=f'{str(qobuz_item.get("track_number",
+                                   "1"))}/{str(qobuz_album.get("tracks_count",
+                                                               "1"))}',
     )
     audio["TPOS"] = id3.TPOS(
         encoding=3,
-        text=f'{str(qobuz_item.get("media_number", "1"))}/{str(qobuz_album.get("media_count", "1"))}',
+        text=f'{str(qobuz_item.get("media_number",
+                                   "1"))}/{str(qobuz_album.get("media_count",
+                                                               "1"))}',
     )
 
     if em_image:

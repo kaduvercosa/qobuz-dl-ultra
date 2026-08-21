@@ -176,8 +176,8 @@ def add_common_arg(custom_parser, default_folder, default_quality):
         "--folder-format",
         metavar="PATTERN",
         help="""pattern for formatting folder names, e.g
-        "{album_artist} - {album_title} ({year}) {{{barcode}}}". available keys: 
-        album_id, album_url, album_title, album_title, album_artist, album_genre, 
+        "{album_artist} - {album_title} ({year}) {{{barcode}}}". available keys:
+        album_id, album_url, album_title, album_title, album_artist, album_genre,
         album_composer, label, copyright, upc, barcode, release_date, year, media_type,
         format, bit_depth, sampling_rate, album_version, disc_count, track_count.
         Note1: {album_title}, {track_title} will contain version information if available.
@@ -197,9 +197,9 @@ def add_common_arg(custom_parser, default_folder, default_quality):
         "--track-format",
         metavar="PATTERN",
         help="""pattern for formatting track names. e.g
-        "{track_number} - {track_title}" 
+        "{track_number} - {track_title}"
         available keys:
-        album_title, album_title_base, album_artist, track_id, track_artist, track_composer, 
+        album_title, album_title_base, album_artist, track_id, track_artist, track_composer,
         track_number, isrc, bit_depth, sampling_rate, track_title, track_title_base
         version, year, disc_number, release_date.
         Cannot contain characters used by the system, which includes /:<>

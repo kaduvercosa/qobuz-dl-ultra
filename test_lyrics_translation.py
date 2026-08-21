@@ -38,14 +38,16 @@ def _print_block(label, block):
     """
     print(f"\n--- {label} ---")
     if not isinstance(block, dict):
-        print(f"  (nao e' um dict -- valor bruto: {json.dumps(block, ensure_ascii=False)[:500]})")
+        print(
+            f"  (nao e' um dict -- valor bruto: {json.dumps(block, ensure_ascii=False)[:500]})")
         return
 
     print(f"  type: {block.get('type', '?')}")
     print(f"  lang: {block.get('lang', '?')}")
     lines = block.get("lines")
     if not isinstance(lines, list):
-        print(f"  lines: (ausente ou formato inesperado -- chaves do bloco: {list(block.keys())})")
+        print(
+            f"  lines: (ausente ou formato inesperado -- chaves do bloco: {list(block.keys())})")
         return
 
     print(f"  lines: {len(lines)} entradas")
@@ -106,7 +108,8 @@ async def main():
 
         params = {"track_id": item_id, "language": "pt"}
         params["request_ts"] = int(time.time())
-        params["request_sig"] = client._modern_sig("track/lyricsUrl", params, client.sec)
+        params["request_sig"] = client._modern_sig(
+            "track/lyricsUrl", params, client.sec)
 
         async with client.session.request(
             "get", client.base + "track/lyricsUrl", params=params
@@ -148,7 +151,8 @@ async def main():
 
         if translation is not None:
             _print_block("translation", translation)
-            if isinstance(translation, dict) and isinstance(translation.get("lines"), list):
+            if isinstance(translation, dict) and isinstance(
+                    translation.get("lines"), list):
                 print(
                     "\n✅ 'translation' tem o mesmo formato de 'original' "
                     "(type/lang/lines com start/end) -- da' pra reaproveitar "
