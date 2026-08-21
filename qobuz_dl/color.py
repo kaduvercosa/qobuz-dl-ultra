@@ -1,5 +1,6 @@
 import os
 import configparser
+import shutil
 from colorama import Style, Fore, init
 
 init(autoreset=True)
@@ -103,19 +104,26 @@ PROGRESS = _ACCENT
 
 
 def accent_preview(escape: str, label: str = "Texto de exemplo") -> str:
-    """Retorna uma string com preview do `escape` em fundo escuro E claro,
-    lado a lado, pra o wizard de escolha de cor mostrar ao usuario."""
+    """Retorna uma string com preview do `escape` em fundo escuro E claro.
+    Adapta automaticamente para o tamanho da tela (celular vs iPad/PC)."""
+    cols, _ = shutil.get_terminal_size()
 
     dark_bg = "\033[40m"      # fundo preto
     light_bg = "\033[47m"     # fundo cinza claro para bom contraste em terminal branco
     dark_fg = "\033[37m"      # texto branco base
     light_fg = "\033[30m"     # texto preto base
 
-    # Monta os blocos de texto separadamente para a cor não ser sobrescrita
-    # Recebe o parâmetro 'label' para evitar crash com o cli.py, mas usa o
-    # layout customizado
+    if cols < 70:
+        # Modo responsivo para telas estreitas (ex: celular na vertical)
+        dark = f"{dark_bg}{dark_fg} {escape}[FX] {dark_fg}The Weeknd {RESET}"
+        light = f"{light_bg}{light_fg} {escape}[FX] {light_fg}The Weeknd {RESET}"
 
-    dark = f"{dark_bg}{dark_fg} -- {escape}[FAIXA] {dark_fg}ARTISTA {escape}The Weeknd{RESET}"
-    light = f"{light_bg}{light_fg} -- {escape}[FAIXA] {light_fg}ARTISTA {escape}The Weeknd{RESET}"
+        # Quebra a linha e adiciona os exatos 30 espaços do prefixo do cli.py
+        # para alinhar o "Claro:" perfeitamente embaixo do "Escuro:"
+        return f"Escuro: {dark}\n{' ' * 30}Claro:  {light}"
+    else:
+        # Modo largo para telas maiores
+        dark = f"{dark_bg}{dark_fg} -- {escape}[FAIXA] {dark_fg}ARTISTA {escape}The Weeknd{RESET}"
+        light = f"{light_bg}{light_fg} -- {escape}[FAIXA] {light_fg}ARTISTA {escape}The Weeknd{RESET}"
 
-    return f"Escuro: {dark}     Claro: {light}"
+        return f"Escuro: {dark}     Claro: {light}"
