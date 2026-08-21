@@ -80,6 +80,29 @@ LOCAL_GENRE_MAP = {
 }
 
 
+def _make_sort_name(name) -> str:
+    """
+    Deriva o nome de ordenacao movendo artigos iniciais pro fim.
+    "The Beatles" -> "Beatles, The"
+    Suporta listas de artistas.
+    """
+    if not name:
+        return ""
+
+    # Se for uma lista enviada pelo Qobuz, processa cada artista e junta
+    if isinstance(name, list):
+        return ", ".join(_make_sort_name(n) for n in name if n)
+
+    name = str(name)
+    articles = ("The ", "A ", "An ", "Os ", "As ", "O ", "A ",
+                "Los ", "Las ", "El ", "La ", "Les ", "Le ", "L'",
+                "Die ", "Das ", "Der ", "Gli ", "Le ", "I ", "Il ")
+    for art in articles:
+        if name.startswith(art):
+            return name[len(art):].strip() + ", " + art.strip()
+    return name
+
+
 def _get_title_with_version(title: str = "", version: str = "") -> str:
     item_title = title
     if version:
@@ -117,13 +140,6 @@ def _format_genres(genres: list) -> str:
 def _get_cover_path(root_dir, override=None):
     """
     Auxiliary function to locate the embedded cover art path.
-    FIX (paralelismo entre faixas de albuns diferentes): `override`
-    permite passar um caminho explicito de capa (usado quando varias
-    faixas de albuns DIFERENTES baixam ao mesmo tempo pra uma MESMA pasta
-    -- ex: playlist sem "--playlist-as-albums"). Sem isso, todas as
-    faixas concorrentes leriam o mesmo "embed_cover.jpg" compartilhado,
-    e uma faixa do Album X podia acabar com a capa do Album Y perto no
-    tempo. Ver Download.download_track() em downloader.py.
     """
     if override and os.path.isfile(override):
         return override
@@ -138,8 +154,10 @@ def _get_cover_path(root_dir, override=None):
     return None
 
 
-def _normalize_name(name: str) -> str:
+def _normalize_name(name) -> str:
     """Removes accents, invisible spaces, and converts to lowercase for strict duplicate checking."""
+    if isinstance(name, list):
+        name = ", ".join(str(n) for n in name if n)
     return (
         unicodedata.normalize("NFKD", str(name))
         .encode("ASCII", "ignore")
@@ -217,19 +235,37 @@ def tag_flac(
         tags["DISCTOTAL"] = str(qobuz_album.get("media_count", "1"))
 
     # --- RICH COMMENT TAG INJECTION ---
-    base_comment = f"Qobuz | {
-        qobuz_item.get(
-            'maximum_bit_depth',
-            16)}b/{
-        qobuz_item.get(
-            'maximum_sampling_rate',
-            44.1)}kHz | Rel: {
-        qobuz_album.get(
-            'release_date_original',
-            'Unknown')} | Trk ID: {
-        qobuz_item.get(
-            'id',
-            'Unknown')}"
+    _bit = qobuz_item.get("maximum_bit_depth", 16)
+    _rate = qobuz_item.get("maximum_sampling_rate", 44.1)
+
+    _ch = qobuz_item.get("maximum_channel_count", 2)
+    _ch_map = {1: "Mono", 2: "Stereo", 4: "4.0", 6: "5.1", 8: "7.1"}
+    _channels = _ch_map.get(_ch, f"{_ch}ch")
+
+    _hires = "sim" if qobuz_item.get("hires_streamable") else "nao"
+
+    _dur_s = int(qobuz_item.get("duration") or 0)
+    _duration = f"{_dur_s // 60}:{_dur_s % 60:02d}" if _dur_s else "?"
+
+    _rtype = (qobuz_album.get("release_type") or "album").lower()
+
+    _raw_date = qobuz_album.get("release_date_original", "") or ""
+    try:
+        if "-" in _raw_date and len(_raw_date) >= 10:
+            _y, _m, _d = _raw_date[:10].split("-")
+            _rel_date = f"{_d}/{_m}/{_y}"
+        else:
+            _rel_date = _raw_date or "?"
+    except Exception:
+        _rel_date = _raw_date or "?"
+
+    _trk_id = qobuz_item.get("id", "?")
+
+    base_comment = (
+        f"Qobuz | {_bit}b/{_rate}kHz | {_channels} | HiRes: {_hires}"
+        f" | Duração: {_duration} | Tipo: {_rtype}"
+        f" | Rel: {_rel_date} | Trk ID: {_trk_id}"
+    )
 
     if em_image:
         cover_path = _get_cover_path(root_dir, override=embed_cover_path)
@@ -295,19 +331,37 @@ def tag_mp3(
     tags = _get_tags_to_add(qobuz_album, qobuz_item, settings=settings)
 
     # --- RICH COMMENT TAG INJECTION ---
-    base_comment = f"Qobuz | {
-        qobuz_item.get(
-            'maximum_bit_depth',
-            16)}b/{
-        qobuz_item.get(
-            'maximum_sampling_rate',
-            44.1)}kHz | Rel: {
-        qobuz_album.get(
-            'release_date_original',
-            'Unknown')} | Trk ID: {
-        qobuz_item.get(
-            'id',
-            'Unknown')}"
+    _bit = qobuz_item.get("maximum_bit_depth", 16)
+    _rate = qobuz_item.get("maximum_sampling_rate", 44.1)
+
+    _ch = qobuz_item.get("maximum_channel_count", 2)
+    _ch_map = {1: "Mono", 2: "Stereo", 4: "4.0", 6: "5.1", 8: "7.1"}
+    _channels = _ch_map.get(_ch, f"{_ch}ch")
+
+    _hires = "sim" if qobuz_item.get("hires_streamable") else "nao"
+
+    _dur_s = int(qobuz_item.get("duration") or 0)
+    _duration = f"{_dur_s // 60}:{_dur_s % 60:02d}" if _dur_s else "?"
+
+    _rtype = (qobuz_album.get("release_type") or "album").lower()
+
+    _raw_date = qobuz_album.get("release_date_original", "") or ""
+    try:
+        if "-" in _raw_date and len(_raw_date) >= 10:
+            _y, _m, _d = _raw_date[:10].split("-")
+            _rel_date = f"{_d}/{_m}/{_y}"
+        else:
+            _rel_date = _raw_date or "?"
+    except Exception:
+        _rel_date = _raw_date or "?"
+
+    _trk_id = qobuz_item.get("id", "?")
+
+    base_comment = (
+        f"Qobuz | {_bit}b/{_rate}kHz | {_channels} | HiRes: {_hires}"
+        f" | Duração: {_duration} | Tipo: {_rtype}"
+        f" | Rel: {_rel_date} | Trk ID: {_trk_id}"
+    )
 
     if em_image:
         cover_path = _get_cover_path(root_dir, override=embed_cover_path)
@@ -356,7 +410,7 @@ def tag_mp3(
     os.rename(filename, final_name)
 
 
-def _get_tags_to_add(
+def _get_tags_to_add(  # noqa: C901
     qobuz_album: dict, qobuz_item: dict, settings: QobuzDLSettings = None
 ):
     tags = dict()
@@ -375,7 +429,9 @@ def _get_tags_to_add(
 
     # Artist Information
     if not settings.no_album_artist_tag:
-        tags["ALBUMARTIST"] = get_album_artist(qobuz_album)
+        _albumartist_val = get_album_artist(qobuz_album)
+        tags["ALBUMARTIST"] = _albumartist_val
+        tags["ALBUMARTISTSORT"] = _make_sort_name(_albumartist_val)
 
     if not settings.no_track_artist_tag:
         artists = []
@@ -415,6 +471,7 @@ def _get_tags_to_add(
 
         if len(artists) > 0:
             tags["ARTIST"] = ", ".join(artists)
+            tags["ARTISTSORT"] = ", ".join(_make_sort_name(a) for a in artists)
         else:
             tags["ARTIST"] = ""
 
@@ -491,6 +548,11 @@ def _get_tags_to_add(
             "1" if qobuz_item.get("parental_warning", False) else ""
         )
 
+    # --- COMPILATION TAG ---
+    release_type = qobuz_album.get("release_type", "") or ""
+    if release_type.lower() == "compilation":
+        tags["COMPILATION"] = "1"
+
     # --- REPLAYGAIN TAGS ---
     if not getattr(settings, "no_replaygain_tag", False):
         audio_info = qobuz_item.get("audio_info", {})
@@ -502,6 +564,13 @@ def _get_tags_to_add(
                 tags["REPLAYGAIN_TRACK_GAIN"] = f"{rg_gain} dB"
             if rg_peak is not None:
                 tags["REPLAYGAIN_TRACK_PEAK"] = str(rg_peak)
+
+            rg_album_gain = audio_info.get("replaygain_album_gain")
+            rg_album_peak = audio_info.get("replaygain_album_peak")
+            if rg_album_gain is not None:
+                tags["REPLAYGAIN_ALBUM_GAIN"] = f"{rg_album_gain} dB"
+            if rg_album_peak is not None:
+                tags["REPLAYGAIN_ALBUM_PEAK"] = str(rg_album_peak)
 
     # --- CLASSICAL MUSIC TAGS ---
     work = qobuz_item.get("work")

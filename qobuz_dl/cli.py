@@ -20,7 +20,10 @@ from qobuz_dl.bundle import Bundle
 # branco). Ver comentario completo em qobuz_dl/color.py. Zero mudanca
 # de codigo neste arquivo: toda f-string que ja usa {CYAN}/{YELLOW}
 # continua funcionando, so' a cor de fato renderizada muda.
-from qobuz_dl.color import GREEN, WARNING as YELLOW, OFF, INFO as CYAN
+from qobuz_dl.color import (
+    GREEN, WARNING as YELLOW, OFF, INFO as CYAN,
+    ACCENT_PRESETS, accent_preview,
+)
 from qobuz_dl.commands import qobuz_dl_args
 from qobuz_dl.core import QobuzDL
 from qobuz_dl.downloader import DEFAULT_FOLDER, DEFAULT_TRACK
@@ -204,6 +207,74 @@ def validate_config_formats(formats_to_check):
         sys.exit(1)
 
 
+def _pick_accent_color() -> str:
+    """
+    Wizard interativo de escolha de cor de destaque.
+    Mostra cada opcao com preview em fundo escuro E claro antes de confirmar.
+    Retorna o valor RGB no formato "R;G;B" pronto pra gravar no config.ini.
+    """
+    print(f"\n{YELLOW}[?] Cor de destaque do programa:{OFF}")
+    print("    Aparece em nomes de faixas, cabecalhos, barras e progresso.")
+    print()
+
+    # Mostrar todas as opcoes com preview lado a lado
+    for idx, (name, rgb, escape) in enumerate(ACCENT_PRESETS, 1):
+        if escape:
+            preview = accent_preview(escape, "━━ [FAIXA]  ARTISTA  The Weeknd")
+            print(f"  {idx:2}. {name:<22} {preview}")
+        else:
+            print(f"  {idx:2}. {name}")
+
+    print()
+    while True:
+        choice = input(
+            f"Escolha (1-{len(ACCENT_PRESETS)}) [Enter = 1 padrao]: ").strip()
+        if not choice:
+            choice = "1"
+        try:
+            idx = int(choice)
+            if 1 <= idx <= len(ACCENT_PRESETS):
+                name, rgb, escape = ACCENT_PRESETS[idx - 1]
+                break
+        except ValueError:
+            pass
+        print(f"  Por favor escolha entre 1 e {len(ACCENT_PRESETS)}.")
+
+    # Opcao de cor personalizada
+    if rgb is None:
+        print()
+        print("  Digite os valores RGB separados por ponto e virgula.")
+        print("  Exemplo: 255;100;50  (vermelho), 0;200;150  (teal)")
+        print()
+        while True:
+            raw = input("  Codigo RGB (R;G;B): ").strip()
+            # Aceita tanto "R;G;B" quanto "R,G,B" quanto "R G B"
+            raw = raw.replace(",", ";").replace(" ", ";")
+            parts_str = [x.strip() for x in raw.split(";") if x.strip()]
+            try:
+                parts = [int(x) for x in parts_str]
+                if len(parts) == 3 and all(0 <= p <= 255 for p in parts):
+                    rgb = ";".join(str(p) for p in parts)
+                    escape = f"\033[38;2;{parts[0]};{parts[1]};{parts[2]}m"
+                    break
+            except ValueError:
+                pass
+            print("  Formato invalido. Use tres numeros de 0 a 255, ex: 150;80;220")
+
+        # Mostrar preview da cor personalizada
+        print()
+        print(f"  Preview da sua cor:")
+        print(accent_preview(escape, "━━ [FAIXA]  ARTISTA  The Weeknd"))
+        print()
+        confirm = input(
+            "  Confirmar esta cor? (Enter = sim, n = escolher outra): ").strip().lower()
+        if confirm in ("n", "nao", "no"):
+            return _pick_accent_color()  # recomecar
+
+    print(f"\n  {GREEN}Cor salva: {escape}━━ {name.strip()}{OFF}\n")
+    return rgb
+
+
 def _reset_config(config_file):
     """
     Interactive configuration wizard for initializing or resetting the config.ini file.
@@ -212,6 +283,10 @@ def _reset_config(config_file):
     config = configparser.ConfigParser(interpolation=None)
 
     config["qobuz"] = {}
+
+    # --- COR DE DESTAQUE ---
+    accent_rgb = _pick_accent_color()
+    config["qobuz"]["accent_color"] = accent_rgb
 
     email = input("Enter your Qobuz email:\n- ").strip()
     config["qobuz"]["email"] = email

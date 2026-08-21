@@ -44,21 +44,26 @@ setup(
 
     # Dependências fixadas diretamente como uma lista Python
     install_requires=[
-        "pathvalidate>=3.0.0",
+        "pathvalidate",
         "httpx",
         "requests",
-        "charset_normalizer>=3.0.0",
-        "mutagen>=1.47.0",
-        "tqdm>=4.66.0",
-        "beautifulsoup4>=4.12.0",
+        "charset_normalizer",
+        "mutagen",
+        "tqdm",
+        "beautifulsoup4",
         "colorama",
         "cryptography",
-        "keyring>=24.0.0",
+        "keyring",
         "aiohttp",
-        "questionary>=2.0.0",
-        "prompt_toolkit>=3.0.43",
-        "lyricsgenius"
+        "questionary",
+        "prompt_toolkit",
+        # lyricsgenius NAO esta aqui: e' opcional (requer token do Genius
+        # configurado manualmente). Instale com:
+        #   pip install "qobuz-dl-ultra[genius]"
     ],
+    extras_require={
+        "genius": ["lyricsgenius"],
+    },
     entry_points={
         "console_scripts": [
             # Keeping the original command names for backward compatibility

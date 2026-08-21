@@ -1,3 +1,5 @@
+import os
+import configparser
 from colorama import Style, Fore, init
 
 init(autoreset=True)
@@ -8,51 +10,112 @@ BG = Style.BRIGHT
 RESET = Style.RESET_ALL
 OFF = Style.DIM
 
-# --- Cores cruas (mantidas por compatibilidade -- varios arquivos importam
-# estas direto) ---
+# Cores fixas (nao personalizaveis)
 RED = Fore.RED
 BLUE = Fore.BLUE
 GREEN = Fore.GREEN
 YELLOW = Fore.YELLOW
-CYAN = "\033[38;2;95;168;211m"
 MAGENTA = Fore.MAGENTA
-
-# --- Por que a paleta semantica abaixo existe ---
-# Das 8 cores padrao do ANSI, so RED, GREEN e MAGENTA sao escuras o
-# suficiente pra aparecer bem em fundo branco E saturadas o suficiente pra
-# aparecer bem em fundo preto ao mesmo tempo. As outras sofrem de um jeito
-# ou de outro:
-#   - YELLOW e CYAN quase soem em fundo branco (sao as duas cores "mais
-#     claras" do conjunto padrao) -- e sao justamente as duas mais usadas
-#     no projeto historicamente, depois do RED.
-#   - BLUE puro fica dificil de ler em fundo preto (vira um "navy" escuro
-#     demais contra o preto).
-#   - BLACK/WHITE puros so funcionam bem num dos dois modos, nunca nos dois.
-#
-# As variantes "LIGHT*_EX" do colorama (bit de alta intensidade do ANSI)
-# NAO sao todas iguais nesse quesito: LIGHTBLUE_EX, LIGHTMAGENTA_EX,
-# LIGHTGREEN_EX e LIGHTRED_EX tendem a ficar mais vivas/saturadas (ajudam
-# no fundo preto sem ficarem palidas demais no branco). Ja LIGHTYELLOW_EX
-# e LIGHTCYAN_EX pioram o problema do claro (ficam ainda mais palidas,
-# quase brancas). Por isso a paleta abaixo usa LIGHTBLUE_EX como
-# substituto do CYAN puro pra texto de progresso/info -- e' visivel nos
-# dois modos, ao contrario do CYAN.
-#
-# Pra WARNING mantive YELLOW por convencao (amarelo = aviso e' quase
-# universal, e trocar quebraria a leitura intuitiva de anos de mensagens),
-# mas com uma ressalva: se no a-Shell modo claro ele ainda ficar fraco na
-# pratica, troque WARNING abaixo pra WARNING_SAFE (definido logo depois) --
-# e' so' mudar essa uma linha, todo o resto do projeto que usa WARNING
-# (em vez de YELLOW cru) acompanha automaticamente.
 
 ERROR = Fore.RED
 SUCCESS = Fore.GREEN
-HIGHLIGHT = "\033[38;2;95;168;211m"          # nomes de faixa/album em destaque, IDs
-# substitui CYAN em texto de progresso/status
-INFO = "\033[38;2;95;168;211m"
-# alias de INFO, mais claro no contexto de download
-PROGRESS = "\033[38;2;95;168;211m"
-WARNING = Fore.YELLOW             # ver ressalva no comentario acima
-WARNING_SAFE = Fore.LIGHTRED_EX   # troca de emergencia se YELLOW nao aparecer bem
-MUTED = Style.DIM                 # texto secundario -- relativo ao brilho do
-# terminal, entao funciona igual nos dois modos
+WARNING = Fore.YELLOW
+WARNING_SAFE = Fore.LIGHTRED_EX
+MUTED = Style.DIM
+
+# Cor de destaque padrao (azul aco) -- pode ser sobrescrita pelo usuario
+# no wizard de configuracao (qobuz-dl -r). O valor e' lido do config.ini
+# na importacao do modulo, entao vale pra toda a sessao sem precisar
+# passar o objeto de settings por todo o codigo.
+_DEFAULT_ACCENT = "\033[38;2;95;168;211m"
+
+# Paleta de cores predefinidas exposta pro wizard. Cada entrada:
+#   (nome_exibicao, codigo_rgb_string, escape_ansi)
+# O campo rgb_string e' o que vai gravado em config.ini: "R;G;B"
+ACCENT_PRESETS = [
+    ("Azul Aço     (padrão)", "95;168;211", "\033[38;2;95;168;211m"),
+    ("Roxo Lavanda", "180;140;255", "\033[38;2;180;140;255m"),
+    ("Verde Menta", "100;220;160", "\033[38;2;100;220;160m"),
+    ("Laranja Âmbar", "255;165;80", "\033[38;2;255;165;80m"),
+    ("Rosa Pastel", "255;130;180", "\033[38;2;255;130;180m"),
+    ("Teal Aqua", "64;196;192", "\033[38;2;64;196;192m"),
+    ("Dourado", "220;180;60", "\033[38;2;220;180;60m"),
+    ("Coral", "255;100;100", "\033[38;2;255;100;100m"),
+    ("Personalizada (RGB)...", None, None),
+]
+
+
+def _find_config_file():
+    """Localiza o config.ini usando a mesma logica de utils.get_config_paths()
+    mas sem importar utils (evita importacao circular no boot do modulo)."""
+    ios_home = os.environ.get("QOBUZ_DL_IOS_HOME")
+    config_dir = os.environ.get("CONFIG_DIR")
+
+    if not config_dir:
+        if ios_home:
+            config_dir = ios_home
+        elif os.name == "nt":
+            config_dir = os.environ.get("APPDATA", "")
+        else:
+            home_dir = os.environ.get("HOME", "")
+            if "Containers/Data/Application" in home_dir:
+                config_dir = os.path.join(home_dir, "Documents")
+            else:
+                config_dir = os.path.join(home_dir, ".config")
+
+    return os.path.join(config_dir, "qobuz-dl", "config.ini")
+
+
+def _load_accent() -> str:
+    """Le accent_color do config.ini e retorna o escape ANSI correto.
+    Falha silenciosamente pro padrao se o arquivo nao existir ou o valor
+    estiver invalido -- nunca deve crashar o boot do programa."""
+    try:
+        cfg_file = _find_config_file()
+        if not os.path.exists(cfg_file):
+            return _DEFAULT_ACCENT
+
+        cfg = configparser.ConfigParser(interpolation=None)
+        cfg.read(cfg_file, encoding="utf-8")
+        rgb = cfg.get("qobuz", "accent_color", fallback="").strip()
+
+        if not rgb:
+            return _DEFAULT_ACCENT
+
+        parts = [int(x.strip()) for x in rgb.split(";")]
+        if len(parts) == 3 and all(0 <= p <= 255 for p in parts):
+            r, g, b = parts
+            return f"\033[38;2;{r};{g};{b}m"
+    except Exception:
+        pass
+
+    return _DEFAULT_ACCENT
+
+
+# Cor de destaque ativa -- lida uma vez na importacao do modulo.
+# Todos os outros arquivos que fazem `from qobuz_dl.color import INFO as CYAN`
+# recebem este valor automaticamente.
+_ACCENT = _load_accent()
+
+HIGHLIGHT = _ACCENT
+INFO = _ACCENT
+PROGRESS = _ACCENT
+
+
+def accent_preview(escape: str, label: str = "Texto de exemplo") -> str:
+    """Retorna uma string com preview do `escape` em fundo escuro E claro,
+    lado a lado, pra o wizard de escolha de cor mostrar ao usuario."""
+
+    dark_bg = "\033[40m"      # fundo preto
+    light_bg = "\033[47m"     # fundo cinza claro para bom contraste em terminal branco
+    dark_fg = "\033[37m"      # texto branco base
+    light_fg = "\033[30m"     # texto preto base
+
+    # Monta os blocos de texto separadamente para a cor não ser sobrescrita
+    # Recebe o parâmetro 'label' para evitar crash com o cli.py, mas usa o
+    # layout customizado
+
+    dark = f"{dark_bg}{dark_fg} -- {escape}[FAIXA] {dark_fg}ARTISTA {escape}The Weeknd{RESET}"
+    light = f"{light_bg}{light_fg} -- {escape}[FAIXA] {light_fg}ARTISTA {escape}The Weeknd{RESET}"
+
+    return f"Escuro: {dark}     Claro: {light}"

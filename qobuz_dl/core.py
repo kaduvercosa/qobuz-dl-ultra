@@ -4,6 +4,7 @@ import sys
 import time
 import asyncio
 import shutil
+import re
 
 import httpx
 from pathvalidate import sanitize_filename
@@ -24,13 +25,8 @@ except ImportError:
 
 from qobuz_dl.bundle import Bundle
 from qobuz_dl import downloader, qopy
-# CYAN/YELLOW importados como INFO/WARNING renomeados: mesma cor de
-# YELLOW (mantida por convencao), mas CYAN agora e' LIGHTBLUE_EX --
-# visivel em terminal claro E escuro (CYAN puro quase some em fundo
-# branco). Ver comentario completo em qobuz_dl/color.py. Zero mudanca
-# de codigo neste arquivo: toda f-string que ja usa {CYAN}/{YELLOW}
-# continua funcionando, so' a cor de fato renderizada muda.
-from qobuz_dl.color import INFO as CYAN, OFF, RED, WARNING as YELLOW, RESET
+# Importando o _ACCENT direto do seu color.py para manter o tema sincronizado
+from qobuz_dl.color import INFO as CYAN, OFF, RED, WARNING as YELLOW, RESET, _ACCENT
 from qobuz_dl.exceptions import NonStreamable
 from qobuz_dl.db import create_db, handle_download_id
 from qobuz_dl.utils import (
@@ -42,26 +38,32 @@ from qobuz_dl.utils import (
 )
 from qobuz_dl.settings import QobuzDLSettings
 
-# Atraso (em segundos) entre a "largada" de cada item nos primeiros
-# workers de um download em lote paralelo (playlist, discografia, lote de
-# URLs, Last.fm). Sem isso, os N primeiros itens comecam quase juntos (o
-# semaforo libera todos os slots de uma vez em t=0) e todos os cabecalhos
-# completos aparecem empilhados de uma vez, poluindo o terminal. Com o
-# atraso, so' o 1o item comeca na hora (feedback imediato de que esta'
-# funcionando), e os proximos vao entrando aos poucos. So' se aplica aos
-# primeiros `batch_workers` itens -- depois disso, cada slot novo so' abre
-# quando uma faixa de verdade termina, o que ja' escalona naturalmente.
 HEADER_STAGGER_DELAY = 1.5
 
-# --- UI STYLE FOR PROMPT_TOOLKIT (100% CONTRAST FIX) ---
+# --- UI STYLE DINÂMICO (LÊ A COR ESCOLHIDA NO -r) ---
+# Converte o código ANSI do color.py (RGB) para HEX que o prompt_toolkit entende
+_hex_accent = "#5fa8d3"    # Fallback padrão
+_darker_accent = "#4c86a8"  # Fallback escurecido (20%)
+
+_match = re.search(r"\033\[38;2;(\d+);(\d+);(\d+)m", _ACCENT)
+if _match:
+    _r, _g, _b = map(int, _match.groups())
+    _hex_accent = f"#{_r:02x}{_g:02x}{_b:02x}"
+
+    # Calcula um tom 20% mais escuro para o fundo da seleção
+    _dr, _dg, _db = int(_r * 0.8), int(_g * 0.8), int(_b * 0.8)
+    _darker_accent = f"#{_dr:02x}{_dg:02x}{_db:02x}"
+
 pt_style = Style.from_dict(
     {
-        "title": "fg:#5fa8d3 bold",
+        "title": f"fg:{_hex_accent} bold",
         "pointer": "ansiyellow bold",
-        "checkbox": "fg:#5fa8d3",
-        "hovered": "fg:#5fa8d3 reverse bold",
+        "checkbox": f"fg:{_hex_accent}",
+        # Fundo levemente escurecido e letra SEMPRE branca (tanto no claro quanto
+        # no escuro)
+        "hovered": f"bg:{_darker_accent} fg:#ffffff bold",
         "meta": "",
-        "highlight": "fg:#5fa8d3 bold",
+        "highlight": f"fg:{_hex_accent} bold",
         "footer": "ansiyellow",
     }
 )
@@ -127,8 +129,6 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
         event.app.exit(exception=KeyboardInterrupt)
 
     def get_text():
-        # Captura as larguras exatas do terminal dinamicamente pelo motor do
-        # prompt_toolkit
         try:
             app_instance = get_app()
             columns = app_instance.output.get_size().columns
@@ -142,27 +142,24 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
         hdr_pref = " " * prefix_len
 
         # CÁLCULOS DINÂMICOS DE ÁREA SEGURA (SAFE AREA)
-        safe_columns = columns - 2  # Deixa 2 espaços de margem de manobra
+        safe_columns = columns - 2
 
         # 1. Matemática da Tabela de FAIXAS (Track)
-        # Fixos: prefixo + separadores(12) + duração(5) + qualidade(12)
         fixed_trk = prefix_len + 29
         flex_trk = max(15, safe_columns - fixed_trk)
-        trk_art_w = max(10, int(flex_trk * 0.25))  # 25%
-        trk_alb_w = max(10, int(flex_trk * 0.30))  # 30%
-        trk_tit_w = flex_trk - trk_art_w - trk_alb_w  # O resto (45%)
+        trk_art_w = max(10, int(flex_trk * 0.25))
+        trk_alb_w = max(10, int(flex_trk * 0.30))
+        trk_tit_w = flex_trk - trk_art_w - trk_alb_w
         dash_trk = flex_trk + 29
 
         # 2. Matemática da Tabela de ÁLBUNS
-        # Fixos: prefixo + separadores(18) + tipo(6) + ano(4) + faixas(6) + dur(5) + qual(12)
         fixed_alb = prefix_len + 51
         flex_alb = max(10, safe_columns - fixed_alb)
-        alb_art_w = max(10, int(flex_alb * 0.35))  # 35%
-        alb_tit_w = flex_alb - alb_art_w          # 65%
+        alb_art_w = max(10, int(flex_alb * 0.35))
+        alb_tit_w = flex_alb - alb_art_w
         dash_alb = flex_alb + 51
 
         # 3. Matemática da Tabela Simples (Playlists)
-        # Fixos: prefixo + separadores(9) + faixas(6) + dur(5)
         fixed_pl = prefix_len + 20
         flex_pl = max(10, safe_columns - fixed_pl)
         pl_own_w = max(10, int(flex_pl * 0.30))
@@ -256,9 +253,9 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
                     dur = str(meta.get("duration", "")).ljust(5)
                     ql = meta.get("quality", "").ljust(12)
 
-                    ql_color = "fg:#c59b27 bold" if "24b" in ql else "ansicyan"
-                    # Se estiver em Hover, o estilo do hover assume tudo, evitando o
-                    # contraste ruim
+                    # Se a qualidade não for 24-bit, aplica a MESMA cor de destaque
+                    # dinâmica do tema!
+                    ql_color = "fg:#c59b27 bold" if "24b" in ql else f"fg:{_hex_accent}"
                     ql_final_style = style if hovered else ql_color
 
                     res.append(
@@ -300,7 +297,8 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
                     dur = str(meta.get("duration", "")).ljust(5)
                     ql = meta.get("quality", "").ljust(12)
 
-                    ql_color = "fg:#c59b27 bold" if "24b" in ql else "ansicyan"
+                    # Se a qualidade não for 24-bit, aplica a cor dinâmica
+                    ql_color = "fg:#c59b27 bold" if "24b" in ql else f"fg:{_hex_accent}"
                     ql_final_style = style if hovered else ql_color
 
                     res.append((style, f"{art} | {tit} | {alb} | {dur} | "))
@@ -375,9 +373,6 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
         return res
 
     window = Window(
-        # focusable=True garante que esta Window seja o alvo do foco do
-        # Application e, por consequência, que a rolagem automática baseada
-        # no [SetCursorPosition] acima realmente seja aplicada.
         content=FormattedTextControl(text=get_text, focusable=True),
         scroll_offsets=ScrollOffsets(top=1, bottom=1),
         wrap_lines=False,
@@ -676,7 +671,6 @@ class QobuzDL:
                 f"Paralelo ({batch_workers} workers)" if can_parallelize else "Sequencial"
             )
 
-            # --- INÍCIO DA MODIFICAÇÃO DO CABEÇALHO ---
             if is_playlist:
                 from qobuz_dl.downloader import print_download_header
                 from qobuz_dl.utils import format_duration
@@ -698,7 +692,6 @@ class QobuzDL:
                         ("Modo", mode_label),
                     ]
                 )
-            # --- FIM DA MODIFICAÇÃO DO CABEÇALHO ---
 
             for idx, item in enumerate(items, start=1):
                 if (
@@ -852,9 +845,6 @@ class QobuzDL:
         batch_workers = int(getattr(self.settings, "max_workers", 1))
         parallel_allowed = batch_workers > 1 and getattr(self, "delay", 0) <= 0
 
-        # Classifica sempre (independente de paralelo estar ligado) so' pra
-        # saber quantas sao faixas avulsas -- a decisao de paralelizar vem
-        # depois, com a contagem em maos.
         track_urls = []
         other_urls = []
         for i, url in enumerate(urls):
@@ -874,9 +864,6 @@ class QobuzDL:
 
         total_track_urls = len(track_urls)
 
-        # So' compensa paralelizar com >1 faixa avulsa pra baixar ao mesmo
-        # tempo -- com 1 so', melhor cair pro caminho sequencial normal
-        # (handle_url), que mostra a barra de progresso ao vivo.
         use_parallel = parallel_allowed and total_track_urls > 1
         if not use_parallel and track_urls:
             other_urls.extend([(i, u) for i, u, _ in track_urls])

@@ -1914,7 +1914,7 @@ async def tqdm_download(
                     ) as bar:
 
                         # iter_content() do requests -> iter_bytes() no httpx
-                        async for data in r.aiter_bytes(chunk_size=65536):
+                        async for data in r.aiter_bytes(chunk_size=524288):
                             if abort_event.is_set():
                                 return
                             if data:
@@ -2208,7 +2208,7 @@ async def tqdm_download_segments(
         try:
             async with http.stream("GET", url, timeout=15) as r:
                 r.raise_for_status()
-                async for chunk in r.aiter_bytes(chunk_size=65536):
+                async for chunk in r.aiter_bytes(chunk_size=524288):
                     if abort_event.is_set():
                         return bytearray()
                     seg_data.extend(chunk)
