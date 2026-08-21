@@ -29,7 +29,7 @@ from qobuz_dl.exceptions import (
 # branco). Ver comentario completo em qobuz_dl/color.py. Zero mudanca
 # de codigo neste arquivo: toda f-string que ja usa {CYAN}/{YELLOW}
 # continua funcionando, so' a cor de fato renderizada muda.
-from qobuz_dl.color import GREEN, WARNING as YELLOW, RED, OFF, RESET
+from qobuz_dl.color import GREEN, WARNING as YELLOW, RED, OFF, RESET, INFO as CYAN
 
 try:
     from qobuz_dl.bundle import Bundle
@@ -553,7 +553,6 @@ class Client:
         Returns:
             list: A list of successfully matched Qobuz track IDs.
         """
-        from qobuz_dl.color import OFF, GREEN, RED, WARNING as YELLOW, INFO as CYAN
         import difflib
 
         print(

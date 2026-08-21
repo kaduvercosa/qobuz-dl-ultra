@@ -14,7 +14,8 @@ from qobuz_dl.lyrics_engine import LyricsEngine
 # branco). Ver comentario completo em qobuz_dl/color.py. Zero mudanca
 # de codigo neste arquivo: toda f-string que ja usa {CYAN}/{YELLOW}
 # continua funcionando, so' a cor de fato renderizada muda.
-from qobuz_dl.color import INFO as CYAN, GREEN, WARNING as YELLOW, RED, OFF
+import shutil as _shutil
+from qobuz_dl.color import INFO as CYAN, GREEN, WARNING as YELLOW, RED, OFF, RESET, BG
 
 logger = logging.getLogger(__name__)
 
@@ -594,9 +595,11 @@ async def process_retroactive_lyrics_async(
     # =========================================================================
     # RELATÓRIO DETALHADO FINAL
     # =========================================================================
-    print(f"\n{'=' * 75}")
-    print(f"{GREEN}{'RELATÓRIO DETALHADO DE ATUALIZAÇÃO DE LETRAS (QOBUZ)':^75}{OFF}")
-    print(f"{'=' * 75}\n")
+    _w = min(_shutil.get_terminal_size((80, 24)).columns, 100)
+    _bar = '━' * _w
+    print(f"\n{CYAN}{_bar}{RESET}")
+    print(f"{BG}{GREEN}{'RELATÓRIO DE ATUALIZAÇÃO DE LETRAS (QOBUZ)':^{_w}}{RESET}")
+    print(f"{CYAN}{_bar}{RESET}\n")
 
     for name, status, desc in report_items:
         if "ATUALIZADO" in status:
@@ -619,8 +622,8 @@ async def process_retroactive_lyrics_async(
         stats["updated_fallback"]
     )
 
-    print(f"{'=' * 75}")
-    print(f"{CYAN}RESUMO GERAL:{OFF}")
+    print(f"{CYAN}{'─' * _w}{RESET}")
+    print(f"{BG}{CYAN}RESUMO GERAL:{RESET}")
     print(f"  • Total de arquivos analisados: {stats['total']}")
     print(f"  • Total de arquivos {GREEN}atualizados{OFF}: {total_updates}")
     print(

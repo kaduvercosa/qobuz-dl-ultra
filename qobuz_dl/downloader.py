@@ -2104,7 +2104,7 @@ async def _get_cover_and_embed(
     if save_cover and saved_url == embed_url and os.path.isfile(saved_file):
         try:
             shutil.copyfile(saved_file, embed_file)
-            safe_print(f"{OFF}  [*] Reusing cover art for embed.{OFF}")
+            safe_print(f"  [*] Reusing cover art for embed..")
             return
         except OSError as e:
             logger.debug(f"Falha ao copiar cover.jpg pra embed, baixando de novo: {e}")

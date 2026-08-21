@@ -203,23 +203,121 @@ def handle_download_id(
 
 def get_stats(db_path):
     """
-    Retrieves statistical information from the database, specifically a list of unique downloaded artists.
-
-    Args:
-        db_path (str): The file path to the SQLite database.
-
-    Returns:
-        list: A sorted list of unique artist names present in the database. Returns an empty list on failure.
+    Retorna um dicionario rico com todas as estatisticas do banco de downloads.
+    Usado pelo comando `qobuz-dl stats` pra exibir um painel completo.
     """
     if not db_path:
-        return []
+        return {}
+
+    empty = {
+        "total": 0, "albums": 0, "tracks": 0,
+        "hires": 0, "flac": 0, "mp3": 0,
+        "quality_met": 0, "quality_not_met": 0,
+        "unique_artists": 0, "unique_albums": 0,
+        "top_artists": [], "formats": {},
+        "bit_depths": {}, "sample_rates": {},
+        "oldest": None, "newest": None,
+        "artist_list": [],
+    }
+
     try:
         with sqlite3.connect(db_path) as conn:
-            cursor = conn.cursor()
-            # We select unique artists, excluding empty strings
-            cursor.execute(
-                "SELECT DISTINCT artist FROM downloads WHERE artist != '' ORDER BY artist ASC"
-            )
-            return [row[0] for row in cursor.fetchall()]
+            c = conn.cursor()
+
+            # totais gerais
+            c.execute("SELECT COUNT(*) FROM downloads")
+            total = c.fetchone()[0]
+            if total == 0:
+                return empty
+
+            c.execute("SELECT COUNT(*) FROM downloads WHERE media_type='album'")
+            albums = c.fetchone()[0]
+
+            c.execute("SELECT COUNT(*) FROM downloads WHERE media_type='track'")
+            tracks = c.fetchone()[0]
+
+            # hi-res: bit_depth >= 24
+            c.execute("SELECT COUNT(*) FROM downloads WHERE CAST(bit_depth AS INTEGER) >= 24")
+            hires = c.fetchone()[0]
+
+            # formatos
+            c.execute(
+                "SELECT file_format, COUNT(*) FROM downloads GROUP BY file_format ORDER BY COUNT(*) DESC")
+            formats = {row[0]: row[1] for row in c.fetchall()}
+            flac_count = formats.get("FLAC", 0)
+            mp3_count = formats.get("MP3", 0)
+
+            # qualidade atingida
+            c.execute("SELECT COUNT(*) FROM downloads WHERE quality_met=1")
+            qmet = c.fetchone()[0]
+            c.execute("SELECT COUNT(*) FROM downloads WHERE quality_met=0")
+            qnotmet = c.fetchone()[0]
+
+            # artistas e albums unicos
+            c.execute("SELECT COUNT(DISTINCT artist) FROM downloads WHERE artist != ''")
+            unique_artists = c.fetchone()[0]
+
+            c.execute("SELECT COUNT(DISTINCT album) FROM downloads WHERE album != ''")
+            unique_albums = c.fetchone()[0]
+
+            # top 10 artistas por numero de downloads
+            c.execute("""
+                SELECT artist, COUNT(*) as cnt
+                FROM downloads
+                WHERE artist != ''
+                GROUP BY artist
+                ORDER BY cnt DESC
+                LIMIT 10
+            """)
+            top_artists = c.fetchall()  # lista de (nome, count)
+
+            # distribuicao de bit depth
+            c.execute("""
+                SELECT bit_depth, COUNT(*) FROM downloads
+                WHERE bit_depth IS NOT NULL AND bit_depth != ''
+                GROUP BY bit_depth ORDER BY CAST(bit_depth AS INTEGER) DESC
+            """)
+            bit_depths = {row[0]: row[1] for row in c.fetchall()}
+
+            # distribuicao de sample rate
+            c.execute("""
+                SELECT sampling_rate, COUNT(*) FROM downloads
+                WHERE sampling_rate IS NOT NULL AND sampling_rate != ''
+                GROUP BY sampling_rate ORDER BY CAST(sampling_rate AS REAL) DESC
+            """)
+            sample_rates = {row[0]: row[1] for row in c.fetchall()}
+
+            # datas extremas
+            c.execute(
+                "SELECT MIN(release_date), MAX(release_date) FROM downloads WHERE release_date != ''")
+            dates = c.fetchone()
+            oldest = dates[0] if dates else None
+            newest = dates[1] if dates else None
+
+            # lista completa de artistas
+            c.execute(
+                "SELECT DISTINCT artist FROM downloads WHERE artist != '' ORDER BY artist ASC")
+            artist_list = [row[0] for row in c.fetchall()]
+
+            return {
+                "total": total,
+                "albums": albums,
+                "tracks": tracks,
+                "hires": hires,
+                "flac": flac_count,
+                "mp3": mp3_count,
+                "quality_met": qmet,
+                "quality_not_met": qnotmet,
+                "unique_artists": unique_artists,
+                "unique_albums": unique_albums,
+                "top_artists": top_artists,
+                "formats": formats,
+                "bit_depths": bit_depths,
+                "sample_rates": sample_rates,
+                "oldest": oldest,
+                "newest": newest,
+                "artist_list": artist_list,
+            }
+
     except sqlite3.Error:
-        return []
+        return empty

@@ -21,8 +21,8 @@ from qobuz_dl.bundle import Bundle
 # de codigo neste arquivo: toda f-string que ja usa {CYAN}/{YELLOW}
 # continua funcionando, so' a cor de fato renderizada muda.
 from qobuz_dl.color import (
-    GREEN, WARNING as YELLOW, OFF, INFO as CYAN,
-    ACCENT_PRESETS, accent_preview,
+    GREEN, WARNING as YELLOW, RED, OFF, INFO as CYAN,
+    RESET, BG, ACCENT_PRESETS, accent_preview,
 )
 from qobuz_dl.commands import qobuz_dl_args
 from qobuz_dl.core import QobuzDL
@@ -156,10 +156,10 @@ def validate_config_formats(formats_to_check):
 
     has_errors = False
 
-    C_RED = "\033[91m"
-    C_YEL = "\033[93m"
-    C_GRE = "\033[92m"
-    C_OFF = "\033[0m"
+    C_RED = RED
+    C_YEL = YELLOW
+    C_GRE = GREEN
+    C_OFF = RESET
 
     for config_name, format_string in formats_to_check.items():
         if not format_string:
@@ -442,9 +442,9 @@ async def _handle_commands(qobuz, arguments):
     """Routes parsed command-line arguments to the appropriate QobuzDL core methods."""
 
     def sigint_handler(sig, frame):
-        print(f"\n\n\033[91m[!] Download forcibly interrupted by the user.\033[0m")
+        print(f"\n\n{RED}[!] Download forcibly interrupted by the user.{RESET}")
         print(
-            f"\033[93mPartially downloaded files will be ignored or overwritten on the next run.\033[0m"
+            f"{YELLOW}Partially downloaded files will be ignored or overwritten on the next run.{RESET}"
         )
         try:
             _remove_leftovers(qobuz.directory)
@@ -695,7 +695,7 @@ async def async_main():
             await run_radar()
         except KeyboardInterrupt:
             print(
-                "\n\n\033[91m[!] Radar manually interrupted by the user (CTRL+C).\033[0m"
+                f"\n\n{RED}[!] Radar manually interrupted by the user (CTRL+C).{RESET}"
             )
         sys.exit(0)
     # --------------------------------------------
@@ -703,19 +703,100 @@ async def async_main():
     # --- STATS COMMAND INTEGRATION ---
     if len(sys.argv) > 1 and sys.argv[1] == "stats":
         from qobuz_dl.db import get_stats
+        import shutil as _shutil
 
-        artists = get_stats(QOBUZ_DB)
+        s = get_stats(QOBUZ_DB)
+        cols = min(_shutil.get_terminal_size((80, 24)).columns, 100)
+        bar = "━" * cols
+        div = "─" * cols
 
-        print(f"\n{CYAN}[ QOBUZ-DL-ULTRA - STATISTICS ]{OFF}")
-        if not artists:
+        def _row(label, value, label_w=22):
+            print(f"  {CYAN}{label:<{label_w}}{RESET}  {value}")
+
+        print(f"\n{CYAN}{bar}{RESET}")
+        print(f"{BG}{CYAN}{'  QOBUZ-DL-ULTRA  ·  STATISTICS':^{cols}}{RESET}")
+        print(f"{CYAN}{bar}{RESET}\n")
+
+        if not s or s.get("total", 0) == 0:
             print(
-                f"{YELLOW}No artist data found yet. Start downloading to populate your stats!{OFF}"
+                f"  {YELLOW}Nenhum dado encontrado. Comece a baixar para popular as estatísticas!{RESET}")
+            print(f"\n{CYAN}{bar}{RESET}\n")
+            sys.exit(0)
+
+        # --- Totais gerais ---
+        print(f"  {BG}BIBLIOTECA{RESET}")
+        _row("Total de downloads", str(s["total"]))
+        _row("Álbuns", str(s["albums"]))
+        _row("Faixas avulsas", str(s["tracks"]))
+        _row("Artistas únicos", str(s["unique_artists"]))
+        _row("Álbuns únicos", str(s["unique_albums"]))
+        print()
+
+        # --- Qualidade ---
+        print(f"  {BG}QUALIDADE DE ÁUDIO{RESET}")
+        total = s["total"] or 1
+        hires_pct = s["hires"] * 100 // total
+        met_pct = s["quality_met"] * 100 // total
+        _row("Hi-Res (≥24bit)", f"{s['hires']}  ({hires_pct}%)")
+        _row("Qualidade solicitada atingida", f"{s['quality_met']}  ({met_pct}%)")
+        _row("Qualidade reduzida", f"{s['quality_not_met']}")
+
+        if s["bit_depths"]:
+            depths_str = "  /  ".join(
+                f"{k}bit → {v}" for k, v in list(s["bit_depths"].items())[:5]
             )
-        else:
-            print(f"Total Unique Artists Downloaded: {len(artists)}\n")
-            for artist in artists:
-                print(f" - {artist}")
-        print(f"{CYAN}-------------------------------------{OFF}\n")
+            _row("Bit depths", depths_str)
+
+        if s["sample_rates"]:
+            rates_str = "  /  ".join(
+                f"{k}kHz → {v}" for k, v in list(s["sample_rates"].items())[:5]
+            )
+            _row("Sample rates", rates_str)
+        print()
+
+        # --- Formatos ---
+        print(f"  {BG}FORMATOS{RESET}")
+        for fmt, cnt in s["formats"].items():
+            pct = cnt * 100 // total
+            _row(fmt, f"{cnt}  ({pct}%)")
+        print()
+
+        # --- Datas ---
+        if s["oldest"] or s["newest"]:
+            print(f"  {BG}PERÍODO{RESET}")
+
+            def _fmt_date(d):
+                if not d:
+                    return "?"
+                try:
+                    y, m, day = d[:10].split("-")
+                    return f"{day}/{m}/{y}"
+                except Exception:
+                    return d
+            _row("Lançamento mais antigo", _fmt_date(s["oldest"]))
+            _row("Lançamento mais recente", _fmt_date(s["newest"]))
+            print()
+
+        # --- Top artistas ---
+        if s["top_artists"]:
+            print(f"  {BG}TOP ARTISTAS{RESET}")
+            for rank, (artist, cnt) in enumerate(s["top_artists"], 1):
+                bar_len = max(1, cnt * 20 // (s["top_artists"][0][1] or 1))
+                bar_vis = f"{CYAN}{'█' * bar_len}{RESET}"
+                print(f"  {rank:>2}. {artist:<32} {bar_vis} {cnt}")
+            print()
+
+        # --- Lista completa de artistas ---
+        if len(sys.argv) > 2 and sys.argv[2] == "--artistas":
+            print(f"  {BG}TODOS OS ARTISTAS ({s['unique_artists']}){RESET}")
+            for a in s["artist_list"]:
+                print(f"    · {a}")
+            print()
+
+        print(f"{CYAN}{bar}{RESET}\n")
+        if len(sys.argv) <= 2 or sys.argv[2] != "--artistas":
+            print(
+                f"  {OFF}Dica: use  qobuz-dl stats --artistas  para ver a lista completa.{RESET}\n")
         sys.exit(0)
     # ---------------------------------
 
@@ -768,7 +849,7 @@ async def async_main():
             legacy_val = config.get(section, "default_folder", fallback=None)
             if legacy_val is not None:
                 print(
-                    f"\033[93m[!] Notice: 'default_folder' in config.ini is deprecated. Please rename it to 'directory' for future updates.\033[0m"
+                    f"{YELLOW}[!] Notice: 'default_folder' in config.ini is deprecated. Please rename it to 'directory' for future updates.{RESET}"
                 )
                 default_folder = legacy_val
             else:
@@ -829,9 +910,9 @@ async def async_main():
     except (configparser.Error, KeyError) as error:
         arguments = qobuz_dl_args().parse_args()
         if not arguments.reset:
-            RED_C = "\033[91m"
-            YELLOW_C = "\033[93m"
-            OFF_C = "\033[0m"
+            RED_C = RED
+            YELLOW_C = YELLOW
+            OFF_C = RESET
             sys.exit(
                 f"{RED_C}Invalid or corrupted configuration ({error}).\n{OFF_C}"
                 f"{YELLOW_C}Run 'python -m qobuz_dl -r' to fix this.{OFF_C}"
@@ -937,9 +1018,9 @@ async def async_main():
             )
         except KeyboardInterrupt:
             print(
-                "\n\n\033[91m[!] Operation manually interrupted by the user (CTRL+C).\033[0m"
+                f"\n\n{RED}[!] Operation manually interrupted by the user (CTRL+C).{RESET}"
             )
-            print("\033[93mAlready processed files are safe. Exiting...\033[0m")
+            print(f"{YELLOW}Already processed files are safe. Exiting...{RESET}")
         finally:
             if lyrics_client:
                 await lyrics_client.close()

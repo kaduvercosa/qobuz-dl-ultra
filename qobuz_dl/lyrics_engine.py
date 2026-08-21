@@ -4,6 +4,7 @@ import httpx  # antes: requests -- ver downloader.py/qopy.py, mesmo motivo
 from mutagen.id3 import ID3, USLT, TXXX, ID3NoHeaderError
 from mutagen.flac import FLAC
 from tqdm import tqdm
+from qobuz_dl.color import SUCCESS as GREEN, WARNING as YELLOW, ERROR as RED, RESET
 
 # Import lyricsgenius only if the user has configured the token
 try:
@@ -352,15 +353,15 @@ class LyricsEngine:
 
                     if embed_lyrics and save_lrc:
                         tqdm.write(
-                            f"    ✅ Letras {is_bilingual}sincronizadas injetadas e salvas em .lrc (via Qobuz)!"
+                            f"    ✅ Letras {GREEN}{is_bilingual}{RESET}sincronizadas injetadas e salvas em .lrc (via Qobuz)!"
                         )
                     elif save_lrc:
                         tqdm.write(
-                            f"    ✅ Letras {is_bilingual}sincronizadas salvas as .lrc (via Qobuz)!"
+                            f"    ✅ Letras {GREEN}{is_bilingual}{RESET}sincronizadas salvas em .lrc (via Qobuz)!"
                         )
                     elif embed_lyrics:
                         tqdm.write(
-                            f"    ✅ Letras {is_bilingual}sincronizadas injetadas no metadata (via Qobuz)!"
+                            f"    ✅ Letras {GREEN}{is_bilingual}{RESET}sincronizadas injetadas no metadata (via Qobuz)!"
                         )
                     return
 
@@ -385,15 +386,15 @@ class LyricsEngine:
 
                     if embed_lyrics and save_lrc:
                         tqdm.write(
-                            f"    ✅ Letras {is_bilingual}padrão injetadas e salvas em .txt (via Qobuz)!"
+                            f"    ✅ Letras {GREEN}{is_bilingual}{RESET}padrão injetadas e salvas em .txt (via Qobuz)!"
                         )
                     elif save_lrc:
                         tqdm.write(
-                            f"    ✅ Letras {is_bilingual}padrão salvas em .txt (via Qobuz)!"
+                            f"    ✅ Letras {GREEN}{is_bilingual}{RESET}padrão salvas em .txt (via Qobuz)!"
                         )
                     elif embed_lyrics:
                         tqdm.write(
-                            f"    ✅ Letras {is_bilingual}padrão injetadas no metadata (via Qobuz)!"
+                            f"    ✅ Letras {GREEN}{is_bilingual}{RESET}padrão injetadas no metadata (via Qobuz)!"
                         )
                     return
 
@@ -461,7 +462,7 @@ class LyricsEngine:
 
                     if embed_lyrics and save_lrc:
                         tqdm.write(
-                            f"    ✅ Letras padrão injetadas e salvas como .txt(via LRCLIB)!"
+                            f"    ✅ Letras padrão injetadas e salvas como .txt (via LRCLIB)!"
                         )
                     elif save_lrc:
                         tqdm.write(
@@ -487,19 +488,22 @@ class LyricsEngine:
                         )
 
                     if embed_lyrics and save_lrc:
-                        tqdm.write(f"    ✅ Lyrics injected via Genius and saved!")
+                        tqdm.write(
+                            f"    ✅ Lyrics injected via Genius and saved!")
                     elif save_lrc:
                         tqdm.write(
                             f"    ✅ Lyrics saved via Genius (Embedding disabled)!"
                         )
                     elif embed_lyrics:
-                        tqdm.write(f"    ✅ Lyrics injected via Genius (Fallback)!")
+                        tqdm.write(
+                            f"    ✅ Lyrics injected via Genius (Fallback)!")
                     return
 
-            tqdm.write(f"    ❌ Nenhuma letra encontrada para esta faixa.")
+            tqdm.write(
+                f"    {YELLOW}⚠️ Nenhuma letra encontrada para esta faixa.{RESET}")
 
         except Exception as e:
-            tqdm.write(f"    ⚠️ Erro durante a pesquisa de letras: {e}")
+            tqdm.write(f"    {RED}❌ Erro durante a pesquisa de letras: {e}{RESET}")
 
     def _save_lrc_file(
         self, audio_file_path, synced_lyrics, source=None, language=None
