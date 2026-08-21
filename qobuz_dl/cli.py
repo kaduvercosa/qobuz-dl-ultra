@@ -710,8 +710,17 @@ async def async_main():
         bar = "━" * cols
         div = "─" * cols
 
-        def _row(label, value, label_w=22):
-            print(f"  {CYAN}{label:<{label_w}}{RESET}  {value}")
+        def _row(label, value, label_w=30):
+            if cols < 60:
+                if label in ["Bit depths", "Sample rates"]:
+                    # MODO CELULAR: Imprime o rótulo e coloca o valor embaixo, indetado
+                    print(f"  {CYAN}{label}:{RESET}")
+                    print(f"    {value}")
+                else:
+                    print(f"  {CYAN}{label}:{RESET} {value}")
+            else:
+                # MODO TABLET/PC: Lado a LAdo com alinhamento perfeito
+                print(f"  {CYAN}{label:<{label_w}}{RESET}  {value}")
 
         print(f"\n{CYAN}{bar}{RESET}")
         print(f"{BG}{CYAN}{'  QOBUZ-DL-ULTRA  ·  STATISTICS':^{cols}}{RESET}")
@@ -780,11 +789,23 @@ async def async_main():
         # --- Top artistas ---
         if s["top_artists"]:
             print(f"  {BG}TOP ARTISTAS{RESET}")
+            top_cnt = s["top_artists"][0][1] or 1
+
             for rank, (artist, cnt) in enumerate(s["top_artists"], 1):
-                bar_len = max(1, cnt * 20 // (s["top_artists"][0][1] or 1))
-                bar_vis = f"{CYAN}{'█' * bar_len}{RESET}"
-                print(f"  {rank:>2}. {artist:<32} {bar_vis} {cnt}")
-            print()
+                if cols < 60:
+                    # MODO CELULAR: Nome na primeira linha, barra recuada na linha de baixo
+                    # Reduzimos o tamanho máximo da barra para 15 blocos para caber  com folga
+                    max_blocks = 12
+                    bar_len = cnt if top_cnt <= max_blocks else max(1, cnt * max_blocks // top_cnt)
+                    bar_vis = f"{CYAN}{('█|' * bar_len)[:-1]}{RESET}"
+                    print(f"  {rank:>2}. {artist}") 
+                    print(f"      {bar_vis} {cnt}")
+                else:
+                    # MODO TABLET/PC: Tudo na mesma linha com alinhamento de 32 espaços
+                    max_blocks = 20
+                    bar_len = cnt if top_cnt <= max_blocks else max(1, cnt * max_blocks // top_cnt)
+                    bar_vis = f"{CYAN}{('█|' * bar_len)[:-1]}{RESET}"
+                    print(f"  {rank:>2}. {artist:<32} {bar_vis} {cnt}")
 
         # --- Lista completa de artistas ---
         if len(sys.argv) > 2 and sys.argv[2] == "--artistas":
