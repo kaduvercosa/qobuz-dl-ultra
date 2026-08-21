@@ -103,27 +103,27 @@ INFO = _ACCENT
 PROGRESS = _ACCENT
 
 
-def accent_preview(escape: str, label: str = "Texto de exemplo") -> str:
+def accent_preview(escape: str, label: str = "") -> str:
     """Retorna uma string com preview do `escape` em fundo escuro E claro.
     Adapta automaticamente para o tamanho da tela (celular vs iPad/PC)."""
-    cols, _ = shutil.get_terminal_size()
+    cols, _ = shutil.get_terminal_size((80, 24))
 
-    dark_bg = "\033[40m"      # fundo preto
-    light_bg = "\033[47m"     # fundo cinza claro para bom contraste em terminal branco
-    dark_fg = "\033[37m"      # texto branco base
-    light_fg = "\033[30m"     # texto preto base
+    dark_bg = "\033[40m"       # Fundo Preto
+    light_bg = "\033[107m"     # Fundo Branco Brilhante
+    dark_fg = "\033[97m"       # Texto Branco Brilhante
+    light_fg = "\033[30m"      # Texto Preto
 
-    if cols < 70:
-        # Modo responsivo para telas estreitas (ex: celular na vertical)
-        dark = f"{dark_bg}{dark_fg} {escape}[FX] {dark_fg}The Weeknd {RESET}"
-        light = f"{light_bg}{light_fg} {escape}[FX] {light_fg}The Weeknd {RESET}"
+    # Aumentado para 115 colunas para acionar o modo escadinha no tablet em pé
+    if cols < 115:
+        # Modo responsivo: Quebra 2 linhas (\n\n) pra sair da frente do nome da cor.
+        # Adiciona margem exata e \n no final para separar da próxima opção da lista.
+        dark = f"{dark_bg} {escape}[FX] {dark_fg}The Weeknd {RESET}"
+        light = f"{light_bg} {escape}[FX] {light_fg}The Weeknd {RESET}"
 
-        # Quebra a linha e adiciona os exatos 30 espaços do prefixo do cli.py
-        # para alinhar o "Claro:" perfeitamente embaixo do "Escuro:"
-        return f"Escuro: {dark}\n{' ' * 30}Claro:  {light}"
+        return f"\n\n          Escuro:  {dark}\n          Claro:   {light}\n"
     else:
-        # Modo largo para telas maiores
-        dark = f"{dark_bg}{dark_fg} -- {escape}[FAIXA] {dark_fg}ARTISTA {escape}The Weeknd{RESET}"
-        light = f"{light_bg}{light_fg} -- {escape}[FAIXA] {light_fg}ARTISTA {escape}The Weeknd{RESET}"
+        # Modo largo (iPad na horizontal ou PC)
+        dark = f"{dark_bg} {escape}[FAIXA] {dark_fg}ARTISTA {escape}The Weeknd {RESET}"
+        light = f"{light_bg} {escape}[FAIXA] {light_fg}ARTISTA {escape}The Weeknd {RESET}"
 
-        return f"Escuro: {dark}     Claro: {light}"
+        return f"  Escuro: {dark}    Claro: {light}"
