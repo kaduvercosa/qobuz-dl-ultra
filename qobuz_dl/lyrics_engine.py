@@ -242,7 +242,7 @@ class LyricsEngine:
             tag, text, is_trans = item[1], item[2], item[3]
             if is_trans:
                 # Seta de recuo e espaco para diferenciar visualmente a traducao
-                final_lrc.append(f"{tag}    ↳ {text}")
+                final_lrc.append(f"{tag}  ~| {text}")
             else:
                 final_lrc.append(f"{tag} {text}")
 

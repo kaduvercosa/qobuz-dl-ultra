@@ -176,8 +176,8 @@ def add_common_arg(custom_parser, default_folder, default_quality):
         "--folder-format",
         metavar="PATTERN",
         help="""pattern for formatting folder names, e.g
-        "{album_artist} - {album_title} ({year}) {{{barcode}}}". available keys:
-        album_id, album_url, album_title, album_title, album_artist, album_genre,
+        "{album_artist} - {album_title} ({year}) {{{barcode}}}". available keys: 
+        album_id, album_url, album_title, album_title, album_artist, album_genre, 
         album_composer, label, copyright, upc, barcode, release_date, year, media_type,
         format, bit_depth, sampling_rate, album_version, disc_count, track_count.
         Note1: {album_title}, {track_title} will contain version information if available.
@@ -197,9 +197,9 @@ def add_common_arg(custom_parser, default_folder, default_quality):
         "--track-format",
         metavar="PATTERN",
         help="""pattern for formatting track names. e.g
-        "{track_number} - {track_title}"
+        "{track_number} - {track_title}" 
         available keys:
-        album_title, album_title_base, album_artist, track_id, track_artist, track_composer,
+        album_title, album_title_base, album_artist, track_id, track_artist, track_composer, 
         track_number, isrc, bit_depth, sampling_rate, track_title, track_title_base
         version, year, disc_number, release_date.
         Cannot contain characters used by the system, which includes /:<>
@@ -365,8 +365,11 @@ def add_common_arg(custom_parser, default_folder, default_quality):
     artwork_group.add_argument(
         "--embedded-art-size",
         choices=["50", "100", "150", "300", "600", "max", "org"],
-        default="org",
-        help="size of embedded artwork (default: org)",
+        default=None,
+        help="size of embedded artwork (default: org, or config.ini's "
+        "embedded_art_size -- if the org file exceeds FLAC's 16MB embed "
+        "limit, it's automatically recompressed just enough to fit, "
+        "keeping the full-quality file saved on disk untouched)",
     )
     artwork_group.add_argument(
         "--saved-art-size",
@@ -437,6 +440,28 @@ def qobuz_dl_args(default_quality=6, default_limit=20, default_folder=None):
         nargs="?",
         const="DEFAULT",
         help="scan local directory to restore missing Qobuz IDs into the database",
+    )
+    parser.add_argument(
+        "--find-duplicates",
+        metavar="PATH",
+        nargs="?",
+        const="DEFAULT",
+        help=(
+            "scan local directory for duplicate tracks by audio fingerprint "
+            "(Chromaprint/AcoustID), not just tags -- requires the 'fpcalc' "
+            "binary installed on the system"
+        ),
+    )
+    parser.add_argument(
+        "--watch",
+        metavar="PATH",
+        nargs="?",
+        const="DEFAULT",
+        help=(
+            "watch local directory and automatically run retro-tagging "
+            "(lyrics injection) whenever new audio files appear -- runs "
+            "until interrupted with Ctrl+C"
+        ),
     )
     parser.add_argument(
         "-sc", "--show-config", action="store_true", help="show configuration"

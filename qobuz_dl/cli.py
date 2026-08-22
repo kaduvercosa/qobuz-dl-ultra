@@ -1,11 +1,16 @@
 from qobuz_dl.utils import get_config_paths
 import sys
-import difflib
+# rapidfuzz no lugar de difflib: mesmo motivo do qopy.py (10-100x mais
+# rapido, C++/Cython em vez de Python puro) -- aqui usado pra sugerir a
+# variavel de formato correta quando o usuario digita uma errada no
+# config.ini.
+from rapidfuzz import process as fuzz_process, fuzz
 import string
 import configparser
 import logging
 import glob
 import os
+import send2trash
 import signal
 import shutil
 import textwrap
@@ -34,24 +39,11 @@ logging.basicConfig(
     format="%(message)s",
 )
 
-# O httpx (ao contrario do requests/aiohttp que usavamos antes) loga CADA
-# requisicao HTTP em nivel INFO por padrao -- uma linha tipo
-# 'HTTP Request: GET https://... "HTTP/1.1 200 OK"' pra cada chamada. Com
-# basicConfig(level=INFO) acima aplicado globalmente, isso significa uma
-# linha de log a mais por segmento baixado (um album Hi-Res facilmente
-# gera dezenas dessas por faixa) -- e o httpcore, biblioteca por baixo do
-# httpx, e' ainda mais verboso nesse nivel com eventos de abertura/
-# fechamento de conexao. Isso e' o que aparecia como mensagens de
-# "conexao"/"desconexao" poluindo a tela.
-#
-# A causa nao estava espalhada pelo projeto -- e' esse UNICO ponto aqui
-# (o unico logging.basicConfig do projeto inteiro) que define o nivel
-# efetivo pra qualquer logger sem nivel proprio, incluindo os do httpx/
-# httpcore. Erros e avisos de verdade dessas libs (nivel WARNING pra
-# cima) continuam aparecendo normalmente -- so o log rotineiro de "fiz
-# uma requisicao" e' que fica quieto.
+
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
+
+logger = logging.getLogger(__name__)
 
 # --- iOS / a-Shell support ---
 # Deteccao cross-platform centralizada em utils.get_config_paths() -- ver
@@ -110,7 +102,7 @@ def validate_config_formats(formats_to_check):
 
     Scans the configuration format strings for unknown variables to prevent
     silent KeyErrors during the download process. Implements a heuristic engine
-    using difflib to suggest typing corrections to the user.
+    using rapidfuzz to suggest typing corrections to the user.
 
     Args:
         formats_to_check (dict): A dictionary mapping format setting names to their string values.
@@ -180,13 +172,18 @@ def validate_config_formats(formats_to_check):
                         f"{C_YEL}[!] Config Warning: Unknown variable '{{{base_var}}}' detected in '{config_name}'.{C_OFF}"
                     )
 
-                    similar_keys = difflib.get_close_matches(
-                        base_var, VALID_KEYS, n=1, cutoff=0.6
+                    # process.extractOne() do rapidfuzz e' o equivalente ao
+                    # difflib.get_close_matches(n=1, cutoff=0.6) -- cutoff
+                    # aqui e' 0-100 (nao 0-1), por isso 60 em vez de 0.6.
+                    # Retorna (match, score, index) ou None, em vez de uma
+                    # lista.
+                    best = fuzz_process.extractOne(
+                        base_var, VALID_KEYS, scorer=fuzz.ratio, score_cutoff=60
                     )
-                    if similar_keys:
+                    if best:
                         print(
                             f"    {C_GRE}-> Did you mean '{{{
-                                similar_keys[0]}}}'?{C_OFF}"
+                                best[0]}}}'?{C_OFF}"
                         )
 
                     print(
@@ -213,8 +210,8 @@ def _pick_accent_color() -> str:
     Mostra cada opcao com preview em fundo escuro E claro antes de confirmar.
     Retorna o valor RGB no formato "R;G;B" pronto pra gravar no config.ini.
     """
-    print(f"\n{YELLOW}[?] Cor de destaque do programa:{OFF}")
-    print("    Aparece em nomes de faixas, cabecalhos, barras e progresso.")
+    print(f"\n{BG}[?] Cor de destaque do programa:{OFF}")
+    print(f"    {OFF}Aparece em nomes de faixas, cabecalhos, barras e progresso.{OFF}")
     print()
 
     # Mostrar todas as opcoes com preview lado a lado
@@ -279,7 +276,7 @@ def _reset_config(config_file):
     """
     Interactive configuration wizard for initializing or resetting the config.ini file.
     """
-    logging.info(f"\n{YELLOW}--- QOBUZ-DL CONFIGURATION WIZARD (2026 Update) ---{OFF}")
+    logging.info(f"\n{BG}[ QOBUZ-DL-ULTRA - CONFIGURAÇÃO INICIAL ]{OFF}")
     config = configparser.ConfigParser(interpolation=None)
 
     config["qobuz"] = {}
@@ -288,26 +285,28 @@ def _reset_config(config_file):
     accent_rgb = _pick_accent_color()
     config["qobuz"]["accent_color"] = accent_rgb
 
+    C_ACCENT = f"\033[38;2;{accent_rgb}m"
+
     email = input("Enter your Qobuz email:\n- ").strip()
     config["qobuz"]["email"] = email
 
     print(
-        f"\n{YELLOW}[!] ATTENTION: Qobuz API blocked direct password login for 3rd party apps.{OFF}"
+        f"\n{C_ACCENT}[!] ATENÇÃO: A API Qobuz bloqueou o login de senha direta para aplicativos de terceiros.{OFF}"
     )
     print(
-        f"{YELLOW}[!] You must use your browser Auth Token (F12 > Storage > Local Storage > localuser > token).{OFF}"
+        f"{C_ACCENT}[!] Você deve usar o Token de autenticação do seu navegador (F12 > Armazenamento > Armazenamento Local > usuário local > token).{OFF}"
     )
 
-    auth_token = input("Paste your browser token here:\n- ").strip()
+    auth_token = input("Cole o token do seu navegador aqui:\n- ").strip()
 
     config["qobuz"]["password"] = ""
 
-    print(f"\n{YELLOW}[?] OS Keyring Security:{OFF}")
-    print("    By default, tokens are encrypted in your OS Credential Manager.")
-    print("    If you are on a headless Linux/NAS/Docker, this might fail silently.")
+    print(f"\n{C_ACCENT}[?] OS Keyring Security:{OFF}")
+    print(f"    Por padrão, os tokens são criptografados no seu Gerenciador de Credenciais do Sistema Operacional.")
+    print(f"    {OFF}Se você estiver em um Linux/NAS/Docker, isso pode falhar silenciosamente.{OFF}")
     disable_kr = (
         input(
-            "    Disable OS Keyring and save tokens in config.ini? (yes/no) [Default: no]\n- "
+            "    Desativar o Keyring do sistema operacional e salvar tokens no config.ini? (yes/no) [Padrão: no]\n- "
         )
         .strip()
         .lower()
@@ -323,7 +322,7 @@ def _reset_config(config_file):
 
     fetch_lyrics = (
         input(
-            "\nDo you want to automatically download and inject lyrics? (yes/no) [Default: yes]\n- "
+            "\nVocê quer baixar e injetar letras e tradução automaticamente? (yes/no) [Default: yes]\n- "
         )
         .strip()
         .lower()
@@ -335,7 +334,7 @@ def _reset_config(config_file):
     genius_token = ""
     if config["qobuz"]["fetch_lyrics"] == "true":
         print(
-            f"{YELLOW}[!] To use Genius as a fallback, enter your API Token. Leave blank to only use LRCLIB (Free/No API).{OFF}"
+            f"\n{C_ACCENT}[!] Para usar o Genius como um fallback, insira seu Token de API. Deixe em branco para usar apenas LRCLIB (Free/No API).{OFF}"
         )
         genius_token = input("Genius API Token:\n- ").strip()
 
@@ -345,17 +344,17 @@ def _reset_config(config_file):
         config["qobuz"]["genius_token"] = genius_token
 
     config["qobuz"]["directory"] = (
-        input("Download folder (press Enter for 'Qobuz Downloads')\n- ") or
+        input("\nPasta de download (pressione Enter para 'Qobuz Downloads')\n- ") or
         "Qobuz Downloads"
     )
 
     config["qobuz"]["folder_format"] = (
-        input(f"Folder format (press Enter for '{DEFAULT_FOLDER}')\n- ") or
+        input(f"\nFormato da pasta (pressione Enter para '{DEFAULT_FOLDER}')\n- ") or
         DEFAULT_FOLDER
     )
 
     config["qobuz"]["default_quality"] = (
-        input("Download quality (5:MP3, 6:FLAC, 7:24b<96, 27:24b>96) [Default 27]\n- ") or
+        input("\nQualidade do Download (5:MP3, 6:FLAC, 7:24b<96, 27:24b>96) [Padrão 27]\n- ") or
         "27"
     )
 
@@ -374,7 +373,7 @@ def _reset_config(config_file):
     config["qobuz"]["blacklist"] = "blacklist.txt"
     config["qobuz"]["lyrics_translation_lang"] = "pt"
 
-    logging.info(f"{YELLOW}Getting tokens. Please wait...{OFF}")
+    logging.info(f"{C_ACCENT}Obtendo tokens. Por favor, aguarde...{OFF}")
     bundle = Bundle()
     config["qobuz"]["app_id"] = str(bundle.get_app_id())
     config["qobuz"]["secrets"] = ",".join(bundle.get_secrets().values())
@@ -423,7 +422,7 @@ def _reset_config(config_file):
         config.write(configfile)
 
     logging.info(
-        f"\n{GREEN}[+] Configuration successfully saved in {config_file}!{OFF}"
+        f"\n{GREEN}[+] Configuração salva com sucesso em {config_file}!{OFF}"
     )
 
 
@@ -433,9 +432,13 @@ def _remove_leftovers(directory):
         search_dir = os.path.join(directory, "**", pattern)
         for i in glob.glob(search_dir, recursive=True):
             try:
-                os.remove(i)
-            except:  # noqa
-                pass
+                # send2trash em vez de os.remove: manda pra lixeira do SO
+                # em vez de apagar de vez. Rede de seguranca barata -- se
+                # um Ctrl+C for mal cronometrado e isto pegar um arquivo
+                # que nao era pra pegar, ainda da pra recuperar.
+                send2trash.send2trash(i)
+            except Exception as e:
+                logger.debug(f"Falha ao mover leftover '{i}' pra lixeira: {e}")
 
 
 async def _handle_commands(qobuz, arguments):
@@ -539,7 +542,7 @@ def _print_logo(cols):
         for row in line2:
             print(f"{CYAN}{pad2}{row}{OFF}")
     else:
-        fallback = "\u266a QOBUZ-DL-ULTRA \u266a"
+        fallback = f"{CYAN}{BG} QOBUZ-DL-ULTRA {OFF}"
         pad = " " * max((cols - len(fallback)) // 2, 0)
         print(f"{CYAN}{pad}{fallback}{OFF}")
 
@@ -597,6 +600,14 @@ def _print_welcome_screen():
             "--sync-db [PATH]",
             "escaneia uma pasta local pra recuperar IDs do Qobuz perdidos no banco",
         ),
+        (
+            "--find-duplicates [PATH]",
+            "acha faixas duplicadas por fingerprint de audio (Chromaprint), nao so' tag",
+        ),
+        (
+            "--watch [PATH]",
+            "observa uma pasta e roda retro-tagging sozinho quando chegam arquivos novos",
+        ),
         ("-sc, --show-config", "mostra a configuracao atual"),
     ]
 
@@ -614,24 +625,22 @@ def _print_welcome_screen():
     print(f"{OFF}{version_line.center(cols)}{OFF}")
     print()
     rule("=")
-    print(f"{YELLOW}Uso:{OFF} qobuz-dl <comando> [opcoes]")
+    print(f"{CYAN}{BG}Uso: qobuz-dl <comando> [opcoes]{RESET}")
     print(f"     qobuz-dl <comando> --help   (lista todas as opcoes daquele comando)")
     print()
 
-    print(f"{YELLOW}Comandos:{OFF}")
+    print(f"{CYAN}{BG}Comandos:{RESET}\n")
     for name, aliases, desc in COMMANDS:
         label = name if not aliases else f"{name} ({aliases})"
-        print(f"  {GREEN}{label}{OFF}")
+        print(f"  {CYAN}{label}{OFF}")
         wrapped(desc, indent=4)
     print()
 
-    print(f"{YELLOW}Flags globais:{OFF} (nao pertencem a nenhum comando especifico)")
+    print(f"{CYAN}{BG}Flags globais:{RESET} {OFF}(nao pertencem a nenhum comando especifico){OFF}\n")
     for flag, desc in FLAGS:
         print(f"  {CYAN}{flag}{OFF}")
         wrapped(desc, indent=4)
-    print()
-
-    rule()
+    rule("=")
 
 
 def _initial_checks():
@@ -983,6 +992,77 @@ async def async_main():
 
         await sync_database(sync_dir, QOBUZ_DB, sync_client)
         sys.exit(f"\n{GREEN}Database synchronization finished successfully.{OFF}")
+    # ----------------------------------------------
+
+    # --- DUPLICATE DETECTION FEATURE (Audio Fingerprint) ---
+    if getattr(arguments, "find_duplicates", None):
+        from qobuz_dl.sync import find_duplicate_tracks
+
+        dup_dir = (
+            default_folder if arguments.find_duplicates == "DEFAULT" else arguments.find_duplicates
+        )
+
+        if os.name == "nt":
+            dup_dir = os.path.abspath(dup_dir)
+            if not dup_dir.startswith("\\\\?\\"):
+                dup_dir = "\\\\?\\" + dup_dir
+
+        await find_duplicate_tracks(dup_dir)
+        sys.exit(0)
+    # ----------------------------------------------
+
+    # --- WATCH FOLDER FEATURE (retro-tagging automático) ---
+    if getattr(arguments, "watch", None):
+        from qobuz_dl.watcher import watch_directory
+        from qobuz_dl.qopy import Client
+
+        watch_dir = (
+            default_folder if arguments.watch == "DEFAULT" else arguments.watch
+        )
+        watch_dir = os.path.expanduser(watch_dir)
+
+        if os.name == "nt":
+            watch_dir = os.path.abspath(watch_dir)
+            if not watch_dir.startswith("\\\\?\\"):
+                watch_dir = "\\\\?\\" + watch_dir
+
+        lrc_pref = not config.getboolean(section, "no_lrc_files", fallback=False)
+        embed_pref = config.getboolean(section, "embed_lyrics", fallback=True)
+        trans_lang = config.get(section, "lyrics_translation_lang", fallback="pt")
+
+        watch_settings = QobuzDLSettings(lrc_files=lrc_pref, embed_lyrics=embed_pref)
+        watch_settings.lyrics_translation_lang = trans_lang
+        watch_settings.default_folder = watch_dir
+
+        # Client e' opcional aqui, igual no comando 'lyrics' -- sem ele, so
+        # o fallback Genius/letras ja embutidas funciona, mas o watch nao
+        # trava a inicializacao inteira por causa disso.
+        watch_client = None
+        try:
+            watch_client = await Client.create(
+                email,
+                password,
+                app_id,
+                secrets,
+                user_auth_token=token,
+                force_english=force_english,
+            )
+        except Exception as e:
+            logging.debug(f"Authentication warning for watch client: {e}")
+
+        try:
+            await watch_directory(
+                watch_dir,
+                client=watch_client,
+                genius_token=genius_token,
+                settings=watch_settings,
+            )
+        except KeyboardInterrupt:
+            print(f"\n\n{RED}[!] Observação interrompida pelo usuário (CTRL+C).{RESET}")
+        finally:
+            if watch_client:
+                await watch_client.close()
+        sys.exit(0)
     # ----------------------------------------------
 
     # --- RETRO LYRICS FEATURE (Standalone Mode) ---

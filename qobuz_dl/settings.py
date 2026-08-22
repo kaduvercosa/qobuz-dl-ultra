@@ -174,7 +174,7 @@ class QobuzDLSettings:
             "no_cover": arguments.no_cover or
             config.getboolean(section, "no_cover", fallback=False),
             "embedded_art_size": arguments.embedded_art_size or
-            config.get(section, "embedded_art_size", fallback="600"),
+            config.get(section, "embedded_art_size", fallback="org"),
             "saved_art_size": arguments.saved_art_size or
             config.get(section, "saved_art_size", fallback="org"),
             # multiple disc option

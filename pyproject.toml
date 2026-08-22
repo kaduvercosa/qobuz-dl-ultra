@@ -32,6 +32,22 @@ classifiers = [
 dependencies = [
     "pathvalidate",
     "httpx",
+    "brotli",  # httpx descomprime Brotli automaticamente se isto estiver
+               # instalado -- APIs modernas (Qobuz inclusa) costumam servir
+               # JSON em Brotli quando o cliente anuncia suporte. Sem
+               # codigo novo necessario, so precisa estar presente.
+    "aiosqlite",  # ver db.py: handle_download_id() e' chamado por
+                  # faixa/album baixado, sqlite3 sincrono travava o event
+                  # loop a cada escrita
+    "rapidfuzz",  # ver qopy.py/cli.py: substitui difflib.SequenceMatcher
+                  # (Python puro, lento) por uma implementacao C++/Cython
+    "send2trash",  # ver downloader.py: manda arquivos parciais pra
+                   # lixeira do SO em vez de apagar de vez
+    "humanize",  # formatacao de tamanho/tempo legivel na UI
+    "pyacoustid",  # ver sync.py: --find-duplicates, fingerprinting de
+                   # audio via Chromaprint. REQUER o binario 'fpcalc' do
+                   # Chromaprint instalado no sistema (fora do pip).
+    "watchdog",  # ver watcher.py: --watch, retro-tagging automatico
     "aiofiles",
     "tenacity",
     "platformdirs",
@@ -44,6 +60,7 @@ dependencies = [
     "keyring",
     "questionary",
     "prompt_toolkit",
+    "Pillow>10.0.0"
 ]
 
 [project.urls]

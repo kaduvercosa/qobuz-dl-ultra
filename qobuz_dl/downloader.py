@@ -29,6 +29,7 @@ from qobuz_dl.color import OFF, GREEN, RED, WARNING as YELLOW, INFO as CYAN, RES
 from qobuz_dl.exceptions import NonStreamable
 
 import aiofiles
+import humanize
 from tenacity import AsyncRetrying, stop_after_attempt, wait_exponential, retry_if_not_exception_type
 
 # Ordem de qualidades para fallback apenas em falhas de conexão
@@ -754,7 +755,7 @@ class Download:
             db_artist = album_attr.get("album_artist", "Unknown")
             db_album = album_attr.get("album_title", "Unknown")
 
-        handle_download_id(
+        await handle_download_id(
             db_path=self.download_db,
             item_id=self.item_id,
             add_id=True,
@@ -929,7 +930,7 @@ class Download:
             db_artist = track_attr.get("artist", "Unknown")
             db_album = track_attr.get("album", "Unknown")
 
-            handle_download_id(
+            await handle_download_id(
                 db_path=self.download_db,
                 item_id=self.item_id,
                 add_id=True,
@@ -1247,11 +1248,11 @@ class Download:
                 )
                 if original_lang:
                     if original_lang.lower() == translation_lang.lower():
-                        translation_note = f"    ℹ️  Lyrics already in {
-                            translation_lang.upper()} -- no translation needed."
+                        translation_note = f"    ℹ️  Letras já em {
+                            translation_lang.upper()} -- sem necessidade de tradução."
                     else:
-                        translation_note = f"    ℹ️  No {
-                            translation_lang.upper()} translation available on Qobuz yet for this track."
+                        translation_note = f"    ℹ️  Nenhuma tradução em {
+                            translation_lang.upper()} disponível no Qobuz, para esta faixa."
 
             def _inject_lyrics_and_print():
                 with print_lock:
@@ -1899,9 +1900,8 @@ async def tqdm_download(
                             )
 
                         if is_parallel and downloaded_size == 0 and attempt.retry_state.attempt_number == 1:
-                            size_mb = total_size / (1024 * 1024)
                             safe_print(
-                                f"{C}[+] Em Progresso: {track_name} [{size_mb:.1f} MB]{O}"
+                                f"{C}[+] Em Progresso: {track_name} [{humanize.naturalsize(total_size, binary=True)}]{O}"
                             )
 
                         async with aiofiles.open(fname, mode) as file:
@@ -2171,8 +2171,8 @@ async def tqdm_download_segments(
     position = position_pool.acquire() if (is_parallel and position_pool) else 0
 
     if is_parallel:
-        size_mb = total_size / (1024 * 1024) if total_size else 0
-        safe_print(f"{C}[+] Em progresso: {track_name} [{size_mb:.1f} MB]{O}")
+        safe_print(
+            f"{C}[+] Em progresso: {track_name} [{humanize.naturalsize(total_size, binary=True)}]{O}")
         desc_len = position_pool.desc_len if position_pool else 14
         short_name = (
             track_name

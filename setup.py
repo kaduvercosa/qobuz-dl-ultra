@@ -46,6 +46,13 @@ setup(
     install_requires=[
         "pathvalidate",
         "httpx",
+        "brotli",
+        "aiosqlite",
+        "rapidfuzz",
+        "send2trash",
+        "humanize",
+        "pyacoustid",
+        "watchdog",
         "aiofiles",
         "tenacity",
         "platformdirs",
@@ -54,17 +61,13 @@ setup(
         "tqdm",
         "beautifulsoup4",
         "colorama",
+        # ver qopy.py: pycryptodome quebra no a-Shell (framework nativo ausente)
         "cryptography",
         "keyring",
         "questionary",
         "prompt_toolkit",
-        # lyricsgenius NAO esta aqui: e' opcional (requer token do Genius
-        # configurado manualmente). Instale com:
-        #   pip install "qobuz-dl-ultra[genius]"
+        "Pillow>=10.0.0",  # usado so' pra recompactar a capa embutida quando excede o limite de 16MB do FLAC
     ],
-    extras_require={
-        "genius": ["lyricsgenius"],
-    },
     entry_points={
         "console_scripts": [
             # Keeping the original command names for backward compatibility

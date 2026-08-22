@@ -1,19 +1,12 @@
 import os
 import re
 import time
-import asyncio
 import logging
 from mutagen.flac import FLAC
 import mutagen.id3 as id3
 
 from qobuz_dl.settings import QobuzDLSettings
 from qobuz_dl.lyrics_engine import LyricsEngine
-# CYAN/YELLOW importados como INFO/WARNING renomeados: mesma cor de
-# YELLOW (mantida por convencao), mas CYAN agora e' LIGHTBLUE_EX --
-# visivel em terminal claro E escuro (CYAN puro quase some em fundo
-# branco). Ver comentario completo em qobuz_dl/color.py. Zero mudanca
-# de codigo neste arquivo: toda f-string que ja usa {CYAN}/{YELLOW}
-# continua funcionando, so' a cor de fato renderizada muda.
 import shutil as _shutil
 from qobuz_dl.color import INFO as CYAN, GREEN, WARNING as YELLOW, RED, OFF, RESET, BG
 
@@ -168,12 +161,11 @@ async def fetch_qobuz_lyrics_raw(client, track_id, language=None):
             "track/lyricsUrl", params, client.sec
         )
 
-        async with client.session.request(
-            "get", client.base + "track/lyricsUrl", params=params
-        ) as r:
-            if r.status != 200:
-                return None
-            meta = await r.json()
+        r = await client.session.request(
+            "get", client.base + "track/lyricsUrl", params=params)
+        if r.status != 200:
+            return None
+        meta = r.json()
 
         lyrics_url = meta.get("url") or meta.get("lyrics_url")
         if not lyrics_url:
@@ -185,18 +177,13 @@ async def fetch_qobuz_lyrics_raw(client, track_id, language=None):
         if not lyrics_url:
             return None
 
-        loop = asyncio.get_event_loop()
+        resp = await client.session.get(lyrics_url, timeout=12.0)
 
-        def _download_signed_json():
-            import requests
+        if resp.status_code == 200:
+            return resp.json()
 
-            session = requests.Session()
-            resp = session.get(lyrics_url, timeout=12)
-            if resp.status_code == 200:
-                return resp.json()
-            return None
+        return None
 
-        return await loop.run_in_executor(None, _download_signed_json)
     except Exception as e:
         logger.debug(f"Falha ao baixar/assinar JSON de letra: {e}")
         return None
@@ -217,8 +204,8 @@ async def process_retroactive_lyrics_async(
     embed_lyrics = getattr(settings, "embed_lyrics", True)
 
     print(f"\n{CYAN}[*] Iniciando verificação e atualização de letras no Qobuz...{OFF}")
-    print(f"{CYAN}  • Pasta raiz :{OFF} {directory_path}")
-    print(f"{CYAN}  • Idioma alvo:{OFF} {target_lang.upper()}\n")
+    print(f"{CYAN}  • Pasta raiz :{RESET} {directory_path}")
+    print(f"{CYAN}  • Idioma alvo:{RESET} {target_lang.upper()}\n")
 
     engine = LyricsEngine(genius_token=genius_token)
 
@@ -322,7 +309,7 @@ async def process_retroactive_lyrics_async(
 
         display_name = f"{artist} - {title}" if artist else title
         id_display = f"[Track ID: {track_id}]" if track_id else "[Sem Track ID]"
-        print(f"{CYAN}› Analisando:{OFF} {display_name} {id_display}")
+        print(f"{CYAN}› Analisando:{RESET} {display_name} {id_display}")
 
         # 4. Consulta o Qobuz para original e tradução
         qobuz_orig_json = None
@@ -612,7 +599,7 @@ async def process_retroactive_lyrics_async(
             color = YELLOW
             prefix = "[!]"
         print(f" {color}{prefix} {name}{OFF}")
-        print(f"     Status: {color}{status}{OFF} ➔ {desc}\n")
+        print(f"     Status: {color}{status}{RESET} ➔ {desc}\n")
 
     total_updates = (
         stats["updated_new_original"] +

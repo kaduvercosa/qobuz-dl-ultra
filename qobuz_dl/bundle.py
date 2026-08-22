@@ -3,7 +3,7 @@ import logging
 import re
 from collections import OrderedDict
 
-from requests import Session
+import httpx
 
 # Modified code based on DashLt's spoofbuz
 
@@ -29,23 +29,33 @@ _BUNDLE_URL_REGEX = re.compile(
 
 class Bundle:
     def __init__(self):
-        self._session = Session()
+        with httpx.Client() as client:
+            logger.debug("Getting logging page")
+            response = client.get(f"{_BASE_URL}/login")
+            response.raise_for_status()
 
-        logger.debug("Getting logging page")
-        response = self._session.get(f"{_BASE_URL}/login")
-        response.raise_for_status()
+            bundle_url_match = _BUNDLE_URL_REGEX.search(response.text)
+            if not bundle_url_match:
+                raise NotImplementedError("Bundle URL found")
 
-        bundle_url_match = _BUNDLE_URL_REGEX.search(response.text)
-        if not bundle_url_match:
-            raise NotImplementedError("Bundle URL found")
+            bundle_url = bundle_url_match.group(1)
 
-        bundle_url = bundle_url_match.group(1)
+            logger.debug("Getting bundle")
+            response = client.get(_BASE_URL + bundle_url)
+            response.raise_for_status()
 
-        logger.debug("Getting bundle")
-        response = self._session.get(_BASE_URL + bundle_url)
-        response.raise_for_status()
+            self._bundle = response.text
 
-        self._bundle = response.text
+    @classmethod
+    async def create(cls):
+        instance = cls.__new__(cls)
+        async with httpx.AsyncClient() as client:
+            logger.debug("Getting logging page")
+            response = await client.get(f"{_BASE_URL}/login", timeout=15.0)
+            response.raise_for_status()
+
+            instance._bundle = response.text
+        return instance
 
     def get_app_id(self):
         match = _APP_ID_REGEX.search(self._bundle)

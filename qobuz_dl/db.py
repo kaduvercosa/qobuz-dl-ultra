@@ -1,5 +1,6 @@
 import logging
 import sqlite3
+import aiosqlite
 
 # CYAN/YELLOW importados como INFO/WARNING renomeados: mesma cor de
 # YELLOW (mantida por convencao), mas CYAN agora e' LIGHTBLUE_EX --
@@ -121,7 +122,7 @@ def create_db(db_path):
         return db_path
 
 
-def handle_download_id(
+async def handle_download_id(
     db_path,
     item_id,
     add_id=False,
@@ -140,6 +141,15 @@ def handle_download_id(
 ):
     """
     Checks for existing downloads or inserts new completed downloads into the database.
+
+    Convertido para async usando aiosqlite (antes: sqlite3.connect sincrono).
+    Essa e' a funcao chamada uma vez POR FAIXA/ALBUM baixado -- com sqlite3
+    sincrono, cada escrita travava o event loop por uma fracao de segundo;
+    isoladamente pouco, mas em discografias grandes rodando varios downloads
+    em paralelo (asyncio.gather em core.py/downloader.py) isso se acumulava.
+    aiosqlite usa um thread dedicado por baixo dos panos e devolve o
+    controle pro event loop enquanto a escrita acontece, em vez de bloquear
+    tudo.
 
     Args:
         db_path (str): The file path to the SQLite database.
@@ -164,11 +174,11 @@ def handle_download_id(
     if not db_path:
         return
 
-    with sqlite3.connect(db_path) as conn:
+    async with aiosqlite.connect(db_path) as conn:
         if add_id:
             try:
                 # Inject artist and album dynamically into the database
-                conn.execute(
+                await conn.execute(
                     """
                     INSERT INTO downloads (id, media_type, quality, file_format, quality_met, bit_depth,
                     sampling_rate, saved_path, url, release_date, status, artist, album) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
@@ -188,17 +198,18 @@ def handle_download_id(
                         album,
                     ),
                 )
-                conn.commit()
+                await conn.commit()
             except sqlite3.IntegrityError:
                 # Provide clean visual feedback instead of an error
                 logger.info(f"{YELLOW}[i] Already in database, skipping.{OFF}")
             except sqlite3.Error as e:
                 logger.error(f"{RED}Unexpected DB error: {e}{OFF}")
         else:
-            return conn.execute(
+            cursor = await conn.execute(
                 "SELECT id FROM downloads WHERE id=? AND quality=?",
                 (item_id, quality),
-            ).fetchone()
+            )
+            return await cursor.fetchone()
 
 
 def get_stats(db_path):

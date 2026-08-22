@@ -515,7 +515,7 @@ class QobuzDL:
         position_pool=None,
         suppress_header=False,
     ):
-        if handle_download_id(
+        if await handle_download_id(
             self.downloads_db, item_id, add_id=False, quality=self.quality
         ):
             logger.info(

@@ -6,14 +6,6 @@ import time
 import unicodedata
 
 import httpx
-# cryptography, nao pycryptodome: pycryptodome precisa de um framework
-# nativo compilado (_cpuid_c) pra deteccao de CPU que o a-Shell nao
-# empacota -- OSError garantido ao importar Crypto.Cipher la', nao um
-# problema de instalacao. A troca anterior partiu da premissa de que o
-# a-Shell emula Alpine via Rust (isso e' o iSH, um app diferente) e
-# precisaria compilar "cryptography" do zero; na pratica "cryptography"
-# ja' tinha rodado nesse mesmo a-Shell sem problema nenhum antes dessa
-# troca, entao voltando pra ela.
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.primitives import hashes, padding
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
@@ -23,12 +15,7 @@ from qobuz_dl.exceptions import (
     InvalidAppSecretError,
     InvalidQuality,
 )
-# CYAN/YELLOW importados como INFO/WARNING renomeados: mesma cor de
-# YELLOW (mantida por convencao), mas CYAN agora e' LIGHTBLUE_EX --
-# visivel em terminal claro E escuro (CYAN puro quase some em fundo
-# branco). Ver comentario completo em qobuz_dl/color.py. Zero mudanca
-# de codigo neste arquivo: toda f-string que ja usa {CYAN}/{YELLOW}
-# continua funcionando, so' a cor de fato renderizada muda.
+
 from qobuz_dl.color import GREEN, WARNING as YELLOW, RED, OFF, RESET, INFO as CYAN
 
 try:
@@ -41,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 class Client:
     """
-    The core Qobuz API client for Qobuz-DL Ultimate Edition.
+    The core Qobuz API client for Qobuz-DL Ultra Edition.
 
     Handles secure authentication, Anti-Ban Stealth Spoofing (WAF bypass), cryptographic
     token unwrapping for Web Player segment streams, and dynamic metadata fetching.
@@ -553,7 +540,11 @@ class Client:
         Returns:
             list: A list of successfully matched Qobuz track IDs.
         """
-        import difflib
+        # rapidfuzz no lugar de difflib.SequenceMatcher: mesma ideia (ratio
+        # de similaridade 0-1), mas em C++/Cython -- 10-100x mais rapido pra
+        # esse tipo de comparacao. Perceptivel em sync de playlists grandes
+        # do Last.fm, onde isso roda por faixa x candidato retornado.
+        from rapidfuzz import fuzz
 
         print(
             f"{CYAN}[*] Matching Last.fm tracks with Qobuz database (Fuzzy matching & Interactive mode enabled)...{OFF}"
@@ -592,7 +583,13 @@ class Client:
                         target_str = f"{target_artist} {target_title}"
                         q_str = f"{q_artist} {q_title}"
 
-                        ratio = difflib.SequenceMatcher(None, target_str, q_str).ratio()
+                        # fuzz.ratio() do rapidfuzz retorna 0-100 (nao 0-1
+                        # como o SequenceMatcher.ratio() do difflib) --
+                        # dividido por 100 pra manter os thresholds acima
+                        # (AUTO_ACCEPT_THRESHOLD/PROMPT_THRESHOLD, escala
+                        # 0-1) e o "highest_ratio * 100" mais abaixo
+                        # funcionando sem precisar tocar em mais nada.
+                        ratio = fuzz.ratio(target_str, q_str) / 100.0
 
                         if ratio > highest_ratio:
                             highest_ratio = ratio

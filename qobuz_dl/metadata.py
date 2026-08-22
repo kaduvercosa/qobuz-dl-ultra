@@ -1,7 +1,9 @@
 import re
 import os
+import io
 import logging
 import unicodedata
+import humanize
 
 from mutagen.flac import FLAC, Picture
 import mutagen.id3 as id3
@@ -167,6 +169,64 @@ def _normalize_name(name) -> str:
     )
 
 
+def _shrink_image_to_fit(image_path, max_bytes):
+    """
+    Recompacta/redimensiona uma imagem ate' caber em max_bytes, priorizando
+    a qualidade -- so' reduz o minimo necessario pra caber no limite.
+
+    Estrategia em 2 fases, sempre tentando a opcao menos destrutiva primeiro:
+      1. Mantem a resolucao original, so' reduz a qualidade de compressao
+         JPEG em passos (95 -> 50). Isso sozinho ja resolve a grande maioria
+         dos casos sem perda perceptivel nenhuma, porque a capa "org" da
+         Qobuz normalmente nao vem no JPEG mais compacto possivel.
+      2. So' se a fase 1 nao for suficiente (imagem com resolucao MUITO
+         alta), reduz as dimensoes gradualmente (90% -> 20%, em passos de
+         10%) mantendo qualidade 85, ate' caber.
+
+    Retorna os bytes da imagem re-encodada (JPEG), ou None se o Pillow nao
+    estiver disponivel ou a imagem nao puder ser processada -- nesses casos
+    o chamador decide o que fazer (ex: pular o embed, como ja fazia antes).
+    """
+    try:
+        from PIL import Image
+    except ImportError:
+        logger.warning(
+            "Pillow nao esta instalado -- nao e' possivel recompactar a capa "
+            "que excede o limite de 16MB do FLAC. Instale com: pip install Pillow"
+        )
+        return None
+
+    try:
+        with Image.open(image_path) as src:
+            if src.mode not in ("RGB", "L"):
+                src = src.convert("RGB")
+
+            # Fase 1: mesma resolucao, so' reduz qualidade de compressao.
+            for quality in (95, 90, 85, 80, 75, 70, 60, 50):
+                buf = io.BytesIO()
+                src.save(buf, format="JPEG", quality=quality, optimize=True)
+                if buf.tell() <= max_bytes:
+                    return buf.getvalue()
+
+            # Fase 2: nao coube so' reduzindo qualidade (imagem com
+            # resolucao muito alta) -- reduz as dimensoes tambem.
+            width, height = src.size
+            scale = 0.9
+            while scale > 0.19:
+                new_size = (max(1, int(width * scale)), max(1, int(height * scale)))
+                resized = src.resize(new_size, Image.LANCZOS)
+                buf = io.BytesIO()
+                resized.save(buf, format="JPEG", quality=85, optimize=True)
+                if buf.tell() <= max_bytes:
+                    return buf.getvalue()
+                scale -= 0.1
+
+            return None
+    except Exception as e:
+        logger.error(f"Falha ao recompactar a capa: {e}", exc_info=True)
+        return None
+
+
 def _embed_flac_img(root_dir, audio: FLAC, cover_override=None):
     cover_image = _get_cover_path(root_dir, override=cover_override)
 
@@ -175,18 +235,35 @@ def _embed_flac_img(root_dir, audio: FLAC, cover_override=None):
         return
 
     try:
-        if os.path.getsize(cover_image) > FLAC_MAX_BLOCKSIZE:
-            raise Exception(
-                "downloaded cover size too large to embed. "
-                "turn off `og_cover` to avoid error"
+        original_size = os.path.getsize(cover_image)
+        image_data = None
+
+        if original_size > FLAC_MAX_BLOCKSIZE:
+            # A capa "org" excedeu o limite fisico de 24 bits do bloco de
+            # metadados do FLAC (16.777.215 bytes) -- NAO mexe no arquivo
+            # salvo em disco (continua em qualidade original), so'
+            # recompacta em memoria a copia que vai ser embutida.
+            logger.info(
+                f"Capa ({humanize.naturalsize(original_size, binary=True)}) excede o limite de "
+                f"16MB de embed do FLAC -- recompactando so' o suficiente pra caber "
+                f"(o arquivo salvo em disco continua em qualidade original)."
             )
+            image_data = _shrink_image_to_fit(cover_image, FLAC_MAX_BLOCKSIZE)
+            if image_data is None:
+                raise Exception(
+                    "capa muito grande pra embutir e a recompactacao automatica "
+                    "falhou (Pillow ausente ou imagem ilegivel) -- pulando embed "
+                    "dessa faixa, mas o download continua normalmente."
+                )
+        else:
+            with open(cover_image, "rb") as img:
+                image_data = img.read()
 
         image = Picture()
         image.type = 3
         image.mime = "image/jpeg"
         image.desc = "cover"
-        with open(cover_image, "rb") as img:
-            image.data = img.read()
+        image.data = image_data
         audio.add_picture(image)
     except Exception as e:
         logger.error(f"Error embedding image: {e}", exc_info=True)
@@ -271,11 +348,10 @@ def tag_flac(
         cover_path = _get_cover_path(root_dir, override=embed_cover_path)
         if cover_path:
             img_size_bytes = os.path.getsize(cover_path)
-            img_size_mb = img_size_bytes / (1024 * 1024)
             req_size = getattr(settings, "embedded_art_size", "unknown")
             is_org = "YES" if req_size == "org" else "NO"
             base_comment += (
-                f" | Cover: {img_size_mb:.2f} MB (Req: {req_size}, Org: {is_org})"
+                f" | Cover: {humanize.naturalsize(img_size_bytes, binary=True)} (Req: {req_size}, Org: {is_org})"
             )
 
     tags["COMMENT"] = base_comment
@@ -367,11 +443,10 @@ def tag_mp3(
         cover_path = _get_cover_path(root_dir, override=embed_cover_path)
         if cover_path:
             img_size_bytes = os.path.getsize(cover_path)
-            img_size_mb = img_size_bytes / (1024 * 1024)
             req_size = getattr(settings, "embedded_art_size", "unknown")
             is_org = "YES" if req_size == "org" else "NO"
             base_comment += (
-                f" | Cover: {img_size_mb:.2f} MB (Req: {req_size}, Org: {is_org})"
+                f" | Cover: {humanize.naturalsize(img_size_bytes, binary=True)} (Req: {req_size}, Org: {is_org})"
             )
 
     tags["COMMENT"] = base_comment

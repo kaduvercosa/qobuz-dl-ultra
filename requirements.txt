@@ -1,5 +1,12 @@
 pathvalidate
 httpx
+brotli
+aiosqlite
+rapidfuzz
+send2trash
+humanize
+pyacoustid
+watchdog
 aiofiles
 charset_normalizer
 tenacity
@@ -12,5 +19,4 @@ keyring
 questionary
 prompt_toolkit
 platformdirs
-# lyricsgenius e' opcional -- instale com: pip install "qobuz-dl-ultra[genius]"
-# lyricsgenius
+Pillow>=10.0.0
