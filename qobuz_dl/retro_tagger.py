@@ -598,7 +598,7 @@ async def process_retroactive_lyrics_async(
     _w = min(_shutil.get_terminal_size((80, 24)).columns, 100)
     _bar = '━' * _w
     print(f"\n{CYAN}{_bar}{RESET}")
-    print(f"{BG}{GREEN}{'RELATÓRIO DE ATUALIZAÇÃO DE LETRAS (QOBUZ)':^{_w}}{RESET}")
+    print(f"{BG}{CYAN}{'RELATÓRIO DE ATUALIZAÇÃO DE LETRAS (QOBUZ)':^{_w}}{RESET}")
     print(f"{CYAN}{_bar}{RESET}\n")
 
     for name, status, desc in report_items:

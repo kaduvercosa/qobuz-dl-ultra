@@ -1,15 +1,16 @@
 pathvalidate
 httpx
-requests
+aiofiles
 charset_normalizer
+tenacity
 mutagen
 tqdm
 beautifulsoup4
 colorama
 cryptography
 keyring
-aiohttp
 questionary
 prompt_toolkit
+platformdirs
 # lyricsgenius e' opcional -- instale com: pip install "qobuz-dl-ultra[genius]"
 # lyricsgenius

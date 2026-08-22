@@ -46,7 +46,9 @@ setup(
     install_requires=[
         "pathvalidate",
         "httpx",
-        "requests",
+        "aiofiles",
+        "tenacity",
+        "platformdirs",
         "charset_normalizer",
         "mutagen",
         "tqdm",
@@ -54,7 +56,6 @@ setup(
         "colorama",
         "cryptography",
         "keyring",
-        "aiohttp",
         "questionary",
         "prompt_toolkit",
         # lyricsgenius NAO esta aqui: e' opcional (requer token do Genius

@@ -12,7 +12,7 @@ from pathvalidate import sanitize_filename
 try:
     from prompt_toolkit.application import Application
     from prompt_toolkit.key_binding import KeyBindings
-    from prompt_toolkit.layout.containers import Window, ScrollOffsets
+    from prompt_toolkit.layout.containers import Window, ScrollOffsets, HSplit
     from prompt_toolkit.layout.controls import FormattedTextControl
     from prompt_toolkit.layout.layout import Layout
     from prompt_toolkit.styles import Style
@@ -78,10 +78,11 @@ def _align_text(text, width):
 
 
 # --- PROMPT_TOOLKIT CUSTOM APPLICATION COM ROLAGEM ESTÁVEL ---
+# --- PROMPT_TOOLKIT CUSTOM APPLICATION COM ROLAGEM ESTÁVEL ---
 async def _tui_select(title, options_dicts, is_multi=False, item_category="album"):
     """
     Motor interativo customizado usando Prompt_Toolkit.
-    Garante rolagem suave sem perder o foco ou o destaque no final da lista.
+    Com cabeçalho fixo (Sticky Header) e design responsivo (App-like).
     """
     bindings = KeyBindings()
     selected_indices = set()
@@ -98,7 +99,6 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
         cursor_pos = min(len(options_dicts) - 1, cursor_pos + 1)
 
     if is_multi:
-
         @bindings.add("space")
         def _(event):
             if cursor_pos in selected_indices:
@@ -128,97 +128,99 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
     def _(event):
         event.app.exit(exception=KeyboardInterrupt)
 
-    def get_text():
+    # ==========================================
+    # BLOCO 1: CABEÇALHO FIXO
+    # ==========================================
+    def get_header_text():
         try:
-            app_instance = get_app()
-            columns = app_instance.output.get_size().columns
+            columns = get_app().output.get_size().columns
         except Exception:
             columns, _ = shutil.get_terminal_size((80, 24))
 
-        is_mobile = columns < 70
         is_table = columns >= 70
-
         prefix_len = 7 if is_multi else 3
         hdr_pref = " " * prefix_len
-
-        # CÁLCULOS DINÂMICOS DE ÁREA SEGURA (SAFE AREA)
         safe_columns = columns - 2
 
-        # 1. Matemática da Tabela de FAIXAS (Track)
-        fixed_trk = prefix_len + 29
-        flex_trk = max(15, safe_columns - fixed_trk)
-        trk_art_w = max(10, int(flex_trk * 0.25))
-        trk_alb_w = max(10, int(flex_trk * 0.30))
-        trk_tit_w = flex_trk - trk_art_w - trk_alb_w
-        dash_trk = flex_trk + 29
-
-        # 2. Matemática da Tabela de ÁLBUNS
-        fixed_alb = prefix_len + 51
-        flex_alb = max(10, safe_columns - fixed_alb)
-        alb_art_w = max(10, int(flex_alb * 0.35))
-        alb_tit_w = flex_alb - alb_art_w
-        dash_alb = flex_alb + 51
-
-        # 3. Matemática da Tabela Simples (Playlists)
-        fixed_pl = prefix_len + 20
-        flex_pl = max(10, safe_columns - fixed_pl)
-        pl_own_w = max(10, int(flex_pl * 0.30))
-        pl_nom_w = flex_pl - pl_own_w
-        dash_pl = flex_pl + 20
-
-        res = []
-        res.append(("class:title", f"=== {title} ===\n\n"))
+        # Adicionamos um \n inicial para dar uma margem no topo da tela
+        if item_category == "filter":
+            # Removemos a linha vazia sobrando nos menus simples
+            res = [("class:title", f"\n === {title} ===\n")]
+        else:
+            # Mantemos o espaço nas tabelas para não esmagar os títulos das colunas
+            res = [("class:title", f"\n === {title} ===\n\n")]
 
         if item_category == "album" and is_table:
+            fixed_alb = prefix_len + 43
+            flex_alb = max(10, safe_columns - fixed_alb)
+            alb_art_w = max(10, int(flex_alb * 0.35))
+            alb_tit_w = flex_alb - alb_art_w
+            dash_alb = flex_alb + 43
             res.append(
-                (
-                    "class:meta",
-                    f"{hdr_pref}{
-                        'ARTISTA'.ljust(alb_art_w)} | {
-                        'ÁLBUM'.ljust(alb_tit_w)} | {
-                        'TIPO'.ljust(6)} | {
-                        'ANO'.ljust(4)} | {
-                        'FAIXAS'.ljust(6)} | {
-                        'DURAÇÃO'.ljust(5)} | {
-                            'QUALIDADE'.ljust(12)}\n",
-                )
-            )
-            res.append(("class:meta", f"{hdr_pref}{'-' * dash_alb}\n"))
+                ("class:meta",
+                 f"{hdr_pref}{
+                     'ARTISTA'.ljust(alb_art_w)} | {
+                     'ÁLBUM'.ljust(alb_tit_w)} | {
+                     'TIPO'.ljust(6)} | {
+                     'ANO'.ljust(4)} | {
+                     'FAIXAS'.ljust(6)} | {
+                     'QUALIDADE'.ljust(12)}\n"))
+            res.append(("class:meta", f"{hdr_pref}{'-' * dash_alb}"))
 
         elif item_category == "track" and is_table:
+            fixed_trk = prefix_len + 21
+            flex_trk = max(15, safe_columns - fixed_trk)
+            trk_art_w = max(10, int(flex_trk * 0.25))
+            trk_alb_w = max(10, int(flex_trk * 0.30))
+            trk_tit_w = flex_trk - trk_art_w - trk_alb_w
+            dash_trk = flex_trk + 21
             res.append(
-                (
-                    "class:meta",
-                    f"{hdr_pref}{
-                        'ARTISTA'.ljust(trk_art_w)} | {
-                        'FAIXA'.ljust(trk_tit_w)} | {
-                        'ÁLBUM'.ljust(trk_alb_w)} | {
-                        'DURAÇÃO'.ljust(5)}  | {
-                        'QUALIDADE'.ljust(12)}\n",
-                )
-            )
-            res.append(("class:meta", f"{hdr_pref}{'-' * dash_trk}\n"))
+                ("class:meta",
+                 f"{hdr_pref}{
+                     'ARTISTA'.ljust(trk_art_w)} | {
+                     'FAIXA'.ljust(trk_tit_w)} | {
+                     'ÁLBUM'.ljust(trk_alb_w)} | {
+                     'QUALIDADE'.ljust(12)}\n"))
+            res.append(("class:meta", f"{hdr_pref}{'-' * dash_trk}"))
 
         elif item_category == "playlist" and is_table:
+            fixed_pl = prefix_len + 24
+            flex_pl = max(10, safe_columns - fixed_pl)
+            pl_own_w = max(10, int(flex_pl * 0.30))
+            pl_nom_w = flex_pl - pl_own_w
+            dash_pl = flex_pl + 24
             res.append(
-                (
-                    "class:meta",
-                    f"{hdr_pref}{
-                        'NOME DA PLAYLIST'.ljust(pl_nom_w)} | {
-                        'CRIADOR'.ljust(pl_own_w)} | {
-                        'FAIXAS'.ljust(6)}  | {
-                        'DURAÇÃO'.ljust(5)}\n",
-                )
-            )
-            res.append(("class:meta", f"{hdr_pref}{'-' * dash_pl}\n"))
+                ("class:meta",
+                 f"{hdr_pref}{
+                     'NOME DA PLAYLIST'.ljust(pl_nom_w)} | {
+                     'CRIADOR'.ljust(pl_own_w)} | {
+                     'FAIXAS'.ljust(6)} | {
+                     'DURAÇÃO'.ljust(9)}\n"))
+            res.append(("class:meta", f"{hdr_pref}{'-' * dash_pl}"))
 
         elif item_category == "artist" and is_table:
             res.append(
-                ("class:meta",
-                 f"{hdr_pref}{'NOME DO ARTISTA'.ljust(50)} | LANÇAMENTOS\n")
-            )
-            res.append(("class:meta", f"{hdr_pref}{'-' * 65}\n"))
+                ("class:meta", f"{hdr_pref}{
+                    'NOME DO ARTISTA'.ljust(50)} | LANÇAMENTOS\n"))
+            res.append(("class:meta", f"{hdr_pref}{'-' * 65}"))
 
+        return res
+
+    # ==========================================
+    # BLOCO 2: LISTA ROLÁVEL DE CONTEÚDO
+    # ==========================================
+    def get_list_text():
+        try:
+            columns = get_app().output.get_size().columns
+        except Exception:
+            columns, _ = shutil.get_terminal_size((80, 24))
+
+        is_table = columns >= 70
+        safe_columns = columns - 2
+        prefix_len = 7 if is_multi else 3
+        hdr_pref = " " * prefix_len
+
+        res = []
         for i, opt in enumerate(options_dicts):
             hovered = i == cursor_pos
             checked = i in selected_indices
@@ -234,7 +236,9 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
             if not is_multi:
                 chk = ""
 
-            prefix = f" {ptr} {chk} " if is_multi else f" {ptr} "
+            # Adiciona um recuo charmoso apenas nos menus curtos (filtros)
+            indent = "   " if item_category == "filter" else ""
+            prefix = f"{indent} {ptr} {chk} " if is_multi else f"{indent} {ptr} "
             res.append((style, prefix))
 
             if isinstance(opt, str):
@@ -245,99 +249,89 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
 
             if item_category == "album":
                 if is_table:
+                    fixed_alb = prefix_len + 43
+                    flex_alb = max(10, safe_columns - fixed_alb)
+                    alb_art_w = max(10, int(flex_alb * 0.35))
+                    alb_tit_w = flex_alb - alb_art_w
+
                     art = _align_text(meta.get("artist", ""), alb_art_w)
                     tit = _align_text(meta.get("title", ""), alb_tit_w)
                     typ = _align_text(meta.get("type", ""), 6)
                     yr = _align_text(meta.get("year", ""), 4)
                     fx = str(meta.get("tracks_count", "")).ljust(6)
-                    dur = str(meta.get("duration", "")).ljust(5)
                     ql = meta.get("quality", "").ljust(12)
 
-                    # Se a qualidade não for 24-bit, aplica a MESMA cor de destaque
-                    # dinâmica do tema!
                     ql_color = "fg:#c59b27 bold" if "24b" in ql else f"fg:{_hex_accent}"
                     ql_final_style = style if hovered else ql_color
 
-                    res.append(
-                        (style, f"{art} | {tit} | {typ} | {yr} | {fx} | {dur} | "))
+                    res.append((style, f"{art} | {tit} | {typ} | {yr} | {fx} | "))
                     res.append((ql_final_style, f"{ql}\n"))
                 else:
-                    res.append((title_style, f"{meta.get('title', '')}\n"))
-                    res.append((style, f"       👤 Artista: {meta.get('artist', '')}\n"))
-                    res.append(
-                        (style, f"       💿 {
-                            meta.get(
-                                'type', '')}  |  📅 {
-                            meta.get(
-                                'year', '')}\n"))
-                    res.append((style, f"       🎧 {meta.get('quality', '')}\n"))
-                    res.append(
-                        (style,
-                         f"       🎶 {
-                             meta.get(
-                                 'tracks_count',
-                                 0)} faixas  |  ⏱️ {
-                             meta.get(
-                                 'duration',
-                                 '--:--')}\n"))
-                    gnr = meta.get("genre", "")
-                    lbl = meta.get("label", "")
-                    if gnr or lbl:
-                        if gnr:
-                            res.append((style, f"       🎵 {gnr}\n"))
-                        if lbl:
-                            res.append((style, f"       🏷️ {lbl}\n"))
-                    res.append((style, f"       {'-' * 30}\n"))
+                    title_str = meta.get('title', '')
+                    ql = meta.get("quality", "")
+                    ql_color = "fg:#c59b27 bold" if "24b" in ql else f"fg:{_hex_accent}"
+                    ql_final_style = style if hovered else ql_color
+
+                    res.append((title_style, f"💿 {title_str} "))
+                    res.append((ql_final_style, f"[{ql}]\n"))
+
+                    art = meta.get('artist', '')
+                    typ = meta.get('type', '')
+                    yr = meta.get('year', '')
+                    res.append((style, f"{hdr_pref}👤 {art} | {typ} | {yr}\n"))
 
             elif item_category == "track":
                 if is_table:
+                    fixed_trk = prefix_len + 21
+                    flex_trk = max(15, safe_columns - fixed_trk)
+                    trk_art_w = max(10, int(flex_trk * 0.25))
+                    trk_alb_w = max(10, int(flex_trk * 0.30))
+                    trk_tit_w = flex_trk - trk_art_w - trk_alb_w
+
                     art = _align_text(meta.get("artist", ""), trk_art_w)
                     tit = _align_text(meta.get("title", ""), trk_tit_w)
                     alb = _align_text(meta.get("album", ""), trk_alb_w)
-                    dur = str(meta.get("duration", "")).ljust(5)
                     ql = meta.get("quality", "").ljust(12)
 
-                    # Se a qualidade não for 24-bit, aplica a cor dinâmica
                     ql_color = "fg:#c59b27 bold" if "24b" in ql else f"fg:{_hex_accent}"
                     ql_final_style = style if hovered else ql_color
 
-                    res.append((style, f"{art} | {tit} | {alb} | {dur} | "))
+                    res.append((style, f"{art} | {tit} | {alb} | "))
                     res.append((ql_final_style, f"{ql}\n"))
                 else:
-                    res.append((title_style, f"🎶 {meta.get('title', '')}\n"))
-                    res.append((style, f"       👤 Artista: {meta.get('artist', '')}\n"))
-                    res.append((style, f"        💿 Álbum: {meta.get('album', '')}\n"))
-                    res.append(
-                        (style,
-                         f"        ⏱️ Duração: {
-                             meta.get(
-                                 'duration',
-                                 '--:--')}\n"))
-                    res.append(
-                        (style, f"       🎧 Qualidade: {
-                            meta.get(
-                                'quality', '')}\n"))
-                    res.append((style, f"       {'-' * 30}\n"))
+                    title_str = meta.get('title', '')
+                    ql = meta.get("quality", "")
+                    ql_color = "fg:#c59b27 bold" if "24b" in ql else f"fg:{_hex_accent}"
+                    ql_final_style = style if hovered else ql_color
+
+                    res.append((title_style, f"🎶 {title_str} "))
+                    res.append((ql_final_style, f"[{ql}]\n"))
+
+                    art = meta.get('artist', '')
+                    alb = meta.get('album', '')
+                    res.append((style, f"{hdr_pref}👤 {art} | 💿 {alb}\n"))
 
             elif item_category == "playlist":
                 if is_table:
+                    fixed_pl = prefix_len + 24
+                    flex_pl = max(10, safe_columns - fixed_pl)
+                    pl_own_w = max(10, int(flex_pl * 0.30))
+                    pl_nom_w = flex_pl - pl_own_w
+
                     n = _align_text(meta.get("name", ""), pl_nom_w)
                     o = _align_text(meta.get("owner", ""), pl_own_w)
                     c = str(meta.get("count", "")).ljust(6)
-                    dur = str(meta.get("duration", "")).ljust(5)
+                    dur = str(meta.get("duration", "")).ljust(9)
 
                     res.append((style, f"{n} | {o} | {c} | {dur}\n"))
                 else:
-                    res.append((title_style, f"📋 {meta.get('name', '')}\n"))
-                    res.append((style, f"       👤 Criador: {meta.get('owner', '')}\n"))
-                    res.append((style, f"        🎶 Faixas: {meta.get('count', 0)}\n"))
-                    res.append(
-                        (style,
-                         f"        ⏱️ Duração: {
-                             meta.get(
-                                 'duration',
-                                 '--:--')}\n"))
-                    res.append((style, f"       {'-' * 30}\n"))
+                    n = meta.get('name', '')
+                    o = meta.get('owner', '')
+                    c = meta.get('count', 0)
+                    dur = meta.get('duration', '--:--')
+
+                    res.append((title_style, f"📋 {n}\n"))
+                    res.append((style, f"{hdr_pref}👤 {o} | 🎶 {c} faixas | ⏱️ {dur}\n"))
 
             elif item_category == "artist":
                 if is_table:
@@ -345,40 +339,58 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
                     c = meta.get("count", "")
                     res.append((style, f"{n} | {c} álbuns\n"))
                 else:
-                    res.append((title_style, f"🎤 {meta.get('name', '')}\n"))
-                    res.append(
-                        (style,
-                         f"       📦 Lançamentos listados: {
-                             meta.get(
-                                 'count',
-                                 '')}\n"))
-                    res.append((style, f"       {'-' * 30}\n"))
+                    n = meta.get('name', '')
+                    c = meta.get('count', '')
+                    res.append((title_style, f"🎤 {n}\n"))
+                    res.append((style, f"{hdr_pref}📦 {c} lançamentos\n"))
+
             elif item_category == "filter":
                 res.append((style, f"{opt}\n"))
 
-        res.append(("", "\n"))
-        if is_multi:
-            res.append(
-                ("class:checkbox", f" ✓ Selecionados: {len(selected_indices)}\n")
-            )
-            res.append(
-                (
-                    "class:footer",
-                    f" [↑ ↓] Mover   [Espaço] Selecionar   [t] Selecionar Todos   [Enter] Confirmar",
-                )
-            )
-        else:
-            res.append(("class:footer", f" [↑ ↓] Mover   [Enter] Confirmar"))
+        if res and res[-1][1].endswith('\n'):
+            res[-1] = (res[-1][0], res[-1][1].rstrip('\n'))
 
         return res
 
-    window = Window(
-        content=FormattedTextControl(text=get_text, focusable=True),
+    # ==========================================
+    # BLOCO 3: RODAPÉ FIXO DE COMANDOS
+    # ==========================================
+    def get_footer_text():
+        res = [("", "\n")]
+        # Adicionamos uma quebra de linha extra no final para afastar o texto da
+        # borda inferior
+        if is_multi:
+            res.append(
+                ("class:checkbox",
+                 f" ✓ Selecionados: {
+                     len(selected_indices)}\n"))
+            res.append(
+                ("class:footer",
+                 " [↑ ↓] Mover   [Espaço] Selecionar   [t] Selecionar Todos   [Enter] Confirmar\n"))
+        else:
+            res.append(("class:footer", " [↑ ↓] Mover   [Enter] Confirmar\n"))
+        return res
+
+    # ------------------------------------------
+    # MONTAGEM FINAL DO APP EM CAMADAS (HSplit)
+    # ------------------------------------------
+    header_window = Window(
+        content=FormattedTextControl(text=get_header_text),
+        dont_extend_height=True
+    )
+
+    list_window = Window(
+        content=FormattedTextControl(text=get_list_text, focusable=True),
         scroll_offsets=ScrollOffsets(top=1, bottom=1),
         wrap_lines=False,
     )
 
-    layout = Layout(window)
+    footer_window = Window(
+        content=FormattedTextControl(text=get_footer_text),
+        dont_extend_height=True
+    )
+
+    layout = Layout(HSplit([header_window, list_window, footer_window]))
     app = Application(
         layout=layout, key_bindings=bindings, full_screen=True, style=pt_style
     )
@@ -1132,12 +1144,13 @@ class QobuzDL:
                             "playlist/getUserPlaylists", p1, self.client.sec
                         )
                         p1["request_sig"] = sig
-                        async with self.client.session.request(
+
+                        r1 = await self.client.session.request(
                             "get",
                             self.client.base + "playlist/getUserPlaylists",
                             params=p1,
-                        ) as r1:
-                            res1 = await r1.json()
+                        )
+                        res1 = r1.json()
 
                         if "playlists" in res1 and "items" in res1["playlists"]:
                             iterable = res1["playlists"]["items"]
@@ -1148,12 +1161,13 @@ class QobuzDL:
                                 "playlist/getUserPlaylistIds", p2, self.client.sec
                             )
                             p2["request_sig"] = sig2
-                            async with self.client.session.request(
+
+                            r2 = await self.client.session.request(
                                 "get",
                                 self.client.base + "playlist/getUserPlaylistIds",
                                 params=p2,
-                            ) as r2:
-                                res2 = await r2.json()
+                            )
+                            res2 = r2.json()
 
                             ids = (
                                 res2.get("playlist_ids", [])
@@ -1168,14 +1182,15 @@ class QobuzDL:
                                         "playlist/get", p_params, self.client.sec
                                     )
                                     p_params["request_sig"] = p_sig
-                                    async with self.client.session.request(
+
+                                    rp = await self.client.session.request(
                                         "get",
                                         self.client.base + "playlist/get",
                                         params=p_params,
-                                    ) as rp:
-                                        p_data = await rp.json()
-                                        if "id" in p_data:
-                                            iterable.append(p_data)
+                                    )
+                                    p_data = rp.json()
+                                    if "id" in p_data:
+                                        iterable.append(p_data)
                                 except Exception:
                                     pass
                     except Exception as e:

@@ -794,16 +794,19 @@ async def async_main():
             for rank, (artist, cnt) in enumerate(s["top_artists"], 1):
                 if cols < 60:
                     # MODO CELULAR: Nome na primeira linha, barra recuada na linha de baixo
-                    # Reduzimos o tamanho máximo da barra para 15 blocos para caber  com folga
+                    # Reduzimos o tamanho máximo da barra para 15 blocos para caber  com
+                    # folga
                     max_blocks = 12
-                    bar_len = cnt if top_cnt <= max_blocks else max(1, cnt * max_blocks // top_cnt)
+                    bar_len = cnt if top_cnt <= max_blocks else max(
+                        1, cnt * max_blocks // top_cnt)
                     bar_vis = f"{CYAN}{('█|' * bar_len)[:-1]}{RESET}"
-                    print(f"  {rank:>2}. {artist}") 
+                    print(f"  {rank:>2}. {artist}")
                     print(f"      {bar_vis} {cnt}")
                 else:
                     # MODO TABLET/PC: Tudo na mesma linha com alinhamento de 32 espaços
                     max_blocks = 20
-                    bar_len = cnt if top_cnt <= max_blocks else max(1, cnt * max_blocks // top_cnt)
+                    bar_len = cnt if top_cnt <= max_blocks else max(
+                        1, cnt * max_blocks // top_cnt)
                     bar_vis = f"{CYAN}{('█|' * bar_len)[:-1]}{RESET}"
                     print(f"  {rank:>2}. {artist:<32} {bar_vis} {cnt}")
 

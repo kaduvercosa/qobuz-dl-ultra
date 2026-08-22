@@ -12,7 +12,6 @@ import os
 import shutil
 import sys
 import time
-import subprocess
 import re
 import threading
 import signal
@@ -28,6 +27,9 @@ from tqdm import tqdm
 import qobuz_dl.metadata as metadata
 from qobuz_dl.color import OFF, GREEN, RED, WARNING as YELLOW, INFO as CYAN, RESET
 from qobuz_dl.exceptions import NonStreamable
+
+import aiofiles
+from tenacity import AsyncRetrying, stop_after_attempt, wait_exponential, retry_if_not_exception_type
 
 # Ordem de qualidades para fallback apenas em falhas de conexão
 FALLBACK_TIERS = [27, 7, 6, 5]
@@ -1839,138 +1841,119 @@ async def tqdm_download(
 
     downloaded_size = 0
     total_size = 0
-    max_retries = 5
-    backoff_delays = [2, 4, 8, 16, 32]
 
     owns_session = session is None
-    # timeout=(10, 60) no requests = (connect, read). Equivalente no httpx e
-    # httpx.Timeout com connect e read separados (write/pool herdam do padrao
-    # geral, aqui deixados generosos igual ao read pra nao cortar upload de
-    # dados internos do proprio httpx).
     timeout_cfg = httpx.Timeout(60.0, connect=10.0)
     http = session or httpx.AsyncClient(follow_redirects=True)
 
     try:
-        for attempt in range(max_retries):
-            if abort_event.is_set():
-                return
-            try:
-                url = (
-                    url_or_callable() if callable(url_or_callable) else url_or_callable
-                )
-
-                if downloaded_size > 0:
-                    headers["Range"] = f"bytes={downloaded_size}-"
-                    mode = "ab"
-                else:
-                    headers["Range"] = "bytes=0-"
-                    mode = "wb"
-
-                # http.get(..., stream=True) do requests virou http.stream(...)
-                # no httpx -- e no httpx isso e OBRIGATORIAMENTE um context
-                # manager (nao da pra pegar a resposta e iterar depois fora do
-                # "with", a conexao fecha na saida). Por isso o bloco que antes
-                # vinha solto agora mora todo dentro do "with" abaixo.
-                async with http.stream(
-                    "GET", url, headers=headers, timeout=timeout_cfg,
-                ) as r:
-                    if r.status_code == 416:
+        try:
+            # MOTOR DE REPETIÇÃO INTELIGENTE (TENACITY)
+            async for attempt in AsyncRetrying(
+                stop=stop_after_attempt(5),
+                wait=wait_exponential(multiplier=2, min=2, max=32),
+                retry=retry_if_not_exception_type(
+                    (_PermanentDownloadError, KeyboardInterrupt, SystemExit)),
+                reraise=True
+            ):
+                with attempt:
+                    if abort_event.is_set():
                         return
-                    if r.status_code == 404:
-                        raise _PermanentDownloadError(
-                            "HTTP 404: File not found on server.")
-                    if r.status_code in (401, 403, 451):
-                        raise _PermanentDownloadError(
-                            f"HTTP {r.status_code}: faixa indisponível (bloqueio de "
-                            f"região, direitos autorais ou sessão expirada)."
-                        )
-                    if r.status_code not in [200, 206]:
-                        raise Exception(f"Status Server: {r.status_code}")
 
-                    if total_size == 0:
-                        total_size = downloaded_size + int(
-                            r.headers.get("content-length", 0)
-                        )
+                    url = url_or_callable() if callable(url_or_callable) else url_or_callable
 
-                    if is_parallel and downloaded_size == 0 and attempt == 0:
-                        size_mb = total_size / (1024 * 1024)
+                    if downloaded_size > 0:
+                        headers["Range"] = f"bytes={downloaded_size}-"
+                        mode = "ab"
+                    else:
+                        headers["Range"] = "bytes=0-"
+                        mode = "wb"
+
+                    # Log dinâmico de reconexão
+                    if attempt.retry_state.attempt_number > 1:
                         safe_print(
-                            f"{C}[+] Em Progresso: {track_name} [{size_mb:.1f} MB]{O}"
+                            f"\n{Y}[!] Falha de Rede. Tentativa {
+                                attempt.retry_state.attempt_number}/5 "
+                            f"para {track_name}{O}"
                         )
 
-                    with open(fname, mode) as file, tqdm(
-                        total=total_size,
-                        unit="iB",
-                        unit_scale=True,
-                        unit_divisor=1024,
-                        desc=tqdm_desc,
-                        initial=downloaded_size,
-                        bar_format=b_format,
-                        position=position,
-                        leave=False,
-                        ncols=ncols,
-                        dynamic_ncols=dynamic_ncols,
-                        disable=is_parallel,
-                    ) as bar:
+                    async with http.stream(
+                        "GET", url, headers=headers, timeout=timeout_cfg,
+                    ) as r:
+                        if r.status_code == 416:
+                            return
+                        if r.status_code == 404:
+                            raise _PermanentDownloadError(
+                                "HTTP 404: File not found on server.")
+                        if r.status_code in (401, 403, 451):
+                            raise _PermanentDownloadError(
+                                f"HTTP {r.status_code}: faixa indisponível (bloqueio de "
+                                f"região, direitos autorais ou sessão expirada)."
+                            )
+                        if r.status_code not in [200, 206]:
+                            raise Exception(f"Status Server: {r.status_code}")
 
-                        # iter_content() do requests -> iter_bytes() no httpx
-                        async for data in r.aiter_bytes(chunk_size=524288):
-                            if abort_event.is_set():
-                                return
-                            if data:
-                                size = file.write(data)
-                                downloaded_size += size
-                                bar.update(size)
+                        if total_size == 0:
+                            total_size = downloaded_size + int(
+                                r.headers.get("content-length", 0)
+                            )
 
-                if downloaded_size >= total_size:
-                    safe_print(f"{G}  L Completed: {track_name}{O}")
-                    return
+                        if is_parallel and downloaded_size == 0 and attempt.retry_state.attempt_number == 1:
+                            size_mb = total_size / (1024 * 1024)
+                            safe_print(
+                                f"{C}[+] Em Progresso: {track_name} [{size_mb:.1f} MB]{O}"
+                            )
 
-            except _PermanentDownloadError as e:
-                if os.path.exists(fname):
-                    os.remove(fname)
-                safe_print(f"{Y}[!] Indisponível: {track_name} ({e}){O}")
-                raise
+                        async with aiofiles.open(fname, mode) as file:
+                            with tqdm(
+                                total=total_size,
+                                unit="iB",
+                                unit_scale=True,
+                                unit_divisor=1024,
+                                desc=tqdm_desc,
+                                initial=downloaded_size,
+                                bar_format=b_format,
+                                position=position,
+                                leave=False,
+                                ncols=ncols,
+                                dynamic_ncols=dynamic_ncols,
+                                disable=is_parallel,
+                            ) as bar:
 
-            except (KeyboardInterrupt, SystemExit):
-                # Se o usuário apertar Ctrl+C, aborta IMEDIATAMENTE sem esperar nem
-                # tentar de novo
-                abort_event.set()
-                if os.path.exists(fname):
-                    try:
-                        os.remove(fname)
-                    except OSError:
-                        pass
-                return
+                                # iter_content() do requests -> iter_bytes() no httpx
+                                async for data in r.aiter_bytes(chunk_size=524288):
+                                    if abort_event.is_set():
+                                        return
+                                    if data:
+                                        size = await file.write(data)
+                                        downloaded_size += size
+                                        bar.update(size)
 
-            except Exception as e:
-                # Se o usuário já pediu para parar, não tenta reconectar
-                if abort_event.is_set():
-                    if os.path.exists(fname):
-                        try:
-                            os.remove(fname)
-                        except OSError:
-                            pass
+                    if downloaded_size >= total_size:
+                        safe_print(f"{G}  L Completed: {track_name}{O}")
                         return
 
-                if "404" in str(e):
-                    if os.path.exists(fname):
-                        os.remove(fname)
-                    raise _PermanentDownloadError("HTTP 404: File not found on server.")
+        except _PermanentDownloadError as e:
+            if os.path.exists(fname):
+                os.remove(fname)
+            safe_print(f"{Y}[!] Indisponível: {track_name} ({e}){O}")
+            raise
 
-                if attempt < max_retries - 1:
-                    wait = backoff_delays[attempt]
-                    safe_print(
-                        f"\n{Y}[!] Falha de rede. Tentando de novo em {wait}s ({
-                            attempt + 1}/{max_retries}) | Detalhes: {e}{O}"
-                    )
-                    time.sleep(wait)
+        except (KeyboardInterrupt, SystemExit):
+            # Se o usuário apertar Ctrl+C, aborta IMEDIATAMENTE sem esperar nem tentar
+            # de novo
+            abort_event.set()
+            if os.path.exists(fname):
+                try:
+                    os.remove(fname)
+                except OSError:
+                    pass
+            return
 
-                else:
-                    if os.path.exists(fname):
-                        os.remove(fname)
-                    raise Exception(f"Definitive timeout after {max_retries} attempts. Last error: {e}"
-                                    )
+        except Exception as e:
+            if os.path.exists(fname):
+                os.remove(fname)
+            raise Exception(f"Definitive timeout after 5 attempts, Last Error: {e}")
 
         if downloaded_size < total_size and not abort_event.is_set():
             if os.path.exists(fname):
@@ -1979,11 +1962,9 @@ async def tqdm_download(
     finally:
         if owns_session:
             try:
-                http.aclose()
-            except Exception as e:
-                logger.debug(
-                    f"Falha ao fechar sessao HTTP do download segmentado (ignorado): {e}"
-                )
+                await http.aclose()
+            except Exception:
+                pass
         if is_parallel and position_pool:
             position_pool.release(position)
 
@@ -2151,7 +2132,7 @@ async def tqdm_download_segments(
 ):
     if abort_event.is_set():
         return
-    G, C, O, R = GREEN, CYAN, OFF, RESET
+    G, C, O, R = GREEN, CYAN, OFF, RESET, YELLOW
 
     tmp_fname = fname + ".mp4"
     n_segments = track_url_dict["n_segments"]
@@ -2162,14 +2143,23 @@ async def tqdm_download_segments(
 
     owns_session = session is None
     http = session or httpx.AsyncClient(follow_redirects=True)
+    timeout_cfg = httpx.Timeout(60.0, connect=10.0)
 
+    # 1. RETRY NAS CHECAGENS DE TAMANHO (TENACITY)
     async def get_seg_size(seg_num):
-        if abort_event.is_set():
-            return 0
         url = url_template.replace("$SEGMENT$", str(seg_num))
         try:
-            r = await http.head(url, timeout=5)
-            return int(r.headers.get("content-length", 0))
+            async for attempt in AsyncRetrying(
+                stop=stop_after_attempt(3),
+                wait=wait_exponential(multiplier=1, min=1, max=10),
+                retry=retry_if_not_exception_type((KeyboardInterrupt, SystemExit)),
+                reraise=True
+            ):
+                with attempt:
+                    if abort_event.is_set():
+                        return 0
+                    r = await http.head(url, timeout=5)
+                    return int(r.headers.get("content-length", 0))
         except Exception as e:
             logger.debug(f"HEAD falhou para segmento (assumindo tamanho 0): {e}")
             return 0
@@ -2181,8 +2171,8 @@ async def tqdm_download_segments(
     position = position_pool.acquire() if (is_parallel and position_pool) else 0
 
     if is_parallel:
-        size_mb = total_size / (1024 * 1024)
-        safe_print(f"{C}[+] In progresso: {track_name} [{size_mb:.1f} MB]{O}")
+        size_mb = total_size / (1024 * 1024) if total_size else 0
+        safe_print(f"{C}[+] Em progresso: {track_name} [{size_mb:.1f} MB]{O}")
         desc_len = position_pool.desc_len if position_pool else 14
         short_name = (
             track_name
@@ -2200,72 +2190,91 @@ async def tqdm_download_segments(
         ncols = None
         dynamic_ncols = True
 
+    # 2. RETRY NO DOWNLOAD DO SEGMENTO (TENACITY)
     async def fetch_segment_fluid(seg_num):
-        if abort_event.is_set():
-            return bytearray()
         url = url_template.replace("$SEGMENT$", str(seg_num))
         seg_data = bytearray()
-        try:
-            async with http.stream("GET", url, timeout=15) as r:
-                r.raise_for_status()
-                async for chunk in r.aiter_bytes(chunk_size=524288):
-                    if abort_event.is_set():
-                        return bytearray()
-                    seg_data.extend(chunk)
-                    bar.update(len(chunk))
-        except Exception:
-            pass
+
+        async for attempt in AsyncRetrying(
+            stop=stop_after_attempt(5),
+            wait=wait_exponential(multiplier=2, min=2, max=32),
+            retry=retry_if_not_exception_type((KeyboardInterrupt, SystemExit)),
+            reraise=True
+        ):
+            with attempt:
+                if abort_event.is_set():
+                    return bytearray()
+
+                # Se cair a rede no meio da música, ele avisa discretamente
+                if attempt.retry_state.attempt_number > 1:
+                    safe_print(
+                        f"\n{YELLOW}[!] Reconectando segmento {seg_num}. Tentativa {
+                            attempt.retry_state.attempt_number}/5 para {track_name}{OFF}")
+
+                seg_data.clear()
+                async with http.stream("GET", url, timeout=15) as r:
+                    r.raise_for_status()
+                    async for chunk in r.aiter_bytes(chunk_size=524288):
+                        if abort_event.is_set():
+                            return bytearray()
+                        seg_data.extend(chunk)
+                        bar.update(len(chunk))
         return seg_data
 
     try:
-        with open(tmp_fname, "wb") as file, tqdm(
-            total=total_size,
-            unit="iB",
-            unit_scale=True,
-            unit_divisor=1024,
-            desc=tqdm_desc,
-            bar_format=b_format,
-            position=position,
-            leave=False,
-            ncols=ncols,
-            dynamic_ncols=dynamic_ncols,
-            disable=is_parallel,
-        ) as bar:
+        async with aiofiles.open(tmp_fname, "wb") as file:
+            with tqdm(
+                total=total_size,
+                unit="iB",
+                unit_scale=True,
+                unit_divisor=1024,
+                desc=tqdm_desc,
+                bar_format=b_format,
+                position=position,
+                leave=False,
+                ncols=ncols,
+                dynamic_ncols=dynamic_ncols,
+                disable=is_parallel,
+            ) as bar:
 
-            segment_uuid = None
-            for i in range(2):
-                seg_data = await fetch_segment_fluid(i)
-                if abort_event.is_set():
-                    return
-                if i == 1:
-                    segment_uuid = _get_qobuz_segment_uuid(seg_data)
-                    if segment_uuid is None:
-                        raise ConnectionError(f"Cannot find segment UUID for {fname}")
+                segment_uuid = None
 
-                file.write(_decrypt_qobuz_segment(seg_data, raw_key, segment_uuid))
+                for i in range(2):
+                    seg_data = await fetch_segment_fluid(i)
+                    if abort_event.is_set():
+                        return
+                    if i == 1:
+                        segment_uuid = _get_qobuz_segment_uuid(seg_data)
+                        if segment_uuid is None:
+                            raise ConnectionError(
+                                f"Cannot find segment UUID for {fname}")
 
-            if n_segments >= 2:
-                semaphore = asyncio.Semaphore(workers)
+                    decrypted_data = _decrypt_qobuz_segment(
+                        seg_data, raw_key, segment_uuid)
 
-                async def bounded_fetch(i):
-                    async with semaphore:
-                        return await fetch_segment_fluid(i)
+                if n_segments >= 2:
+                    semaphore = asyncio.Semaphore(workers)
 
-                tasks_seg = [bounded_fetch(i) for i in range(2, n_segments + 1)]
-                results = await asyncio.gather(*tasks_seg)
+                    async def bounded_fetch(i):
+                        async with semaphore:
+                            return await fetch_segment_fluid(i)
 
-                for seg_data in results:
-                    if not abort_event.is_set():
-                        file.write(
-                            _decrypt_qobuz_segment(seg_data, raw_key, segment_uuid)
-                        )
+                    tasks_seg = [bounded_fetch(i) for i in range(2, n_segments + 1)]
+                    results = await asyncio.gather(*tasks_seg)
+
+                    for seg_data in results:
+                        if not abort_event.is_set():
+                            decrypted_data = _decrypt_qobuz_segment(
+                                seg_data, raw_key, segment_uuid)
+                            await file.write(decrypted_data)
 
         if abort_event.is_set():
             return
         if not is_parallel:
             safe_print(f" {G}  > Assembling the final FLAC file...{O}")
 
-        remux = subprocess.run(
+        # 4. MONTAGEM FINAL ASSINCRONA COM O FFMPEG
+        remux = await asyncio.create_subprocess_exec(
             [
                 "ffmpeg",
                 "-nostdin",
@@ -2280,16 +2289,26 @@ async def tqdm_download_segments(
                 "flac",
                 fname,
             ],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-            text=True,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
         )
+        _, stderr = await remux.communicate()
+
         if remux.returncode != 0:
-            raise ConnectionError(f"FFmpeg remux failed for {fname}")
+            raise ConnectionError(f"FFmpeg remux failed for {fname}: {stderr.decode()}")
 
         safe_print(f"{G}  L Completed: {track_name}{O}")
 
+    except (KeyboardInterrupt, SystemExit):
+        abort_event.set()
+        return
+
+    except Exception as e:
+        if not abort_event.is_set():
+            raise Exception(f"Download fatiado falhou: {e}")
+
     finally:
+        # 5. LIMPEZA SEGURA
         if os.path.isfile(tmp_fname):
             try:
                 os.remove(tmp_fname)

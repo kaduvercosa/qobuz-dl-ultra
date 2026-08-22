@@ -32,7 +32,9 @@ classifiers = [
 dependencies = [
     "pathvalidate",
     "httpx",
-    "requests",
+    "aiofiles",
+    "tenacity",
+    "platformdirs",
     "charset_normalizer",
     "mutagen",
     "tqdm",
@@ -40,10 +42,8 @@ dependencies = [
     "colorama",
     "cryptography",
     "keyring",
-    "aiohttp",
     "questionary",
     "prompt_toolkit",
-    "lyricsgenius"
 ]
 
 [project.urls]

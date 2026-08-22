@@ -4,14 +4,9 @@ import os
 import logging
 import subprocess
 import time
-# CYAN/YELLOW importados como INFO/WARNING renomeados: mesma cor de
-# YELLOW (mantida por convencao), mas CYAN agora e' LIGHTBLUE_EX --
-# visivel em terminal claro E escuro (CYAN puro quase some em fundo
-# branco). Ver comentario completo em qobuz_dl/color.py. Zero mudanca
-# de codigo neste arquivo: toda f-string que ja usa {CYAN}/{YELLOW}
-# continua funcionando, so' a cor de fato renderizada muda.
 from qobuz_dl.color import RED, WARNING as YELLOW, INFO as CYAN, OFF
 import unicodedata
+import platformdirs
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -599,28 +594,20 @@ def get_config_paths():
             "qobuz_db": ...,
         }
     """
-    # a-Shell (iOS) only exposes the app's "Documents" folder to the user via
-    # the Files app. Everything qobuz-dl creates (config, database,
-    # downloads) must live inside it. Set QOBUZ_DL_IOS_HOME (e.g. in
-    # a-Shell's .shellrc: export QOBUZ_DL_IOS_HOME="$HOME/Documents") to opt
-    # in. On every other platform this variable is simply unset and behavior
-    # is unchanged.
     ios_home = os.environ.get("QOBUZ_DL_IOS_HOME")
-
     config_dir = os.environ.get("CONFIG_DIR")
+
     if not config_dir:
         if ios_home:
             config_dir = ios_home
-        elif os.name == "nt":
-            config_dir = os.environ.get("APPDATA")
         else:
-            # iOS / a-Shell Auto-Detection
+            # IOS / a-Shell Auto Detection
             home_dir = os.environ.get("HOME", "")
             if "Containers/Data/Application" in home_dir:
-                # Forca o uso da pasta Documents no iOS para evitar PermissionError
                 config_dir = os.path.join(home_dir, "Documents")
             else:
-                config_dir = os.path.join(home_dir, ".config")
+                # Windows, macOS, Linux e Android assumem o padrão nativo do SO
+                config_dir = platformdirs.user_config_dir()
 
     config_path = os.path.join(config_dir, "qobuz-dl")
     config_file = os.path.join(config_path, "config.ini")
