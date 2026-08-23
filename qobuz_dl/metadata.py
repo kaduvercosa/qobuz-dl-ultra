@@ -360,11 +360,11 @@ def tag_flac(
         if v:
             if (
                 getattr(settings, "multi_value_tags", False) and
-                k == "GENRE" and
+                k in ["ARTIST", "ARTISTSORT", "ALBUMARTIST", "ALBUMARTISTSORT", "COMPOSER", "GENRE"] and
                 isinstance(v, str)
             ):
                 if ", " in v:
-                    v = v.split(", ")
+                    v = v.replace(", ", " ; ")
             audio[k] = v
 
     if em_image:
@@ -453,6 +453,14 @@ def tag_mp3(
 
     for k, v in tags.items():
         if v:
+            if (
+                getattr(settings, "multi_value_tags", False) and
+                k in ["ARTIST", "ARTISTSORT", "ALBUMARTIST", "ALBUMARTISTSORT", "COMPOSER", "GENRE"] and
+                isinstance(v, str)
+            ):
+                if ", " in v:
+                    v = v.replace(", ", " ; ")
+
             id3tag = ID3_LEGEND.get(k.lower()) or ID3_LEGEND.get(k)
             if id3tag:
                 if id3tag == id3.TXXX:

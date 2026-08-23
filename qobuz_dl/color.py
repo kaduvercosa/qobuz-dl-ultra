@@ -29,6 +29,7 @@ MUTED = Style.DIM
 # na importacao do modulo, entao vale pra toda a sessao sem precisar
 # passar o objeto de settings por todo o codigo.
 _DEFAULT_ACCENT = "\033[38;2;95;168;211m"
+_DEFAULT_ACCENT_RGB = (95, 168, 211)
 
 # Paleta de cores predefinidas exposta pro wizard. Cada entrada:
 #   (nome_exibicao, codigo_rgb_string, escape_ansi)
@@ -67,36 +68,53 @@ def _find_config_file():
     return os.path.join(config_dir, "qobuz-dl", "config.ini")
 
 
-def _load_accent() -> str:
-    """Le accent_color do config.ini e retorna o escape ANSI correto.
+def _rgb_escape(r, g, b) -> str:
+    return f"\033[38;2;{r};{g};{b}m"
+
+
+def _darken(rgb: tuple, factor: float = 0.55) -> tuple:
+    """Escurece um RGB multiplicando cada canal por 'factor' (0-1). Usado
+    pra derivar uma variante mais escura da cor de destaque escolhida no
+    wizard (qobuz-dl -r), sem precisar de uma segunda cor cadastrada a
+    parte -- 1 escolha do usuario, 2 tons derivados automaticamente."""
+    r, g, b = rgb
+    return (
+        max(0, min(255, int(r * factor))),
+        max(0, min(255, int(g * factor))),
+        max(0, min(255, int(b * factor))),
+    )
+
+
+def _load_accent_rgb() -> tuple:
+    """Le accent_color do config.ini e retorna a tupla (r, g, b).
     Falha silenciosamente pro padrao se o arquivo nao existir ou o valor
     estiver invalido -- nunca deve crashar o boot do programa."""
     try:
         cfg_file = _find_config_file()
         if not os.path.exists(cfg_file):
-            return _DEFAULT_ACCENT
+            return _DEFAULT_ACCENT_RGB
 
         cfg = configparser.ConfigParser(interpolation=None)
         cfg.read(cfg_file, encoding="utf-8")
         rgb = cfg.get("qobuz", "accent_color", fallback="").strip()
 
         if not rgb:
-            return _DEFAULT_ACCENT
+            return _DEFAULT_ACCENT_RGB
 
         parts = [int(x.strip()) for x in rgb.split(";")]
         if len(parts) == 3 and all(0 <= p <= 255 for p in parts):
-            r, g, b = parts
-            return f"\033[38;2;{r};{g};{b}m"
+            return tuple(parts)
     except Exception:
         pass
 
-    return _DEFAULT_ACCENT
+    return _DEFAULT_ACCENT_RGB
 
 
-# Cor de destaque ativa -- lida uma vez na importacao do modulo.
-# Todos os outros arquivos que fazem `from qobuz_dl.color import INFO as CYAN`
-# recebem este valor automaticamente.
-_ACCENT = _load_accent()
+_ACCENT_RGB = _load_accent_rgb()
+_ACCENT = _rgb_escape(*_ACCENT_RGB)
+
+
+ACCENT_DARK = _rgb_escape(*_darken(_ACCENT_RGB))
 
 HIGHLIGHT = _ACCENT
 INFO = _ACCENT

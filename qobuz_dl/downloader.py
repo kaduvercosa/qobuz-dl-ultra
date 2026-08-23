@@ -1248,10 +1248,10 @@ class Download:
                 )
                 if original_lang:
                     if original_lang.lower() == translation_lang.lower():
-                        translation_note = f"    ℹ️  Letras já em {
+                        translation_note = f"    ℹ️ Letras já em {
                             translation_lang.upper()} -- sem necessidade de tradução."
                     else:
-                        translation_note = f"    ℹ️  Nenhuma tradução em {
+                        translation_note = f"    ℹ️ Nenhuma tradução em {
                             translation_lang.upper()} disponível no Qobuz, para esta faixa."
 
             def _inject_lyrics_and_print():
@@ -1267,7 +1267,7 @@ class Download:
                         qobuz_translation_response=qobuz_translation_response,
                     )
                     if translation_note:
-                        tqdm.write(f"{CYAN}{translation_note}{OFF}")
+                        tqdm.write(f"{OFF}{translation_note}{OFF}")
 
             await loop.run_in_executor(None, _inject_lyrics_and_print)
 
@@ -1278,14 +1278,6 @@ class Download:
             path=final_file,
         )
 
-        # Verificacao de integridade pos-download (opcional, off por padrao).
-        # Decodifica o arquivo final inteiro com ffmpeg pra pegar corrupcao
-        # real no stream de audio -- coisa que passa batido em downloads que
-        # cortam no meio mas ainda geram um arquivo com tags/tamanho
-        # plausiveis. Fica atras de um flag porque decodificar cada faixa
-        # adiciona tempo real numa discografia grande; quem quiser sempre
-        # ligado usa --verify-download (ver settings.py/cli.py) ou roda
-        # "python check_audio.py --verify-library" depois, em lote.
         if (
             getattr(self.settings, "verify_after_download", False) and
             not abort_event.is_set()
@@ -1320,15 +1312,9 @@ class Download:
 
     @staticmethod
     def _get_filename_attr(track_artist, track_metadata: dict, album_metadata: dict):
-        def _flatten_artists(artist_data):
-            if isinstance(artist_data, list):
-                return ", ".join(artist_data)
-            return str(artist_data) if artist_data else ""
-
-        album_artist_raw = get_album_artist(album_metadata)
-        album_artist_str = (
-            _flatten_artists(album_artist_raw) if album_artist_raw else track_artist
-        )
+        # Pega o nome oficial do artista principal do album, sem criar listas
+        artists_list = get_album_artist(album_metadata)
+        album_artist_str = artists_list[0] if artists_list else (album_metadata.get("artist", {}).get("name") or track_artist)
 
         return {
             "artist": track_artist,
@@ -1358,17 +1344,8 @@ class Download:
     def _get_track_attr(meta, track_title, bit_depth, sampling_rate, file_format):
         album_meta = meta.get("album", {})
 
-        def _flatten_artists(artist_data):
-            if isinstance(artist_data, list):
-                return ", ".join(artist_data)
-            return str(artist_data) if artist_data else ""
-
-        album_artist_raw = get_album_artist(album_meta)
-        album_artist_str = (
-            _flatten_artists(album_artist_raw)
-            if album_artist_raw
-            else _safe_get(meta, "performer", "name")
-        )
+        artists_list = get_album_artist(album_meta)
+        album_artist_str = artists_list[0] if artists_list else (album_meta.get("artist", {}).get("name") or _safe_get(meta, "performer", "name", default="Unknown"))
 
         return {
             "album": _get_title(album_meta),
@@ -1413,13 +1390,8 @@ class Download:
 
     @staticmethod
     def _get_album_attr(meta, album_title, file_format, bit_depth, sampling_rate):
-        def _flatten_artists(artist_data):
-            if isinstance(artist_data, list):
-                return ", ".join(artist_data)
-            return str(artist_data) if artist_data else ""
-
-        album_artist_raw = get_album_artist(meta)
-        album_artist_str = _flatten_artists(album_artist_raw)
+        artists_list = get_album_artist(meta)
+        album_artist_str = artists_list[0] if artists_list else meta.get("artist", {}).get("name", "Unknown")
 
         return {
             "artist": meta.get("artist", {}).get("name", ""),
@@ -2079,13 +2051,13 @@ async def _get_cover_and_embed(
 
     if os.path.isfile(embed_file):
         safe_print(
-            f"{YELLOW}[*] Skipping embedded cover art: {embed_name} (Already downloaded){OFF}")
+            f"{YELLOW}[*] Pulando arte da capa incorporada: {embed_name} (Já Baixado){OFF}")
         return
 
     if save_cover and saved_url == embed_url and os.path.isfile(saved_file):
         try:
             shutil.copyfile(saved_file, embed_file)
-            safe_print(f"  [*] Reusing cover art for embed..")
+            safe_print(f"  {OFF}[*] Reutilizando cover.jpg para o embed..{OFF}")
             return
         except OSError as e:
             logger.debug(f"Falha ao copiar cover.jpg pra embed, baixando de novo: {e}")

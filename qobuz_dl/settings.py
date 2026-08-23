@@ -252,10 +252,13 @@ class QobuzDLSettings:
                 if getattr(arguments, "no_embed_lyrics", False)
                 else config.getboolean(section, "embed_lyrics", fallback=True)
             ),
-            "multi_value_tags": getattr(
-                arguments,
-                "multi_value_tags",
-                config.getboolean(section, "multi_value_tags", fallback=False),
+            "multi_value_tags": (
+                False if getattr(arguments, "no_multi_tags", False)
+                else getattr(
+                    arguments,
+                    "multi_value_tags",
+                    config.getboolean(section, "multi_value_tags", fallback=False),
+                )
             ),
         }
 

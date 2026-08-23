@@ -20,8 +20,8 @@ def fun_args(subparsers, default_limit):
     """Configures the 'interactive' command-line subparser."""
     interactive = subparsers.add_parser(
         "interactive",
-        description="Interactively search for tracks and albums.",
-        help="interactive mode",
+        description="Pesquise interativamente por faixas e álbuns.",
+        help="Modo interativo",
         aliases=["i", "fun"],
     )
     interactive.add_argument(
@@ -264,6 +264,11 @@ def add_common_arg(custom_parser, default_folder, default_quality):
         action="store_true",
         default=argparse.SUPPRESS,
         help="split comma-separated metadata (like genres) into multiple tag fields",
+    )
+    custom_parser.add_argument(
+        "--no-multi-tags",
+        action="store_true",
+        help="temporarily disable splitting metadata into multiple tags (overrides config.ini)",
     )
     custom_parser.add_argument(
         "--booklet-only",

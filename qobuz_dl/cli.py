@@ -1,5 +1,6 @@
 from qobuz_dl.utils import get_config_paths
 import sys
+import argparse
 # rapidfuzz no lugar de difflib: mesmo motivo do qopy.py (10-100x mais
 # rapido, C++/Cython em vez de Python puro) -- aqui usado pra sugerir a
 # variavel de formato correta quando o usuario digita uma errada no
@@ -28,6 +29,7 @@ from qobuz_dl.bundle import Bundle
 from qobuz_dl.color import (
     GREEN, WARNING as YELLOW, RED, OFF, INFO as CYAN,
     RESET, BG, ACCENT_PRESETS, accent_preview,
+    HIGHLIGHT as ACCENT,
 )
 from qobuz_dl.commands import qobuz_dl_args
 from qobuz_dl.core import QobuzDL
@@ -38,7 +40,6 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(message)s",
 )
-
 
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
@@ -172,34 +173,28 @@ def validate_config_formats(formats_to_check):
                         f"{C_YEL}[!] Config Warning: Unknown variable '{{{base_var}}}' detected in '{config_name}'.{C_OFF}"
                     )
 
-                    # process.extractOne() do rapidfuzz e' o equivalente ao
-                    # difflib.get_close_matches(n=1, cutoff=0.6) -- cutoff
-                    # aqui e' 0-100 (nao 0-1), por isso 60 em vez de 0.6.
-                    # Retorna (match, score, index) ou None, em vez de uma
-                    # lista.
                     best = fuzz_process.extractOne(
                         base_var, VALID_KEYS, scorer=fuzz.ratio, score_cutoff=60
                     )
                     if best:
                         print(
-                            f"    {C_GRE}-> Did you mean '{{{
-                                best[0]}}}'?{C_OFF}"
+                            f"    {C_GRE}-> Você quis dizer '{{{best[0]}}}'?{C_OFF}"
                         )
 
                     print(
-                        f"    {C_RED}-> This will cause the entire format string to be discarded during download.{C_OFF}"
+                        f"    {C_RED}-> Isto fará com que toda a string de formato seja descartada durante o download.{C_OFF}"
                     )
                     has_errors = True
 
         except ValueError as e:
             print(
-                f"{C_RED}[!] Config Error: Syntax error in '{config_name}' -> {e}{C_OFF}"
+                f"{C_RED}[!] Erro de Configuração: erro de sintaxe em '{config_name}' -> {e}{C_OFF}"
             )
             has_errors = True
 
     if has_errors:
         print(
-            f"\n{C_YEL}[*] Tip: Please check your config.ini file or your command line arguments and fix any typos before downloading.{C_OFF}\n"
+            f"\n{C_YEL}[*] Dica: Verifique seu arquivo config.ini ou seus argumentos de linha de comando e corrija quaisquer erros de digitação antes de baixar.{C_OFF}\n"
         )
         sys.exit(1)
 
@@ -285,7 +280,7 @@ def _reset_config(config_file):
     accent_rgb = _pick_accent_color()
     config["qobuz"]["accent_color"] = accent_rgb
 
-    C_ACCENT = f"\033[38;2;{accent_rgb}m"
+    C_ACCENT = f"\033[38;2;{accent_rgb}m" if accent_rgb else YELLOW
 
     email = input("Enter your Qobuz email:\n- ").strip()
     config["qobuz"]["email"] = email
@@ -373,7 +368,7 @@ def _reset_config(config_file):
     config["qobuz"]["blacklist"] = "blacklist.txt"
     config["qobuz"]["lyrics_translation_lang"] = "pt"
 
-    logging.info(f"{C_ACCENT}Obtendo tokens. Por favor, aguarde...{OFF}")
+    logging.info(f"\n{C_ACCENT}Obtendo tokens. Por favor, aguarde...{OFF}")
     bundle = Bundle()
     config["qobuz"]["app_id"] = str(bundle.get_app_id())
     config["qobuz"]["secrets"] = ",".join(bundle.get_secrets().values())
@@ -445,9 +440,9 @@ async def _handle_commands(qobuz, arguments):
     """Routes parsed command-line arguments to the appropriate QobuzDL core methods."""
 
     def sigint_handler(sig, frame):
-        print(f"\n\n{RED}[!] Download forcibly interrupted by the user.{RESET}")
+        print(f"\n\n{RED}[!] Download interrompido à força pelo usuário.{RESET}")
         print(
-            f"{YELLOW}Partially downloaded files will be ignored or overwritten on the next run.{RESET}"
+            f"{YELLOW}Arquivos parcialmente baixados serão ignorados ou substituídos na próxima execução.{RESET}"
         )
         try:
             _remove_leftovers(qobuz.directory)
@@ -484,12 +479,6 @@ async def _handle_commands(qobuz, arguments):
         _remove_leftovers(qobuz.directory)
 
 
-# Fonte bitmap 5x5 propria (nao depende de nenhuma lib externa tipo
-# pyfiglet) usada so' pelas letras que aparecem em "QOBUZ-DL" / "ULTRA".
-# Desenhada e testada a mao pra garantir alinhamento perfeito -- cada
-# glifo tem exatamente 5 colunas de largura, sem excecao, entao toda
-# linha da logo sai com a MESMA largura total, garantindo que o bloco
-# nunca fica torto na hora de centralizar.
 _LOGO_FONT = {
     "A": ["01110", "10001", "11111", "10001", "10001"],
     "B": ["11110", "10001", "11110", "10001", "11110"],
@@ -542,9 +531,101 @@ def _print_logo(cols):
         for row in line2:
             print(f"{CYAN}{pad2}{row}{OFF}")
     else:
-        fallback = f"{CYAN}{BG} QOBUZ-DL-ULTRA {OFF}"
-        pad = " " * max((cols - len(fallback)) // 2, 0)
-        print(f"{CYAN}{pad}{fallback}{OFF}")
+        # Antes: len(fallback) contava os bytes invisiveis do ANSI
+        # ({CYAN}{BG}...{OFF}) como se fossem caracteres visiveis -- o
+        # padding saia errado (empurrava tudo pra esquerda, ou zerava em
+        # telas estreitas). Agora mede so' o texto que realmente aparece
+        # na tela, aplica a cor DEPOIS de calcular o preenchimento. Cor
+        # trocada de CYAN fixo pra ACCENT (a cor de destaque escolhida no
+        # wizard, `qobuz-dl -r`) + BG (negrito/brilho).
+        fallback_text = " QOBUZ-DL-ULTRA "
+        pad = " " * max((cols - len(fallback_text)) // 2, 0)
+        print(f"{pad}{ACCENT}{BG}{fallback_text}{OFF}")
+
+
+def _extract_subcommands(parser):
+    """
+    Le os subcomandos DIRETO do parser real (commands.py) -- nome
+    principal, aliases e o texto de help que foi passado pra
+    add_parser(). Isso garante que a tela inicial nunca fica desatualizada
+    silenciosamente: se um comando existe no parser, ele SEMPRE aparece
+    aqui, mesmo que ninguem lembre de atualizar uma lista escrita a mao
+    em algum outro lugar (foi exatamente isso que aconteceu com
+    --find-duplicates/--watch antes desta funcao existir).
+
+    Retorna: [(nome_principal, "alias1, alias2" ou None, help_text), ...]
+    na ordem de registro.
+    """
+    subparsers_action = None
+    for action in parser._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            subparsers_action = action
+            break
+    if subparsers_action is None:
+        return []
+
+    result = []
+    # ._choices_actions preserva a ORDEM de add_parser() e ja' lista so' o
+    # nome PRINCIPAL de cada subcomando (aliases nao aparecem aqui) --
+    # exatamente o que precisamos, sem ter que deduplicar na mao.
+    for choice_action in subparsers_action._choices_actions:
+        primary = choice_action.dest
+        subparser = subparsers_action.choices[primary]
+        # Aliases: qualquer chave em .choices que aponte pro MESMO objeto
+        # de subparser (argparse registra aliases como entradas extras
+        # apontando pro mesmo parser), exceto a propria entrada principal.
+        aliases = [
+            name
+            for name, sp in subparsers_action.choices.items()
+            if sp is subparser and name != primary
+        ]
+        alias_str = ", ".join(aliases) if aliases else None
+        result.append((primary, alias_str, choice_action.help))
+    return result
+
+
+def _extract_global_flags(parser):
+    """
+    Le as flags globais (fora de qualquer subcomando) DIRETO do parser
+    real. Retorna [(flag_str, dest, help_text), ...] na ordem de
+    registro. flag_str ja' inclui o hint "[METAVAR]" quando a opcao
+    aceita um valor opcional (ex.: "--watch [PATH]"), igual o estilo que
+    a tela ja usava antes.
+    """
+    result = []
+    for action in parser._actions:
+        if isinstance(action, (argparse._HelpAction, argparse._SubParsersAction)):
+            continue
+        flag_str = ", ".join(action.option_strings)
+        if action.nargs == "?" and action.metavar:
+            flag_str += f" [{action.metavar}]"
+        result.append((flag_str, action.dest, action.help))
+    return result
+
+
+# Descricoes PT-BR curadas (mais completas que o help= terso em ingles
+# usado internamente pelo argparse). Chave = nome do comando (primary) ou
+# dest da flag. Se um comando/flag novo for adicionado em commands.py e
+# esquecerem de cadastrar a descricao aqui, a tela NAO omite ele (isso
+# era o bug antigo) -- ela cai pro help_text do proprio argparse e loga
+# um aviso em debug, entao o "esquecimento" fica visivel no pior caso
+# como texto em ingles mais curto, nunca como ausencia total.
+_COMMAND_DESCRIPTIONS_PT = {
+    "dl": "Baixa por URL de álbum, faixa, artista, label, playlist ou playlist do last.fm.",
+    "interactive": "Busca interativa: procura faixas/álbuns e escolhe o que baixar na hora.",
+    "lucky": "Baixa os N primeiros resultados de uma busca no Qobuz, sem passar URL.",
+    "lyrics": "Varre uma pasta já baixada e injeta letras/traduções que estejam faltando.",
+    "sync-playlist": "Sincroniza uma pasta local com uma playlist do Qobuz (baixa o que falta, remove o que saiu).",
+}
+
+_FLAG_DESCRIPTIONS_PT = {
+    "reset": "cria/reseta o arquivo de configuração",
+    "purge": "apaga o banco de downloads-já-feitos",
+    "sync_db": "escaneia uma pasta local pra recuperar IDs do Qobuz perdidos no banco",
+    "find_duplicates": "acha faixas duplicadas por fingerprint de áudio (Chromaprint), não só tag",
+    "watch": "observa uma pasta e roda retro-tagging sozinho quando chegam arquivos novos",
+    "show_config": "mostra a configuração atual",
+}
 
 
 def _print_welcome_screen():
@@ -555,6 +636,11 @@ def _print_welcome_screen():
     View, a-Shell mini, etc.) por um layout que se adapta a QUALQUER
     largura de terminal, igual o `_get_safe_ncols()` que o downloader.py
     ja' usa pras barras de progresso.
+
+    Comandos e flags sao lidos DIRETO do parser real (ver
+    _extract_subcommands/_extract_global_flags) em vez de mantidos numa
+    lista separada -- evita a tela ficar desatualizada silenciosamente
+    quando um comando/flag novo e' adicionado em commands.py.
     """
     from qobuz_dl import __version__
 
@@ -563,53 +649,6 @@ def _print_welcome_screen():
     # leitura confortavel numa tela grande.
     cols = max(min(shutil.get_terminal_size(fallback=(80, 24)).columns, 100), 32)
     body_width = cols - 2  # 1 char de respiro em cada margem
-
-    # (comando, aliases, descricao breve)
-    COMMANDS = [
-        (
-            "dl",
-            None,
-            "Baixa por URL de album, faixa, artista, label, playlist ou playlist do last.fm.",
-        ),
-        (
-            "interactive",
-            "i, fun",
-            "Busca interativa: procura faixas/albuns e escolhe o que baixar na hora.",
-        ),
-        (
-            "lucky",
-            None,
-            "Baixa os N primeiros resultados de uma busca no Qobuz, sem passar URL.",
-        ),
-        (
-            "lyrics",
-            None,
-            "Varre uma pasta ja' baixada e injeta letras/traducoes que estejam faltando.",
-        ),
-        (
-            "sync-playlist",
-            "sp",
-            "Sincroniza uma pasta local com uma playlist do Qobuz (baixa o que falta, remove o que saiu).",
-        ),
-    ]
-
-    FLAGS = [
-        ("-r, --reset", "cria/reseta o arquivo de configuracao"),
-        ("-p, --purge", "apaga o banco de downloads-ja-feitos"),
-        (
-            "--sync-db [PATH]",
-            "escaneia uma pasta local pra recuperar IDs do Qobuz perdidos no banco",
-        ),
-        (
-            "--find-duplicates [PATH]",
-            "acha faixas duplicadas por fingerprint de audio (Chromaprint), nao so' tag",
-        ),
-        (
-            "--watch [PATH]",
-            "observa uma pasta e roda retro-tagging sozinho quando chegam arquivos novos",
-        ),
-        ("-sc, --show-config", "mostra a configuracao atual"),
-    ]
 
     def rule(ch="-"):
         print(ch * cols)
@@ -625,21 +664,42 @@ def _print_welcome_screen():
     print(f"{OFF}{version_line.center(cols)}{OFF}")
     print()
     rule("=")
-    print(f"{CYAN}{BG}Uso: qobuz-dl <comando> [opcoes]{RESET}")
-    print(f"     qobuz-dl <comando> --help   (lista todas as opcoes daquele comando)")
+    print(f"{CYAN}{BG}Uso: qobuz-dl <comando> [opções]{OFF}")
+    print(f"     qobuz-dl <comando> --help  {OFF}(lista todas as opções daquele comando){OFF}")
     print()
 
-    print(f"{CYAN}{BG}Comandos:{RESET}\n")
-    for name, aliases, desc in COMMANDS:
+    # Parser construido so' pra introspeccao -- os valores default aqui
+    # (qualidade/limite/pasta) nao importam pra esse fim, so' a
+    # ESTRUTURA (quais comandos/flags existem e seus textos de help).
+    parser = qobuz_dl_args()
+
+    print(f"{CYAN}{BG}Comandos:{OFF}\n")
+    for name, aliases, help_text in _extract_subcommands(parser):
         label = name if not aliases else f"{name} ({aliases})"
-        print(f"  {CYAN}{label}{OFF}")
+        desc = _COMMAND_DESCRIPTIONS_PT.get(name)
+        if desc is None:
+            logger.debug(
+                f"Comando '{name}' sem descrição PT-BR cadastrada na tela "
+                f"inicial, usando help do argparse como fallback."
+            )
+            desc = help_text or ""
+        print(f"  {ACCENT}{label}{OFF}")
         wrapped(desc, indent=4)
     print()
 
-    print(f"{CYAN}{BG}Flags globais:{RESET} {OFF}(nao pertencem a nenhum comando especifico){OFF}\n")
-    for flag, desc in FLAGS:
-        print(f"  {CYAN}{flag}{OFF}")
+    print(f"{CYAN}{BG}Flags globais:{RESET} {OFF}(não pertencem a nenhum comando específico){OFF}\n")
+    for flag_str, dest, help_text in _extract_global_flags(parser):
+        desc = _FLAG_DESCRIPTIONS_PT.get(dest)
+        if desc is None:
+            logger.debug(
+                f"Flag '{flag_str}' sem descrição PT-BR cadastrada na tela "
+                f"inicial, usando help do argparse como fallback."
+            )
+            desc = help_text or ""
+        print(f"  {ACCENT}{flag_str}{OFF}")
         wrapped(desc, indent=4)
+    print()
+
     rule("=")
 
 
@@ -672,10 +732,10 @@ def check_for_updates():
 
         if latest_tuple > current_tuple:
             print(
-                f"\n{YELLOW}[*] UPDATE AVAILABLE: Ultra Edition v{latest_version_str} is out!{OFF}"
+                f"\n{YELLOW}[*] ATUALIZAÇÃO DISPONÍVEL: Ultra Edition v{latest_version_str} está disponível!{OFF}"
             )
-            print(f"{YELLOW}    - PyPI: run 'pip install -U qobuz-dl-ultra'{OFF}")
-            print(f"{YELLOW}    - Docker: pull the latest image{OFF}")
+            print(f"{YELLOW}    - PyPI: rode 'pip install -U qobuz-dl-ultra'{OFF}")
+            print(f"{YELLOW}    - Docker: puxe a imagem mais recente{OFF}")
 
     except Exception:
         pass
@@ -704,7 +764,7 @@ async def async_main():
             await run_radar()
         except KeyboardInterrupt:
             print(
-                f"\n\n{RED}[!] Radar manually interrupted by the user (CTRL+C).{RESET}"
+                f"\n\n{RED}[!] Radar interrompido manualmente pelo usuário (CTRL+C).{RESET}"
             )
         sys.exit(0)
     # --------------------------------------------
@@ -721,8 +781,8 @@ async def async_main():
 
         def _row(label, value, label_w=30):
             if cols < 60:
+                # MODO CELULAR: Imprime o rótulo e coloca o valor embaixo, indetado
                 if label in ["Bit depths", "Sample rates"]:
-                    # MODO CELULAR: Imprime o rótulo e coloca o valor embaixo, indetado
                     print(f"  {CYAN}{label}:{RESET}")
                     print(f"    {value}")
                 else:
@@ -737,7 +797,8 @@ async def async_main():
 
         if not s or s.get("total", 0) == 0:
             print(
-                f"  {YELLOW}Nenhum dado encontrado. Comece a baixar para popular as estatísticas!{RESET}")
+                f"  {YELLOW}Nenhum dado encontrado. Comece a baixar para popular as estatísticas!{RESET}"
+            )
             print(f"\n{CYAN}{bar}{RESET}\n")
             sys.exit(0)
 
@@ -803,8 +864,6 @@ async def async_main():
             for rank, (artist, cnt) in enumerate(s["top_artists"], 1):
                 if cols < 60:
                     # MODO CELULAR: Nome na primeira linha, barra recuada na linha de baixo
-                    # Reduzimos o tamanho máximo da barra para 15 blocos para caber  com
-                    # folga
                     max_blocks = 12
                     bar_len = cnt if top_cnt <= max_blocks else max(
                         1, cnt * max_blocks // top_cnt)
@@ -829,7 +888,8 @@ async def async_main():
         print(f"{CYAN}{bar}{RESET}\n")
         if len(sys.argv) <= 2 or sys.argv[2] != "--artistas":
             print(
-                f"  {OFF}Dica: use  qobuz-dl stats --artistas  para ver a lista completa.{RESET}\n")
+                f"  {OFF}Dica: use  qobuz-dl stats --artistas  para ver a lista completa.{RESET}\n"
+            )
         sys.exit(0)
     # ---------------------------------
 
@@ -882,7 +942,7 @@ async def async_main():
             legacy_val = config.get(section, "default_folder", fallback=None)
             if legacy_val is not None:
                 print(
-                    f"{YELLOW}[!] Notice: 'default_folder' in config.ini is deprecated. Please rename it to 'directory' for future updates.{RESET}"
+                    f"{YELLOW}[!] Aviso: 'default_folder' em config.ini está obsoleto. Por favor, renomeie-o para 'directory' para atualizações futuras.{RESET}"
                 )
                 default_folder = legacy_val
             else:
@@ -947,15 +1007,15 @@ async def async_main():
             YELLOW_C = YELLOW
             OFF_C = RESET
             sys.exit(
-                f"{RED_C}Invalid or corrupted configuration ({error}).\n{OFF_C}"
-                f"{YELLOW_C}Run 'python -m qobuz_dl -r' to fix this.{OFF_C}"
+                f"{RED_C}Configuração inválida ou corrompida ({error}).\n{OFF_C}"
+                f"{YELLOW_C}Rode 'python -m qobuz_dl -r' para consertar isto.{OFF_C}"
             )
 
     if arguments.reset:
         sys.exit(_reset_config(CONFIG_FILE))
 
     if arguments.show_config:
-        print(f"Configuration: {CONFIG_FILE}\nDatabase: {QOBUZ_DB}\n---")
+        print(f"Configuração: {CONFIG_FILE}\nDatabase: {QOBUZ_DB}\n---")
         with open(CONFIG_FILE, "r") as f:
             print(f.read())
         sys.exit()
@@ -965,7 +1025,7 @@ async def async_main():
             os.remove(QOBUZ_DB)
         except FileNotFoundError:
             pass
-        sys.exit(f"{GREEN}Database has been purged.{OFF}")
+        sys.exit(f"{GREEN}O banco de dados foi deletado.{OFF}")
 
     # --- NEW DB SYNC FEATURE (Lightweight Mode) ---
     if getattr(arguments, "sync_db", None):
@@ -991,7 +1051,7 @@ async def async_main():
                 sync_dir = "\\\\?\\" + sync_dir
 
         await sync_database(sync_dir, QOBUZ_DB, sync_client)
-        sys.exit(f"\n{GREEN}Database synchronization finished successfully.{OFF}")
+        sys.exit(f"\n{GREEN}Sincronização do banco de dados concluída com sucesso.{OFF}")
     # ----------------------------------------------
 
     # --- DUPLICATE DETECTION FEATURE (Audio Fingerprint) ---
@@ -1048,7 +1108,7 @@ async def async_main():
                 force_english=force_english,
             )
         except Exception as e:
-            logging.debug(f"Authentication warning for watch client: {e}")
+            logging.debug(f"Aviso de autenticação para o cliente de letras: {e}")
 
         try:
             await watch_directory(
@@ -1111,7 +1171,7 @@ async def async_main():
                 force_english=force_english,
             )
         except Exception as e:
-            logging.debug(f"Authentication warning for lyrics client: {e}")
+            logging.debug(f"Aviso de autenticação para o cliente de letras: {e}")
 
         try:
             await inject_lyrics_retroactively(
@@ -1122,9 +1182,9 @@ async def async_main():
             )
         except KeyboardInterrupt:
             print(
-                f"\n\n{RED}[!] Operation manually interrupted by the user (CTRL+C).{RESET}"
+                f"\n\n{RED}[!] Operação interrompida manualmente pelo usuário (CTRL+C).{RESET}"
             )
-            print(f"{YELLOW}Already processed files are safe. Exiting...{RESET}")
+            print(f"{YELLOW}Os arquivos já processados estão seguros. Saindo...{RESET}")
         finally:
             if lyrics_client:
                 await lyrics_client.close()
