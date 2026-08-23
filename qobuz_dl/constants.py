@@ -1,6 +1,6 @@
 # Default format strings
 DEFAULT_FOLDER = (
-    "{media_type}/{album_artist} - {album_title} ({year}) [{format} {bit_depth}]"
+    "{release_type}/{album_artist} - {album_title} ({year}) [{format} {bit_depth}]"
 )
 # Formato padrao: so' numero + titulo. O artista nao e' repetido no
 # nome do arquivo porque ja' aparece no nivel da pasta (ALBUMARTIST).

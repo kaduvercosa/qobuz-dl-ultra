@@ -339,7 +339,7 @@ def _reset_config(config_file):
         config["qobuz"]["genius_token"] = genius_token
 
     config["qobuz"]["directory"] = (
-        input("\nPasta de download (pressione Enter para 'Qobuz Downloads')\n- ") or
+        input("\nPasta de download (pressione Enter para 'Qobuz Downloads')\n- ") or 
         "Qobuz Downloads"
     )
 
@@ -419,6 +419,21 @@ def _reset_config(config_file):
     logging.info(
         f"\n{GREEN}[+] Configuração salva com sucesso em {config_file}!{OFF}"
     )
+
+    import time
+    global ACCENT, CYAN
+    if accent_rgb:
+        nova_cor = f"\033[38;2;{accent_rgb}m"
+        ACCENT = nova_cor
+        CYAN = nova_cor
+
+    print("{ACCENT}\n [*] Atualizando interface...{OFF}", end="", flush=True)
+
+    time.sleep(2.0)
+
+    print("\r\033[K", end="")
+
+    _print_welcome_screen()
 
 
 def _remove_leftovers(directory):
