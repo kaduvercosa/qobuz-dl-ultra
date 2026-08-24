@@ -11,22 +11,23 @@
   * [🌉 Integração Inteligente com Last.fm e Modo Interativo](#-integração-inteligente-com-lastfm-e-modo-interativo)
   * [📡 Radar RSS do MusicButler](#-radar-rss-do-musicbutler-sincronização-automatizada-de-favoritos)
   * [🛡️ Gerenciamento de Pastas À Prova de Falhas e Retomada Inteligente](#️-gerenciamento-de-pastas-à-prova-de-falhas-e-retomada-inteligente)
+
 * [📥 Instalação e Configuração](#-instalação-e-configuração)
   * [Opção A: 📦 Pacote PyPI (Recomendado)](#opção-a--pacote-pypi-recomendado-para-todas-as-plataformas)
   * [Opção B: Código-fonte Python (Avançado)](#opção-b-código-fonte-python-avançado)
   * [Opção C: 🐳 Uso com Docker](#opção-c--uso-com-docker-nas-e-servidores-caseiros)
   * [⚙️ Configuração e Caminhos Personalizados](#️-configuração-e-caminhos-personalizados)
   * [🔑 Como obter seu Auth Token](#-como-obter-seu-auth-token)
+
 * [💻 Uso e Exemplos Rápidos](#-uso-e-exemplos-rápidos)
   * [🗄️ Gerenciamento de Banco de Dados e Biblioteca](#️-gerenciamento-de-banco-de-dados-e-biblioteca)
   * [🛠️ Principais Variáveis de Formatação](#️-principais-variáveis-de-formatação)
+
 * [🔧 Solução de Problemas: Ambientes Headless e Servidores](#-solução-de-problemas-ambientes-headless-e-servidores)
 * [🏆 Créditos](#-créditos)
 * [⚠️ Isenção de Responsabilidade (Aviso Legal)](#️-isenção-de-responsabilidade-aviso-legal)
 
 __Pesquise, explore e baixe músicas Lossless e Hi-Res do [Qobuz](https://www.qobuz.com/).__
-
-**Este é um fork aprimorado e repleto de recursos do projeto original qobuz-dl, projetado para a melhor experiência audiófila. Ele inclui um mecanismo de download resiliente com filtragem inteligente anti-spam, personalização profunda para manter sua biblioteca perfeitamente organizada e suporte nativo abrangente para metadados de música clássica.**
 
 ## ✨ Funcionalidades
 
