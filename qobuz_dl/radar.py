@@ -94,7 +94,8 @@ async def fetch_rss_releases(rss_url):
     Async wrapper around the blocking RSS fetch/parse -- offloaded via
     run_in_executor pra nao travar o event loop durante o request de rede.
     """
-    loop = asyncio.get_event_loop()
+    # BUGFIX: get_event_loop() dentro de corrotina esta' deprecado (3.10+).
+    loop = asyncio.get_running_loop()
     return await loop.run_in_executor(None, _fetch_rss_releases_sync, rss_url)
 
 

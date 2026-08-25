@@ -25,6 +25,7 @@ from pathvalidate import sanitize_filename, sanitize_filepath
 from tqdm import tqdm
 
 import qobuz_dl.metadata as metadata
+from qobuz_dl import ui
 from qobuz_dl.color import OFF, GREEN, RED, WARNING as YELLOW, INFO as CYAN, RESET
 from qobuz_dl.exceptions import NonStreamable
 
@@ -100,18 +101,22 @@ class _PermanentDownloadError(Exception):
     pass
 
 
-# UI Lock to prevent text scrambling during multithreading
-print_lock = threading.Lock()
+# UI Lock to prevent text scrambling during multithreading.
+# REFATORACAO: agora e' o MESMO objeto de lock usado por qobuz_dl.ui, para
+# que exista um unico lock de terminal no processo inteiro. Antes, o logging
+# de core.py/sync*.py escrevia sem lock nenhum e picava as barras do tqdm.
+print_lock = ui.print_lock
 
 # Global Abort Event for graceful CTRL+C handling and file unlock
 abort_event = threading.Event()
 
 
 def _get_safe_ncols():
-    try:
-        return max(shutil.get_terminal_size(fallback=(80, 24)).columns - 1, 20)
-    except Exception:
-        return 40
+    """Delegado para ``ui.progress_ncols()`` (fonte unica de largura).
+
+    Mantido como nome publico porque varios pontos do modulo o chamam.
+    """
+    return ui.progress_ncols()
 
 
 def _desc_budget(ncols):
@@ -151,11 +156,13 @@ def safe_print(*args, **kwargs):
     """
     Thread-safe print function. Prevents UI glitches ("cursor wars")
     when multiple download threads attempt to log to the terminal simultaneously.
+
+    REFATORACAO: agora delega para ``ui.emit()``, o unico ponto de escrita no
+    terminal do projeto -- assim ``--quiet``, deteccao de TTY e o fallback
+    para terminais nao-UTF-8 valem tambem aqui.
     """
-    with print_lock:
-        text = " ".join(map(str, args))
-        end = kwargs.get("end", "\n")
-        tqdm.write(text, end=end)
+    text = " ".join(map(str, args))
+    ui.emit(text, end=kwargs.get("end", "\n"))
 
 
 def print_download_header(kind: str, rows: list) -> None:
@@ -182,25 +189,11 @@ def print_download_header(kind: str, rows: list) -> None:
     fixo, estourando a tela em telas estreitas (ex: A-Shell no iPhone) mesmo
     quando o conteudo era bem mais curto que isso.
     """
-    label_width = max((len(label) for label, _ in rows), default=8)
-    BOLD = "\033[1m"  # Código ANSI para negrito
-
-    header_line = f" [{kind}]"
-    row_lines = [f" {label.upper():<{label_width}}  {value}" for label, value in rows]
-    content_width = max([len(header_line)] + [len(l) for l in row_lines], default=20)
-    bar_width = max(20, min(content_width, 44))
-    bar = "━" * bar_width
-
-    # [FAIXA] em negrito com a cor padrão (branco/preto). Linhas divisórias em Ciano.
-    lines = [f"\n{CYAN}{bar}{RESET}", f"{BOLD} [{kind}]{RESET}", ""]
-
-    # Rótulo em Ciano, Valor na cor padrão (branco/preto)
-    for label, value in rows:
-        lines.append(f" {CYAN}{label.upper():<{label_width}}{RESET}  {value}")
-
-    # Linha divisória final com a quebra de linha extra (\n) para espaçamento
-    lines.append(f"{CYAN}{bar}{RESET}\n")
-    safe_print("\n".join(lines))
+    # REFATORACAO: a implementacao virou ``ui.header()`` para ficar disponivel
+    # a todo o projeto (core.py, retro_tagger.py, sync*.py desenhavam cada um
+    # o seu proprio cabecalho, com larguras e cores diferentes). O teto de
+    # largura tambem deixou de ser 44 fixo e passou a acompanhar a tela.
+    ui.header(kind, rows)
 
 
 def emit_progress_json(settings, event, **fields):
@@ -257,9 +250,12 @@ def process_folder_format_with_subdirs(
                 cleaned_part = sanitize_filepath(
                     clean_filename(
                         formatted_part,
-                        legacy_charmap=(
-                            legacy_flag if "legacy_flag" in locals() else legacy_charmap
-                        ),
+                        # BUGFIX: era
+                        #   legacy_flag if "legacy_flag" in locals() else legacy_charmap
+                        # mas `legacy_flag` era um GLOBAL do modulo, nunca um
+                        # local desta funcao -- entao `"legacy_flag" in locals()`
+                        # era sempre False e o primeiro ramo era codigo morto.
+                        legacy_charmap=legacy_charmap,
                     ),
                     replacement_text="_",
                 )
@@ -578,8 +574,6 @@ class Download:
                 album_meta, dirn, album_title, file_format, bit_depth, sampling_rate
             )
 
-            loop = asyncio.get_event_loop()
-
             if self.settings.no_cover:
                 safe_print(f"{OFF}[*] Skipping cover{OFF}")
 
@@ -876,8 +870,6 @@ class Download:
             )
             os.makedirs(dirn, exist_ok=True)
 
-            loop = asyncio.get_event_loop()
-
             skip_saved_cover = getattr(self, "is_playlist", False) and not getattr(
                 self, "playlist_as_albums", False
             )
@@ -1000,7 +992,12 @@ class Download:
         embed_cover_path=None,
     ) -> bool:
         extension = ".mp3" if is_mp3 else ".flac"
-        loop = asyncio.get_event_loop()
+        # BUGFIX: `asyncio.get_event_loop()` dentro de uma corrotina esta'
+        # deprecado desde o Python 3.10 (emite DeprecationWarning em 3.12+ e
+        # sera' removido). Dentro de codigo async o correto e'
+        # `get_running_loop()`, que tambem falha alto em vez de criar um loop
+        # novo por acidente.
+        loop = asyncio.get_running_loop()
 
         track_artist = _safe_get(track_metadata, "performer", "name")
         filename_attr = self._get_filename_attr(
@@ -1066,8 +1063,9 @@ class Download:
         final_file = os.path.join(root_dir, formatted_path) + extension
 
         if os.path.exists(final_file):
-            safe_print(f"{CYAN}[*] Pulando: {
-                os.path.basename(final_file)} (Já existe){OFF}")
+            safe_print(
+                f"{CYAN}[*] Pulando: {os.path.basename(final_file)} (Já existe){OFF}"
+            )
             return True
 
         if abort_event.is_set():
@@ -1126,8 +1124,10 @@ class Download:
                 return False
 
             if attempt_fmt != int(self.quality):
-                safe_print(f"{YELLOW}[!] Automatic downgrade: Attempting to save in {
-                    TIER_NAMES[attempt_fmt]}...{OFF}")
+                safe_print(
+                    f"{YELLOW}[!] Automatic downgrade: Attempting to save in "
+                    f"{TIER_NAMES[attempt_fmt]}...{OFF}"
+                )
 
             async def get_fresh_url(fmt=attempt_fmt, force_segments=False):
                 return await self.client.get_track_url(
@@ -1286,11 +1286,15 @@ class Download:
                 )
                 if original_lang:
                     if original_lang.lower() == translation_lang.lower():
-                        translation_note = f"    ℹ️ Letras já em {
-                            translation_lang.upper()} -- sem necessidade de tradução."
+                        translation_note = (
+                            f"    ℹ️ Letras já em {translation_lang.upper()} "
+                            f"-- sem necessidade de tradução."
+                        )
                     else:
-                        translation_note = f"    ℹ️ Nenhuma tradução em {
-                            translation_lang.upper()} disponível no Qobuz ainda para esta faixa."
+                        translation_note = (
+                            f"    ℹ️ Nenhuma tradução em {translation_lang.upper()} "
+                            f"disponível no Qobuz ainda para esta faixa."
+                        )
 
             def _inject_lyrics_and_print():
                 with print_lock:
@@ -1570,7 +1574,9 @@ class Download:
 
         media_count = album_meta.get("media_count", 1)
         is_multiple = True if media_count > 1 else False
-        extension = ".flac" if file_format.lower() == "flac" else ".mp3"
+        # NOTA: mantido apenas para documentar a extensao correspondente ao
+        # formato; a checagem real acontece via excecao mais abaixo.
+        _extension = ".flac" if file_format.lower() == "flac" else ".mp3"
 
         legacy_flag = getattr(settings, "legacy_charmap", False) if settings else False
 
@@ -1597,7 +1603,7 @@ class Download:
                     )
 
                     if is_multiple and self.settings.multiple_disc_one_dir:
-                        track_path = sanitize_filename(
+                        _track_path = sanitize_filename(
                             clean_filename(
                                 multi_disc_fmt.format(**filename_attr),
                                 legacy_charmap=legacy_flag,
@@ -1606,12 +1612,17 @@ class Download:
                         )
                     else:
                         if is_multiple and not self.settings.multiple_disc_one_dir:
-                            disc_dir = f"{
-                                self.settings.multiple_disc_prefix} {
-                                track_metadata['media_number']:02}"
+                            _mnum = track_metadata["media_number"]
+                            disc_dir = (
+                                f"{self.settings.multiple_disc_prefix} {_mnum:02}"
+                            )
+                            # NOTA: o join e' descartado de proposito -- este
+                            # bloco existe apenas para VALIDAR os formatos, e
+                            # o sinal de validade e' a excecao (KeyError/
+                            # ValueError) capturada abaixo, nao o valor.
                             os.path.join(root_dir, disc_dir)
 
-                        track_path = sanitize_filename(
+                        _track_path = sanitize_filename(
                             clean_filename(
                                 track_fmt.format(**filename_attr),
                                 legacy_charmap=legacy_flag,
@@ -1765,7 +1776,6 @@ class Download:
             if not lyrics_json_url:
                 return None
 
-            loop = asyncio.get_event_loop()
             resp = await self.http_session.get(lyrics_json_url, timeout=12)
 
             if resp.status_code in (403, 404):
@@ -1850,7 +1860,12 @@ async def tqdm_download(
 ):
     if abort_event.is_set():
         return
-    G, Y, C, O, R = GREEN, YELLOW, CYAN, OFF, RESET
+    # BUGFIX: o alias era `DIM = OFF`, e as linhas terminavam em `{DIM}`
+    # achando que aquilo encerrava a formatacao. `OFF` era `Style.DIM`, ou
+    # seja: em vez de encerrar, ATIVAVA o esmaecido e mantinha a cor ligada,
+    # vazando para tudo que vinha depois. Agora fecha com `{R}` (RESET real)
+    # e o alias enganoso deixou de existir.
+    G, Y, C, R = GREEN, YELLOW, CYAN, RESET
 
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -1861,8 +1876,8 @@ async def tqdm_download(
     position = position_pool.acquire() if (is_parallel and position_pool) else 0
 
     if not is_parallel:
-        safe_print(f"{C}[+] Em Progresso: {track_name}{O}")
-        tqdm_desc = f" {R}⬇️{O}"
+        safe_print(f"{C}[+] Em Progresso: {track_name}{R}")
+        tqdm_desc = f" {R}⬇️{R}"
         b_format = "{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]"
         ncols = None
         dynamic_ncols = True
@@ -1915,10 +1930,10 @@ async def tqdm_download(
 
                     # Log dinâmico de reconexão
                     if attempt.retry_state.attempt_number > 1:
+                        _n = attempt.retry_state.attempt_number
                         safe_print(
-                            f"\n{Y}[!] Falha de Rede. Tentativa {
-                                attempt.retry_state.attempt_number}/5 "
-                            f"para {track_name}{O}"
+                            f"\n{Y}[!] Falha de Rede. Tentativa {_n}/5 "
+                            f"para {track_name}{R}"
                         )
 
                     async with http.stream(
@@ -1953,7 +1968,7 @@ async def tqdm_download(
                         ):
                             size_mb = total_size / (1024 * 1024) if total_size else 0
                             safe_print(
-                                f"{C}[+] Em Progresso: {track_name} [{size_mb:.1f} MB]{O}"
+                                f"{C}[+] Em Progresso: {track_name} [{size_mb:.1f} MB]{R}"
                             )
 
                         async with aiofiles.open(fname, mode) as file:
@@ -1982,13 +1997,13 @@ async def tqdm_download(
                                         bar.update(size)
 
                     if downloaded_size >= total_size:
-                        safe_print(f"{G}  L Concluído: {track_name}{O}")
+                        safe_print(f"{G}  L Concluído: {track_name}{R}")
                         return
 
         except _PermanentDownloadError as e:
             if os.path.exists(fname):
                 os.remove(fname)
-            safe_print(f"{Y}[!] Indisponível: {track_name} ({e}){O}")
+            safe_print(f"{Y}[!] Indisponível: {track_name} ({e}){R}")
             raise
 
         except (KeyboardInterrupt, SystemExit):
@@ -2005,7 +2020,13 @@ async def tqdm_download(
         except Exception as e:
             if os.path.exists(fname):
                 os.remove(fname)
-            raise Exception(f"Definitive timeout after 5 attempts, Last Error: {e}")
+            # BUGFIX: `raise Exception(...)` sem `from e` DESCARTA o traceback
+            # original. O erro de rede real (timeout, DNS, TLS, 5xx) sumia e
+            # so' sobrava a mensagem generica -- o que tornava impossivel
+            # depurar downloads que falham em producao.
+            raise Exception(
+                f"Definitive timeout after 5 attempts, Last Error: {e}"
+            ) from e
 
         if downloaded_size < total_size and not abort_event.is_set():
             if os.path.exists(fname):
@@ -2162,7 +2183,7 @@ async def _get_cover_and_embed(
 
 def _clean_format_str(folder: str, track: str, file_format: str) -> Tuple[str, str]:
     final = []
-    for i, fs in enumerate((folder, track)):
+    for _i, fs in enumerate((folder, track)):
         if fs.endswith(".mp3"):
             fs = fs[:-4]
         elif fs.endswith(".flac"):
@@ -2195,7 +2216,15 @@ async def tqdm_download_segments(
 ):
     if abort_event.is_set():
         return
-    G, C, O, R = GREEN, CYAN, OFF, RESET, YELLOW
+    # BUGFIX CRITICO: era `G, C, O, R = GREEN, CYAN, OFF, RESET, YELLOW`
+    # -- 4 nomes recebendo 5 valores, o que levanta
+    # `ValueError: too many values to unpack (expected 4, got 5)` na
+    # PRIMEIRA linha executavel da funcao. Ou seja: o download segmentado
+    # de fallback (acionado quando a Akamai bloqueia o download direto)
+    # nunca chegou a rodar -- morria antes de baixar 1 byte.
+    # O alias `O` (ambiguo, confundivel com zero) foi eliminado junto: as
+    # linhas desta funcao fecham com `{R}` (RESET real), nunca com esmaecido.
+    G, C, R = GREEN, CYAN, RESET
 
     tmp_fname = fname + ".mp4"
     n_segments = track_url_dict["n_segments"]
@@ -2205,8 +2234,14 @@ async def tqdm_download_segments(
     workers = segment_workers if segment_workers else 4
 
     owns_session = session is None
-    http = session or httpx.AsyncClient(follow_redirects=True)
+    # BUGFIX: `timeout_cfg` era construido e nunca usado -- o AsyncClient subia
+    # com o timeout DEFAULT do httpx (5s), enquanto a intencao declarada era
+    # 60s de leitura / 10s de conexao. Em faixas Hi-Res grandes ou conexoes
+    # lentas isso derrubava o download segmentado por timeout prematuro.
     timeout_cfg = httpx.Timeout(60.0, connect=10.0)
+    http = session or httpx.AsyncClient(
+        follow_redirects=True, timeout=timeout_cfg
+    )
 
     # 1. RETRY NAS CHECAGENS DE TAMANHO (TENACITY)
     async def get_seg_size(seg_num):
@@ -2235,7 +2270,7 @@ async def tqdm_download_segments(
 
     if is_parallel:
         size_mb = total_size / (1024 * 1024) if total_size else 0
-        safe_print(f"{C}[+] Em progresso: {track_name} [{size_mb:.1f} MB]{O}")
+        safe_print(f"{C}[+] Em progresso: {track_name} [{size_mb:.1f} MB]{R}")
         desc_len = position_pool.desc_len if position_pool else 14
         short_name = (
             track_name
@@ -2247,8 +2282,8 @@ async def tqdm_download_segments(
         ncols = position_pool.ncols if position_pool else _get_safe_ncols()
         dynamic_ncols = False
     else:
-        safe_print(f"{C}[+] Em Progresso: {track_name}{O}")
-        tqdm_desc = f" {R}Segmented Download{O}"
+        safe_print(f"{C}[+] Em Progresso: {track_name}{R}")
+        tqdm_desc = f" {R}Segmented Download{R}"
         b_format = "{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]"
         ncols = None
         dynamic_ncols = True
@@ -2270,9 +2305,10 @@ async def tqdm_download_segments(
 
                 # Se cair a rede no meio da música, ele avisa discretamente
                 if attempt.retry_state.attempt_number > 1:
+                    _n = attempt.retry_state.attempt_number
                     safe_print(
-                        f"\n{YELLOW}[!] Reconectando segmento {seg_num}. Tentativa {
-                            attempt.retry_state.attempt_number}/5 para {track_name}{OFF}"
+                        f"\n{YELLOW}[!] Reconectando segmento {seg_num}. "
+                        f"Tentativa {_n}/5 para {track_name}{OFF}"
                     )
 
                 seg_data.clear()
@@ -2338,7 +2374,7 @@ async def tqdm_download_segments(
         if abort_event.is_set():
             return
         if not is_parallel:
-            safe_print(f" {G}  > Assembling the final FLAC file...{O}")
+            safe_print(f" {G}  > Assembling the final FLAC file...{R}")
 
         # 4. MONTAGEM FINAL ASSINCRONA COM O FFMPEG
         remux = await asyncio.create_subprocess_exec(
@@ -2364,7 +2400,7 @@ async def tqdm_download_segments(
         if remux.returncode != 0:
             raise ConnectionError(f"FFmpeg remux failed for {fname}: {stderr.decode()}")
 
-        safe_print(f"{G}  L Concluído: {track_name}{O}")
+        safe_print(f"{G}  L Concluído: {track_name}{R}")
 
     except (KeyboardInterrupt, SystemExit):
         abort_event.set()
@@ -2372,7 +2408,8 @@ async def tqdm_download_segments(
 
     except Exception as e:
         if not abort_event.is_set():
-            raise Exception(f"Download fatiado falhou: {e}")
+            # BUGFIX: preserva a excecao original (ver comentario acima).
+            raise Exception(f"Download fatiado falhou: {e}") from e
 
     finally:
         # 5. LIMPEZA SEGURA

@@ -1,7 +1,17 @@
-from qobuz_dl.utils import get_config_paths
+from qobuz_dl.utils import get_config_paths, checar_binarios_externos
 import sys
 import argparse
-from rapidfuzz import process as fuzz_process, fuzz
+
+# BUGFIX: era `from rapidfuzz import process as fuzz_process, fuzz`, um import
+# no topo do arquivo. Como o rapidfuzz e' um pacote compilado, isso tornava o
+# CLI inteiro impossivel de importar em ambientes que so' aceitam pacotes
+# Python puros (a-Shell no iPad). Nem `--help` rodava. Agora passa pelo
+# qobuz_dl.fuzzy, que usa rapidfuzz quando existe e difflib quando nao.
+from qobuz_dl import fuzzy
+
+# Comparacao de versao conforme a especificacao da PyPA (ver check de update
+# mais abaixo). Pacote Python puro, sem dependencias proprias.
+from packaging.version import Version
 import string
 import configparser
 import logging
@@ -9,8 +19,7 @@ import glob
 import os
 import send2trash
 import signal
-import shutil
-import textwrap
+import time
 import keyring
 import httpx
 import asyncio
@@ -32,14 +41,7 @@ from qobuz_dl.commands import qobuz_dl_args
 from qobuz_dl.core import QobuzDL
 from qobuz_dl.downloader import DEFAULT_FOLDER, DEFAULT_TRACK
 from qobuz_dl.settings import QobuzDLSettings
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(message)s",
-)
-
-logging.getLogger("httpx").setLevel(logging.WARNING)
-logging.getLogger("httpcore").setLevel(logging.WARNING)
+from qobuz_dl import ui
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +58,31 @@ QOBUZ_DB = _config_paths["qobuz_db"]
 IOS_HOME = os.environ.get("QOBUZ_DL_IOS_HOME")
 
 KEYRING_SERVICE = "qobuz-dl"
+
+
+def _bootstrap_ui():
+    """Configura a camada de saída antes de o argparse rodar.
+
+    As flags ``--quiet/--verbose/--no-color`` precisam valer já na tela
+    inicial e nas mensagens de erro de configuração, que acontecem ANTES do
+    ``parse_args()``. Por isso este único ponto olha ``sys.argv`` direto --
+    e só para decidir verbosidade/cor, nunca para despachar comandos.
+    """
+    argv = sys.argv[1:]
+    ui.configure(
+        quiet="--quiet" in argv,
+        verbose=("--verbose" in argv or "-v" in argv),
+        color=False if "--no-color" in argv else None,
+    )
+    ui.install_logging()
+
+
+# REFATORACAO: antes era um `logging.basicConfig(level=INFO, ...)` cru, cujo
+# StreamHandler escrevia direto em stderr -- por cima das barras de progresso
+# do tqdm sempre que core.py/sync*.py logavam algo durante um download.
+# Agora todo o logging passa pelo `ui.TqdmLoggingHandler`, ou seja pelo mesmo
+# lock e pelo mesmo `tqdm.write` usados pelo downloader.
+_bootstrap_ui()
 
 
 def _keyring_save(key, value):
@@ -100,7 +127,7 @@ def validate_config_formats(formats_to_check):
 
     Scans the configuration format strings for unknown variables to prevent
     silent KeyErrors during the download process. Implements a heuristic engine
-    using rapidfuzz to suggest typing corrections to the user.
+    (ver qobuz_dl.fuzzy) to suggest typing corrections to the user.
 
     Args:
         formats_to_check (dict): A dictionary mapping format setting names to their string values.
@@ -170,11 +197,9 @@ def validate_config_formats(formats_to_check):
                         f"{C_YEL}[!] Config Warning: Unknown variable '{{{base_var}}}' detected in '{config_name}'.{C_OFF}"
                     )
 
-                    best = fuzz_process.extractOne(
-                        base_var, VALID_KEYS, scorer=fuzz.ratio, score_cutoff=60
-                    )
+                    best = fuzzy.melhor_match(base_var, VALID_KEYS, corte=0.6)
                     if best:
-                        print(f"    {C_GRE}-> Você quis dizer '{{{best[0]}}}'?{C_OFF}")
+                        print(f"    {C_GRE}-> Você quis dizer '{{{best}}}'?{C_OFF}")
 
                     print(
                         f"    {C_RED}-> Isto fará com que toda a string de formato seja descartada durante o download.{C_OFF}"
@@ -201,11 +226,16 @@ def _pick_accent_color() -> str:
     Retorna o valor RGB no formato "R;G;B" pronto pra gravar no config.ini.
     """
     print(f"\n{BG}[?] Cor de destaque do programa:{OFF}")
-    print(f"    {OFF}Aparece em nomes de faixas, cabecalhos, barras e progresso.{OFF}")
+    # BUGFIX (tela estreita): esta explicacao era um literal de 63 colunas
+    # impresso cru, estourando em qualquer terminal abaixo disso. Agora
+    # quebra na largura real, como o resto da interface.
+    ui.wrapped(
+        "Aparece em nomes de faixas, cabecalhos, barras e progresso.", indent=4
+    )
     print()
 
     # Mostrar todas as opcoes com preview lado a lado
-    for idx, (name, rgb, escape) in enumerate(ACCENT_PRESETS, 1):
+    for idx, (name, _rgb, escape) in enumerate(ACCENT_PRESETS, 1):
         if escape:
             preview = accent_preview(escape, "━━ [FAIXA]  ARTISTA  The Weeknd")
             print(f"  {idx:2}. {name:<22} {preview}")
@@ -214,9 +244,14 @@ def _pick_accent_color() -> str:
 
     print()
     while True:
-        choice = input(
-            f"Escolha (1-{len(ACCENT_PRESETS)}) [Enter = 1 padrao]: "
-        ).strip()
+        # BUGFIX (tela estreita): o prompt tinha 34 colunas fixas e estourava
+        # em 32. Em tela apertada usa a forma curta -- prompt de `input()` NAO
+        # pode ser quebrado em varias linhas sem separar a pergunta do cursor.
+        _n = len(ACCENT_PRESETS)
+        prompt = f"Escolha (1-{_n}) [Enter = 1 padrao]: "
+        if len(prompt) > ui.width():
+            prompt = f"Escolha 1-{_n}: "
+        choice = input(prompt).strip()
         if not choice:
             choice = "1"
         try:
@@ -251,7 +286,7 @@ def _pick_accent_color() -> str:
 
         # Mostrar preview da cor personalizada
         print()
-        print(f"  Preview da sua cor:")
+        print("  Preview da sua cor:")
         print(accent_preview(escape, "━━ [FAIXA]  ARTISTA  The Weeknd"))
         print()
         confirm = (
@@ -270,7 +305,12 @@ def _reset_config(config_file):
     """
     Interactive configuration wizard for initializing or resetting the config.ini file.
     """
-    logging.info(f"\n{BG}[ QOBUZ-DL-ULTRA - CONFIGURAÇÃO INICIAL ]{OFF}")
+    # BUGFIX (tela estreita): titulo fixo de 41 colunas. Em tela apertada cai
+    # para a forma curta em vez de vazar para a linha de baixo.
+    if ui.width() >= 41:
+        logging.info(f"\n{BG}[ QOBUZ-DL-ULTRA - CONFIGURAÇÃO INICIAL ]{OFF}")
+    else:
+        logging.info(f"\n{BG}[ CONFIGURAÇÃO INICIAL ]{OFF}")
     config = configparser.ConfigParser(interpolation=None)
 
     config["qobuz"] = {}
@@ -297,7 +337,7 @@ def _reset_config(config_file):
 
     print(f"\n{C_ACCENT}[?] OS Keyring Security:{OFF}")
     print(
-        f"    Por padrão, os tokens são criptografados no seu Gerenciador de Credenciais do Sistema Operacional."
+        "    Por padrão, os tokens são criptografados no seu Gerenciador de Credenciais do Sistema Operacional."
     )
     print(
         f"    {OFF}Se você estiver em um Linux/NAS/Docker, isso pode falhar silenciosamente.{OFF}"
@@ -418,12 +458,10 @@ def _reset_config(config_file):
     config["qobuz"]["max_workers"] = "1"
     config["qobuz"]["user_auth_token"] = ""
 
-    with open(config_file, "w") as configfile:
+    with open(config_file, "w", encoding="utf-8") as configfile:
         config.write(configfile)
 
     logging.info(f"\n{GREEN}[+] Configuração salva com sucesso em {config_file}!{OFF}")
-
-    import time
 
     global ACCENT, CYAN
     if accent_rgb:
@@ -431,7 +469,9 @@ def _reset_config(config_file):
         ACCENT = nova_cor
         CYAN = nova_cor
 
-    print("{ACCENT}\n [*] Atualizando interface...{OFF}", end="", flush=True)
+    # BUGFIX: faltava o prefixo `f`, então o terminal imprimia literalmente
+    # "{ACCENT}...{OFF}" em vez de aplicar as cores.
+    print(f"{ACCENT}\n [*] Atualizando interface...{OFF}", end="", flush=True)
 
     time.sleep(2.0)
 
@@ -652,35 +692,38 @@ def _print_welcome_screen():
     """
     from qobuz_dl import __version__
 
-    # Nunca deixa a largura ficar ridiculamente pequena (ex: terminal
-    # relatando 0 colunas em alguns pipes/CI) nem gigante demais pra
-    # leitura confortavel numa tela grande.
-    cols = max(min(shutil.get_terminal_size(fallback=(80, 24)).columns, 100), 32)
-    body_width = cols - 2  # 1 char de respiro em cada margem
+    # REFATORACAO: esta funcao calculava a propria largura e definia os
+    # proprios `rule()`/`wrapped()` locais -- um dos 7 lugares do projeto que
+    # faziam isso com limites diferentes. Agora usa a camada unica ui.py.
+    cols = ui.width()
 
     def rule(ch="-"):
-        print(ch * cols)
+        ui.rule(ch)
 
     def wrapped(text, indent):
-        pad = " " * indent
-        for line in textwrap.wrap(text, width=body_width - indent) or [""]:
-            print(f"{pad}{line}")
+        ui.wrapped(text, indent=indent)
 
     print()
     _print_logo(cols)
     version_line = f"v{__version__}"
-    print(f"{OFF}{version_line.center(cols)}{OFF}")
+    # A versao fica em texto limpo: quem carrega a identidade visual e' a
+    # logo logo acima. Antes saia esmaecida por causa do `OFF`/`Style.DIM`.
+    print(f"{RESET}{version_line.center(cols)}")
     print()
     rule("=")
-    print(f"{CYAN}{BG}Uso: qobuz-dl <comando> [opções]{OFF}")
-    print(
-        f"     qobuz-dl <comando> --help  {OFF}(lista todas as opções daquele comando){OFF}"
-    )
+    # Titulos de secao usam SO' negrito, sem cor: na tela inicial a cor fica
+    # reservada para a logo e para os comandos/flags -- o que o usuario
+    # precisa localizar e digitar. Negrito ja' da' a hierarquia.
+    print(f"{BG}Uso: qobuz-dl <comando> [opções]{OFF}")
+    # BUGFIX: estas duas linhas eram literais fixos e estouravam a tela em
+    # terminais estreitos (a de `--help` tem 71 caracteres). Agora quebram
+    # na largura real.
+    ui.wrapped("qobuz-dl <comando> --help  (lista todas as opções daquele comando)", indent=5)
     print()
 
     parser = qobuz_dl_args()
 
-    print(f"{CYAN}{BG}Comandos:{OFF}\n")
+    print(f"{BG}Comandos:{OFF}\n")
     for name, aliases, help_text in _extract_subcommands(parser):
         label = name if not aliases else f"{name} ({aliases})"
         desc = _COMMAND_DESCRIPTIONS_PT.get(name)
@@ -694,9 +737,15 @@ def _print_welcome_screen():
         wrapped(desc, indent=4)
     print()
 
-    print(
-        f"{CYAN}{BG}Flags globais:{RESET} {OFF}(não pertencem a nenhum comando específico){OFF}\n"
-    )
+    if cols >= 62:
+        print(
+            f"{BG}Flags globais:{RESET} "
+            f"{OFF}(não pertencem a nenhum comando específico){OFF}\n"
+        )
+    else:
+        # Em telas estreitas o parênteses explicativo ia para a linha de baixo
+        # sem recuo; melhor omiti-lo e manter só o título da seção.
+        print(f"{BG}Flags globais:{RESET}\n")
     for flag_str, dest, help_text in _extract_global_flags(parser):
         desc = _FLAG_DESCRIPTIONS_PT.get(dest)
         if desc is None:
@@ -733,21 +782,39 @@ def check_for_updates():
         response = httpx.get(url, timeout=2)
         response.raise_for_status()
 
-        latest_version_str = response.json().get("tag_name", "").replace("v", "")
+        latest_version_str = response.json().get("tag_name", "").lstrip("vV")
         current_version_str = __version__
 
-        latest_tuple = tuple(map(int, latest_version_str.split(".")))
-        current_tuple = tuple(map(int, current_version_str.split(".")))
+        # BUGFIX: era `tuple(map(int, s.split(".")))` nas duas versoes. Isso
+        # levanta ValueError em qualquer tag que nao seja puramente numerica
+        # -- "2.5.0-rc1", "2.5.0b1", "2.5.0.post1" -- e como a funcao inteira
+        # estava dentro de um `except Exception: pass`, o erro era engolido e
+        # o aviso de atualizacao simplesmente nunca aparecia, sem pista
+        # nenhuma de que tinha falhado. Testado: 3 de 7 tags plausiveis
+        # quebravam.
+        #
+        # `packaging.version.Version` implementa a especificacao de versao da
+        # PyPA (a mesma que o pip usa), entende pre/post/dev-release e ordena
+        # corretamente. Tambem trocado `.replace("v", "")` por `.lstrip("vV")`:
+        # o replace removia TODO "v" da string, entao uma tag como "2.5.0-dev"
+        # continuava certa mas "v2.5.0-preview" virava "2.5.0-preiew".
+        versao_remota = Version(latest_version_str)
+        versao_local = Version(current_version_str)
 
-        if latest_tuple > current_tuple:
+        if versao_remota > versao_local:
             print(
                 f"\n{YELLOW}[*] ATUALIZAÇÃO DISPONÍVEL: Ultra Edition v{latest_version_str} está disponível!{OFF}"
             )
             print(f"{YELLOW}    - PyPI: rode 'pip install -U qobuz-dl-ultra'{OFF}")
             print(f"{YELLOW}    - Docker: puxe a imagem mais recente{OFF}")
 
-    except Exception:
-        pass
+    except Exception as e:
+        # Continua sem incomodar quem so' quer baixar musica (sem rede, atras
+        # de firewall, GitHub fora do ar -- nada disso deve poluir a saida).
+        # Mas nao engole mais em silencio: com --verbose o motivo aparece.
+        # Erro silencioso e' bug que nunca se descobre; foi exatamente assim
+        # que o ValueError acima passou despercebido.
+        logger.debug("Checagem de atualizacao falhou: %s: %s", type(e).__name__, e)
 
 
 async def async_main():
@@ -765,152 +832,45 @@ async def async_main():
 
     asyncio.create_task(_async_check_updates())
 
-    # --- RADAR FEATURE (Standalone Intercept) ---
-    if len(sys.argv) > 1 and sys.argv[1] == "radar":
+    # --- Comandos que nao precisam de login no Qobuz ---
+    # REFATORACAO: `radar` e `stats` eram despachados por sniffing de
+    # `sys.argv[1]`, e `--artistas` por `sys.argv[2]`. Consequencias reais:
+    #   * `qobuz-dl --quiet stats` NAO caia no atalho (argv[1] era "--quiet"),
+    #     seguia para o fluxo normal e tentava logar no Qobuz -- estourando
+    #     AuthenticationError num comando que so' le' o banco local;
+    #   * qualquer flag antes do subcomando quebrava os dois comandos;
+    #   * `--artistas` so' funcionava se fosse exatamente o 2o argumento.
+    # Agora o argparse resolve o nome do comando (ele ja' conhece os aliases)
+    # e o despacho usa `arguments.command`.
+    offline_args, _unknown = qobuz_dl_args().parse_known_args()
+    offline_command = getattr(offline_args, "command", None)
+
+    if offline_command == "radar":
         from qobuz_dl.radar import run_radar
 
         try:
             await run_radar()
         except KeyboardInterrupt:
-            print(
-                f"\n\n{RED}[!] Radar interrompido manualmente pelo usuário (CTRL+C).{RESET}"
-            )
+            ui.blank()
+            ui.error("Radar interrompido manualmente pelo usuário (CTRL+C).")
         sys.exit(0)
-    # --------------------------------------------
 
-    # --- STATS COMMAND INTEGRATION ---
-    if len(sys.argv) > 1 and sys.argv[1] == "stats":
-        from qobuz_dl.db import get_stats
-        import shutil as _shutil
+    if offline_command == "stats":
+        from qobuz_dl.stats_view import render_stats
 
-        s = get_stats(QOBUZ_DB)
-        cols = min(_shutil.get_terminal_size((80, 24)).columns, 100)
-        bar = "━" * cols
-        div = "─" * cols
-
-        def _row(label, value, label_w=30):
-            if cols < 60:
-                # MODO CELULAR: Imprime o rótulo e coloca o valor embaixo, indetado
-                if label in ["Bit depths", "Sample rates"]:
-                    print(f"  {CYAN}{label}:{RESET}")
-                    print(f"    {value}")
-                else:
-                    print(f"  {CYAN}{label}:{RESET} {value}")
-            else:
-                # MODO TABLET/PC: Lado a LAdo com alinhamento perfeito
-                print(f"  {CYAN}{label:<{label_w}}{RESET}  {value}")
-
-        print(f"\n{CYAN}{bar}{RESET}")
-        print(f"{BG}{CYAN}{'  QOBUZ-DL-ULTRA  ·  STATISTICS':^{cols}}{RESET}")
-        print(f"{CYAN}{bar}{RESET}\n")
-
-        if not s or s.get("total", 0) == 0:
-            print(
-                f"  {YELLOW}Nenhum dado encontrado. Comece a baixar para popular as estatísticas!{RESET}"
+        sys.exit(
+            render_stats(
+                QOBUZ_DB,
+                show_all_artists=getattr(offline_args, "artistas", False),
             )
-            print(f"\n{CYAN}{bar}{RESET}\n")
-            sys.exit(0)
-
-        # --- Totais gerais ---
-        print(f"  {BG}BIBLIOTECA{RESET}")
-        _row("Total de downloads", str(s["total"]))
-        _row("Álbuns", str(s["albums"]))
-        _row("Faixas avulsas", str(s["tracks"]))
-        _row("Artistas únicos", str(s["unique_artists"]))
-        _row("Álbuns únicos", str(s["unique_albums"]))
-        print()
-
-        # --- Qualidade ---
-        print(f"  {BG}QUALIDADE DE ÁUDIO{RESET}")
-        total = s["total"] or 1
-        hires_pct = s["hires"] * 100 // total
-        met_pct = s["quality_met"] * 100 // total
-        _row("Hi-Res (≥24bit)", f"{s['hires']}  ({hires_pct}%)")
-        _row("Qualidade solicitada atingida", f"{s['quality_met']}  ({met_pct}%)")
-        _row("Qualidade reduzida", f"{s['quality_not_met']}")
-
-        if s["bit_depths"]:
-            depths_str = "  /  ".join(
-                f"{k}bit → {v}" for k, v in list(s["bit_depths"].items())[:5]
-            )
-            _row("Bit depths", depths_str)
-
-        if s["sample_rates"]:
-            rates_str = "  /  ".join(
-                f"{k}kHz → {v}" for k, v in list(s["sample_rates"].items())[:5]
-            )
-            _row("Sample rates", rates_str)
-        print()
-
-        # --- Formatos ---
-        print(f"  {BG}FORMATOS{RESET}")
-        for fmt, cnt in s["formats"].items():
-            pct = cnt * 100 // total
-            _row(fmt, f"{cnt}  ({pct}%)")
-        print()
-
-        # --- Datas ---
-        if s["oldest"] or s["newest"]:
-            print(f"  {BG}PERÍODO{RESET}")
-
-            def _fmt_date(d):
-                if not d:
-                    return "?"
-                try:
-                    y, m, day = d[:10].split("-")
-                    return f"{day}/{m}/{y}"
-                except Exception:
-                    return d
-
-            _row("Lançamento mais antigo", _fmt_date(s["oldest"]))
-            _row("Lançamento mais recente", _fmt_date(s["newest"]))
-            print()
-
-        # --- Top artistas ---
-        if s["top_artists"]:
-            print(f"  {BG}TOP ARTISTAS{RESET}")
-            top_cnt = s["top_artists"][0][1] or 1
-
-            for rank, (artist, cnt) in enumerate(s["top_artists"], 1):
-                if cols < 60:
-                    # MODO CELULAR: Nome na primeira linha, barra recuada na linha de baixo
-                    max_blocks = 12
-                    bar_len = (
-                        cnt
-                        if top_cnt <= max_blocks
-                        else max(1, cnt * max_blocks // top_cnt)
-                    )
-                    bar_vis = f"{CYAN}{('█|' * bar_len)[:-1]}{RESET}"
-                    print(f"  {rank:>2}. {artist}")
-                    print(f"      {bar_vis} {cnt}")
-                else:
-                    # MODO TABLET/PC: Tudo na mesma linha com alinhamento de 32 espaços
-                    max_blocks = 20
-                    bar_len = (
-                        cnt
-                        if top_cnt <= max_blocks
-                        else max(1, cnt * max_blocks // top_cnt)
-                    )
-                    bar_vis = f"{CYAN}{('█|' * bar_len)[:-1]}{RESET}"
-                    print(f"  {rank:>2}. {artist:<32} {bar_vis} {cnt}")
-
-        # --- Lista completa de artistas ---
-        if len(sys.argv) > 2 and sys.argv[2] == "--artistas":
-            print(f"\n  {BG}TODOS OS ARTISTAS ({s['unique_artists']}){RESET}")
-            for a in s["artist_list"]:
-                print(f"    · {a}")
-            print()
-
-        print(f"{CYAN}{bar}{RESET}\n")
-        if len(sys.argv) <= 2 or sys.argv[2] != "--artistas":
-            print(
-                f"  {OFF}Dica: use  qobuz-dl stats --artistas  para ver a lista completa.{RESET}\n"
-            )
-        sys.exit(0)
-    # ---------------------------------
+        )
+    # ---------------------------------------------------
 
     config = configparser.ConfigParser(interpolation=None)
-    config.read(CONFIG_FILE)
+    # BUGFIX: sem encoding explicito o configparser usa a codificacao local
+    # (cp1252 no Windows), o que estoura UnicodeDecodeError em qualquer
+    # config.ini com acento (ex.: diretorio "C:\Musica\Coleção").
+    config.read(CONFIG_FILE, encoding="utf-8")
 
     try:
         section = "qobuz" if config.has_section("qobuz") else "DEFAULT"
@@ -942,7 +902,7 @@ async def async_main():
                     migrated = True
             if migrated:
                 try:
-                    with open(CONFIG_FILE, "w") as f:
+                    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
                         config.write(f)
                 except OSError:
                     pass
@@ -970,7 +930,12 @@ async def async_main():
         default_quality = config.get(section, "default_quality")
 
         no_m3u = config.getboolean(section, "no_m3u", fallback=False)
-        no_lrc_files_config = config.getboolean(section, "no_lrc_files", fallback=False)
+        # NOTA: `no_lrc_files` do config.ini nao e' lido aqui de proposito.
+        # Antes existia um `no_lrc_files_config` que era atribuido e nunca
+        # usado -- a resolucao CLI+config e' feita por QobuzDLSettings
+        # (settings.lrc_files), que e' a unica fonte de verdade. Ler o valor
+        # duas vezes era justamente o que causava o bug de `--no-lrc-files`
+        # nao conseguir sobrepor o config.
         albums_only = config.getboolean(section, "albums_only", fallback=False)
         no_fallback = config.getboolean(section, "no_fallback", fallback=False)
         og_cover = config.getboolean(section, "og_cover", fallback=True)
@@ -1021,13 +986,16 @@ async def async_main():
             )
 
     if arguments.reset:
-        sys.exit(_reset_config(CONFIG_FILE))
+        # BUGFIX: `_reset_config()` retorna None, e `sys.exit(None)` funciona
+        # por acidente. Deixar explicito que o codigo de saida e' 0.
+        _reset_config(CONFIG_FILE)
+        sys.exit(0)
 
     if arguments.show_config:
         print(f"Configuração: {CONFIG_FILE}\nDatabase: {QOBUZ_DB}\n---")
-        with open(CONFIG_FILE, "r") as f:
+        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
             print(f.read())
-        sys.exit()
+        sys.exit(0)
 
     if arguments.purge:
         try:
@@ -1035,6 +1003,23 @@ async def async_main():
         except FileNotFoundError:
             pass
         sys.exit(f"{GREEN}O banco de dados foi deletado.{OFF}")
+
+    # Checagem de pre-voo dos executaveis que o pip NAO instala: o ffmpeg
+    # (integridade do audio) e, apenas quando --find-duplicates foi pedido, o
+    # fpcalc/Chromaprint. Avisa UMA vez, com a instrucao de instalacao.
+    #
+    # ANTES: a ausencia do ffmpeg so' aparecia arquivo por arquivo, dentro de
+    # verify_audio_integrity(), como FileNotFoundError -- um album de 14
+    # faixas gerava 14 mensagens que pareciam 14 arquivos corrompidos.
+    #
+    # A POSICAO AQUI E' DELIBERADA e foi corrigida: esta chamada estava mais
+    # abaixo, depois do bloco de --find-duplicates. Como aquele bloco termina
+    # em sys.exit(), o aviso de fpcalc nunca era alcancado por quem usava
+    # justamente a feature que precisa dele. Tem que vir ANTES de todos os
+    # branches que saem do programa (--sync-db, --find-duplicates, --watch).
+    checar_binarios_externos(
+        precisa_fpcalc=bool(getattr(arguments, "find_duplicates", None))
+    )
 
     # --- NEW DB SYNC FEATURE (Lightweight Mode) ---
     if getattr(arguments, "sync_db", None):
@@ -1070,7 +1055,18 @@ async def async_main():
 
     # --- DUPLICATE DETECTION FEATURE (Audio Fingerprint) ---
     if getattr(arguments, "find_duplicates", None):
-        from qobuz_dl.sync import find_duplicate_tracks
+        # Import com mensagem: o pyacoustid e' extra opcional (`[duplicates]`)
+        # porque so' serve pra esta feature. Antes um ImportError cru vazava
+        # como traceback, sem dizer o que instalar.
+        try:
+            from qobuz_dl.sync import find_duplicate_tracks
+        except ImportError as e:
+            sys.exit(
+                f"{RED}[!] --find-duplicates precisa do extra 'duplicates'.{RESET}\n"
+                f"    Instale com: pip install 'qobuz-dl-ultra[duplicates]'\n"
+                f"    E o binario Chromaprint: apt install libchromaprint-tools\n"
+                f"    (detalhe tecnico: {e})"
+            )
 
         dup_dir = (
             default_folder
@@ -1089,7 +1085,15 @@ async def async_main():
 
     # --- WATCH FOLDER FEATURE (retro-tagging automático) ---
     if getattr(arguments, "watch", None):
-        from qobuz_dl.watcher import watch_directory
+        # Mesma ideia do --find-duplicates: o watchdog e' extra `[watch]`.
+        try:
+            from qobuz_dl.watcher import watch_directory
+        except ImportError as e:
+            sys.exit(
+                f"{RED}[!] --watch precisa do extra 'watch'.{RESET}\n"
+                f"    Instale com: pip install 'qobuz-dl-ultra[watch]'\n"
+                f"    (detalhe tecnico: {e})"
+            )
         from qobuz_dl.qopy import Client
 
         watch_dir = default_folder if arguments.watch == "DEFAULT" else arguments.watch
@@ -1254,8 +1258,10 @@ async def async_main():
         getattr(arguments, "embed_art", None) or embed_art,
         ignore_singles_eps=getattr(arguments, "albums_only", False) or albums_only,
         no_m3u_for_playlists=getattr(arguments, "no_m3u", False) or no_m3u,
-        quality_fallback=not getattr(arguments, "no_fallback", False) or
-        not no_fallback,
+        # BUGFIX: era `not arg or not cfg`, o que resulta em True sempre que
+        # apenas um dos dois está ligado -- ou seja, `--no-fallback` e a opção
+        # `no_fallback` do config.ini NUNCA desligavam o fallback de qualidade.
+        quality_fallback=not (getattr(arguments, "no_fallback", False) or no_fallback),
         cover_og_quality=getattr(arguments, "og_cover", None) or og_cover,
         no_cover=getattr(arguments, "no_cover", False) or no_cover,
         downloads_db=(
@@ -1266,7 +1272,10 @@ async def async_main():
         smart_discography=getattr(arguments, "smart_discography", False) or
         smart_discography,
         fetch_lyrics=fetch_lyrics,
-        no_lrc_files=("--no-lrc-files" in sys.argv) or no_lrc_files_config,
+        # BUGFIX: antes fazia sniffing manual de `"--no-lrc-files" in sys.argv`
+        # porque o merge em settings.py estava quebrado. Agora que
+        # `settings.lrc_files` resolve CLI+config corretamente, usamos ele.
+        no_lrc_files=not settings.lrc_files,
         genius_token=genius_token,
         force_english=force_english,
         no_credits=no_credits_flag,

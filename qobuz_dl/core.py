@@ -166,13 +166,18 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
             alb_art_w = max(10, int(flex_alb * 0.35))
             alb_tit_w = flex_alb - alb_art_w
             dash_alb = flex_alb + 43
-            res.append(("class:meta", f"{hdr_pref}{
-                'ARTISTA'.ljust(alb_art_w)} | {
-                'ÁLBUM'.ljust(alb_tit_w)} | {
-                'TIPO'.ljust(6)} | {
-                'ANO'.ljust(4)} | {
-                'FAIXAS'.ljust(6)} | {
-                'QUALIDADE'.ljust(12)}\n"))
+            res.append(
+                (
+                    "class:meta",
+                    hdr_pref +
+                    "ARTISTA".ljust(alb_art_w) + " | " +
+                    "ÁLBUM".ljust(alb_tit_w) + " | " +
+                    "TIPO".ljust(6) + " | " +
+                    "ANO".ljust(4) + " | " +
+                    "FAIXAS".ljust(6) + " | " +
+                    "QUALIDADE".ljust(12) + "\n",
+                )
+            )
             res.append(("class:meta", f"{hdr_pref}{'-' * dash_alb}"))
 
         elif item_category == "track" and is_table:
@@ -182,11 +187,16 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
             trk_alb_w = max(10, int(flex_trk * 0.30))
             trk_tit_w = flex_trk - trk_art_w - trk_alb_w
             dash_trk = flex_trk + 21
-            res.append(("class:meta", f"{hdr_pref}{
-                'ARTISTA'.ljust(trk_art_w)} | {
-                'FAIXA'.ljust(trk_tit_w)} | {
-                'ÁLBUM'.ljust(trk_alb_w)} | {
-                'QUALIDADE'.ljust(12)}\n"))
+            res.append(
+                (
+                    "class:meta",
+                    hdr_pref +
+                    "ARTISTA".ljust(trk_art_w) + " | " +
+                    "FAIXA".ljust(trk_tit_w) + " | " +
+                    "ÁLBUM".ljust(trk_alb_w) + " | " +
+                    "QUALIDADE".ljust(12) + "\n",
+                )
+            )
             res.append(("class:meta", f"{hdr_pref}{'-' * dash_trk}"))
 
         elif item_category == "playlist" and is_table:
@@ -195,16 +205,25 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
             pl_own_w = max(10, int(flex_pl * 0.30))
             pl_nom_w = flex_pl - pl_own_w
             dash_pl = flex_pl + 24
-            res.append(("class:meta", f"{hdr_pref}{
-                'NOME DA PLAYLIST'.ljust(pl_nom_w)} | {
-                'CRIADOR'.ljust(pl_own_w)} | {
-                'FAIXAS'.ljust(6)} | {
-                'DURAÇÃO'.ljust(9)}\n"))
+            res.append(
+                (
+                    "class:meta",
+                    hdr_pref +
+                    "NOME DA PLAYLIST".ljust(pl_nom_w) + " | " +
+                    "CRIADOR".ljust(pl_own_w) + " | " +
+                    "FAIXAS".ljust(6) + " | " +
+                    "DURAÇÃO".ljust(9) + "\n",
+                )
+            )
             res.append(("class:meta", f"{hdr_pref}{'-' * dash_pl}"))
 
         elif item_category == "artist" and is_table:
-            res.append(("class:meta", f"{hdr_pref}{
-                'NOME DO ARTISTA'.ljust(50)} | LANÇAMENTOS\n"))
+            res.append(
+                (
+                    "class:meta",
+                    hdr_pref + "NOME DO ARTISTA".ljust(50) + " | LANÇAMENTOS\n",
+                )
+            )
             res.append(("class:meta", f"{hdr_pref}{'-' * 65}"))
 
         return res
@@ -365,8 +384,9 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
         # Adicionamos uma quebra de linha extra no final para afastar o texto da
         # borda inferior
         if is_multi:
-            res.append(("class:checkbox", f" ✓ Selecionados: {
-                len(selected_indices)}\n"))
+            res.append(
+                ("class:checkbox", f" ✓ Selecionados: {len(selected_indices)}\n")
+            )
             res.append(
                 (
                     "class:footer",
@@ -633,8 +653,10 @@ class QobuzDL:
 
             if getattr(self, "_is_interactive_session", False) and url_type == "artist":
                 options = ["Album", "EP", "Single", "Live", "Compilation"]
-                title_text = f"Encontrados {
-                    len(items)} lançamentos para {content_name}. Filtre por tipo:"
+                title_text = (
+                    f"Encontrados {len(items)} lançamentos "
+                    f"para {content_name}. Filtre por tipo:"
+                )
 
                 sel_res = await _tui_select(
                     title_text, options, is_multi=True, item_category="filter"
@@ -653,17 +675,14 @@ class QobuzDL:
 
             logger.debug(f"Number of chunks: {len(content)}")
             if content:
-                logger.debug(f"Items in first chunk: {
-                    len(
-                        content[0].get(
-                            type_dict['iterable_key'],
-                            {}).get(
-                            'items',
-                                []))}")
+                _first_items = content[0].get(type_dict["iterable_key"], {}).get(
+                    "items", []
+                )
+                logger.debug(f"Items in first chunk: {len(_first_items)}")
             if getattr(self, "allowed_release_types", None) is not None:
                 logger.info(
-                    f"{YELLOW}[*] Evaluating {
-                        len(items)} releases (unwanted types will be skipped silently)...{OFF}"
+                    f"{YELLOW}[*] Evaluating {len(items)} releases "
+                    f"(unwanted types will be skipped silently)...{OFF}"
                 )
 
             is_playlist = url_type == "playlist"

@@ -251,7 +251,7 @@ def _embed_flac_img(root_dir, audio: FLAC, cover_override=None):
     cover_image = _get_cover_path(root_dir, override=cover_override)
 
     if not cover_image or not os.path.isfile(cover_image):
-        logger.debug(f"Cover image not found to embed.")
+        logger.debug("Cover image not found to embed.")
         return
 
     try:
@@ -293,7 +293,7 @@ def _embed_id3_img(root_dir, audio: id3.ID3, cover_override=None):
     cover_image = _get_cover_path(root_dir, override=cover_override)
 
     if not cover_image or not os.path.isfile(cover_image):
-        logger.debug(f"Cover image not found to embed.")
+        logger.debug("Cover image not found to embed.")
         return
 
     with open(cover_image, "rb") as cover:
@@ -508,18 +508,13 @@ def tag_mp3(
                 else:
                     audio[id3tag.__name__] = id3tag(encoding=3, text=v)
 
-    audio["TRCK"] = id3.TRCK(
-        encoding=3,
-        text=f'{str(qobuz_item.get("track_number",
-                                   "1"))}/{str(qobuz_album.get("tracks_count",
-                                                               "1"))}',
-    )
-    audio["TPOS"] = id3.TPOS(
-        encoding=3,
-        text=f'{str(qobuz_item.get("media_number",
-                                   "1"))}/{str(qobuz_album.get("media_count",
-                                                               "1"))}',
-    )
+    _trck_n = qobuz_item.get("track_number", "1")
+    _trck_total = qobuz_album.get("tracks_count", "1")
+    audio["TRCK"] = id3.TRCK(encoding=3, text=f"{_trck_n}/{_trck_total}")
+
+    _tpos_n = qobuz_item.get("media_number", "1")
+    _tpos_total = qobuz_album.get("media_count", "1")
+    audio["TPOS"] = id3.TPOS(encoding=3, text=f"{_tpos_n}/{_tpos_total}")
 
     if em_image:
         _embed_id3_img(root_dir, audio, cover_override=embed_cover_path)

@@ -117,7 +117,7 @@ def _clean_empty_dirs(base_directory, exclude_dirs=None):
     exclude = set(exclude_dirs or [])
     exclude.add("_Playlists")
 
-    for root, dirs, files in os.walk(base_directory, topdown=False):
+    for root, dirs, _files in os.walk(base_directory, topdown=False):
         for d in dirs:
             dir_path = os.path.join(root, d)
             try:
@@ -192,8 +192,8 @@ async def sync_playlist(qobuz_dl, url, folder, auto_confirm=False):
     logger.info(f"{CYAN}      Found {len(local_tracks)} tagged tracks locally.{OFF}")
     if untagged:
         logger.info(
-            f"{YELLOW}      {
-                len(untagged)} files have no QOBUZTRACKID tag and will be ignored.{OFF}"
+            f"{YELLOW}      {len(untagged)} files have no QOBUZTRACKID tag "
+            f"and will be ignored.{OFF}"
         )
 
     local_id_set = set(local_tracks.keys())

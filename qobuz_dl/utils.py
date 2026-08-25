@@ -2,6 +2,7 @@ import re
 import string
 import os
 import logging
+import shutil
 import subprocess
 import time
 from qobuz_dl.color import RED, WARNING as YELLOW, INFO as CYAN, OFF
@@ -265,8 +266,7 @@ def smart_discography_filter(
     title_grouped = dict()
     for item in items:
         title_ = essence(item["title"])
-        if title_ not in title_grouped:  # ?
-            #            if (t := essence(item["title"])) not in title_grouped:
+        if title_ not in title_grouped:
             title_grouped[title_] = []
         title_grouped[title_].append(item)
 
@@ -281,13 +281,26 @@ def smart_discography_filter(
         )
         remaster_exists = any(is_type("remaster", a) for a in albums)
 
-        def is_valid(album: dict) -> bool:
+        # BUGFIX (late binding / B023): esta closure lia `best_bit_depth`,
+        # `best_sampling_rate` e `remaster_exists` das variaveis do LOOP.
+        # Funcionava por sorte porque `filter()` era consumido na mesma
+        # iteracao; qualquer refatoracao que guardasse a funcao para chamar
+        # depois (lista de callbacks, generator lazy, thread pool) passaria a
+        # usar os valores da ULTIMA iteracao para todos os grupos, filtrando
+        # a discografia errada silenciosamente. Fixado via argumentos default,
+        # que capturam o valor no momento da definicao.
+        def is_valid(
+            album: dict,
+            _bit_depth=best_bit_depth,
+            _sampling_rate=best_sampling_rate,
+            _remaster_exists=remaster_exists,
+        ) -> bool:
             return (
-                album["maximum_bit_depth"] == best_bit_depth and
-                album["maximum_sampling_rate"] == best_sampling_rate and
+                album["maximum_bit_depth"] == _bit_depth and
+                album["maximum_sampling_rate"] == _sampling_rate and
                 album["artist"]["name"] == requested_artist and
                 not (  # states that are not allowed
-                    (remaster_exists and not is_type("remaster", album)) or
+                    (_remaster_exists and not is_type("remaster", album)) or
                     (skip_extras and is_type("extra", album))
                 )
             )
@@ -313,6 +326,114 @@ def format_duration(duration):
         str: The formatted time string.
     """
     return time.strftime("%H:%M:%S", time.gmtime(duration))
+
+
+# Cache do resultado da checagem de binarios externos. Chave = nome do
+# binario, valor = caminho encontrado ou None. Existe para que o aviso saia
+# UMA vez por execucao, nao uma vez por arquivo.
+_BINARIOS_CHECADOS = {}
+
+# Onde procurar alem do PATH. O a-Shell (iOS/iPadOS) traz ffmpeg nativo em
+# $APPDIR/bin, que nem sempre esta no PATH do processo Python.
+_DIRS_EXTRA = [
+    os.path.join(os.environ.get("APPDIR", ""), "bin"),
+]
+
+
+def encontrar_binario(nome):
+    """Procura um executavel externo e memoriza o resultado.
+
+    Antes o projeto nao tinha nenhum `shutil.which`: descobria a ausencia do
+    ffmpeg via `FileNotFoundError` na hora de rodar o subprocess, dentro de
+    `verify_audio_integrity()`. Como aquela funcao roda **por arquivo**, um
+    album de 14 faixas produzia 14 mensagens que pareciam 14 arquivos
+    corrompidos, quando o problema era um so' e era de instalacao.
+
+    Returns:
+        str | None: caminho do executavel, ou None se nao existir.
+    """
+    if nome in _BINARIOS_CHECADOS:
+        return _BINARIOS_CHECADOS[nome]
+
+    caminho = shutil.which(nome)
+    if not caminho:
+        for d in _DIRS_EXTRA:
+            if not d or not os.path.isdir(d):
+                continue
+            tentativa = shutil.which(nome, path=d)
+            if tentativa:
+                caminho = tentativa
+                break
+
+    _BINARIOS_CHECADOS[nome] = caminho
+    return caminho
+
+
+def _avisar(titulo, detalhe):
+    """Emite um aviso quebrado na largura do terminal.
+
+    ANTES estes avisos eram um `logger.warning()` de ~200 caracteres em linha
+    unica. A ponte de logging (`ui.TqdmLoggingHandler`) serializa a escrita mas
+    NAO quebra linha, entao num terminal estreito -- o a-Shell no iPad chega a
+    40 colunas -- o proprio terminal quebrava onde dava, cortando palavra ao
+    meio.
+
+    O `try/except ImportError` existe para a funcao continuar utilizavel fora
+    da CLI (importada por um script, por exemplo), onde a UI pode nao estar
+    configurada. Nesse caso volta ao logging simples.
+    """
+    try:
+        from qobuz_dl import ui
+
+        ui.warn(titulo)
+        ui.wrapped(detalhe, indent=4)
+    except ImportError:  # pragma: no cover - so' fora da CLI
+        logger.warning("%s %s", titulo, detalhe)
+
+
+def checar_binarios_externos(precisa_fpcalc=False):
+    """Verifica na inicializacao os executaveis que o pip NAO instala.
+
+    `ffmpeg` (checagem de integridade) e `fpcalc`/Chromaprint (usado pelo
+    `--find-duplicates` via pyacoustid) nao vem de pacote Python -- precisam
+    estar instalados no sistema. Avisa UMA vez, com a instrucao de instalacao,
+    em vez de deixar cada feature falhar do seu jeito mais adiante.
+
+    Args:
+        precisa_fpcalc: so' avisa sobre o fpcalc quando a execucao atual
+            realmente vai usar fingerprint de audio. Nao faz sentido cobrar
+            Chromaprint de quem so' quer baixar um album.
+
+    Returns:
+        dict: {"ffmpeg": caminho|None, "fpcalc": caminho|None}
+    """
+    resultado = {"ffmpeg": encontrar_binario("ffmpeg"), "fpcalc": None}
+
+    if not resultado["ffmpeg"]:
+        _avisar(
+            # Titulo curto de proposito: `ui.warn()` NAO quebra linha -- so' o
+            # `ui.wrapped()` do detalhe quebra. Com a tag "[!] " ocupando 4
+            # colunas, o titulo precisa caber em ~28 para nao estourar num
+            # terminal de 32 colunas (a-Shell no iPad em tela dividida).
+            "ffmpeg nao encontrado",
+            "A integridade dos arquivos baixados nao sera verificada. O "
+            "download em si funciona normalmente. Instale com `apt install "
+            "ffmpeg` ou `brew install ffmpeg`. No a-Shell (iOS/iPadOS) o "
+            "ffmpeg ja vem embutido em $APPDIR/bin.",
+        )
+
+    if precisa_fpcalc:
+        resultado["fpcalc"] = encontrar_binario("fpcalc")
+        if not resultado["fpcalc"]:
+            _avisar(
+                "fpcalc nao encontrado",
+                "O --find-duplicates nao vai funcionar: o fingerprint de audio "
+                "depende deste executavel do Chromaprint, que NAO vem via pip. "
+                "Instale com `apt install libchromaprint-tools` ou `brew "
+                "install chromaprint`.",
+            )
+
+    return resultado
 
 
 def verify_audio_integrity(filepath, timeout=180):
@@ -343,10 +464,17 @@ def verify_audio_integrity(filepath, timeout=180):
     if not os.path.isfile(filepath):
         return False, "Arquivo nao encontrado."
 
+    # Consulta o cache em vez de descobrir a ausencia do ffmpeg via
+    # FileNotFoundError a cada arquivo. O aviso completo, com instrucao de
+    # instalacao, sai uma unica vez em checar_binarios_externos().
+    ffmpeg = encontrar_binario("ffmpeg")
+    if not ffmpeg:
+        return False, "ffmpeg nao disponivel -- integridade nao verificada."
+
     try:
         result = subprocess.run(
             [
-                "ffmpeg",
+                ffmpeg,
                 "-nostdin",
                 "-v",
                 "error",

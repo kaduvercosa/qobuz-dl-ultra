@@ -5,6 +5,38 @@ from qobuz_dl.constants import (
     DEFAULT_MULTIPLE_DISC_TRACK,
 )
 
+_MISSING = object()
+
+
+def _merge_bool_opt_out(arguments, dest, config_value):
+    """Resolve uma flag booleana de "desligar" (store_false + SUPPRESS).
+
+    A CLI so' define o atributo quando o usuario passa a flag explicitamente
+    (por causa de ``default=argparse.SUPPRESS``). Nesse caso a CLI ganha; se
+    nao, vale o valor vindo do config.ini.
+
+    Isso substitui o padrao antigo ``getattr(args, x, False) or config[...]``,
+    que tornava impossivel DESLIGAR pela CLI algo LIGADO no config.ini.
+    """
+    cli_value = getattr(arguments, dest, _MISSING)
+    if cli_value is _MISSING or cli_value is None:
+        return bool(config_value)
+    return bool(cli_value)
+
+
+def _merge_bool_opt_in(arguments, dest, config_value):
+    """Resolve uma flag booleana de "ligar" (store_true).
+
+    Aceita tambem o par negativo ``--no-<flag>`` (dest ``no_<dest>``): se o
+    usuario passou a forma negativa, ela vence, mesmo que o config.ini tenha
+    a opcao ligada.
+    """
+    if getattr(arguments, f"no_{dest}", False):
+        return False
+    if getattr(arguments, dest, False):
+        return True
+    return bool(config_value)
+
 
 class QobuzDLSettings:
     """
@@ -31,7 +63,10 @@ class QobuzDLSettings:
         self.default_limit = kwargs.get("default_limit", 20)
         self.no_m3u = kwargs.get("no_m3u", False)
         self.albums_only = kwargs.get("albums_only", False)
-        self.no_fallback = not kwargs.get("no_fallback", False)
+        # BUGFIX: este campo era atribuido invertido (`not kwargs.get(...)`),
+        # ou seja `no_fallback=True` virava `self.no_fallback = False`.
+        # O nome do campo passou a contradizer o proprio valor.
+        self.no_fallback = kwargs.get("no_fallback", False)
         self.no_database = kwargs.get("no_database", False)
         self.app_id = kwargs.get("app_id")
         self.secrets = kwargs.get("secrets")
@@ -266,10 +301,14 @@ class QobuzDLSettings:
             config.get(section, "segment_workers", fallback="0"),
             # user_auth_token
             "user_auth_token": config.get(section, "user_auth_token", fallback=""),
-            "lrc_files": not getattr(
+            # BUGFIX: lia `arguments.no_lrc_files`, mas o argparse registra a
+            # flag `--no-lrc-files` com dest="lrc_files" (store_false), logo o
+            # atributo `no_lrc_files` NUNCA existe e o getattr sempre caia no
+            # default -> a flag de CLI era silenciosamente ignorada aqui.
+            "lrc_files": _merge_bool_opt_out(
                 arguments,
-                "no_lrc_files",
-                config.getboolean(section, "no_lrc_files", fallback=False),
+                "lrc_files",
+                config.getboolean(section, "no_lrc_files", fallback=False) is False,
             ),
             "embed_lyrics": (
                 False
