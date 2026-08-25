@@ -343,15 +343,15 @@ class LyricsEngine:
 
                     if embed_lyrics and save_lrc:
                         tqdm.write(
-                            f"    ✅ Letras sincronizadas injetadas e salvas como .lrc (via LRCLIB)!"
+                            "    ✅ Letras sincronizadas injetadas e salvas como .lrc (via LRCLIB)!"
                         )
                     elif save_lrc:
                         tqdm.write(
-                            f"    ✅ Letras sincronizadas salvas como .lrc (via LRCLIB)!"
+                            "    ✅ Letras sincronizadas salvas como .lrc (via LRCLIB)!"
                         )
                     elif embed_lyrics:
                         tqdm.write(
-                            f"    ✅ Letras sincronizadas injetadas no metadata (via LRCLIB)!"
+                            "    ✅ Letras sincronizadas injetadas no metadata (via LRCLIB)!"
                         )
                     return
 
@@ -367,15 +367,15 @@ class LyricsEngine:
 
                     if embed_lyrics and save_lrc:
                         tqdm.write(
-                            f"    ✅ Letras padrão injetadas e salvas como .txt (via LRCLIB)!"
+                            "    ✅ Letras padrão injetadas e salvas como .txt (via LRCLIB)!"
                         )
                     elif save_lrc:
                         tqdm.write(
-                            f"    ✅ Letras padrão salvas como .txt (via LRCLIB)!"
+                            "    ✅ Letras padrão salvas como .txt (via LRCLIB)!"
                         )
                     elif embed_lyrics:
                         tqdm.write(
-                            f"    ✅ Letras padrão salvas no metadata (via LRCLIB)!"
+                            "    ✅ Letras padrão salvas no metadata (via LRCLIB)!"
                         )
                     return
 
@@ -392,13 +392,13 @@ class LyricsEngine:
                         )
 
                     if embed_lyrics and save_lrc:
-                        tqdm.write(f"    ✅ Letras injetadas e salvas via Genius!")
+                        tqdm.write("    ✅ Letras injetadas e salvas via Genius!")
                     elif save_lrc:
                         tqdm.write(
-                            f"    ✅ Letras salvas via Genius (embed desativado)!"
+                            "    ✅ Letras salvas via Genius (embed desativado)!"
                         )
                     elif embed_lyrics:
-                        tqdm.write(f"    ✅ Letras injetadas via Genius (Fallback)!")
+                        tqdm.write("    ✅ Letras injetadas via Genius (Fallback)!")
                     return
 
             tqdm.write(

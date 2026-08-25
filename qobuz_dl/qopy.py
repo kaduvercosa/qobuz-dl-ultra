@@ -558,11 +558,11 @@ class Client:
         Returns:
             list: A list of successfully matched Qobuz track IDs.
         """
-        # rapidfuzz no lugar de difflib.SequenceMatcher: mesma ideia (ratio
-        # de similaridade 0-1), mas em C++/Cython -- 10-100x mais rapido pra
-        # esse tipo de comparacao. Perceptivel em sync de playlists grandes
-        # do Last.fm, onde isso roda por faixa x candidato retornado.
-        from rapidfuzz import fuzz
+        # Passa pelo qobuz_dl.fuzzy: usa rapidfuzz (C++/Cython, 10-100x mais
+        # rapido, perceptivel em playlist grande do Last.fm onde isso roda por
+        # faixa x candidato) quando esta instalado, e cai pro difflib da
+        # biblioteca padrao quando nao esta -- ver o docstring de fuzzy.py.
+        from qobuz_dl import fuzzy
 
         print(
             f"{CYAN}[*] Matching Last.fm tracks with Qobuz database (Fuzzy matching & Interactive mode enabled)...{OFF}"
@@ -601,13 +601,13 @@ class Client:
                         target_str = f"{target_artist} {target_title}"
                         q_str = f"{q_artist} {q_title}"
 
-                        # fuzz.ratio() do rapidfuzz retorna 0-100 (nao 0-1
-                        # como o SequenceMatcher.ratio() do difflib) --
-                        # dividido por 100 pra manter os thresholds acima
-                        # (AUTO_ACCEPT_THRESHOLD/PROMPT_THRESHOLD, escala
-                        # 0-1) e o "highest_ratio * 100" mais abaixo
-                        # funcionando sem precisar tocar em mais nada.
-                        ratio = fuzz.ratio(target_str, q_str) / 100.0
+                        # fuzzy.ratio() ja devolve 0-1 nos dois motores. Antes
+                        # este ponto fazia `fuzz.ratio(...) / 100.0` na mao,
+                        # porque o rapidfuzz devolve 0-100 e o difflib 0-1 --
+                        # a normalizacao agora e' responsabilidade do modulo,
+                        # justamente pra ninguem trocar o motor e esquecer da
+                        # divisao (o que faria todo threshold passar sempre).
+                        ratio = fuzzy.ratio(target_str, q_str)
 
                         if ratio > highest_ratio:
                             highest_ratio = ratio
@@ -618,8 +618,10 @@ class Client:
                         valid_track_ids.append(best_match_id)
 
                     elif highest_ratio >= PROMPT_THRESHOLD and best_match_id:
-                        print(f"\n{YELLOW}[?] Borderline match detected ({
-                            highest_ratio * 100:.0f}% similarity){OFF}")
+                        print(
+                            f"\n{YELLOW}[?] Borderline match detected "
+                            f"({highest_ratio * 100:.0f}% similarity){OFF}"
+                        )
                         print(
                             f"    Target (Last.fm): {item['artist']} - {item['title']}"
                         )
@@ -640,8 +642,10 @@ class Client:
                             print(f"{RED}    [-] Track skipped manually.{OFF}")
 
                     else:
-                        print(f"{YELLOW}[!] Skipping: '{query}' (Best match was only {
-                            highest_ratio * 100:.0f}% similar){OFF}")
+                        print(
+                            f"{YELLOW}[!] Skipping: '{query}' (Best match was only "
+                            f"{highest_ratio * 100:.0f}% similar){OFF}"
+                        )
 
                 else:
                     print(
@@ -651,9 +655,10 @@ class Client:
             except Exception as e:
                 print(f"{RED}[!] Error searching for '{query}': {e}{OFF}")
 
-        print(f"\n{GREEN}[+] Successfully matched {
-            len(valid_track_ids)} out of {
-            len(tracks_list)} tracks!{OFF}")
+        print(
+            f"\n{GREEN}[+] Successfully matched {len(valid_track_ids)} "
+            f"out of {len(tracks_list)} tracks!{OFF}"
+        )
         return valid_track_ids
 
     # --- SEARCH FUNCTIONS (Crash-Proof) ---

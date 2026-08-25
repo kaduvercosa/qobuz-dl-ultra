@@ -1,83 +1,27 @@
-import os
-from setuptools import setup, find_packages
+"""Shim de compatibilidade -- a configuracao real vive no pyproject.toml.
 
-# 1. NEW PACKAGE NAME (Must be unique on PyPI)
-pkg_name = "qobuz-dl-ultra"
+CONTEXTO DA MUDANCA
+-------------------
+Antes, este arquivo duplicava TODA a configuracao do pacote: nome, versao,
+autor, classifiers, `python_requires` e a lista completa de `install_requires`.
+Com `pyproject.toml` no repositorio declarando as mesmas coisas, existiam
+tres fontes de verdade concorrentes (pyproject.toml, setup.py e
+requirements.txt) -- e elas JA' haviam divergido na pratica:
 
+  * ``Pillow>10.0.0`` no pyproject vs ``Pillow>=10.0.0`` aqui e no
+    requirements.txt (o primeiro EXCLUI a versao 10.0.0);
+  * ``python_requires=">=3.6"`` em ambos, uma versao onde o projeto nem
+    compila.
 
-def get_version():
-    init_path = os.path.join(os.path.dirname(__file__), "qobuz_dl", "__init__.py")
-    try:
-        with open(init_path, "r", encoding="utf-8") as f:
-            for line in f:
-                if line.startswith("__version__"):
-                    return line.split('"')[1]
-    except Exception:
-        pass
-    return "2.3.7"
+Como o build-backend declarado em ``[build-system]`` e' o
+``setuptools.build_meta``, o setuptools le' o ``[project]`` do pyproject.toml
+e este ``setup.py`` nao precisa repetir nada. Ele fica apenas para nao quebrar
+fluxos legados que ainda invocam ``python setup.py ...`` diretamente.
 
+Para alterar dependencias, versao minima do Python ou metadados, edite
+SOMENTE o ``pyproject.toml``.
+"""
 
-def read_file(fname):
-    # Added encoding="utf-8" to prevent build errors with emojis in README
-    with open(fname, "r", encoding="utf-8") as f:
-        return f.read()
+from setuptools import setup
 
-
-setup(
-    name=pkg_name,
-    # 2. VERSION READ AUTOMATICALLY FROM __init__.py
-    version=get_version(),
-    # 3. AUTHOR INFO
-    author="Eduardo Verçosa (kaduvercosa)",
-    author_email="kaduvercosa@users.noreply.github.com",
-    description="The Ultimate Lossless and Hi-Res music downloader for Qobuz with ReplayGain and Classical metadata",
-    long_description=read_file("README.md"),
-    long_description_content_type="text/markdown",
-    # 4. LINK TO YOUR FORK
-    url="https://github.com/kaduvercosa/qobuz-dl-ultra",
-    project_urls={
-        "Documentation": "https://github.com/kaduvercosa/qobuz-dl-ultra/wiki",
-        "Source Code": "https://github.com/kaduvercosa/qobuz-dl-ultra",
-        "Bug Tracker": "https://github.com/kaduvercosa/qobuz-dl-ultra/issues",
-    },
-    # Dependências fixadas diretamente como uma lista Python
-    install_requires=[
-        "pathvalidate",
-        "httpx",
-        "brotli",
-        "aiosqlite",
-        "rapidfuzz",
-        "send2trash",
-        "humanize",
-        "pyacoustid",
-        "watchdog",
-        "aiofiles",
-        "tenacity",
-        "platformdirs",
-        "charset_normalizer",
-        "mutagen",
-        "tqdm",
-        "beautifulsoup4",
-        "colorama",
-        # ver qopy.py: pycryptodome quebra no a-Shell (framework nativo ausente)
-        "cryptography",
-        "keyring",
-        "questionary",
-        "prompt_toolkit",
-        "Pillow>=10.0.0",  # usado so' pra recompactar a capa embutida quando excede o limite de 16MB do FLAC
-    ],
-    entry_points={
-        "console_scripts": [
-            # Keeping the original command names for backward compatibility
-            "qobuz-dl = qobuz_dl:main",
-            "qdl = qobuz_dl:main",
-        ],
-    },
-    packages=find_packages(),
-    classifiers=[
-        "Programming Language :: Python :: 3",
-        "License :: OSI Approved :: GNU General Public License (GPL)",
-        "Operating System :: OS Independent",
-    ],
-    python_requires=">=3.6",
-)
+setup()

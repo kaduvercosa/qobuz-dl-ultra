@@ -1,34 +1,107 @@
 import os
+import sys
 import configparser
 import shutil
-from colorama import Style, Fore, init
+from colorama import Style, Fore, just_fix_windows_console
 
-init(autoreset=True)
+# BUGFIX: aqui rodava `init(autoreset=True)` no import do modulo. Dois
+# problemas serios:
+#
+# 1. `colorama.init()` SUBSTITUI `sys.stdout` por um wrapper que REMOVE as
+#    sequencias ANSI sempre que a saida nao e' um TTY. Resultado: FORCE_COLOR=1
+#    e `qobuz-dl ... | less -R` nunca funcionavam, e a decisao sobre cor ficava
+#    fora do controle do programa -- o oposto do que ui.py precisa para
+#    implementar --no-color / NO_COLOR / FORCE_COLOR de forma coerente.
+# 2. `autoreset=True` faz o colorama injetar um reset depois de CADA print.
+#    Como o projeto ja' emite RESET explicito, isso duplicava resets e
+#    atrapalhava as linhas de progresso multi-segmento do tqdm.
+#
+# `just_fix_windows_console()` faz APENAS o necessario: liga o suporte a
+# VT/ANSI nos consoles legados do Windows, sem trocar o sys.stdout nem filtrar
+# nada. Em Linux/macOS e' um no-op. Quem decide se a cor sai ou nao passa a ser
+# `qobuz_dl.ui.color_enabled()`.
+just_fix_windows_console()
+
+
+# --------------------------------------------------------------------------
+# Porta unica de decisao sobre cor
+# --------------------------------------------------------------------------
+# BUGFIX: `ui.c()` era a unica porta que respeitava --no-color/NO_COLOR, mas
+# as constantes deste modulo sao importadas por valor e usadas DIRETO em
+# centenas de `print(f"{CYAN}...")` espalhados pelo projeto, que nunca
+# passam por `ui.c()`. Resultado concreto: `NO_COLOR=1 qobuz-dl` continuava
+# despejando ANSI na tela inicial inteira, e `--no-color` vazava em outros
+# modulos -- exatamente o contrario do que a ajuda da flag promete.
+#
+# A decisao agora acontece UMA vez, aqui no import, e as constantes ja'
+# nascem vazias quando a cor esta desligada. Assim toda emissao do projeto
+# fica correta de uma vez, sem precisar reescrever cada print. `ui.c()`
+# continua valendo como segunda camada (para --no-color por argumento e para
+# overrides em tempo de execucao); as duas juntas nao conflitam, porque
+# concatenar string vazia e' inofensivo.
+#
+# Le `sys.argv` de proposito: o import deste modulo acontece antes de
+# qualquer parsing de argumentos, entao esperar pelo argparse deixaria a
+# tela inicial (impressa muito cedo) sem protecao.
+def _detect_color_capability() -> bool:
+    if os.environ.get("NO_COLOR") is not None:  # https://no-color.org/
+        return False
+    if "--no-color" in sys.argv:
+        return False
+    if os.environ.get("FORCE_COLOR"):
+        return True
+    if os.environ.get("TERM", "").lower() in ("dumb", "") and os.name != "nt":
+        return False
+    try:
+        return bool(sys.stdout.isatty())
+    except Exception:
+        return False
+
+
+COLOR_ON = _detect_color_capability()
+
+
+def _e(seq: str) -> str:
+    """Devolve a sequencia ANSI, ou string vazia se a cor esta desligada."""
+    return seq if COLOR_ON else ""
+
 
 # STYLE
-DF = Style.NORMAL
-BG = Style.BRIGHT
-RESET = Style.RESET_ALL
-OFF = Style.DIM
+DF = _e(Style.NORMAL)
+BG = _e(Style.BRIGHT)
+RESET = _e(Style.RESET_ALL)
+# BUGFIX CRITICO: `OFF` era `Style.DIM` (\033[2m), mas as 239 ocorrencias de
+# `{OFF}` no projeto usam ele como TERMINADOR -- `f"{GREEN}texto{OFF}"`.
+# `\033[2m` nao encerra nada: ele ATIVA o modo esmaecido e DEIXA a cor
+# anterior valendo. Consequencia dupla em cascata:
+#   1. tudo depois de um `{OFF}` saia esmaecido (o "aspecto apagado");
+#   2. a cor nunca era desligada, entao linhas seguintes SEM cor nenhuma
+#      herdavam o accent -- por isso as descricoes da tela inicial apareciam
+#      coloridas mesmo sendo emitidas como texto puro.
+# Isso ficou escondido por anos porque o `colorama.init(autoreset=True)`
+# antigo grudava um RESET no fim de CADA print, mascarando o erro. Ao trocar
+# por `just_fix_windows_console()` (que nao mexe no stdout), o vazamento
+# apareceu. `MUTED` continua existindo para quando esmaecer for a intencao.
+OFF = _e(Style.RESET_ALL)
 
 # Cores fixas (nao personalizaveis)
-RED = Fore.RED
-BLUE = Fore.BLUE
-GREEN = Fore.GREEN
-YELLOW = Fore.YELLOW
-MAGENTA = Fore.MAGENTA
+RED = _e(Fore.RED)
+BLUE = _e(Fore.BLUE)
+GREEN = _e(Fore.GREEN)
+YELLOW = _e(Fore.YELLOW)
+MAGENTA = _e(Fore.MAGENTA)
 
-ERROR = Fore.RED
-SUCCESS = Fore.GREEN
-WARNING = Fore.YELLOW
-WARNING_SAFE = Fore.LIGHTRED_EX
-MUTED = Style.DIM
+ERROR = _e(Fore.RED)
+SUCCESS = _e(Fore.GREEN)
+WARNING = _e(Fore.YELLOW)
+WARNING_SAFE = _e(Fore.LIGHTRED_EX)
+MUTED = _e(Style.DIM)
 
 # Cor de destaque padrao (azul aco) -- pode ser sobrescrita pelo usuario
 # no wizard de configuracao (qobuz-dl -r). O valor e' lido do config.ini
 # na importacao do modulo, entao vale pra toda a sessao sem precisar
 # passar o objeto de settings por todo o codigo.
-_DEFAULT_ACCENT = "\033[38;2;95;168;211m"
+_DEFAULT_ACCENT = _e("\033[38;2;95;168;211m")
 _DEFAULT_ACCENT_RGB = (95, 168, 211)
 
 # Paleta de cores predefinidas exposta pro wizard. Cada entrada:
@@ -45,6 +118,14 @@ ACCENT_PRESETS = [
     ("Coral", "255;100;100", "\033[38;2;255;100;100m"),
     ("Personalizada (RGB)...", None, None),
 ]
+
+# Com a cor desligada, o preview de cada preset nao tem o que mostrar: zera o
+# escape (3o campo) preservando o `None` da opcao "Personalizada", que e' o
+# que o wizard usa pra identificar aquele item.
+if not COLOR_ON:
+    ACCENT_PRESETS = [
+        (name, rgb, "" if escape else escape) for name, rgb, escape in ACCENT_PRESETS
+    ]
 
 
 def _find_config_file():
@@ -69,7 +150,9 @@ def _find_config_file():
 
 
 def _rgb_escape(r, g, b) -> str:
-    return f"\033[38;2;{r};{g};{b}m"
+    # Passa pela mesma porta: e' daqui que saem ACCENT/HIGHLIGHT/INFO/PROGRESS,
+    # as cores mais usadas do programa.
+    return _e(f"\033[38;2;{r};{g};{b}m")
 
 
 def _darken(rgb: tuple, factor: float = 0.55) -> tuple:
@@ -126,10 +209,10 @@ def accent_preview(escape: str, label: str = "") -> str:
     Adapta automaticamente para o tamanho da tela (celular vs iPad/PC)."""
     cols, _ = shutil.get_terminal_size((80, 24))
 
-    dark_bg = "\033[40m"  # Fundo Preto
-    light_bg = "\033[107m"  # Fundo Branco Brilhante
-    dark_fg = "\033[97m"  # Texto Branco Brilhante
-    light_fg = "\033[30m"  # Texto Preto
+    dark_bg = _e("\033[40m")  # Fundo Preto
+    light_bg = _e("\033[107m")  # Fundo Branco Brilhante
+    dark_fg = _e("\033[97m")  # Texto Branco Brilhante
+    light_fg = _e("\033[30m")  # Texto Preto
 
     # Aumentado para 115 colunas para acionar o modo escadinha no tablet em pé
     if cols < 115:
@@ -138,7 +221,15 @@ def accent_preview(escape: str, label: str = "") -> str:
         dark = f"{dark_bg} {escape}[FX] {dark_fg}The Weeknd {RESET}"
         light = f"{light_bg} {escape}[FX] {light_fg}The Weeknd {RESET}"
 
-        return f"\n\n          Escuro:  {dark}\n          Claro:   {light}\n"
+        # BUGFIX (tela estreita): o recuo era fixo em 10 espacos, entao a
+        # linha media 36 colunas visiveis (10 recuo + 9 do rotulo + 17 da
+        # amostra) e estourava em qualquer terminal menor que isso -- caso
+        # real do a-Shell no iPad em Split View. O recuo agora cede espaco
+        # conforme a largura disponivel, com piso de 2 para nao colar na
+        # borda. O bloco de amostra em si nao encolhe: ele E' o conteudo.
+        indent = " " * max(2, min(10, cols - 26))
+
+        return f"\n\n{indent}Escuro:  {dark}\n{indent}Claro:   {light}\n"
     else:
         # Modo largo (iPad na horizontal ou PC)
         dark = f"{dark_bg} {escape}[FAIXA] {dark_fg}ARTISTA {escape}The Weeknd {RESET}"

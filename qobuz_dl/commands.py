@@ -254,7 +254,10 @@ def import_playlist_args(subparsers):
             "  JSON: formato de exportação do Spotify\n"
         ),
         help="importa playlist por URL (Spotify/Deezer/Apple Music) ou arquivo",
-        formatter_class=__import__("argparse").RawDescriptionHelpFormatter,
+        # NOTA: passar `formatter_class` aqui nao tinha efeito nenhum --
+        # ColoredArgumentParser.__init__ sobrescreve incondicionalmente com
+        # CustomHelpFormatter. O argumento foi removido para nao dar a falsa
+        # impressao de que este subparser usa um formatter diferente.
     )
     ip.add_argument(
         "SOURCE",
@@ -274,9 +277,54 @@ def import_playlist_args(subparsers):
         "--auto",
         action="store_true",
         default=False,
-        help="Aceita automaticamente correspondências duvidosas (>=60% de similaridade).",
+        # BUGFIX CRÍTICO: o argparse aplica formatação `%` nos textos de help,
+        # então um `%` literal precisa ser escrito `%%`. Sem isso, o Python
+        # 3.14 (que passou a validar isso em add_argument) derrubava o programa
+        # INTEIRO -- inclusive a tela inicial -- com
+        # "TypeError: %d format: a real number is required, not dict".
+        # Em Python <= 3.13 o crash acontecia ao rodar `--help` deste comando.
+        help=(
+            "Aceita automaticamente correspondências duvidosas "
+            "(>=60%% de similaridade)."
+        ),
     )
     return ip
+
+
+def add_output_args(parser, suppress=False):
+    """Adiciona as flags de controle de saída a um parser.
+
+    São aplicadas TANTO ao parser principal quanto a cada subcomando, porque
+    argparse só aceita opções do parser pai ANTES do subcomando -- ou seja,
+    ``qobuz-dl stats --quiet`` morria com "unrecognized arguments: --quiet",
+    o que é justamente a ordem que todo mundo digita.
+
+    Nas cópias dos subcomandos o default é ``SUPPRESS``: sem isso, o default
+    ``False`` do subparser sobrescreveria um ``--quiet`` escrito antes do
+    subcomando, desligando silenciosamente a flag.
+    """
+    kwargs = {"default": argparse.SUPPRESS} if suppress else {}
+    group = parser.add_argument_group("saída no terminal")
+    group.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="mostra mensagens de diagnóstico (nível DEBUG)",
+        **kwargs,
+    )
+    group.add_argument(
+        "--quiet",
+        action="store_true",
+        help="mostra apenas avisos e erros (bom para cron/scripts)",
+        **kwargs,
+    )
+    group.add_argument(
+        "--no-color",
+        action="store_true",
+        help="desliga as cores ANSI (respeita também a variável NO_COLOR)",
+        **kwargs,
+    )
+    return parser
 
 
 def add_common_arg(custom_parser, default_folder, default_quality):
@@ -626,8 +674,10 @@ def qobuz_dl_args(default_quality=6, default_limit=20, default_folder=None):
         prog="qobuz-dl",
         usage="qobuz-dl <comando> [opções]",
         description=(
+            # BUGFIX: apontava para https://github.com/Sei969/qobuz-dl, o
+            # repositorio de outra pessoa (heranca do fork original).
             "O baixador definitivo de músicas do Qobuz.\nVeja exemplos de uso "
-            "em https://github.com/Sei969/qobuz-dl"
+            "em https://github.com/kaduvercosa/qobuz-dl-ultra"
         ),
     )
     parser.add_argument(
@@ -673,6 +723,12 @@ def qobuz_dl_args(default_quality=6, default_limit=20, default_folder=None):
         "-sc", "--show-config", action="store_true", help="mostra a configuração atual"
     )
 
+    # --- Controle de saída no terminal (NOVO) ---
+    # Antes não havia nenhuma forma de reduzir/aumentar a verbosidade nem de
+    # desligar as cores: o logging era fixado em INFO e as sequências ANSI
+    # truecolor eram emitidas sempre, até quando a saída ia para um arquivo.
+    add_output_args(parser)
+
     subparsers = parser.add_subparsers(
         title="comandos",
         description="rode qobuz-dl <comando> --help para mais opções e detalhes\n(ex. qobuz-dl interactive --help)",
@@ -682,14 +738,27 @@ def qobuz_dl_args(default_quality=6, default_limit=20, default_folder=None):
 
     interactive = fun_args(subparsers, default_limit)
     download = dl_args(subparsers)
-    import_playlist_args(subparsers)
+    import_playlist = import_playlist_args(subparsers)
     lucky = lucky_args(subparsers)
     lyrics_cmd = lyrics_args(subparsers, default_folder=default_folder)
     sync_pl_cmd = sync_playlist_args(subparsers)
-    radar_args(subparsers)
-    stats_args(subparsers)
+    radar = radar_args(subparsers)
+    stats = stats_args(subparsers)
 
-    for i in (interactive, download, lucky, sync_pl_cmd):
-        add_common_arg(i, default_folder, default_quality)
+    for subparser in (interactive, download, lucky, sync_pl_cmd):
+        add_common_arg(subparser, default_folder, default_quality)
+
+    # As flags de saída valem para TODOS os subcomandos, em qualquer ordem.
+    for subparser in (
+        interactive,
+        download,
+        import_playlist,
+        lucky,
+        lyrics_cmd,
+        sync_pl_cmd,
+        radar,
+        stats,
+    ):
+        add_output_args(subparser, suppress=True)
 
     return parser
