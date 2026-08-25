@@ -4,6 +4,7 @@ import xml.etree.ElementTree as ET
 import asyncio
 import questionary
 from qobuz_dl.qopy import Client
+
 # CYAN/YELLOW importados como INFO/WARNING renomeados: mesma cor de
 # YELLOW (mantida por convencao), mas CYAN agora e' LIGHTBLUE_EX --
 # visivel em terminal claro E escuro (CYAN puro quase some em fundo

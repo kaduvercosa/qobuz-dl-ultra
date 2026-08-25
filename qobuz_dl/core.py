@@ -25,8 +25,17 @@ except ImportError:
 
 from qobuz_dl.bundle import Bundle
 from qobuz_dl import downloader, qopy
+
 # Importando o _ACCENT direto do seu color.py para manter o tema sincronizado
-from qobuz_dl.color import INFO as CYAN, OFF, RED, WARNING as YELLOW, RESET, _ACCENT
+from qobuz_dl.color import (
+    INFO as CYAN,
+    OFF,
+    RED,
+    GREEN,
+    WARNING as YELLOW,
+    RESET,
+    _ACCENT,
+)
 from qobuz_dl.exceptions import NonStreamable
 from qobuz_dl.db import create_db, handle_download_id
 from qobuz_dl.utils import (
@@ -42,7 +51,7 @@ HEADER_STAGGER_DELAY = 1.5
 
 # --- UI STYLE DINÂMICO (LÊ A COR ESCOLHIDA NO -r) ---
 # Converte o código ANSI do color.py (RGB) para HEX que o prompt_toolkit entende
-_hex_accent = "#5fa8d3"    # Fallback padrão
+_hex_accent = "#5fa8d3"  # Fallback padrão
 _darker_accent = "#4c86a8"  # Fallback escurecido (20%)
 
 _match = re.search(r"\033\[38;2;(\d+);(\d+);(\d+)m", _ACCENT)
@@ -99,6 +108,7 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
         cursor_pos = min(len(options_dicts) - 1, cursor_pos + 1)
 
     if is_multi:
+
         @bindings.add("space")
         def _(event):
             if cursor_pos in selected_indices:
@@ -156,15 +166,13 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
             alb_art_w = max(10, int(flex_alb * 0.35))
             alb_tit_w = flex_alb - alb_art_w
             dash_alb = flex_alb + 43
-            res.append(
-                ("class:meta",
-                 f"{hdr_pref}{
-                     'ARTISTA'.ljust(alb_art_w)} | {
-                     'ÁLBUM'.ljust(alb_tit_w)} | {
-                     'TIPO'.ljust(6)} | {
-                     'ANO'.ljust(4)} | {
-                     'FAIXAS'.ljust(6)} | {
-                     'QUALIDADE'.ljust(12)}\n"))
+            res.append(("class:meta", f"{hdr_pref}{
+                'ARTISTA'.ljust(alb_art_w)} | {
+                'ÁLBUM'.ljust(alb_tit_w)} | {
+                'TIPO'.ljust(6)} | {
+                'ANO'.ljust(4)} | {
+                'FAIXAS'.ljust(6)} | {
+                'QUALIDADE'.ljust(12)}\n"))
             res.append(("class:meta", f"{hdr_pref}{'-' * dash_alb}"))
 
         elif item_category == "track" and is_table:
@@ -174,13 +182,11 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
             trk_alb_w = max(10, int(flex_trk * 0.30))
             trk_tit_w = flex_trk - trk_art_w - trk_alb_w
             dash_trk = flex_trk + 21
-            res.append(
-                ("class:meta",
-                 f"{hdr_pref}{
-                     'ARTISTA'.ljust(trk_art_w)} | {
-                     'FAIXA'.ljust(trk_tit_w)} | {
-                     'ÁLBUM'.ljust(trk_alb_w)} | {
-                     'QUALIDADE'.ljust(12)}\n"))
+            res.append(("class:meta", f"{hdr_pref}{
+                'ARTISTA'.ljust(trk_art_w)} | {
+                'FAIXA'.ljust(trk_tit_w)} | {
+                'ÁLBUM'.ljust(trk_alb_w)} | {
+                'QUALIDADE'.ljust(12)}\n"))
             res.append(("class:meta", f"{hdr_pref}{'-' * dash_trk}"))
 
         elif item_category == "playlist" and is_table:
@@ -189,19 +195,16 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
             pl_own_w = max(10, int(flex_pl * 0.30))
             pl_nom_w = flex_pl - pl_own_w
             dash_pl = flex_pl + 24
-            res.append(
-                ("class:meta",
-                 f"{hdr_pref}{
-                     'NOME DA PLAYLIST'.ljust(pl_nom_w)} | {
-                     'CRIADOR'.ljust(pl_own_w)} | {
-                     'FAIXAS'.ljust(6)} | {
-                     'DURAÇÃO'.ljust(9)}\n"))
+            res.append(("class:meta", f"{hdr_pref}{
+                'NOME DA PLAYLIST'.ljust(pl_nom_w)} | {
+                'CRIADOR'.ljust(pl_own_w)} | {
+                'FAIXAS'.ljust(6)} | {
+                'DURAÇÃO'.ljust(9)}\n"))
             res.append(("class:meta", f"{hdr_pref}{'-' * dash_pl}"))
 
         elif item_category == "artist" and is_table:
-            res.append(
-                ("class:meta", f"{hdr_pref}{
-                    'NOME DO ARTISTA'.ljust(50)} | LANÇAMENTOS\n"))
+            res.append(("class:meta", f"{hdr_pref}{
+                'NOME DO ARTISTA'.ljust(50)} | LANÇAMENTOS\n"))
             res.append(("class:meta", f"{hdr_pref}{'-' * 65}"))
 
         return res
@@ -267,7 +270,7 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
                     res.append((style, f"{art} | {tit} | {typ} | {yr} | {fx} | "))
                     res.append((ql_final_style, f"{ql}\n"))
                 else:
-                    title_str = meta.get('title', '')
+                    title_str = meta.get("title", "")
                     ql = meta.get("quality", "")
                     ql_color = "fg:#c59b27 bold" if "24b" in ql else f"fg:{_hex_accent}"
                     ql_final_style = style if hovered else ql_color
@@ -275,9 +278,9 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
                     res.append((title_style, f"💿 {title_str} "))
                     res.append((ql_final_style, f"[{ql}]\n"))
 
-                    art = meta.get('artist', '')
-                    typ = meta.get('type', '')
-                    yr = meta.get('year', '')
+                    art = meta.get("artist", "")
+                    typ = meta.get("type", "")
+                    yr = meta.get("year", "")
                     res.append((style, f"{hdr_pref}👤 {art} | {typ} | {yr}\n"))
 
             elif item_category == "track":
@@ -299,7 +302,7 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
                     res.append((style, f"{art} | {tit} | {alb} | "))
                     res.append((ql_final_style, f"{ql}\n"))
                 else:
-                    title_str = meta.get('title', '')
+                    title_str = meta.get("title", "")
                     ql = meta.get("quality", "")
                     ql_color = "fg:#c59b27 bold" if "24b" in ql else f"fg:{_hex_accent}"
                     ql_final_style = style if hovered else ql_color
@@ -307,8 +310,8 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
                     res.append((title_style, f"🎶 {title_str} "))
                     res.append((ql_final_style, f"[{ql}]\n"))
 
-                    art = meta.get('artist', '')
-                    alb = meta.get('album', '')
+                    art = meta.get("artist", "")
+                    alb = meta.get("album", "")
                     res.append((style, f"{hdr_pref}👤 {art} | 💿 {alb}\n"))
 
             elif item_category == "playlist":
@@ -325,13 +328,15 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
 
                     res.append((style, f"{n} | {o} | {c} | {dur}\n"))
                 else:
-                    n = meta.get('name', '')
-                    o = meta.get('owner', '')
-                    c = meta.get('count', 0)
-                    dur = meta.get('duration', '--:--')
+                    n = meta.get("name", "")
+                    o = meta.get("owner", "")
+                    c = meta.get("count", 0)
+                    dur = meta.get("duration", "--:--")
 
                     res.append((title_style, f"📋 {n}\n"))
-                    res.append((style, f"{hdr_pref}👤 {o} | 🎶 {c} faixas | ⏱️ {dur}\n"))
+                    res.append(
+                        (style, f"{hdr_pref}👤 {o} | 🎶 {c} faixas | ⏱️ {dur}\n")
+                    )
 
             elif item_category == "artist":
                 if is_table:
@@ -339,16 +344,16 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
                     c = meta.get("count", "")
                     res.append((style, f"{n} | {c} álbuns\n"))
                 else:
-                    n = meta.get('name', '')
-                    c = meta.get('count', '')
+                    n = meta.get("name", "")
+                    c = meta.get("count", "")
                     res.append((title_style, f"🎤 {n}\n"))
                     res.append((style, f"{hdr_pref}📦 {c} lançamentos\n"))
 
             elif item_category == "filter":
                 res.append((style, f"{opt}\n"))
 
-        if res and res[-1][1].endswith('\n'):
-            res[-1] = (res[-1][0], res[-1][1].rstrip('\n'))
+        if res and res[-1][1].endswith("\n"):
+            res[-1] = (res[-1][0], res[-1][1].rstrip("\n"))
 
         return res
 
@@ -360,13 +365,14 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
         # Adicionamos uma quebra de linha extra no final para afastar o texto da
         # borda inferior
         if is_multi:
+            res.append(("class:checkbox", f" ✓ Selecionados: {
+                len(selected_indices)}\n"))
             res.append(
-                ("class:checkbox",
-                 f" ✓ Selecionados: {
-                     len(selected_indices)}\n"))
-            res.append(
-                ("class:footer",
-                 " [↑ ↓] Mover   [Espaço] Selecionar   [t] Selecionar Todos   [Enter] Confirmar\n"))
+                (
+                    "class:footer",
+                    " [↑ ↓] Mover   [Espaço] Selecionar   [t] Selecionar Todos   [Enter] Confirmar\n",
+                )
+            )
         else:
             res.append(("class:footer", " [↑ ↓] Mover   [Enter] Confirmar\n"))
         return res
@@ -375,8 +381,7 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
     # MONTAGEM FINAL DO APP EM CAMADAS (HSplit)
     # ------------------------------------------
     header_window = Window(
-        content=FormattedTextControl(text=get_header_text),
-        dont_extend_height=True
+        content=FormattedTextControl(text=get_header_text), dont_extend_height=True
     )
 
     list_window = Window(
@@ -386,8 +391,7 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
     )
 
     footer_window = Window(
-        content=FormattedTextControl(text=get_footer_text),
-        dont_extend_height=True
+        content=FormattedTextControl(text=get_footer_text), dont_extend_height=True
     )
 
     layout = Layout(HSplit([header_window, list_window, footer_window]))
@@ -497,7 +501,7 @@ class QobuzDL:
             self.settings.user_auth_token,
             force_english=self.force_english,
         )
-        logger.info(f"{YELLOW}Set max quality: {QUALITIES[int(self.quality)]}\n")
+        logger.info(f"{YELLOW}Set max quality: {QUALITIES[int(self.quality)]}")
 
     def get_tokens(self):
         bundle = Bundle()
@@ -523,6 +527,8 @@ class QobuzDL:
                 "according to the local database.\nUse the '--no-db' flag "
                 "to bypass this."
             )
+            if is_playlist:
+                self.settings.pl_skipped = getattr(self.settings, "pl_skipped", 0) + 1
             return
         try:
             dloader = downloader.Download(
@@ -555,11 +561,16 @@ class QobuzDL:
                 suppress_header=suppress_header,
             )
         except (httpx.RequestError, NonStreamable) as e:
-            logger.error(f"{RED}Error getting release: {e}. Skipping...")
+            logger.error(f"{RED}Erro na liberação: {e}. Pulando...")
+            if is_playlist:
+                self.settings.pl_failed = getattr(self.settings, "pl_failed", 0) + 1
         except Exception as e:
             logger.error(
-                f"{RED}Erro inesperado baixando item {item_id}: Pulando...{OFF}")
+                f"{RED}Erro inesperado baixando item {item_id}: {e} (Pulando...){OFF}"
+            )
             logger.debug("Detalhes do erro inesperado:", exc_info=True)
+            if is_playlist:
+                self.settings.pl_failed = getattr(self.settings, "pl_failed", 0) + 1
 
         if getattr(self, "delay", 0) > 0:
             logger.info(
@@ -642,15 +653,13 @@ class QobuzDL:
 
             logger.debug(f"Number of chunks: {len(content)}")
             if content:
-                logger.debug(
-                    f"Items in first chunk: {
-                        len(
-                            content[0].get(
-                                type_dict['iterable_key'],
-                                {}).get(
-                                'items',
-                                []))}"
-                )
+                logger.debug(f"Items in first chunk: {
+                    len(
+                        content[0].get(
+                            type_dict['iterable_key'],
+                            {}).get(
+                            'items',
+                                []))}")
             if getattr(self, "allowed_release_types", None) is not None:
                 logger.info(
                     f"{YELLOW}[*] Evaluating {
@@ -658,6 +667,11 @@ class QobuzDL:
                 )
 
             is_playlist = url_type == "playlist"
+            if is_playlist:
+                self.settings.pl_success = 0
+                self.settings.pl_skipped = 0
+                self.settings.pl_failed = 0
+
             if is_playlist and not getattr(self, "playlist_as_albums", False):
                 original_folder_format = self.folder_format
                 original_multi_disc_setting = self.settings.multiple_disc_one_dir
@@ -680,7 +694,9 @@ class QobuzDL:
             pending_tasks = []
 
             mode_label = (
-                f"Paralelo ({batch_workers} workers)" if can_parallelize else "Sequencial"
+                f"Paralelo ({batch_workers} workers)"
+                if can_parallelize
+                else "Sequencial"
             )
 
             if is_playlist:
@@ -688,8 +704,11 @@ class QobuzDL:
                 from qobuz_dl.utils import format_duration
 
                 p_name = content_name
-                p_owner = content[0].get("owner", {}).get(
-                    "name", "Unknown") if content else "Unknown"
+                p_owner = (
+                    content[0].get("owner", {}).get("name", "Unknown")
+                    if content
+                    else "Unknown"
+                )
                 p_count = str(len(items))
                 dur_raw = content[0].get("duration", 0) if content else 0
                 p_dur = format_duration(dur_raw) if dur_raw else "--:--"
@@ -702,7 +721,7 @@ class QobuzDL:
                         ("Faixas", p_count),
                         ("Duração", p_dur),
                         ("Modo", mode_label),
-                    ]
+                    ],
                 )
 
             for idx, item in enumerate(items, start=1):
@@ -830,6 +849,29 @@ class QobuzDL:
 
             if url_type == "playlist" and not self.no_m3u_for_playlists:
                 make_m3u(new_path)
+
+            if url_type == "playlist" and not self.no_m3u_for_playlists:
+                make_m3u(new_path)
+
+            # === EXIBINDO O RESUMO COMPLETO ===
+            if is_playlist:
+                succ = getattr(self.settings, "pl_success", 0)
+                skip = getattr(self.settings, "pl_skipped", 0)
+                fail = getattr(self.settings, "pl_failed", 0)
+
+                from qobuz_dl.downloader import safe_print
+
+                safe_print(f"\n{CYAN}{'━' * 40}{RESET}")
+                safe_print(f"📊 {GREEN}RESUMO DA PLAYLIST:{RESET} {content_name}")
+                safe_print(f"   • Sucesso : {GREEN}{succ}/{len(items)}{RESET}")
+                if skip > 0:
+                    safe_print(
+                        f"   • Puladas : {YELLOW}{skip}{RESET} (Já baixado/Demo)"
+                    )
+                if fail > 0:
+                    safe_print(f"   • Falhas  : {RED}{fail}{RESET}")
+                safe_print(f"{CYAN}{'━' * 40}{RESET}\n")
+
         else:
             await self.download_from_id(item_id, type_dict["album"])
 
@@ -857,11 +899,20 @@ class QobuzDL:
         batch_workers = int(getattr(self.settings, "max_workers", 1))
         parallel_allowed = batch_workers > 1 and getattr(self, "delay", 0) <= 0
 
+        # O comando 'dl' aceita SO' URLs do Qobuz (ou um arquivo de texto
+        # com uma lista delas) -- suporte a URL de outras plataformas
+        # (Spotify/Deezer/Apple Music via platform_fetcher.py, playlist do
+        # Last.fm via lastfm_parser.py) foi removido DESTE fluxo por
+        # pedido explicito. Isso NAO afeta o comando 'import-playlist'
+        # (import_playlist_from_url_or_file, mais abaixo neste arquivo),
+        # que continua multi-plataforma normalmente -- e' um comando
+        # separado, feito especificamente pra isso.
         track_urls = []
         other_urls = []
+
         for i, url in enumerate(urls):
             probe_url = url.replace("open.qobuz.com", "play.qobuz.com")
-            if "last.fm" in probe_url or os.path.isfile(probe_url):
+            if os.path.isfile(probe_url):
                 other_urls.append((i, url))
                 continue
             try:
@@ -888,13 +939,17 @@ class QobuzDL:
 
         if total_track_urls > 1:
             from qobuz_dl.downloader import print_download_header
+
             print_download_header(
                 "LOTE DE FAIXAS",
                 [
                     ("Total de Faixas", str(total_track_urls)),
                     ("Modo", mode_label),
-                ]
+                ],
             )
+            self.settings.pl_success = 0
+            self.settings.pl_skipped = 0
+            self.settings.pl_failed = 0
 
         if track_urls:
             position_pool = downloader._PositionPool(batch_workers)
@@ -910,6 +965,7 @@ class QobuzDL:
                         is_parallel=True,
                         position_pool=position_pool,
                         suppress_header=(total_track_urls > 1),
+                        is_playlist=(total_track_urls > 1),
                     )
                 self.mark_url_done_in_file(txt_file, original_url)
 
@@ -920,14 +976,30 @@ class QobuzDL:
                 ]
             )
 
+            # === ADICIONE O PAINEL FINAL DO LOTE AQUI ===
+            if total_track_urls > 1:
+                succ = getattr(self.settings, "pl_success", 0)
+                skip = getattr(self.settings, "pl_skipped", 0)
+                fail = getattr(self.settings, "pl_failed", 0)
+
+                from qobuz_dl.downloader import safe_print
+
+                safe_print(f"\n{CYAN}{'━' * 44}{RESET}")
+                safe_print(f"📊 {GREEN}RESUMO DO LOTE DE FAIXAS:{RESET}")
+                safe_print(f"   • Sucesso : {GREEN}{succ}/{total_track_urls}{RESET}")
+                if skip > 0:
+                    safe_print(
+                        f"   • Puladas : {YELLOW}{skip}{RESET} (Já baixado/Demo)"
+                    )
+                if fail > 0:
+                    safe_print(f"   • Falhas  : {RED}{fail}{RESET}")
+                safe_print(f"{CYAN}{'━' * 44}{RESET}\n")
+
         for _, url in other_urls:
             original_url = url
             url = url.replace("open.qobuz.com", "play.qobuz.com")
 
-            if "last.fm" in url:
-                await self.download_lastfm_pl(url)
-                self.mark_url_done_in_file(txt_file, original_url)
-            elif os.path.isfile(url):
+            if os.path.isfile(url):
                 await self.download_from_txt_file(url)
             else:
                 await self.handle_url(url)
@@ -942,14 +1014,14 @@ class QobuzDL:
                     if not line or line.startswith("#") or "[DONE]" in line:
                         continue
 
-                    if "last.fm" in line:
+                    # So' URLs do Qobuz sao aceitas no arquivo de texto
+                    # agora (ver comentario em download_list_of_urls sobre
+                    # a remocao do suporte a outras plataformas no 'dl').
+                    try:
+                        get_url_info(line)
                         valid_urls.append(line)
-                    else:
-                        try:
-                            get_url_info(line)
-                            valid_urls.append(line)
-                        except (KeyError, IndexError, AttributeError):
-                            logger.debug(f"Skipping invalid URL line: {line}")
+                    except (KeyError, IndexError, AttributeError):
+                        logger.debug(f"Skipping invalid URL line: {line}")
 
         except Exception as e:
             logger.error(f"{RED}Invalid text file: {e}{OFF}")
@@ -1510,31 +1582,185 @@ class QobuzDL:
             logger.info(f"{YELLOW}Operação cancelada pelo usuário.{OFF}")
             return
 
-    async def download_lastfm_pl(self, playlist_url):
-        from qobuz_dl.lastfm_parser import fetch_lastfm_playlist
+    async def import_playlist_from_url_or_file(
+        self,
+        source: str,
+        name: str = None,
+        auto: bool = False,
+    ):
+        """
+        Ponto de entrada unificado para import-playlist.
+        Aceita tanto URL (Spotify, Deezer, Apple Music) quanto arquivo (TXT/CSV/JSON).
 
-        logger.info(
-            f"{CYAN}[*] Last.fm URL detected! Initiating Last.fm integration...{OFF}"
-        )
+        Após buscar as faixas, exibe um menu:
+            [1] Baixar faixas          → matching fuzzy + download normal
+            [2] Copiar para o Qobuz   → cria playlist na conta do usuário
+            [3] As duas               → baixa E cria playlist no Qobuz
+            [0] Cancelar
+        """
+        import shutil as _shutil
 
-        loop = asyncio.get_event_loop()
-        tracks_list = await loop.run_in_executor(
-            None, fetch_lastfm_playlist, playlist_url
-        )
+        is_url = source.startswith("http://") or source.startswith("https://")
+        platform_label = "arquivo"
+        tracks_list = []
+        playlist_name = name or "Playlist"
+
+        # ── 1. Buscar faixas ─────────────────────────────────────────────────
+        if is_url:
+            from qobuz_dl.platform_fetcher import fetch_playlist_from_url
+
+            logger.info(f"{CYAN}[*] Buscando playlist de: {source}{OFF}")
+            try:
+                playlist_data = await fetch_playlist_from_url(source)
+            except ValueError as e:
+                logger.info(f"{RED}[!] {e}{OFF}")
+                return
+            platform_label = playlist_data["platform"].replace("_", " ").title()
+            tracks_list = playlist_data["tracks"]
+            playlist_name = name or playlist_data["name"]
+            logger.info(
+                f"{GREEN}[+] Playlist encontrada ({platform_label}): "
+                f"'{playlist_name}' -- {len(tracks_list)} faixas{OFF}"
+            )
+        else:
+            from qobuz_dl.playlist_import import parse_playlist_file
+
+            logger.info(f"{CYAN}[*] Lendo arquivo: {source}{OFF}")
+            try:
+                tracks_list = parse_playlist_file(source)
+            except (FileNotFoundError, ValueError) as e:
+                logger.info(f"{RED}[!] {e}{OFF}")
+                return
+            playlist_name = name or os.path.splitext(os.path.basename(source))[0]
+            logger.info(f"{GREEN}[+] {len(tracks_list)} faixas encontradas.{OFF}")
 
         if not tracks_list:
-            logger.info(f"{YELLOW}[!] Last.fm processing aborted (no tracks).{OFF}")
+            logger.info(f"{YELLOW}[!] Nenhuma faixa encontrada.{OFF}")
             return
 
-        pl_id = playlist_url.rstrip("/").split("/")[-1]
-        pl_title = sanitize_filename(f"LastFM_Playlist_{pl_id}")
-        pl_directory = os.path.join(self.directory, pl_title)
+        # ── 2. Menu de ação ──────────────────────────────────────────────────
+        cols = min(_shutil.get_terminal_size((70, 24)).columns, 90)
+        bar = "━" * cols
+        print(f"\n{CYAN}{bar}{OFF}")
+        print(f"\033[1m{CYAN}{'  O QUE DESEJA FAZER?':^{cols}}{OFF}")
+        print(f"{CYAN}{bar}{OFF}\n")
+        print(f"  {CYAN}[1]{OFF} Baixar faixas             (matching Qobuz → download)")
+        print(
+            f"  {CYAN}[2]{OFF} Copiar para o Qobuz       (cria playlist na sua conta)"
+        )
+        print(
+            f"  {CYAN}[3]{OFF} As duas                   (baixar + criar playlist no Qobuz)"
+        )
+        print(f"  {CYAN}[0]{OFF} Cancelar")
+        print()
 
+        while True:
+            choice = input("  Escolha (0-3): ").strip()
+            if choice in ("0", "1", "2", "3"):
+                break
+            print(f"  {YELLOW}Por favor, escolha entre 0 e 3.{OFF}")
+
+        if choice == "0":
+            logger.info(f"{YELLOW}[*] Cancelado.{OFF}")
+            return
+
+        do_download = choice in ("1", "3")
+        do_copy_qobuz = choice in ("2", "3")
+
+        # ── 3. Matching fuzzy (feito uma vez, reutilizado pelas duas ações) ──
+        logger.info(
+            f"\n{CYAN}[*] Fazendo matching de {len(tracks_list)} faixas no Qobuz...{OFF}"
+        )
         track_ids = await self.client.get_track_ids_from_list(tracks_list)
 
         if not track_ids:
-            logger.info(f"{RED}[!] No matching tracks found on Qobuz. Aborting.{OFF}")
+            logger.info(f"{RED}[!] Nenhuma faixa encontrada no Qobuz. Encerrando.{OFF}")
             return
+
+        logger.info(
+            f"{GREEN}[+] {len(track_ids)} de {len(tracks_list)} "
+            f"faixas encontradas no Qobuz.{OFF}"
+        )
+
+        # ── 4a. Baixar ───────────────────────────────────────────────────────
+        if do_download:
+            await self.download_from_playlist_file(
+                file_path=source if not is_url else None,
+                name=playlist_name,
+                auto=auto,
+                _preloaded_track_ids=track_ids,
+            )
+
+        # ── 4b. Copiar para o Qobuz ──────────────────────────────────────────
+        if do_copy_qobuz:
+            logger.info(
+                f"\n{CYAN}[*] Criando playlist '{playlist_name}' no Qobuz...{OFF}"
+            )
+            pl_id = await self.client.create_qobuz_playlist(
+                name=playlist_name,
+                description=f"Importada de {platform_label} via qobuz-dl-ultra",
+                is_public=False,
+            )
+            if pl_id:
+                ok = await self.client.add_tracks_to_qobuz_playlist(pl_id, track_ids)
+                if ok:
+                    logger.info(
+                        f"{GREEN}[+] {len(track_ids)} faixas adicionadas à playlist "
+                        f"'{playlist_name}' no Qobuz!{OFF}"
+                    )
+                else:
+                    logger.info(
+                        f"{YELLOW}[!] Algumas faixas podem não ter sido adicionadas.{OFF}"
+                    )
+
+    async def download_from_playlist_file(
+        self,
+        file_path: str = None,
+        name: str = None,
+        auto: bool = False,
+        _preloaded_track_ids: list = None,
+    ):
+        """
+        Importa uma playlist de arquivo (TXT/CSV/JSON), faz matching fuzzy
+        contra o Qobuz e baixa as faixas encontradas.
+        """
+        from qobuz_dl.playlist_import import parse_playlist_file
+
+        if _preloaded_track_ids is not None:
+            # Matching já feito por import_playlist_from_url_or_file
+            track_ids = _preloaded_track_ids
+            playlist_name = name or "Playlist"
+            pl_directory = os.path.join(
+                self.directory, sanitize_filename(playlist_name)
+            )
+        else:
+            logger.info(f"{CYAN}[*] Importando playlist: {file_path}{OFF}")
+            try:
+                tracks_list = parse_playlist_file(file_path)
+            except (FileNotFoundError, ValueError) as e:
+                logger.info(f"{RED}[!] Erro ao ler o arquivo: {e}{OFF}")
+                return
+            if not tracks_list:
+                logger.info(f"{YELLOW}[!] Nenhuma faixa encontrada no arquivo.{OFF}")
+                return
+            logger.info(
+                f"{CYAN}[*] {len(tracks_list)} entradas encontradas. "
+                f"Iniciando matching no Qobuz...{OFF}"
+            )
+            playlist_name = name or os.path.splitext(os.path.basename(file_path))[0]
+            pl_directory = os.path.join(
+                self.directory, sanitize_filename(playlist_name)
+            )
+            track_ids = await self.client.get_track_ids_from_list(tracks_list)
+
+        if not track_ids:
+            logger.info(f"{RED}[!] Nenhuma faixa encontrada no Qobuz. Encerrando.{OFF}")
+            return
+
+        logger.info(
+            f"{GREEN}[+] {len(track_ids)} de {len(tracks_list)} faixas "
+            f"encontradas no Qobuz.{OFF}"
+        )
 
         original_folder_format = self.folder_format
         original_multi_disc_setting = self.settings.multiple_disc_one_dir
@@ -1544,11 +1770,8 @@ class QobuzDL:
             self.settings.multiple_disc_one_dir = True
 
         batch_workers = int(getattr(self.settings, "max_workers", 1))
-        # Idem aos outros caminhos: paralelo so' com >1 faixa encontrada.
         can_parallelize = (
-            batch_workers > 1 and
-            len(track_ids) > 1 and
-            getattr(self, "delay", 0) <= 0
+            batch_workers > 1 and len(track_ids) > 1 and getattr(self, "delay", 0) <= 0
         )
         position_pool = (
             downloader._PositionPool(batch_workers) if can_parallelize else None
@@ -1556,73 +1779,76 @@ class QobuzDL:
         semaphore = asyncio.Semaphore(batch_workers) if can_parallelize else None
         pending_tasks = []
 
-        mode_label = (
-            f"Paralelo ({batch_workers} workers)" if can_parallelize else "Sequencial"
-        )
-        # Removido: resumo do lote (LAST.FM PLAYLIST) por decisao explicita
-        # do usuario -- agora cada faixa mostra seu proprio cabeçalho
-        # completo, sem nenhum resumo por cima. As info que estavam aqui
-        # (total encontrado na Last.fm / quantas casaram no Qobuz) ja'
-        # foram logadas antes deste ponto (get_track_ids_from_list).
+        # === ATUALIZAÇÕES DA INTEGRAÇÃO COMEÇAM AQUI ===
 
-        # --- INÍCIO DA MODIFICAÇÃO DO CABEÇALHO ---
+        # 1. Zera os contadores silenciosos da playlist
+        self.settings.pl_success = 0
+        self.settings.pl_skipped = 0
+        self.settings.pl_failed = 0
+
+        # 2. Imprime o Cabeçalho Global (Ocultando os da faixa)
         from qobuz_dl.downloader import print_download_header
+        mode_label = f"Paralelo ({batch_workers} workers)" if can_parallelize else "Sequencial"
         print_download_header(
-            "LAST.FM PLAYLIST",
+            "PLAYLIST IMPORTADA",
             [
-                ("Playlist", pl_title),
+                ("Nome", playlist_name),
                 ("Faixas", str(len(track_ids))),
                 ("Modo", mode_label),
             ]
         )
-        # --- FIM DA MODIFICAÇÃO DO CABEÇALHO ---
 
-        for idx, t_id in enumerate(track_ids, start=1):
+        for idx, track_id in enumerate(track_ids):
             if can_parallelize:
-                t_id_captured = t_id
+                # 3. Bug corrigido: Envolvendo o semaphore de forma segura
+                track_id_captured = track_id
                 idx_captured = idx
 
-                async def _bounded_track_download(t_id=t_id_captured, idx=idx_captured):
-                    stagger_index = idx - 1
-                    if stagger_index < batch_workers:
-                        await asyncio.sleep(stagger_index * HEADER_STAGGER_DELAY)
+                async def _bounded_track_download(t_id=track_id_captured, t_idx=idx_captured):
+                    if t_idx < batch_workers:
+                        await asyncio.sleep(t_idx * HEADER_STAGGER_DELAY)
                     async with semaphore:
-                        try:
-                            await self.download_from_id(
-                                t_id,
-                                False,
-                                pl_directory,
-                                is_playlist=True,
-                                playlist_index=idx,
-                                is_parallel=True,
-                                position_pool=position_pool,
-                                suppress_header=True,
-                            )
-                        except Exception as e:
-                            logger.error(
-                                f"{RED}[!] Failed to queue track ID {t_id}: {e}{OFF}"
-                            )
-
+                        await self.download_from_id(
+                            t_id,
+                            album=False,
+                            alt_path=pl_directory,
+                            is_playlist=True,
+                            playlist_index=t_idx,
+                            is_parallel=True,
+                            position_pool=position_pool,
+                            suppress_header=True,  # 4. Força a ocultação do cabeçalho
+                        )
                 pending_tasks.append(_bounded_track_download())
             else:
-                try:
-                    await self.download_from_id(
-                        t_id,
-                        False,
-                        pl_directory,
-                        is_playlist=True,
-                        playlist_index=idx,
-                        suppress_header=True,
-                    )
-                except Exception as e:
-                    logger.error(f"{RED}[!] Failed to queue track ID {t_id}: {e}{OFF}")
+                await self.download_from_id(
+                    track_id,
+                    album=False,
+                    alt_path=pl_directory,
+                    is_playlist=True,
+                    playlist_index=idx,
+                    is_parallel=False,
+                    position_pool=None,
+                    suppress_header=True,  # 4. Força a ocultação do cabeçalho
+                )
 
         if pending_tasks:
             await asyncio.gather(*pending_tasks)
 
-        if not getattr(self, "playlist_as_albums", False):
-            self.folder_format = original_folder_format
-            self.settings.multiple_disc_one_dir = original_multi_disc_setting
+        self.folder_format = original_folder_format
+        self.settings.multiple_disc_one_dir = original_multi_disc_setting
 
-        if not self.no_m3u_for_playlists:
-            make_m3u(pl_directory)
+        # 5. Imprime o resumo final global da playlist importada
+        succ = getattr(self.settings, "pl_success", 0)
+        skip = getattr(self.settings, "pl_skipped", 0)
+        fail = getattr(self.settings, "pl_failed", 0)
+
+        from qobuz_dl.downloader import safe_print
+
+        safe_print(f"\n{CYAN}{'━' * 44}{RESET}")
+        safe_print(f"📊 {GREEN}RESUMO DA PLAYLIST IMPORTADA:{RESET} {playlist_name}")
+        safe_print(f"   • Sucesso : {GREEN}{succ}/{len(track_ids)}{RESET}")
+        if skip > 0:
+            safe_print(f"   • Puladas : {YELLOW}{skip}{RESET} (Já baixado/Demo)")
+        if fail > 0:
+            safe_print(f"   • Falhas  : {RED}{fail}{RESET}")
+        safe_print(f"{CYAN}{'━' * 44}{RESET}\n")

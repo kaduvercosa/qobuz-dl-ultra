@@ -9,6 +9,7 @@ Usa a lib watchdog (observer nativo do SO -- inotify no Linux, FSEvents no
 macOS, ReadDirectoryChangesW no Windows; cai pra polling em sistemas sem
 suporte nativo, o que cobre o caso do iSH/a-Shell no iOS).
 """
+
 import asyncio
 import logging
 import os
@@ -43,9 +44,7 @@ class _NewAudioFileHandler(FileSystemEventHandler):
         # call_soon_threadsafe e' obrigatorio aqui: a callback do watchdog
         # roda numa thread separada da do asyncio, entao um
         # queue.put_nowait() direto NAO seria thread-safe.
-        self._loop.call_soon_threadsafe(
-            self._queue.put_nowait, os.path.dirname(path)
-        )
+        self._loop.call_soon_threadsafe(self._queue.put_nowait, os.path.dirname(path))
 
     def on_created(self, event):
         if not event.is_directory:

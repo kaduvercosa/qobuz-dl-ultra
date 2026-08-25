@@ -7,7 +7,9 @@ try:
     from prompt_toolkit.shortcuts import radiolist_dialog
     from prompt_toolkit.styles import Style
 except ImportError:
-    sys.exit("Erro: Por favor, instale o prompt_toolkit executando: pip install prompt_toolkit")
+    sys.exit(
+        "Erro: Por favor, instale o prompt_toolkit executando: pip install prompt_toolkit"
+    )
 
 # Reusa a mesma logica de verificacao que o downloader.py agora chama
 # automaticamente apos cada download (qobuz_dl/utils.py). Antes, este
@@ -22,20 +24,22 @@ except ImportError:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     from qobuz_dl.utils import verify_audio_integrity
 
-pt_style = Style.from_dict({
-    'title': 'ansicyan bold',
-    'pointer': 'ansiyellow bold',
-    'hovered': 'bg:#cccccc fg:#000000 bold',
-})
+pt_style = Style.from_dict(
+    {
+        "title": "ansicyan bold",
+        "pointer": "ansiyellow bold",
+        "hovered": "bg:#cccccc fg:#000000 bold",
+    }
+)
 
 
 def get_root_from_config():
-    for cfg_name in ['config.ini', 'settings.ini']:
+    for cfg_name in ["config.ini", "settings.ini"]:
         if os.path.exists(cfg_name):
             config = configparser.ConfigParser()
             config.read(cfg_name)
             for section in config.sections():
-                for key in ['directory', 'download_path', 'dir']:
+                for key in ["directory", "download_path", "dir"]:
                     if key in config[section]:
                         path = config[section][key]
                         if os.path.isdir(path):
@@ -44,7 +48,7 @@ def get_root_from_config():
 
 
 def find_audio_files(root_dir):
-    audio_extensions = ('.flac', '.mp3', '.m4a', '.wav', '.alac')
+    audio_extensions = (".flac", ".mp3", ".m4a", ".wav", ".alac")
     audio_files = []
     for dirpath, _, filenames in os.walk(root_dir):
         for f in filenames:
@@ -104,14 +108,20 @@ def main():
     if config_dir:
         print(f"📁 Pasta encontrada no config.ini: \033[33m{config_dir}\033[0m")
         resp = input("Deseja usá-la? [S/n]: ").strip().lower()
-        if resp in ('', 's', 'sim'):
+        if resp in ("", "s", "sim"):
             target_dir = config_dir
 
     if not target_dir:
         default_path = os.getcwd()
         print(f"📂 Diretório atual de trabalho: \033[33m{default_path}\033[0m")
-        user_input = input("Digite o nome da pasta de músicas (ou aperte Enter para usar a atual): ").strip(
-        ).strip('"').strip("'")
+        user_input = (
+            input(
+                "Digite o nome da pasta de músicas (ou aperte Enter para usar a atual): "
+            )
+            .strip()
+            .strip('"')
+            .strip("'")
+        )
 
         if not user_input:
             target_dir = default_path
@@ -130,7 +140,8 @@ def main():
 
     if not target_dir or not os.path.isdir(target_dir):
         print(
-            f"\n\033[31m[!] O diretório informado não existe ou não pôde ser acessado: '{target_dir}'\033[0m")
+            f"\n\033[31m[!] O diretório informado não existe ou não pôde ser acessado: '{target_dir}'\033[0m"
+        )
         sys.exit(1)
 
     print(f"\n🔍 Varrendo subpastas em '{target_dir}'...")
@@ -152,7 +163,7 @@ def main():
             title="Selecione a música para inspecionar",
             text="Use as setas para mover e ENTER para escolher:",
             values=options,
-            style=pt_style
+            style=pt_style,
         ).run()
 
         if selected_idx is None:
@@ -166,8 +177,15 @@ def main():
 
         # Removemos os filtros para exibir o relatório técnico completo do ffprobe
         cmd = [
-            "ffprobe", "-v", "quiet", "-hide_banner",
-            "-print_format", "flat", "-show_format", "-show_streams", chosen_file
+            "ffprobe",
+            "-v",
+            "quiet",
+            "-hide_banner",
+            "-print_format",
+            "flat",
+            "-show_format",
+            "-show_streams",
+            chosen_file,
         ]
 
         result = subprocess.run(cmd, capture_output=True, text=True)

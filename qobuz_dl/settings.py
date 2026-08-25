@@ -41,6 +41,19 @@ class QobuzDLSettings:
         )
         self.track_format = kwargs.get("track_format")
         self.smart_discography = kwargs.get("smart_discography", False)
+        self.dry_run = kwargs.get("dry_run", False)
+        self.tag_only = kwargs.get("tag_only", False)
+        self.musicbrainz = kwargs.get("musicbrainz", False)
+        # Normaliza datas: aceita "YYYY" (expande pra "YYYY-01-01" / "YYYY-12-31")
+        # e "YYYY-MM-DD" direto. None desativa o filtro.
+        _since = kwargs.get("since_date") or ""
+        self.since_date = (
+            (_since[:4] + "-01-01") if len(_since) == 4 else (_since or None)
+        )
+        _before = kwargs.get("before_date") or ""
+        self.before_date = (
+            (_before[:4] + "-12-31") if len(_before) == 4 else (_before or None)
+        )
         self.legacy_charmap = kwargs.get("legacy_charmap", False)
 
         # Verificacao de integridade pos-download (decodifica cada FLAC/MP3
@@ -137,81 +150,92 @@ class QobuzDLSettings:
         kwargs = {
             "email": config.get(section, "email", fallback=""),
             "password": config.get(section, "password", fallback=""),
-            "default_folder": arguments.directory or
+            "default_folder": getattr(arguments, "directory", None) or
             config.get(section, "default_folder", fallback="QobuzDownloads"),
-            "default_quality": arguments.quality or
+            "default_quality": getattr(arguments, "quality", None) or
             config.get(section, "default_quality", fallback="6"),
             "default_limit": config.get(section, "default_limit", fallback="20"),
-            "no_m3u": arguments.no_m3u or
+            "no_m3u": getattr(arguments, "no_m3u", False) or
             config.getboolean(section, "no_m3u", fallback=False),
-            "albums_only": arguments.albums_only or
+            "albums_only": getattr(arguments, "albums_only", False) or
             config.getboolean(section, "albums_only", fallback=False),
-            "no_fallback": arguments.no_fallback or
+            "no_fallback": getattr(arguments, "no_fallback", False) or
             config.getboolean(section, "no_fallback", fallback=False),
-            "no_database": arguments.no_db or
+            "no_database": getattr(arguments, "no_db", False) or
             config.getboolean(section, "no_database", fallback=False),
             "app_id": config.get(section, "app_id", fallback=""),
             "secrets": [
                 s for s in config.get(section, "secrets", fallback="").split(",") if s
             ],
-            "folder_format": arguments.folder_format or
+            "folder_format": getattr(arguments, "folder_format", None) or
             config.get(section, "folder_format", fallback=DEFAULT_FOLDER),
-            "fallback_folder_format": arguments.fallback_folder_format or
+            "fallback_folder_format": getattr(arguments, "fallback_folder_format", None) or
             config.get(section, "fallback_folder_format", fallback=DEFAULT_FOLDER),
-            "track_format": arguments.track_format or
+            "track_format": getattr(arguments, "track_format", None) or
             config.get(section, "track_format", fallback=DEFAULT_TRACK),
-            "smart_discography": arguments.smart_discography or
+            "smart_discography": getattr(arguments, "smart_discography", False) or
             config.getboolean(section, "smart_discography", fallback=False),
+            "dry_run": getattr(arguments, "dry_run", False),
+            "tag_only": getattr(arguments, "tag_only", False),
+            "musicbrainz": getattr(arguments, "musicbrainz", False),
+            "since_date": getattr(arguments, "since", None) or
+            config.get(section, "since_date", fallback="") or
+            None,
+            "before_date": getattr(arguments, "before", None) or
+            config.get(section, "before_date", fallback="") or
+            None,
             "verify_after_download": getattr(arguments, "verify_after_download", False) or
             config.getboolean(section, "verify_after_download", fallback=False),
             "progress_json": getattr(arguments, "progress_json", False) or
             config.getboolean(section, "progress_json", fallback=False),
             # cover options
-            "embed_art": arguments.embed_art or
+            "embed_art": getattr(arguments, "embed_art", None) or
             config.getboolean(section, "embed_art", fallback=True),
-            "og_cover": arguments.og_cover or
+            "og_cover": getattr(arguments, "og_cover", None) or
             config.getboolean(section, "og_cover", fallback=False),
-            "no_cover": arguments.no_cover or
+            "no_cover": getattr(arguments, "no_cover", False) or
             config.getboolean(section, "no_cover", fallback=False),
-            "embedded_art_size": arguments.embedded_art_size or
+            "embedded_art_size": getattr(arguments, "embedded_art_size", None) or
             config.get(section, "embedded_art_size", fallback="org"),
-            "saved_art_size": arguments.saved_art_size or
+            "saved_art_size": getattr(arguments, "saved_art_size", None) or
             config.get(section, "saved_art_size", fallback="org"),
             # multiple disc option
-            "multiple_disc_prefix": arguments.multiple_disc_prefix or
+            "multiple_disc_prefix": getattr(arguments, "multiple_disc_prefix", None) or
             config.get(section, "multiple_disc_prefix", fallback="CD"),
-            "multiple_disc_one_dir": arguments.multiple_disc_one_dir or
+            "multiple_disc_one_dir": getattr(arguments, "multiple_disc_one_dir", False) or
             config.getboolean(section, "multiple_disc_one_dir", fallback=False),
-            "multiple_disc_track_format": arguments.multiple_disc_track_format or
+            "multiple_disc_track_format": getattr(
+                arguments, "multiple_disc_track_format", None
+            ) or
             config.get(
                 section,
                 "multiple_disc_track_format",
                 fallback=DEFAULT_MULTIPLE_DISC_TRACK,
             ),
             # tag options
-            "no_album_artist_tag": arguments.no_album_artist_tag or
+            "no_album_artist_tag": getattr(arguments, "no_album_artist_tag", False) or
             config.getboolean(section, "no_album_artist_tag", fallback=False),
-            "no_album_title_tag": arguments.no_album_title_tag or
+            "no_album_title_tag": getattr(arguments, "no_album_title_tag", False) or
             config.getboolean(section, "no_album_title_tag", fallback=False),
-            "no_track_artist_tag": arguments.no_track_artist_tag or
+            "no_track_artist_tag": getattr(arguments, "no_track_artist_tag", False) or
             config.getboolean(section, "no_track_artist_tag", fallback=False),
-            "no_track_title_tag": arguments.no_track_title_tag or
+            "no_track_title_tag": getattr(arguments, "no_track_title_tag", False) or
             config.getboolean(section, "no_track_title_tag", fallback=False),
-            "no_release_date_tag": arguments.no_release_date_tag or
+            "no_release_date_tag": getattr(arguments, "no_release_date_tag", False) or
             config.getboolean(section, "no_release_date_tag", fallback=False),
-            "no_media_type_tag": arguments.no_media_type_tag or
+            "no_media_type_tag": getattr(arguments, "no_media_type_tag", False) or
             config.getboolean(section, "no_media_type_tag", fallback=False),
-            "no_genre_tag": arguments.no_genre_tag or
+            "no_genre_tag": getattr(arguments, "no_genre_tag", False) or
             config.getboolean(section, "no_genre_tag", fallback=False),
-            "no_track_number_tag": arguments.no_track_number_tag or
+            "no_track_number_tag": getattr(arguments, "no_track_number_tag", False) or
             config.getboolean(section, "no_track_number_tag", fallback=False),
-            "no_track_total_tag": arguments.no_track_total_tag or
+            "no_track_total_tag": getattr(arguments, "no_track_total_tag", False) or
             config.getboolean(section, "no_track_total_tag", fallback=False),
-            "no_disc_number_tag": arguments.no_disc_number_tag or
+            "no_disc_number_tag": getattr(arguments, "no_disc_number_tag", False) or
             config.getboolean(section, "no_disc_number_tag", fallback=False),
-            "no_disc_total_tag": arguments.no_disc_total_tag or
+            "no_disc_total_tag": getattr(arguments, "no_disc_total_tag", False) or
             config.getboolean(section, "no_disc_total_tag", fallback=False),
-            "no_composer_tag": arguments.no_composer_tag or
+            "no_composer_tag": getattr(arguments, "no_composer_tag", False) or
             config.getboolean(section, "no_composer_tag", fallback=False),
             "no_conductor_tag": getattr(arguments, "no_conductor_tag", False) or
             config.getboolean(section, "no_conductor_tag", fallback=False),
@@ -219,22 +243,22 @@ class QobuzDLSettings:
             config.getboolean(section, "no_ensemble_tag", fallback=False),
             "no_work_tag": getattr(arguments, "no_work_tag", False) or
             config.getboolean(section, "no_work_tag", fallback=False),
-            "no_explicit_tag": arguments.no_explicit_tag or
+            "no_explicit_tag": getattr(arguments, "no_explicit_tag", False) or
             config.getboolean(section, "no_explicit_tag", fallback=False),
-            "no_copyright_tag": arguments.no_copyright_tag or
+            "no_copyright_tag": getattr(arguments, "no_copyright_tag", False) or
             config.getboolean(section, "no_copyright_tag", fallback=False),
-            "no_label_tag": arguments.no_label_tag or
+            "no_label_tag": getattr(arguments, "no_label_tag", False) or
             config.getboolean(section, "no_label_tag", fallback=False),
-            "no_upc_tag": arguments.no_upc_tag or
+            "no_upc_tag": getattr(arguments, "no_upc_tag", False) or
             config.getboolean(section, "no_upc_tag", fallback=False),
-            "no_isrc_tag": arguments.no_isrc_tag or
+            "no_isrc_tag": getattr(arguments, "no_isrc_tag", False) or
             config.getboolean(section, "no_isrc_tag", fallback=False),
             "no_replaygain_tag": getattr(arguments, "no_replaygain_tag", False) or
             config.getboolean(section, "no_replaygain_tag", fallback=False),
             "no_album_url_tag": getattr(arguments, "no_album_url_tag", False) or
             config.getboolean(section, "no_album_url_tag", fallback=False),
             # Add parallel download thread count configuration
-            "max_workers": arguments.max_workers or
+            "max_workers": getattr(arguments, "max_workers", None) or
             config.get(section, "max_workers", fallback="1"),
             # Threads do fallback de download segmentado -- "0"/ausente =
             # auto-detect adaptativo por dispositivo (ver settings.py).
@@ -253,7 +277,8 @@ class QobuzDLSettings:
                 else config.getboolean(section, "embed_lyrics", fallback=True)
             ),
             "multi_value_tags": (
-                False if getattr(arguments, "no_multi_tags", False)
+                False
+                if getattr(arguments, "no_multi_tags", False)
                 else getattr(
                     arguments,
                     "multi_value_tags",

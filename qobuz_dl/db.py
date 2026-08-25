@@ -221,13 +221,22 @@ def get_stats(db_path):
         return {}
 
     empty = {
-        "total": 0, "albums": 0, "tracks": 0,
-        "hires": 0, "flac": 0, "mp3": 0,
-        "quality_met": 0, "quality_not_met": 0,
-        "unique_artists": 0, "unique_albums": 0,
-        "top_artists": [], "formats": {},
-        "bit_depths": {}, "sample_rates": {},
-        "oldest": None, "newest": None,
+        "total": 0,
+        "albums": 0,
+        "tracks": 0,
+        "hires": 0,
+        "flac": 0,
+        "mp3": 0,
+        "quality_met": 0,
+        "quality_not_met": 0,
+        "unique_artists": 0,
+        "unique_albums": 0,
+        "top_artists": [],
+        "formats": {},
+        "bit_depths": {},
+        "sample_rates": {},
+        "oldest": None,
+        "newest": None,
         "artist_list": [],
     }
 
@@ -248,12 +257,15 @@ def get_stats(db_path):
             tracks = c.fetchone()[0]
 
             # hi-res: bit_depth >= 24
-            c.execute("SELECT COUNT(*) FROM downloads WHERE CAST(bit_depth AS INTEGER) >= 24")
+            c.execute(
+                "SELECT COUNT(*) FROM downloads WHERE CAST(bit_depth AS INTEGER) >= 24"
+            )
             hires = c.fetchone()[0]
 
             # formatos
             c.execute(
-                "SELECT file_format, COUNT(*) FROM downloads GROUP BY file_format ORDER BY COUNT(*) DESC")
+                "SELECT file_format, COUNT(*) FROM downloads GROUP BY file_format ORDER BY COUNT(*) DESC"
+            )
             formats = {row[0]: row[1] for row in c.fetchall()}
             flac_count = formats.get("FLAC", 0)
             mp3_count = formats.get("MP3", 0)
@@ -300,14 +312,16 @@ def get_stats(db_path):
 
             # datas extremas
             c.execute(
-                "SELECT MIN(release_date), MAX(release_date) FROM downloads WHERE release_date != ''")
+                "SELECT MIN(release_date), MAX(release_date) FROM downloads WHERE release_date != ''"
+            )
             dates = c.fetchone()
             oldest = dates[0] if dates else None
             newest = dates[1] if dates else None
 
             # lista completa de artistas
             c.execute(
-                "SELECT DISTINCT artist FROM downloads WHERE artist != '' ORDER BY artist ASC")
+                "SELECT DISTINCT artist FROM downloads WHERE artist != '' ORDER BY artist COLLATE NOCASE ASC"
+            )
             artist_list = [row[0] for row in c.fetchall()]
 
             return {

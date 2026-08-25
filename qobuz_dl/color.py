@@ -126,10 +126,10 @@ def accent_preview(escape: str, label: str = "") -> str:
     Adapta automaticamente para o tamanho da tela (celular vs iPad/PC)."""
     cols, _ = shutil.get_terminal_size((80, 24))
 
-    dark_bg = "\033[40m"       # Fundo Preto
-    light_bg = "\033[107m"     # Fundo Branco Brilhante
-    dark_fg = "\033[97m"       # Texto Branco Brilhante
-    light_fg = "\033[30m"      # Texto Preto
+    dark_bg = "\033[40m"  # Fundo Preto
+    light_bg = "\033[107m"  # Fundo Branco Brilhante
+    dark_fg = "\033[97m"  # Texto Branco Brilhante
+    light_fg = "\033[30m"  # Texto Preto
 
     # Aumentado para 115 colunas para acionar o modo escadinha no tablet em pé
     if cols < 115:
@@ -142,6 +142,8 @@ def accent_preview(escape: str, label: str = "") -> str:
     else:
         # Modo largo (iPad na horizontal ou PC)
         dark = f"{dark_bg} {escape}[FAIXA] {dark_fg}ARTISTA {escape}The Weeknd {RESET}"
-        light = f"{light_bg} {escape}[FAIXA] {light_fg}ARTISTA {escape}The Weeknd {RESET}"
+        light = (
+            f"{light_bg} {escape}[FAIXA] {light_fg}ARTISTA {escape}The Weeknd {RESET}"
+        )
 
         return f"  Escuro: {dark}    Claro: {light}"
