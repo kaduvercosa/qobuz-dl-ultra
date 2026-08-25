@@ -41,12 +41,6 @@ jobs:
         echo "VERSION=$VERSION" >> $GITHUB_ENV
         echo "La versione che verrà iniettata è: $VERSION"
 
-    - name: Inietta la versione nel setup.py
-      run: |
-        sed -i "s/version=['\"].*['\"]/version='${{ env.VERSION }}'/g" setup.py
-        echo "Verifica del setup.py aggiornato:"
-        grep "version=" setup.py
-
     - name: Installa i tool di compilazione
       run: python -m pip install --upgrade pip build
 
