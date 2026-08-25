@@ -35,13 +35,11 @@ setup(
     long_description_content_type="text/markdown",
     # 4. LINK TO YOUR FORK
     url="https://github.com/kaduvercosa/qobuz-dl-ultra",
-
     project_urls={
         "Documentation": "https://github.com/kaduvercosa/qobuz-dl-ultra/wiki",
         "Source Code": "https://github.com/kaduvercosa/qobuz-dl-ultra",
         "Bug Tracker": "https://github.com/kaduvercosa/qobuz-dl-ultra/issues",
     },
-
     # Dependências fixadas diretamente como uma lista Python
     install_requires=[
         "pathvalidate",

@@ -96,9 +96,29 @@ def _make_sort_name(name) -> str:
         return ", ".join(_make_sort_name(n) for n in name if n)
 
     name = str(name)
-    articles = ("The ", "A ", "An ", "Os ", "As ", "O ", "A ",
-                "Los ", "Las ", "El ", "La ", "Les ", "Le ", "L'",
-                "Die ", "Das ", "Der ", "Gli ", "Le ", "I ", "Il ")
+    articles = (
+        "The ",
+        "A ",
+        "An ",
+        "Os ",
+        "As ",
+        "O ",
+        "A ",
+        "Los ",
+        "Las ",
+        "El ",
+        "La ",
+        "Les ",
+        "Le ",
+        "L'",
+        "Die ",
+        "Das ",
+        "Der ",
+        "Gli ",
+        "Le ",
+        "I ",
+        "Il ",
+    )
     for art in articles:
         if name.startswith(art):
             return name[len(art):].strip() + ", " + art.strip()
@@ -290,6 +310,7 @@ def tag_flac(
     em_image=False,
     settings: QobuzDLSettings = None,
     embed_cover_path=None,
+    musicbrainz_ids=None,
 ):
     audio = FLAC(filename)
 
@@ -300,7 +321,9 @@ def tag_flac(
         qobuz_item = d
         qobuz_album = album
 
-    tags = _get_tags_to_add(qobuz_album, qobuz_item, settings=settings)
+    tags = _get_tags_to_add(
+        qobuz_album, qobuz_item, settings=settings, musicbrainz_ids=musicbrainz_ids
+    )
 
     if not settings.no_track_number_tag:
         tags["TRACKNUMBER"] = str(qobuz_item.get("track_number", "1"))
@@ -350,9 +373,7 @@ def tag_flac(
             img_size_bytes = os.path.getsize(cover_path)
             req_size = getattr(settings, "embedded_art_size", "unknown")
             is_org = "YES" if req_size == "org" else "NO"
-            base_comment += (
-                f" | Cover: {humanize.naturalsize(img_size_bytes, binary=True)} (Req: {req_size}, Org: {is_org})"
-            )
+            base_comment += f" | Cover: {humanize.naturalsize(img_size_bytes, binary=True)} (Req: {req_size}, Org: {is_org})"
 
     tags["COMMENT"] = base_comment
 
@@ -360,7 +381,15 @@ def tag_flac(
         if v:
             if (
                 getattr(settings, "multi_value_tags", False) and
-                k in ["ARTIST", "ARTISTSORT", "ALBUMARTIST", "ALBUMARTISTSORT", "COMPOSER", "GENRE"] and
+                k
+                in [
+                    "ARTIST",
+                    "ARTISTSORT",
+                    "ALBUMARTIST",
+                    "ALBUMARTISTSORT",
+                    "COMPOSER",
+                    "GENRE",
+                ] and
                 isinstance(v, str)
             ):
                 if ", " in v:
@@ -391,6 +420,7 @@ def tag_mp3(
     em_image=False,
     settings: QobuzDLSettings = None,
     embed_cover_path=None,
+    musicbrainz_ids=None,
 ):
     try:
         audio = id3.ID3(filename)
@@ -404,7 +434,9 @@ def tag_mp3(
         qobuz_item = d
         qobuz_album = album
 
-    tags = _get_tags_to_add(qobuz_album, qobuz_item, settings=settings)
+    tags = _get_tags_to_add(
+        qobuz_album, qobuz_item, settings=settings, musicbrainz_ids=musicbrainz_ids
+    )
 
     # --- RICH COMMENT TAG INJECTION ---
     _bit = qobuz_item.get("maximum_bit_depth", 16)
@@ -445,9 +477,7 @@ def tag_mp3(
             img_size_bytes = os.path.getsize(cover_path)
             req_size = getattr(settings, "embedded_art_size", "unknown")
             is_org = "YES" if req_size == "org" else "NO"
-            base_comment += (
-                f" | Cover: {humanize.naturalsize(img_size_bytes, binary=True)} (Req: {req_size}, Org: {is_org})"
-            )
+            base_comment += f" | Cover: {humanize.naturalsize(img_size_bytes, binary=True)} (Req: {req_size}, Org: {is_org})"
 
     tags["COMMENT"] = base_comment
 
@@ -455,7 +485,15 @@ def tag_mp3(
         if v:
             if (
                 getattr(settings, "multi_value_tags", False) and
-                k in ["ARTIST", "ARTISTSORT", "ALBUMARTIST", "ALBUMARTISTSORT", "COMPOSER", "GENRE"] and
+                k
+                in [
+                    "ARTIST",
+                    "ARTISTSORT",
+                    "ALBUMARTIST",
+                    "ALBUMARTISTSORT",
+                    "COMPOSER",
+                    "GENRE",
+                ] and
                 isinstance(v, str)
             ):
                 if ", " in v:
@@ -494,7 +532,10 @@ def tag_mp3(
 
 
 def _get_tags_to_add(  # noqa: C901
-    qobuz_album: dict, qobuz_item: dict, settings: QobuzDLSettings = None
+    qobuz_album: dict,
+    qobuz_item: dict,
+    settings: QobuzDLSettings = None,
+    musicbrainz_ids=None,
 ):
     tags = dict()
     if not qobuz_album or not qobuz_item:

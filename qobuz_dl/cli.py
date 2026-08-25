@@ -1,10 +1,6 @@
 from qobuz_dl.utils import get_config_paths
 import sys
 import argparse
-# rapidfuzz no lugar de difflib: mesmo motivo do qopy.py (10-100x mais
-# rapido, C++/Cython em vez de Python puro) -- aqui usado pra sugerir a
-# variavel de formato correta quando o usuario digita uma errada no
-# config.ini.
 from rapidfuzz import process as fuzz_process, fuzz
 import string
 import configparser
@@ -20,15 +16,16 @@ import httpx
 import asyncio
 
 from qobuz_dl.bundle import Bundle
-# CYAN/YELLOW importados como INFO/WARNING renomeados: mesma cor de
-# YELLOW (mantida por convencao), mas CYAN agora e' LIGHTBLUE_EX --
-# visivel em terminal claro E escuro (CYAN puro quase some em fundo
-# branco). Ver comentario completo em qobuz_dl/color.py. Zero mudanca
-# de codigo neste arquivo: toda f-string que ja usa {CYAN}/{YELLOW}
-# continua funcionando, so' a cor de fato renderizada muda.
 from qobuz_dl.color import (
-    GREEN, WARNING as YELLOW, RED, OFF, INFO as CYAN,
-    RESET, BG, ACCENT_PRESETS, accent_preview,
+    GREEN,
+    WARNING as YELLOW,
+    RED,
+    OFF,
+    INFO as CYAN,
+    RESET,
+    BG,
+    ACCENT_PRESETS,
+    accent_preview,
     HIGHLIGHT as ACCENT,
 )
 from qobuz_dl.commands import qobuz_dl_args
@@ -177,9 +174,7 @@ def validate_config_formats(formats_to_check):
                         base_var, VALID_KEYS, scorer=fuzz.ratio, score_cutoff=60
                     )
                     if best:
-                        print(
-                            f"    {C_GRE}-> Você quis dizer '{{{best[0]}}}'?{C_OFF}"
-                        )
+                        print(f"    {C_GRE}-> Você quis dizer '{{{best[0]}}}'?{C_OFF}")
 
                     print(
                         f"    {C_RED}-> Isto fará com que toda a string de formato seja descartada durante o download.{C_OFF}"
@@ -220,7 +215,8 @@ def _pick_accent_color() -> str:
     print()
     while True:
         choice = input(
-            f"Escolha (1-{len(ACCENT_PRESETS)}) [Enter = 1 padrao]: ").strip()
+            f"Escolha (1-{len(ACCENT_PRESETS)}) [Enter = 1 padrao]: "
+        ).strip()
         if not choice:
             choice = "1"
         try:
@@ -258,8 +254,11 @@ def _pick_accent_color() -> str:
         print(f"  Preview da sua cor:")
         print(accent_preview(escape, "━━ [FAIXA]  ARTISTA  The Weeknd"))
         print()
-        confirm = input(
-            "  Confirmar esta cor? (Enter = sim, n = escolher outra): ").strip().lower()
+        confirm = (
+            input("  Confirmar esta cor? (Enter = sim, n = escolher outra): ")
+            .strip()
+            .lower()
+        )
         if confirm in ("n", "nao", "no"):
             return _pick_accent_color()  # recomecar
 
@@ -297,8 +296,12 @@ def _reset_config(config_file):
     config["qobuz"]["password"] = ""
 
     print(f"\n{C_ACCENT}[?] OS Keyring Security:{OFF}")
-    print(f"    Por padrão, os tokens são criptografados no seu Gerenciador de Credenciais do Sistema Operacional.")
-    print(f"    {OFF}Se você estiver em um Linux/NAS/Docker, isso pode falhar silenciosamente.{OFF}")
+    print(
+        f"    Por padrão, os tokens são criptografados no seu Gerenciador de Credenciais do Sistema Operacional."
+    )
+    print(
+        f"    {OFF}Se você estiver em um Linux/NAS/Docker, isso pode falhar silenciosamente.{OFF}"
+    )
     disable_kr = (
         input(
             "    Desativar o Keyring do sistema operacional e salvar tokens no config.ini? (yes/no) [Padrão: no]\n- "
@@ -339,7 +342,7 @@ def _reset_config(config_file):
         config["qobuz"]["genius_token"] = genius_token
 
     config["qobuz"]["directory"] = (
-        input("\nPasta de download (pressione Enter para 'Qobuz Downloads')\n- ") or 
+        input("\nPasta de download (pressione Enter para 'Qobuz Downloads')\n- ") or
         "Qobuz Downloads"
     )
 
@@ -349,7 +352,9 @@ def _reset_config(config_file):
     )
 
     config["qobuz"]["default_quality"] = (
-        input("\nQualidade do Download (5:MP3, 6:FLAC, 7:24b<96, 27:24b>96) [Padrão 27]\n- ") or
+        input(
+            "\nQualidade do Download (5:MP3, 6:FLAC, 7:24b<96, 27:24b>96) [Padrão 27]\n- "
+        ) or
         "27"
     )
 
@@ -416,11 +421,10 @@ def _reset_config(config_file):
     with open(config_file, "w") as configfile:
         config.write(configfile)
 
-    logging.info(
-        f"\n{GREEN}[+] Configuração salva com sucesso em {config_file}!{OFF}"
-    )
+    logging.info(f"\n{GREEN}[+] Configuração salva com sucesso em {config_file}!{OFF}")
 
     import time
+
     global ACCENT, CYAN
     if accent_rgb:
         nova_cor = f"\033[38;2;{accent_rgb}m"
@@ -442,10 +446,7 @@ def _remove_leftovers(directory):
         search_dir = os.path.join(directory, "**", pattern)
         for i in glob.glob(search_dir, recursive=True):
             try:
-                # send2trash em vez de os.remove: manda pra lixeira do SO
-                # em vez de apagar de vez. Rede de seguranca barata -- se
-                # um Ctrl+C for mal cronometrado e isto pegar um arquivo
-                # que nao era pra pegar, ainda da pra recuperar.
+
                 send2trash.send2trash(i)
             except Exception as e:
                 logger.debug(f"Falha ao mover leftover '{i}' pra lixeira: {e}")
@@ -484,6 +485,12 @@ async def _handle_commands(qobuz, arguments):
             qobuz.lucky_type = arguments.type
             qobuz.lucky_limit = arguments.number
             await qobuz.lucky_mode(query)
+        elif arguments.command in ("import-playlist", "ip"):
+            await qobuz.import_playlist_from_url_or_file(
+                source=arguments.SOURCE,
+                name=getattr(arguments, "name", None),
+                auto=getattr(arguments, "auto", False),
+            )
         else:
             qobuz.interactive_limit = arguments.limit
             await qobuz.interactive()
@@ -546,13 +553,7 @@ def _print_logo(cols):
         for row in line2:
             print(f"{CYAN}{pad2}{row}{OFF}")
     else:
-        # Antes: len(fallback) contava os bytes invisiveis do ANSI
-        # ({CYAN}{BG}...{OFF}) como se fossem caracteres visiveis -- o
-        # padding saia errado (empurrava tudo pra esquerda, ou zerava em
-        # telas estreitas). Agora mede so' o texto que realmente aparece
-        # na tela, aplica a cor DEPOIS de calcular o preenchimento. Cor
-        # trocada de CYAN fixo pra ACCENT (a cor de destaque escolhida no
-        # wizard, `qobuz-dl -r`) + BG (negrito/brilho).
+
         fallback_text = " QOBUZ-DL-ULTRA "
         pad = " " * max((cols - len(fallback_text)) // 2, 0)
         print(f"{pad}{ACCENT}{BG}{fallback_text}{OFF}")
@@ -580,15 +581,11 @@ def _extract_subcommands(parser):
         return []
 
     result = []
-    # ._choices_actions preserva a ORDEM de add_parser() e ja' lista so' o
-    # nome PRINCIPAL de cada subcomando (aliases nao aparecem aqui) --
-    # exatamente o que precisamos, sem ter que deduplicar na mao.
+
     for choice_action in subparsers_action._choices_actions:
         primary = choice_action.dest
         subparser = subparsers_action.choices[primary]
-        # Aliases: qualquer chave em .choices que aponte pro MESMO objeto
-        # de subparser (argparse registra aliases como entradas extras
-        # apontando pro mesmo parser), exceto a propria entrada principal.
+
         aliases = [
             name
             for name, sp in subparsers_action.choices.items()
@@ -618,19 +615,15 @@ def _extract_global_flags(parser):
     return result
 
 
-# Descricoes PT-BR curadas (mais completas que o help= terso em ingles
-# usado internamente pelo argparse). Chave = nome do comando (primary) ou
-# dest da flag. Se um comando/flag novo for adicionado em commands.py e
-# esquecerem de cadastrar a descricao aqui, a tela NAO omite ele (isso
-# era o bug antigo) -- ela cai pro help_text do proprio argparse e loga
-# um aviso em debug, entao o "esquecimento" fica visivel no pior caso
-# como texto em ingles mais curto, nunca como ausencia total.
 _COMMAND_DESCRIPTIONS_PT = {
-    "dl": "Baixa por URL de álbum, faixa, artista, label, playlist ou playlist do last.fm.",
+    "dl": "Baixa por URL de álbum, faixa, artista, gravadora ou playlist do Qobuz, ou um arquivo de texto com uma lista dessas URLs.",
     "interactive": "Busca interativa: procura faixas/álbuns e escolhe o que baixar na hora.",
     "lucky": "Baixa os N primeiros resultados de uma busca no Qobuz, sem passar URL.",
     "lyrics": "Varre uma pasta já baixada e injeta letras/traduções que estejam faltando.",
     "sync-playlist": "Sincroniza uma pasta local com uma playlist do Qobuz (baixa o que falta, remove o que saiu).",
+    "import-playlist": "Importa um arquivo de playlist (TXT, CSV, JSON) de qualquer plataforma para download.",
+    "radar": "Monitora e intercepta links copiados para download automático.",
+    "stats": "Mostra estatísticas detalhadas sobre sua biblioteca e downloads efetuados.",
 }
 
 _FLAG_DESCRIPTIONS_PT = {
@@ -680,12 +673,11 @@ def _print_welcome_screen():
     print()
     rule("=")
     print(f"{CYAN}{BG}Uso: qobuz-dl <comando> [opções]{OFF}")
-    print(f"     qobuz-dl <comando> --help  {OFF}(lista todas as opções daquele comando){OFF}")
+    print(
+        f"     qobuz-dl <comando> --help  {OFF}(lista todas as opções daquele comando){OFF}"
+    )
     print()
 
-    # Parser construido so' pra introspeccao -- os valores default aqui
-    # (qualidade/limite/pasta) nao importam pra esse fim, so' a
-    # ESTRUTURA (quais comandos/flags existem e seus textos de help).
     parser = qobuz_dl_args()
 
     print(f"{CYAN}{BG}Comandos:{OFF}\n")
@@ -702,7 +694,9 @@ def _print_welcome_screen():
         wrapped(desc, indent=4)
     print()
 
-    print(f"{CYAN}{BG}Flags globais:{RESET} {OFF}(não pertencem a nenhum comando específico){OFF}\n")
+    print(
+        f"{CYAN}{BG}Flags globais:{RESET} {OFF}(não pertencem a nenhum comando específico){OFF}\n"
+    )
     for flag_str, dest, help_text in _extract_global_flags(parser):
         desc = _FLAG_DESCRIPTIONS_PT.get(dest)
         if desc is None:
@@ -867,6 +861,7 @@ async def async_main():
                     return f"{day}/{m}/{y}"
                 except Exception:
                     return d
+
             _row("Lançamento mais antigo", _fmt_date(s["oldest"]))
             _row("Lançamento mais recente", _fmt_date(s["newest"]))
             print()
@@ -880,22 +875,28 @@ async def async_main():
                 if cols < 60:
                     # MODO CELULAR: Nome na primeira linha, barra recuada na linha de baixo
                     max_blocks = 12
-                    bar_len = cnt if top_cnt <= max_blocks else max(
-                        1, cnt * max_blocks // top_cnt)
+                    bar_len = (
+                        cnt
+                        if top_cnt <= max_blocks
+                        else max(1, cnt * max_blocks // top_cnt)
+                    )
                     bar_vis = f"{CYAN}{('█|' * bar_len)[:-1]}{RESET}"
                     print(f"  {rank:>2}. {artist}")
                     print(f"      {bar_vis} {cnt}")
                 else:
                     # MODO TABLET/PC: Tudo na mesma linha com alinhamento de 32 espaços
                     max_blocks = 20
-                    bar_len = cnt if top_cnt <= max_blocks else max(
-                        1, cnt * max_blocks // top_cnt)
+                    bar_len = (
+                        cnt
+                        if top_cnt <= max_blocks
+                        else max(1, cnt * max_blocks // top_cnt)
+                    )
                     bar_vis = f"{CYAN}{('█|' * bar_len)[:-1]}{RESET}"
                     print(f"  {rank:>2}. {artist:<32} {bar_vis} {cnt}")
 
         # --- Lista completa de artistas ---
         if len(sys.argv) > 2 and sys.argv[2] == "--artistas":
-            print(f"  {BG}TODOS OS ARTISTAS ({s['unique_artists']}){RESET}")
+            print(f"\n  {BG}TODOS OS ARTISTAS ({s['unique_artists']}){RESET}")
             for a in s["artist_list"]:
                 print(f"    · {a}")
             print()
@@ -1001,13 +1002,6 @@ async def async_main():
             fetch_lyrics = False
 
         force_english = not getattr(arguments, "native_lang", False)
-        # FIX: --with-credits existia no argparse (commands.py) e no README
-        # ("overrides config.ini"), mas nunca era lido aqui -- essa linha so'
-        # olhava --no-credits e o config.ini, entao se no_credits=true
-        # estivesse salvo no config.ini, NENHUMA flag de CLI conseguia
-        # reverter e o Digital Booklet.txt nunca era gerado. Agora
-        # --with-credits tem prioridade e forca no_credits_flag=False,
-        # exatamente como o help text sempre prometeu.
         with_credits_flag = getattr(arguments, "with_credits", False)
         no_credits_flag = (
             False
@@ -1046,6 +1040,9 @@ async def async_main():
     if getattr(arguments, "sync_db", None):
         from qobuz_dl.sync import sync_database
         from qobuz_dl.qopy import Client
+        from qobuz_dl.db import create_db  # <-- ADICIONE ESTA LINHA
+
+        create_db(QOBUZ_DB)
 
         sync_client = await Client.create(
             email,
@@ -1066,7 +1063,9 @@ async def async_main():
                 sync_dir = "\\\\?\\" + sync_dir
 
         await sync_database(sync_dir, QOBUZ_DB, sync_client)
-        sys.exit(f"\n{GREEN}Sincronização do banco de dados concluída com sucesso.{OFF}")
+        sys.exit(
+            f"\n{GREEN}Sincronização do banco de dados concluída com sucesso.{OFF}"
+        )
     # ----------------------------------------------
 
     # --- DUPLICATE DETECTION FEATURE (Audio Fingerprint) ---
@@ -1074,7 +1073,9 @@ async def async_main():
         from qobuz_dl.sync import find_duplicate_tracks
 
         dup_dir = (
-            default_folder if arguments.find_duplicates == "DEFAULT" else arguments.find_duplicates
+            default_folder
+            if arguments.find_duplicates == "DEFAULT"
+            else arguments.find_duplicates
         )
 
         if os.name == "nt":
@@ -1091,9 +1092,7 @@ async def async_main():
         from qobuz_dl.watcher import watch_directory
         from qobuz_dl.qopy import Client
 
-        watch_dir = (
-            default_folder if arguments.watch == "DEFAULT" else arguments.watch
-        )
+        watch_dir = default_folder if arguments.watch == "DEFAULT" else arguments.watch
         watch_dir = os.path.expanduser(watch_dir)
 
         if os.name == "nt":
@@ -1235,8 +1234,8 @@ async def async_main():
 
     # --- PRE-FLIGHT CONFIG CHECK ---
     formats_to_validate = {
-        "folder_format": arguments.folder_format or folder_format,
-        "track_format": arguments.track_format or track_format,
+        "folder_format": getattr(arguments, "folder_format", None) or folder_format,
+        "track_format": getattr(arguments, "track_format", None) or track_format,
         "fallback_folder_format": config.get(
             section, "fallback_folder_format", fallback="{artist} - {album}"
         ),
@@ -1251,17 +1250,21 @@ async def async_main():
 
     qobuz = QobuzDL(
         directory_to_use,
-        arguments.quality,
-        arguments.embed_art or embed_art,
-        ignore_singles_eps=arguments.albums_only or albums_only,
-        no_m3u_for_playlists=arguments.no_m3u or no_m3u,
-        quality_fallback=not arguments.no_fallback or not no_fallback,
-        cover_og_quality=arguments.og_cover or og_cover,
-        no_cover=arguments.no_cover or no_cover,
-        downloads_db=None if no_database or arguments.no_db else QOBUZ_DB,
-        folder_format=arguments.folder_format or folder_format,
-        track_format=arguments.track_format or track_format,
-        smart_discography=arguments.smart_discography or smart_discography,
+        getattr(arguments, "quality", None) or default_quality,
+        getattr(arguments, "embed_art", None) or embed_art,
+        ignore_singles_eps=getattr(arguments, "albums_only", False) or albums_only,
+        no_m3u_for_playlists=getattr(arguments, "no_m3u", False) or no_m3u,
+        quality_fallback=not getattr(arguments, "no_fallback", False) or
+        not no_fallback,
+        cover_og_quality=getattr(arguments, "og_cover", None) or og_cover,
+        no_cover=getattr(arguments, "no_cover", False) or no_cover,
+        downloads_db=(
+            None if no_database or getattr(arguments, "no_db", False) else QOBUZ_DB
+        ),
+        folder_format=getattr(arguments, "folder_format", None) or folder_format,
+        track_format=getattr(arguments, "track_format", None) or track_format,
+        smart_discography=getattr(arguments, "smart_discography", False) or
+        smart_discography,
         fetch_lyrics=fetch_lyrics,
         no_lrc_files=("--no-lrc-files" in sys.argv) or no_lrc_files_config,
         genius_token=genius_token,

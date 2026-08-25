@@ -126,7 +126,8 @@ class Client:
         limits = httpx.Limits(max_keepalive_connections=10, max_connections=50)
 
         self.session = httpx.AsyncClient(
-            headers=headers, timeout=client_timeout, limits=limits)
+            headers=headers, timeout=client_timeout, limits=limits
+        )
 
         self.base = "https://www.qobuz.com/api.json/0.2/"
         self.sec = None
@@ -412,9 +413,24 @@ class Client:
             elif epoint == "label/get":
                 params["label_id"] = val_id
                 params["extra"] = "albums"
+            elif epoint == "playlist/create":
+                params["user_auth_token"] = getattr(self, "uat", "")
+                params["name"] = kwargs.get("name", "")
+                params["description"] = kwargs.get("description", "")
+                params["is_public"] = "1" if kwargs.get("is_public", False) else "0"
+                params["is_collaborative"] = "0"
+            elif epoint == "playlist/addTracks":
+                params["user_auth_token"] = getattr(self, "uat", "")
+                params["playlist_id"] = kwargs.get("playlist_id", "")
+                params["track_ids"] = kwargs.get("track_ids", "")
 
         # PATCH: Added favorite/create to POST methods
-        if epoint in ["user/login", "favorite/create"]:
+        if epoint in [
+            "user/login",
+            "favorite/create",
+            "playlist/create",
+            "playlist/addTracks",
+        ]:
             method, req_kwargs = "post", {"data": params}
         elif epoint == "session/start":
             method, req_kwargs = "post", {
@@ -439,7 +455,9 @@ class Client:
 
             try:
                 # httpx AsyncClient returns a Response object from request()
-                resp = await self.session.request(method, self.base + epoint, **req_kwargs)
+                resp = await self.session.request(
+                    method, self.base + epoint, **req_kwargs
+                )
 
                 if epoint == "user/login" and resp.status_code == 400:
                     text = resp.text
@@ -600,10 +618,8 @@ class Client:
                         valid_track_ids.append(best_match_id)
 
                     elif highest_ratio >= PROMPT_THRESHOLD and best_match_id:
-                        print(
-                            f"\n{YELLOW}[?] Borderline match detected ({
-                                highest_ratio * 100:.0f}% similarity){OFF}"
-                        )
+                        print(f"\n{YELLOW}[?] Borderline match detected ({
+                            highest_ratio * 100:.0f}% similarity){OFF}")
                         print(
                             f"    Target (Last.fm): {item['artist']} - {item['title']}"
                         )
@@ -624,10 +640,8 @@ class Client:
                             print(f"{RED}    [-] Track skipped manually.{OFF}")
 
                     else:
-                        print(
-                            f"{YELLOW}[!] Skipping: '{query}' (Best match was only {
-                                highest_ratio * 100:.0f}% similar){OFF}"
-                        )
+                        print(f"{YELLOW}[!] Skipping: '{query}' (Best match was only {
+                            highest_ratio * 100:.0f}% similar){OFF}")
 
                 else:
                     print(
@@ -637,14 +651,92 @@ class Client:
             except Exception as e:
                 print(f"{RED}[!] Error searching for '{query}': {e}{OFF}")
 
-        print(
-            f"\n{GREEN}[+] Successfully matched {
-                len(valid_track_ids)} out of {
-                len(tracks_list)} tracks!{OFF}"
-        )
+        print(f"\n{GREEN}[+] Successfully matched {
+            len(valid_track_ids)} out of {
+            len(tracks_list)} tracks!{OFF}")
         return valid_track_ids
 
     # --- SEARCH FUNCTIONS (Crash-Proof) ---
+    async def search_by_isrc(self, isrc: str):
+        """Busca faixa no Qobuz por ISRC -- match exato. Retorna ID ou None."""
+        if not isrc:
+            return None
+        try:
+            results = await self.api_call(
+                "catalog/search",
+                query=isrc.strip().upper(),
+                type="tracks",
+                limit=1,
+            )
+            items = (results or {}).get("tracks", {}).get("items", [])
+            if items:
+                return items[0].get("id")
+        except Exception as e:
+            logger.debug(f"ISRC search failed for {isrc}: {e}")
+        return None
+
+    async def search_by_upc(self, upc: str):
+        """Busca álbum no Qobuz por UPC -- match exato. Retorna ID ou None."""
+        if not upc:
+            return None
+        try:
+            results = await self.api_call(
+                "catalog/search",
+                query=upc.strip(),
+                type="albums",
+                limit=1,
+            )
+            items = (results or {}).get("albums", {}).get("items", [])
+            if items:
+                return items[0].get("id")
+        except Exception as e:
+            logger.debug(f"UPC search failed for {upc}: {e}")
+        return None
+
+    async def match_external_tracks(self, tracks: list, auto: bool = False) -> list:
+        """
+        Matching ISRC-first com fuzzy fallback.
+        Cascade por faixa:
+          1. ISRC → catalog/search exato (~80-90% de acerto p/ Spotify/Deezer)
+          2. Fuzzy → get_track_ids_from_list() como fallback
+        Args:
+            tracks: lista de dicts com keys: title, artist, isrc, duration_ms, album
+            auto: aceita borderline fuzzy automaticamente
+        Returns: lista de IDs int do Qobuz
+        """
+        matched_ids = []
+        fuzzy_queue = []
+        isrc_hits = 0
+        isrc_misses = 0
+
+        for track in tracks:
+            isrc = (track.get("isrc") or "").strip().upper()
+            if isrc:
+                qid = await self.search_by_isrc(isrc)
+                if qid:
+                    matched_ids.append(qid)
+                    isrc_hits += 1
+                    continue
+                isrc_misses += 1
+            fuzzy_queue.append(track)
+
+        if isrc_hits or isrc_misses:
+            logger.info(
+                f"{GREEN}[+] ISRC: {isrc_hits} match(es) exato(s){OFF}" +
+                (
+                    f", {YELLOW}{isrc_misses} miss(es) → fuzzy fallback{OFF}"
+                    if isrc_misses
+                    else ""
+                )
+            )
+
+        if fuzzy_queue:
+            logger.info(f"{CYAN}[*] Fuzzy matching {len(fuzzy_queue)} faixa(s)...{OFF}")
+            fuzzy_ids = await self.get_track_ids_from_list(fuzzy_queue)
+            matched_ids.extend(fuzzy_ids)
+
+        return matched_ids
+
     async def search_albums(self, query, limit=20):
         """Searches the Qobuz catalog for albums. Crash-proof against API timeouts."""
         try:
@@ -662,6 +754,55 @@ class Client:
             )
         except Exception:
             return {}
+
+    async def create_qobuz_playlist(
+        self, name: str, description: str = "", is_public: bool = False
+    ):
+        """
+        Cria uma nova playlist na conta Qobuz do usuário logado.
+        Returns: ID da playlist criada (str), ou None se falhar.
+        """
+        try:
+            resp = await self.api_call(
+                "playlist/create",
+                name=name,
+                description=description,
+                is_public=is_public,
+            )
+            pl_id = str(resp.get("id") or resp.get("playlist", {}).get("id", ""))
+            if pl_id:
+                logger.info(
+                    f"{GREEN}[+] Playlist criada no Qobuz: '{name}' (ID: {pl_id}){OFF}"
+                )
+            return pl_id or None
+        except Exception as e:
+            logger.info(f"{RED}[!] Erro ao criar playlist no Qobuz: {e}{OFF}")
+            return None
+
+    async def add_tracks_to_qobuz_playlist(
+        self, playlist_id: str, track_ids: list
+    ) -> bool:
+        """
+        Adiciona faixas a uma playlist existente no Qobuz.
+        Pagina automaticamente em lotes de 50 (limite da API).
+        Returns: True se todas as faixas foram adicionadas com sucesso.
+        """
+        BATCH = 50
+        success = True
+        for i in range(0, len(track_ids), BATCH):
+            batch = track_ids[i: i + BATCH]
+            try:
+                await self.api_call(
+                    "playlist/addTracks",
+                    playlist_id=playlist_id,
+                    track_ids=",".join(str(t) for t in batch),
+                )
+            except Exception as e:
+                logger.info(
+                    f"{YELLOW}[!] Erro ao adicionar faixas à playlist {playlist_id}: {e}{OFF}"
+                )
+                success = False
+        return success
 
     async def search_playlists(self, query, limit=20):
         """Searches the Qobuz catalog for playlists. Crash-proof against API timeouts."""
@@ -718,6 +859,24 @@ class Client:
         return await self.api_call(
             "favorite/create", album_ids=str(album_id), artist_ids="", track_ids=""
         )
+
+    async def add_favorite_track(self, track_id):
+        """Adds a track to the user's Qobuz favorites."""
+        return await self.api_call(
+            "favorite/create", track_ids=str(track_id), album_ids="", artist_ids=""
+        )
+
+    async def add_favorite(self, item_id, item_type: str):
+        """
+        Adiciona um item aos favoritos do Qobuz.
+        item_type: "track" ou "album"
+        """
+        if item_type == "track":
+            return await self.add_favorite_track(item_id)
+        elif item_type == "album":
+            return await self.add_favorite_album(item_id)
+        else:
+            raise ValueError(f"Tipo de favorito desconhecido: {item_type}")
 
     # NEW GET_TRACK_URL (Patch 0004)
     async def get_track_url(self, id, fmt_id, force_segments=False):
