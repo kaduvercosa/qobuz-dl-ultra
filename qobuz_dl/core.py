@@ -238,7 +238,7 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
         prefix_len = 5 if is_multi else 3
         hdr_pref = " " * prefix_len
 
-        res = [("class:title", f"\n === {title} ===\n")]
+        res = [("class:title", f"\n === {title} ===\n\n")]
 
         if is_table:
             res.append(("class:meta", hdr_pref + borders["top"] + "\n"))
@@ -303,6 +303,54 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
             final_fragments.append(("", "\n"))
             res.extend(final_fragments)
 
+        inner_w = max(10, columns - 6)
+
+        def add_card_line(fragments, hovered=False, is_checked=False, border_style="class:meta"):
+            final_fragments = []
+            current_w = 0
+
+            row_st = "class:hovered" if hovered else (
+                "class:highlight" if is_checked else "")
+            border_st = "class:hovered" if hovered else border_style
+
+            # Caractere físico mais grosso (Heavy Box Drawing) se estiver marcado
+            vt = "┃" if is_checked else "│"
+
+            final_fragments.append((border_st, f" {vt} "))
+
+            for st, txt in fragments:
+                txt_w = get_cwidth(txt)
+                if current_w + txt_w > inner_w:
+                    allowed = max(0, inner_w - current_w)
+                    trunc_txt = ""
+                    temp_w = 0
+                    for char in txt:
+                        cw = get_cwidth(char)
+                        if temp_w + cw > allowed:
+                            break
+                        trunc_txt += char
+                        temp_w += cw
+
+                    st_use = "class:hovered" if hovered else (
+                        "class:highlight" if is_checked else st)
+                    final_fragments.append((st_use, trunc_txt))
+                    current_w += temp_w
+                    break
+                else:
+                    st_use = "class:hovered" if hovered else (
+                        "class:highlight" if is_checked else st)
+                    final_fragments.append((st_use, txt))
+                    current_w += txt_w
+
+            padding = max(0, inner_w - current_w)
+            if padding > 0:
+                pad_st = "class:hovered" if hovered else (
+                    "class:highlight" if is_checked else "")
+                final_fragments.append((pad_st, " " * padding))
+
+            final_fragments.append((border_st, f" {vt}\n"))
+            res.extend(final_fragments)
+
         for i, opt in enumerate(options_dicts):
             hovered = i == cursor_pos
             checked = i in selected_indices
@@ -310,7 +358,7 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
             if hovered:
                 res.append(("[SetCursorPosition]", ""))
 
-            style = ""
+            style = "class:highlight" if checked else ""
             title_style = "class:highlight"
 
             ptr = ">" if hovered else " "
@@ -321,240 +369,287 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
                 prefix = f" {ptr} "
 
             row_st = "class:hovered" if hovered else style
-            tit_st = "class:hovered" if hovered else "class:item_title"
+            tit_st = "class:hovered" if hovered else (
+                "class:highlight" if checked else "class:item_title")
+            border_st = "class:hovered" if hovered else (
+                "class:highlight" if checked else "class:meta")
+
+            # Borda superior e quinas desenhadas com linhas grossas se marcado
+            if not is_table:
+                top_l = "┏" if checked else "╭"
+                top_r = "┓" if checked else "╮"
+                hz = "━" if checked else "─"
+                res.append((border_st, f" {top_l}{hz * (inner_w + 2)}{top_r}\n"))
 
             if item_category == "filter" and isinstance(opt, str):
-                add_line([(tit_st, f"{prefix}{opt}")], fill_bg=hovered)
-                continue
+                if is_table:
+                    add_line([(tit_st, f"{prefix}{opt}")], fill_bg=hovered)
+                else:
+                    add_card_line(
+                        [(tit_st, f"{prefix}{opt}")], hovered=hovered, is_checked=checked, border_style=border_st)
 
-            if isinstance(opt, str):
-                add_line([(row_st, f"{prefix}{opt}")], fill_bg=hovered)
-                continue
+            elif isinstance(opt, str):
+                if is_table:
+                    add_line([(row_st, f"{prefix}{opt}")], fill_bg=hovered)
+                else:
+                    add_card_line(
+                        [(row_st, f"{prefix}{opt}")], hovered=hovered, is_checked=checked, border_style=border_st)
 
-            meta = opt.get("meta", {})
-            ql = meta.get("quality", "")
-            typ = meta.get("type", "")
-
-            ql_color = "fg:#c59b27 bold" if "24b" in ql else f"fg:{_hex_accent}"
-            ql_st = "class:hovered" if hovered else ql_color
-
-            raw_typ = typ.strip().lower()
-            if raw_typ == "album":
-                typ_st = "class:type_album"
-            elif raw_typ == "ep":
-                typ_st = "class:type_ep"
-            elif raw_typ == "single":
-                typ_st = "class:type_single"
-            elif raw_typ == "track":
-                typ_st = "class:type_track"
-            elif raw_typ == "compilation":
-                typ_st = "class:type_comp"
             else:
-                typ_st = "class:type_other"
+                meta = opt.get("meta", {})
+                ql = meta.get("quality", "")
+                typ = meta.get("type", "")
 
-            if hovered:
-                typ_st = "class:hovered"
+                ql_color = "fg:#c59b27 bold" if "24b" in ql else f"fg:{_hex_accent}"
+                ql_st = "class:hovered" if hovered else (
+                    "class:highlight" if checked else ql_color)
 
-            if item_category == "album":
-                tit_str = meta.get("title", "")
-                art = meta.get("artist", "")
-                yr = meta.get("year", "")
-                fx = str(meta.get("tracks_count", ""))
-
-                if is_table:
-                    tit_align = _align_text(tit_str, widths[0])
-                    art_align = _align_text(art, widths[1])
-                    typ_align = _align_text(typ, widths[2])
-                    yr_align = _align_text(yr, widths[3])
-                    fx_align = _align_text(fx, widths[4])
-                    ql_align = _align_text(ql, widths[5])
-
-                    if hovered:
-                        p1 = f"│ {tit_align} │ {art_align} │ {typ_align} │ {yr_align} │ {fx_align} │ "
-                        add_line([
-                            (style, prefix),
-                            (row_st, p1),
-                            (ql_st, ql_align),
-                            (row_st, " │")
-                        ], fill_bg=False)
-                    else:
-                        add_line([
-                            (style, prefix),
-                            (style, "│ "),
-                            (tit_st, tit_align),
-                            (style, " │ "),
-                            (style, art_align),
-                            (style, " │ "),
-                            (typ_st, typ_align),
-                            (style, " │ "),
-                            (style, yr_align),
-                            (style, " │ "),
-                            (style, fx_align),
-                            (style, " │ "),
-                            (ql_st, ql_align),
-                            (style, " │")
-                        ], fill_bg=False)
+                raw_typ = typ.strip().lower()
+                if raw_typ == "album":
+                    typ_st = "class:type_album"
+                elif raw_typ == "ep":
+                    typ_st = "class:type_ep"
+                elif raw_typ == "single":
+                    typ_st = "class:type_single"
+                elif raw_typ == "track":
+                    typ_st = "class:type_track"
+                elif raw_typ == "compilation":
+                    typ_st = "class:type_comp"
                 else:
-                    if not hovered:
-                        l1 = [(tit_st, f"{prefix}{tit_str} ")]
+                    typ_st = "class:type_other"
+
+                if hovered:
+                    typ_st = "class:hovered"
+                elif checked:
+                    typ_st = "class:highlight"
+
+                if item_category == "album":
+                    tit_str = meta.get("title", "")
+                    art = meta.get("artist", "")
+                    yr = meta.get("year", "")
+                    fx = str(meta.get("tracks_count", ""))
+
+                    if is_table:
+                        tit_align = _align_text(tit_str, widths[0])
+                        art_align = _align_text(art, widths[1])
+                        typ_align = _align_text(typ, widths[2])
+                        yr_align = _align_text(yr, widths[3])
+                        fx_align = _align_text(fx, widths[4])
+                        ql_align = _align_text(ql, widths[5])
+
+                        if hovered:
+                            p1 = f"│ {tit_align} │ {art_align} │ {typ_align} │ {yr_align} │ {fx_align} │ "
+                            add_line([
+                                (style, prefix),
+                                (row_st, p1),
+                                (ql_st, ql_align),
+                                (row_st, " │")
+                            ], fill_bg=False)
+                        else:
+                            add_line([
+                                (style, prefix),
+                                (style, "│ "),
+                                (tit_st, tit_align),
+                                (style, " │ "),
+                                (style, art_align),
+                                (style, " │ "),
+                                (typ_st, typ_align),
+                                (style, " │ "),
+                                (style, yr_align),
+                                (style, " │ "),
+                                (style, fx_align),
+                                (style, " │ "),
+                                (ql_st, ql_align),
+                                (style, " │")
+                            ], fill_bg=False)
+                    else:
+                        l1 = [(tit_st, f"{prefix}{tit_str}")]
                         ql_str = f"[{ql}]"
-                        pad_len = columns - get_cwidth(l1[0][1]) - get_cwidth(ql_str)
+                        pad_len = inner_w - get_cwidth(l1[0][1]) - get_cwidth(ql_str)
                         if pad_len > 0:
                             l1.append(("", " " * pad_len))
-                        l1.append((ql_st, ql_str))
-                        add_line(l1, fill_bg=False)
-                        add_line([
-                            (style, f"    👤 {art} · "),
-                            (typ_st, typ),
-                            (style, f" · {yr} · {fx} faixas")
-                        ], fill_bg=False)
+                            l1.append((ql_st, ql_str))
+                        add_card_line(l1, hovered=hovered,
+                                      is_checked=checked, border_style=border_st)
+
+                        if hovered:
+                            add_card_line(
+                                [(row_st, f"   👤 {art}")], hovered=hovered, is_checked=checked, border_style=border_st)
+                            add_card_line(
+                                [(row_st, f"   💿 {typ} · {yr}")], hovered=hovered, is_checked=checked, border_style=border_st)
+                            add_card_line(
+                                [(row_st, f"   🎵 {fx} faixas")], hovered=hovered, is_checked=checked, border_style=border_st)
+                            add_card_line(
+                                [(row_st, f"   🎚 {ql}")], hovered=hovered, is_checked=checked, border_style=border_st)
+                        else:
+                            add_card_line([
+                                (style, f"   👤 {art} · "),
+                                (typ_st, typ),
+                                (style, f" · {yr}")
+                            ], hovered=hovered, is_checked=checked, border_style=border_st)
+
+                elif item_category == "track":
+                    tit_str = meta.get("title", "")
+                    art = meta.get("artist", "")
+                    alb = meta.get("album", "")
+                    dur = meta.get("duration", "")
+
+                    if is_table:
+                        tit_align = _align_text(tit_str, widths[0])
+                        art_align = _align_text(art, widths[1])
+                        alb_align = _align_text(alb, widths[2])
+                        typ_align = _align_text(typ, widths[3])
+                        dur_align = _align_text(dur, widths[4])
+                        ql_align = _align_text(ql, widths[5])
+
+                        if hovered:
+                            p1 = f"│ {tit_align} │ {art_align} │ {alb_align} │ {typ_align} │ {dur_align} │ "
+                            add_line([
+                                (style, prefix),
+                                (row_st, p1),
+                                (ql_st, ql_align),
+                                (row_st, " │")
+                            ], fill_bg=False)
+                        else:
+                            add_line([
+                                (style, prefix),
+                                (style, "│ "),
+                                (tit_st, tit_align),
+                                (style, " │ "),
+                                (style, art_align),
+                                (style, " │ "),
+                                (style, alb_align),
+                                (style, " │ "),
+                                (typ_st, typ_align),
+                                (style, " │ "),
+                                (style, dur_align),
+                                (style, " │ "),
+                                (ql_st, ql_align),
+                                (style, " │")
+                            ], fill_bg=False)
                     else:
-                        add_line([(tit_st, f"{prefix}{tit_str}")], fill_bg=True)
-                        add_line([(row_st, f"    👤 {art}")], fill_bg=True)
-                        add_line([(row_st, f"    📀 {typ} · {yr}")], fill_bg=True)
-                        add_line([(row_st, f"    🎵 {fx} faixas")], fill_bg=True)
-                        add_line([(row_st, f"    🎚 {ql}")], fill_bg=True)
-
-            elif item_category == "track":
-                tit_str = meta.get("title", "")
-                art = meta.get("artist", "")
-                alb = meta.get("album", "")
-                dur = meta.get("duration", "")
-
-                if is_table:
-                    tit_align = _align_text(tit_str, widths[0])
-                    art_align = _align_text(art, widths[1])
-                    alb_align = _align_text(alb, widths[2])
-                    typ_align = _align_text(typ, widths[3])
-                    dur_align = _align_text(dur, widths[4])
-                    ql_align = _align_text(ql, widths[5])
-
-                    if hovered:
-                        p1 = f"│ {tit_align} │ {art_align} │ {alb_align} │ {typ_align} │ {dur_align} │ "
-                        add_line([
-                            (style, prefix),
-                            (row_st, p1),
-                            (ql_st, ql_align),
-                            (row_st, " │")
-                        ], fill_bg=False)
-                    else:
-                        add_line([
-                            (style, prefix),
-                            (style, "│ "),
-                            (tit_st, tit_align),
-                            (style, " │ "),
-                            (style, art_align),
-                            (style, " │ "),
-                            (style, alb_align),
-                            (style, " │ "),
-                            (typ_st, typ_align),
-                            (style, " │ "),
-                            (style, dur_align),
-                            (style, " │ "),
-                            (ql_st, ql_align),
-                            (style, " │")
-                        ], fill_bg=False)
-                else:
-                    if not hovered:
-                        l1 = [(tit_st, f"{prefix}{tit_str} ")]
+                        l1 = [(tit_st, f"{prefix}{tit_str}")]
                         ql_str = f"[{ql}]"
-                        pad_len = columns - get_cwidth(l1[0][1]) - get_cwidth(ql_str)
+                        pad_len = inner_w - get_cwidth(l1[0][1]) - get_cwidth(ql_str)
                         if pad_len > 0:
                             l1.append(("", " " * pad_len))
-                        l1.append((ql_st, ql_str))
-                        add_line(l1, fill_bg=False)
-                        add_line([
-                            (style, f"    👤 {art} · 💿 {alb} · "),
-                            (typ_st, typ),
-                            (style, f" · ⏱ {dur}")
-                        ], fill_bg=False)
+                            l1.append((ql_st, ql_str))
+                        add_card_line(l1, hovered=hovered,
+                                      is_checked=checked, border_style=border_st)
+
+                        if hovered:
+                            add_card_line(
+                                [(row_st, f"   👤 {art}")], hovered=hovered, is_checked=checked, border_style=border_st)
+                            add_card_line(
+                                [(row_st, f"   💿 {alb}")], hovered=hovered, is_checked=checked, border_style=border_st)
+                            add_card_line(
+                                [(row_st, f"   📀 {typ} · ⏱ {dur}")], hovered=hovered, is_checked=checked, border_style=border_st)
+                            add_card_line(
+                                [(row_st, f"   🎚 {ql}")], hovered=hovered, is_checked=checked, border_style=border_st)
+                        else:
+                            add_card_line([
+                                (style, f"   👤 {art} · "),
+                                (typ_st, typ),
+                                (style, f" · ⏱ {dur}")
+                            ], hovered=hovered, is_checked=checked, border_style=border_st)
+
+                elif item_category == "playlist":
+                    n = meta.get("name", "")
+                    o = meta.get("owner", "")
+                    c = str(meta.get("count", 0))
+                    dur = meta.get("duration", "--:--")
+
+                    if is_table:
+                        n_align = _align_text(n, widths[0])
+                        o_align = _align_text(o, widths[1])
+                        c_align = _align_text(c, widths[2])
+                        dur_align = _align_text(dur, widths[3])
+
+                        if hovered:
+                            p1 = f"│ {n_align} │ {o_align} │ {c_align} │ {dur_align} │"
+                            add_line([
+                                (style, prefix),
+                                (row_st, p1)
+                            ], fill_bg=False)
+                        else:
+                            add_line([
+                                (style, prefix),
+                                (style, "│ "),
+                                (tit_st, n_align),
+                                (style, " │ "),
+                                (style, o_align),
+                                (style, " │ "),
+                                (style, c_align),
+                                (style, " │ "),
+                                (style, dur_align),
+                                (style, " │")
+                            ], fill_bg=False)
                     else:
-                        add_line([(tit_st, f"{prefix}{tit_str}")], fill_bg=True)
-                        add_line([(row_st, f"    👤 {art}")], fill_bg=True)
-                        add_line([(row_st, f"    💿 {alb}")], fill_bg=True)
-                        add_line([(row_st, f"    📀 {typ} · ⏱ {dur}")], fill_bg=True)
-                        add_line([(row_st, f"    🎚 {ql}")], fill_bg=True)
+                        add_card_line(
+                            [(tit_st, f"{prefix}{n}")], hovered=hovered, is_checked=checked, border_style=border_st)
+                        if hovered:
+                            add_card_line(
+                                [(row_st, f"   👤 {o}")], hovered=hovered, is_checked=checked, border_style=border_st)
+                            add_card_line(
+                                [(row_st, f"   🎵 {c} faixas")], hovered=hovered, is_checked=checked, border_style=border_st)
+                            add_card_line(
+                                [(row_st, f"   ⏱ {dur}")], hovered=hovered, is_checked=checked, border_style=border_st)
+                        else:
+                            add_card_line(
+                                [(style, f"   👤 {o} · 🎵 {c} · ⏱ {dur}")], hovered=hovered, is_checked=checked, border_style=border_st)
 
-            elif item_category == "playlist":
-                n = meta.get("name", "")
-                o = meta.get("owner", "")
-                c = str(meta.get("count", 0))
-                dur = meta.get("duration", "--:--")
+                elif item_category == "artist":
+                    n = meta.get("name", "")
+                    c_str = f"{meta.get('count', '')} lançamentos"
 
-                if is_table:
-                    n_align = _align_text(n, widths[0])
-                    o_align = _align_text(o, widths[1])
-                    c_align = _align_text(c, widths[2])
-                    dur_align = _align_text(dur, widths[3])
+                    if is_table:
+                        n_align = _align_text(n, widths[0])
+                        c_align = _align_text(c_str, widths[1])
 
-                    if hovered:
-                        p1 = f"│ {n_align} │ {o_align} │ {c_align} │ {dur_align} │"
-                        add_line([
-                            (style, prefix),
-                            (row_st, p1)
-                        ], fill_bg=False)
+                        if hovered:
+                            p1 = f"│ {n_align} │ {c_align} │"
+                            add_line([
+                                (style, prefix),
+                                (row_st, p1)
+                            ], fill_bg=False)
+                        else:
+                            add_line([
+                                (style, prefix),
+                                (style, "│ "),
+                                (tit_st, n_align),
+                                (style, " │ "),
+                                (style, c_align),
+                                (style, " │")
+                            ], fill_bg=False)
                     else:
-                        add_line([
-                            (style, prefix),
-                            (style, "│ "),
-                            (tit_st, n_align),
-                            (style, " │ "),
-                            (style, o_align),
-                            (style, " │ "),
-                            (style, c_align),
-                            (style, " │ "),
-                            (style, dur_align),
-                            (style, " │")
-                        ], fill_bg=False)
-                else:
-                    if not hovered:
-                        add_line([(tit_st, f"{prefix}{n}")], fill_bg=False)
-                        add_line(
-                            [(style, f"    👤 {o} · 🎵 {c} · ⏱ {dur}")], fill_bg=False)
-                    else:
-                        add_line([(tit_st, f"{prefix}{n}")], fill_bg=True)
-                        add_line([(row_st, f"    👤 {o}")], fill_bg=True)
-                        add_line([(row_st, f"    🎵 {c} faixas")], fill_bg=True)
-                        add_line([(row_st, f"    ⏱ {dur}")], fill_bg=True)
+                        add_card_line(
+                            [(tit_st, f"{prefix}👤 {n}")], hovered=hovered, is_checked=checked, border_style=border_st)
+                        if hovered:
+                            add_card_line(
+                                [(row_st, f"   🎵 {c_str}")], hovered=hovered, is_checked=checked, border_style=border_st)
+                            add_card_line([(row_st, f"   [Enter] para abrir opções")],
+                                          hovered=hovered, is_checked=checked, border_style=border_st)
+                        else:
+                            add_card_line(
+                                [(style, f"   🎵 {c_str}")], hovered=hovered, is_checked=checked, border_style=border_st)
 
-            elif item_category == "artist":
-                n = meta.get("name", "")
-                c_str = f"{meta.get('count', '')} lançamentos"
+            # Borda inferior e quinas desenhadas com linhas grossas se marcado
+            if not is_table:
+                bot_l = "┗" if checked else "╰"
+                bot_r = "┛" if checked else "╯"
+                hz = "━" if checked else "─"
+                res.append((border_st, f" {bot_l}{hz * (inner_w + 2)}{bot_r}\n"))
+            else:
+                if i < len(options_dicts) - 1:
+                    empty_prefix = " " * len(prefix)
+                    add_line([("class:meta", empty_prefix + borders["mid"])],
+                             fill_bg=False)
 
-                if is_table:
-                    n_align = _align_text(n, widths[0])
-                    c_align = _align_text(c_str, widths[1])
-
-                    if hovered:
-                        p1 = f"│ {n_align} │ {c_align} │"
-                        add_line([
-                            (style, prefix),
-                            (row_st, p1)
-                        ], fill_bg=False)
-                    else:
-                        add_line([
-                            (style, prefix),
-                            (style, "│ "),
-                            (tit_st, n_align),
-                            (style, " │ "),
-                            (style, c_align),
-                            (style, " │")
-                        ], fill_bg=False)
-                else:
-                    if not hovered:
-                        add_line([(tit_st, f"{prefix}👤 {n}")], fill_bg=False)
-                        add_line([(style, f"   🎵 {c_str}")], fill_bg=False)
-                    else:
-                        add_line([(tit_st, f"{prefix}👤 {n}")], fill_bg=True)
-                        add_line([(row_st, f"   🎵 {c_str}")], fill_bg=True)
-                        add_line([(row_st, f"   Enter para abrir opções")], fill_bg=True)
-
-            if is_table and i < len(options_dicts) - 1:
-                empty_prefix = " " * len(prefix)
-                add_line([("class:meta", empty_prefix + borders["mid"])], fill_bg=False)
+        if not is_table:
+            res.append(("", " \n" * 8))
 
         if res and res[-1][1].endswith("\n"):
-            res[-1] = (res[-1][0], res[-1][1].rstrip("\n"))
+            res[-1] = (res[-1][0], res[-1][1][:-1])
 
         return res
 
@@ -604,9 +699,10 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
         content=FormattedTextControl(text=get_header_text), dont_extend_height=True
     )
 
+    # Offset bottom=8 força a câmera a subir toda a expansão do cartão
     list_window = Window(
         content=FormattedTextControl(text=get_list_text, focusable=True),
-        scroll_offsets=ScrollOffsets(top=1, bottom=1),
+        scroll_offsets=ScrollOffsets(top=2, bottom=8),
         wrap_lines=False,
     )
 
@@ -1289,20 +1385,34 @@ class QobuzDL:
                 else i.get("label", "")
             )
 
-            raw_type = i.get("release_type") or i.get("product_type")
+            raw_type = (i.get("release_type") or i.get(
+                "product_type") or "unknown").lower()
 
-            if not raw_type and isinstance(i.get("album"), dict):
-                raw_type = i["album"].get(
-                    "release_type") or i["album"].get("product_type")
+            if raw_type == "unknown" and isinstance(i.get("album"), dict):
+                raw_type = (i["album"].get("release_type") or i["album"].get(
+                    "product_type") or "unknown").lower()
 
-            if not raw_type:
-                if item_type == "album" and (t_count or duration):
+            base_title = (i.get("title") or i.get("name") or "Unknown").lower()
+            version_tag = (i.get("version") or "").lower()
+            t_count = int(i.get("tracks_count") or 0)
+            duration = int(i.get("duration") or 0)
+
+            if " ep" in base_title or version_tag == "ep":
+                raw_type = "ep"
+            elif raw_type == "single" and t_count >= 4:
+                raw_type = "ep"
+            elif raw_type == "ep" and 1 <= t_count <= 3:
+                raw_type = "single"
+            elif raw_type == "album" and 1 <= t_count <= 3:
+                raw_type = "single"
+            elif raw_type == "unknown":
+                if item_type == "album":
                     if duration >= 1740 or t_count >= 7:
-                        raw_type = "Album"
-                    elif t_count == 1:
-                        raw_type = "Single"
-                    else:
-                        raw_type = "EP"
+                        raw_type = "album"
+                    elif 1 <= t_count <= 3:
+                        raw_type = "single"
+                    elif 4 <= t_count <= 6:
+                        raw_type = "ep"
                 else:
                     raw_type = item_type
 
