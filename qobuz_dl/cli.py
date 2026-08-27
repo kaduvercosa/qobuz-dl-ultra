@@ -411,7 +411,19 @@ def _reset_config(config_file):
     config["qobuz"]["multi_value_tags"] = "false"
     config["qobuz"]["legacy_charmap"] = "false"
     config["qobuz"]["blacklist"] = "blacklist.txt"
-    config["qobuz"]["lyrics_translation_lang"] = "pt"
+
+    # --- IDIOMA DE TRADUÇÃO DAS LETRAS ---
+    print(f"\n{C_ACCENT}[?] Idioma de Tradução de Letras:{OFF}")
+    print("    Escolha o idioma preferido caso a música possua tradução no Qobuz.")
+    print("    Opções: pt (Português), en (Inglês), es (Espanhol), fr (Francês), original (Manter nativo)")
+    lang_choice = input("    Idioma [Padrão: pt]:\n- ").strip().lower()
+
+    if lang_choice in ["original", "orig"]:
+        config["qobuz"]["lyrics_translation_lang"] = ""
+    elif lang_choice in ["pt", "en", "es", "fr", "de", "it"]:
+        config["qobuz"]["lyrics_translation_lang"] = lang_choice
+    else:
+        config["qobuz"]["lyrics_translation_lang"] = "pt"
 
     logging.info(f"\n{C_ACCENT}Obtendo tokens. Por favor, aguarde...{OFF}")
     bundle = Bundle()
@@ -492,6 +504,79 @@ def _remove_leftovers(directory):
                 logger.debug(f"Falha ao mover leftover '{i}' pra lixeira: {e}")
 
 
+async def _auth_command(config_file):
+    """Atualiza as credenciais e valida o login com a API do Qobuz em tempo real (versão assíncrona)."""
+    from qobuz_dl.qopy import Client
+
+    if not os.path.isfile(config_file):
+        print(
+            f"{RED}[!] Arquivo de configuração não encontrado. Rode 'qobuz-dl -r' primeiro.{OFF}")
+        return
+
+    config = configparser.ConfigParser(interpolation=None)
+    config.read(config_file, encoding="utf-8")
+    section = "qobuz" if config.has_section("qobuz") else "DEFAULT"
+
+    print(f"\n{CYAN}{BG}[ QOBUZ-DL - ATUALIZAÇÃO DE CREDENCIAIS ]{OFF}\n")
+
+    email = input(
+        f"E-mail atual [{config.get(section, 'email', fallback='')}]:\n- ").strip()
+    if email:
+        config.set(section, "email", email)
+
+    print(f"\n{CYAN}[!] Cole o novo Token de autenticação do seu navegador:{OFF}")
+    auth_token = input("- ").strip()
+
+    if not auth_token:
+        print(f"{YELLOW}[!] Token vazio. Operação cancelada.{OFF}")
+        return
+
+    app_id = config.get(section, "app_id", fallback="")
+    secrets = [s for s in config.get(section, "secrets", fallback="").split(",") if s]
+    force_english = not config.getboolean(section, "native_lang", fallback=False)
+
+    print(f"\n{CYAN}[*] Validando sessão com a API do Qobuz...{OFF}")
+
+    # Validação direta com await, sem conflito de event loop
+    is_valid = False
+    try:
+        client = await Client.create(
+            email=email or config.get(section, "email", fallback=""),
+            pwd="",
+            app_id=app_id,
+            secrets=secrets,
+            user_auth_token=auth_token,
+            force_english=force_english,
+        )
+        await client.close()
+        is_valid = True
+    except Exception as e:
+        logger.debug(f"Erro de validação de token: {e}")
+        is_valid = False
+
+    if not is_valid:
+        print(
+            f"\n{RED}[✗] Falha na validação! O token informado é inválido, expirou ou a conta está inacessível.{OFF}")
+        print(
+            f"{RED}[!] As alterações NÃO foram salvas. Tente copiar um token mais recente do navegador.{OFF}\n")
+        return
+
+    disable_keyring = config.getboolean(section, "disable_keyring", fallback=False)
+    if not disable_keyring and _keyring_save("auth_token", auth_token):
+        config.set(section, "auth_token", "")
+        print(
+            f"{GREEN}[+] Token validado e salvo com segurança no Keyring do sistema!{OFF}")
+    else:
+        config.set(section, "auth_token", auth_token)
+        config.set(section, "password", "")
+        print(f"{GREEN}[+] Token validado e salvo diretamente no config.ini!{OFF}")
+
+    with open(config_file, "w", encoding="utf-8") as f:
+        config.write(f)
+
+    print(f"\n{GREEN}[✓] Sessão revalidada com sucesso! Conta Studio ativa.{OFF}\n")
+
+
 async def _handle_commands(qobuz, arguments):
     """Routes parsed command-line arguments to the appropriate QobuzDL core methods."""
 
@@ -531,9 +616,16 @@ async def _handle_commands(qobuz, arguments):
                 name=getattr(arguments, "name", None),
                 auto=getattr(arguments, "auto", False),
             )
+        elif arguments.command == "auth":
+            # Se preferir usar o fluxo de login interativo direto no client, podemos chamar a função de reautenticação
+            print(f"\n{CYAN}[*] Atualizando credenciais...{OFF}")
+            await _auth_command(CONFIG_FILE)
         else:
-            qobuz.interactive_limit = arguments.limit
-            await qobuz.interactive()
+            if hasattr(arguments, "limit"):
+                qobuz.interactive_limit = arguments.limit
+                await qobuz.interactive()
+            else:
+                await qobuz.interactive()
 
     except KeyboardInterrupt:
         pass
@@ -593,10 +685,11 @@ def _print_logo(cols):
         for row in line2:
             print(f"{CYAN}{pad2}{row}{OFF}")
     else:
-
-        fallback_text = " QOBUZ-DL-ULTRA "
-        pad = " " * max((cols - len(fallback_text)) // 2, 0)
-        print(f"{pad}{ACCENT}{BG}{fallback_text}{OFF}")
+        # Versão celular ( apens a siga QDL em blocos)
+        line_short = _render_logo_word("QDL")
+        pad_short = " " * max((cols - len(line_short[0])) // 2, 0)
+        for row in line_short:
+            print(f"{CYAN}{pad_short}{row}{OFF}")
 
 
 def _extract_subcommands(parser):
@@ -664,7 +757,9 @@ _COMMAND_DESCRIPTIONS_PT = {
     "import-playlist": "Importa um arquivo de playlist (TXT, CSV, JSON) de qualquer plataforma para download.",
     "radar": "Monitora e intercepta links copiados para download automático.",
     "stats": "Mostra estatísticas detalhadas sobre sua biblioteca e downloads efetuados.",
+    "auth": "Atualiza suas credenciais de acesso (email e token) sem precisar redefinir toda a configuração.",
 }
+
 
 _FLAG_DESCRIPTIONS_PT = {
     "reset": "cria/reseta o arquivo de configuração",
@@ -708,7 +803,9 @@ def _print_welcome_screen():
     version_line = f"v{__version__}"
     # A versao fica em texto limpo: quem carrega a identidade visual e' a
     # logo logo acima. Antes saia esmaecida por causa do `OFF`/`Style.DIM`.
-    print(f"{RESET}{version_line.center(cols)}")
+    pad_version = " " * max((cols - len(version_line)) // 2, 0)
+    print(f"{RESET}{pad_version}{version_line}")
+
     print()
     rule("=")
     # Titulos de secao usam SO' negrito, sem cor: na tela inicial a cor fica
@@ -1286,7 +1383,9 @@ async def async_main():
         playlist_as_albums_config,
     )
 
-    await qobuz.initialize_client(email, password, app_id, secrets)
+    # Se o comando for 'auth', não tentamos logar com as credenciais antigas para evitar confusão
+    if arguments.command != "auth":
+        await qobuz.initialize_client(email, password, app_id, secrets)
 
     try:
         await _handle_commands(qobuz, arguments)

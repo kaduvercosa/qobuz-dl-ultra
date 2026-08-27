@@ -8,15 +8,12 @@ from qobuz_dl.color import INFO as CYAN, RESET as OFF, BG
 class CustomHelpFormatter(argparse.RawTextHelpFormatter):
     def __init__(self, prog, indent_increment=2, max_help_position=50, width=None):
         try:
-            # Captura a largura real do terminal no momento da execução
             term_width = shutil.get_terminal_size((100, 24)).columns
             width = term_width
         except Exception:
             width = 100
             term_width = 100
 
-        # Responsividade: No iPad/PC, a margem é 50. No celular, é no máximo 40% da tela.
-        # Assim, o argparse sabe exatamente quando alinhar lado a lado e quando quebrar a linha.
         max_pos = min(50, max(24, int(term_width * 0.4)))
 
         super().__init__(prog, indent_increment, max_pos, width)
@@ -24,7 +21,6 @@ class CustomHelpFormatter(argparse.RawTextHelpFormatter):
 
 class ColoredArgumentParser(argparse.ArgumentParser):
     def __init__(self, *args, **kwargs):
-        # Injeta automaticamente o nosso formatador responsivo
         kwargs["formatter_class"] = CustomHelpFormatter
         super().__init__(*args, **kwargs)
 
@@ -36,7 +32,6 @@ class ColoredArgumentParser(argparse.ArgumentParser):
 
         help_text = self.format_help()
 
-        # Traduz os textos estruturais nativos do Python
         help_text = help_text.replace(
             "positional arguments:", "argumentos posicionais:"
         )
@@ -47,20 +42,16 @@ class ColoredArgumentParser(argparse.ArgumentParser):
         )
         help_text = help_text.replace("usage:", "Uso:")
 
-        # 1. Pinta os cabeçalhos de grupos com CYAN + BG e adiciona uma quebra de linha dupla
         help_text = re.sub(
             r"^([\w][\w\s]*:)$", f"\n{CYAN}{BG}\\1{OFF}", help_text, flags=re.MULTILINE
         )
 
-        # 2. Regex Responsivo: Pinta a flag em CYAN independente de a explicação estar na mesma linha ou na de baixo
         def colorize_responsive(match):
             spaces = match.group(1)
             flag_title = match.group(2)
-            # Pode estar vazio se quebrou a linha no celular
             explanation = match.group(3)
             return f"{spaces}{CYAN}{flag_title}{OFF}{explanation}"
 
-        # Captura: (espaços iniciais) (qualquer coisa começando com '-' até os dois espaços ou final da linha) (o resto)
         help_text = re.sub(
             r"^(\s+)(-[^\n]{2,}?)( {2,}.*|)$",
             colorize_responsive,
@@ -68,20 +59,12 @@ class ColoredArgumentParser(argparse.ArgumentParser):
             flags=re.MULTILINE,
         )
 
-        # Limpeza visual do topo
         help_text = help_text.lstrip("\n")
 
         file.write(help_text)
 
 
 def _default_download_folder():
-    """
-    Resolves the fallback download folder.
-
-    On iOS (a-Shell), QOBUZ_DL_IOS_HOME must be set (e.g. to $HOME/Documents),
-    since that's the only folder the Files app can see. Everywhere else this
-    is unset and the historical relative "QobuzDownloads" default is kept.
-    """
     ios_home = os.environ.get("QOBUZ_DL_IOS_HOME")
     if ios_home:
         return os.path.join(ios_home, "QobuzDownloads")
@@ -89,7 +72,6 @@ def _default_download_folder():
 
 
 def fun_args(subparsers, default_limit):
-    """Configures the 'interactive' command-line subparser."""
     interactive = subparsers.add_parser(
         "interactive",
         usage="qobuz-dl interactive [opções]",
@@ -108,7 +90,6 @@ def fun_args(subparsers, default_limit):
 
 
 def lucky_args(subparsers):
-    """Configures the 'lucky' command-line subparser."""
     lucky = subparsers.add_parser(
         "lucky",
         usage="qobuz-dl lucky [opções] <QUERY>",
@@ -134,7 +115,6 @@ def lucky_args(subparsers):
 
 
 def dl_args(subparsers):
-    """Configures the 'dl' (download) command-line subparser."""
     download = subparsers.add_parser(
         "dl",
         usage="qobuz-dl dl [opções] <SOURCE>",
@@ -189,12 +169,18 @@ def dl_args(subparsers):
     return download
 
 
+def auth_args(subparsers):
+    auth = subparsers.add_parser(
+        "auth",
+        usage="qobuz-dl auth",
+        description="Atualiza suas credenciais de acesso (email e token) sem precisar redefinir toda a configuração.",
+        help="atualiza credenciais de login",
+        aliases=["login"]
+    )
+    return auth
+
+
 def lyrics_args(subparsers, default_folder=None):
-    """
-    Configures the 'lyrics' command-line subparser for retroactive lyrics injection.
-    DIR is optional (nargs='?'). If omitted, it automatically resolves to the root
-    download directory configured in config.ini.
-    """
     lyrics = subparsers.add_parser(
         "lyrics",
         usage="qobuz-dl lyrics [opções] [DIR]",
@@ -212,7 +198,6 @@ def lyrics_args(subparsers, default_folder=None):
 
 
 def sync_playlist_args(subparsers):
-    """Configures the 'sync-playlist' command-line subparser."""
     sync_pl = subparsers.add_parser(
         "sync-playlist",
         aliases=["sp"],
@@ -235,9 +220,6 @@ def sync_playlist_args(subparsers):
 
 
 def import_playlist_args(subparsers):
-    """
-    Configures the 'import-playlist' subparser.
-    """
     ip = subparsers.add_parser(
         "import-playlist",
         aliases=["ip"],
@@ -254,10 +236,6 @@ def import_playlist_args(subparsers):
             "  JSON: formato de exportação do Spotify\n"
         ),
         help="importa playlist por URL (Spotify/Deezer/Apple Music) ou arquivo",
-        # NOTA: passar `formatter_class` aqui nao tinha efeito nenhum --
-        # ColoredArgumentParser.__init__ sobrescreve incondicionalmente com
-        # CustomHelpFormatter. O argumento foi removido para nao dar a falsa
-        # impressao de que este subparser usa um formatter diferente.
     )
     ip.add_argument(
         "SOURCE",
@@ -277,12 +255,6 @@ def import_playlist_args(subparsers):
         "--auto",
         action="store_true",
         default=False,
-        # BUGFIX CRÍTICO: o argparse aplica formatação `%` nos textos de help,
-        # então um `%` literal precisa ser escrito `%%`. Sem isso, o Python
-        # 3.14 (que passou a validar isso em add_argument) derrubava o programa
-        # INTEIRO -- inclusive a tela inicial -- com
-        # "TypeError: %d format: a real number is required, not dict".
-        # Em Python <= 3.13 o crash acontecia ao rodar `--help` deste comando.
         help=(
             "Aceita automaticamente correspondências duvidosas "
             "(>=60%% de similaridade)."
@@ -292,17 +264,6 @@ def import_playlist_args(subparsers):
 
 
 def add_output_args(parser, suppress=False):
-    """Adiciona as flags de controle de saída a um parser.
-
-    São aplicadas TANTO ao parser principal quanto a cada subcomando, porque
-    argparse só aceita opções do parser pai ANTES do subcomando -- ou seja,
-    ``qobuz-dl stats --quiet`` morria com "unrecognized arguments: --quiet",
-    o que é justamente a ordem que todo mundo digita.
-
-    Nas cópias dos subcomandos o default é ``SUPPRESS``: sem isso, o default
-    ``False`` do subparser sobrescreveria um ``--quiet`` escrito antes do
-    subcomando, desligando silenciosamente a flag.
-    """
     kwargs = {"default": argparse.SUPPRESS} if suppress else {}
     group = parser.add_argument_group("saída no terminal")
     group.add_argument(
@@ -328,7 +289,6 @@ def add_output_args(parser, suppress=False):
 
 
 def add_common_arg(custom_parser, default_folder, default_quality):
-    """Appends global arguments to a specific subparser."""
     custom_parser.add_argument(
         "-d",
         "--directory",
@@ -639,7 +599,6 @@ def add_common_arg(custom_parser, default_folder, default_quality):
 
 
 def radar_args(subparsers):
-    """Configures the 'radar' command-line subparser."""
     radar = subparsers.add_parser(
         "radar",
         usage="qobuz-dl radar [opções]",
@@ -650,7 +609,6 @@ def radar_args(subparsers):
 
 
 def stats_args(subparsers):
-    """Configures the 'stats' command-line subparser."""
     stats = subparsers.add_parser(
         "stats",
         usage="qobuz-dl stats [opções]",
@@ -666,7 +624,6 @@ def stats_args(subparsers):
 
 
 def qobuz_dl_args(default_quality=6, default_limit=20, default_folder=None):
-    """Initializes and constructs the master argument parser for Qobuz-DL."""
     if default_folder is None:
         default_folder = _default_download_folder()
 
@@ -674,8 +631,6 @@ def qobuz_dl_args(default_quality=6, default_limit=20, default_folder=None):
         prog="qobuz-dl",
         usage="qobuz-dl <comando> [opções]",
         description=(
-            # BUGFIX: apontava para https://github.com/Sei969/qobuz-dl, o
-            # repositorio de outra pessoa (heranca do fork original).
             "O baixador definitivo de músicas do Qobuz.\nVeja exemplos de uso "
             "em https://github.com/kaduvercosa/qobuz-dl-ultra"
         ),
@@ -723,10 +678,6 @@ def qobuz_dl_args(default_quality=6, default_limit=20, default_folder=None):
         "-sc", "--show-config", action="store_true", help="mostra a configuração atual"
     )
 
-    # --- Controle de saída no terminal (NOVO) ---
-    # Antes não havia nenhuma forma de reduzir/aumentar a verbosidade nem de
-    # desligar as cores: o logging era fixado em INFO e as sequências ANSI
-    # truecolor eram emitidas sempre, até quando a saída ia para um arquivo.
     add_output_args(parser)
 
     subparsers = parser.add_subparsers(
@@ -744,11 +695,11 @@ def qobuz_dl_args(default_quality=6, default_limit=20, default_folder=None):
     sync_pl_cmd = sync_playlist_args(subparsers)
     radar = radar_args(subparsers)
     stats = stats_args(subparsers)
+    auth_cmd = auth_args(subparsers)
 
     for subparser in (interactive, download, lucky, sync_pl_cmd):
         add_common_arg(subparser, default_folder, default_quality)
 
-    # As flags de saída valem para TODOS os subcomandos, em qualquer ordem.
     for subparser in (
         interactive,
         download,
@@ -758,6 +709,7 @@ def qobuz_dl_args(default_quality=6, default_limit=20, default_folder=None):
         sync_pl_cmd,
         radar,
         stats,
+        auth_cmd,
     ):
         add_output_args(subparser, suppress=True)
 

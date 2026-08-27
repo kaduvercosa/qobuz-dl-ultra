@@ -46,7 +46,7 @@ def extract_track_id(file_path: str) -> str | None:
                     return m.group(1).strip()
         except Exception as e:
             logger.debug(
-                f"Falha ao extrair Trk ID do frame COMM (MP3), tag provavelmente ausente: {e}"
+                f"Falha ao extrair Trk ID do frame COMM (MP3), tag probabilmente ausente: {e}"
             )
 
     return None
@@ -174,9 +174,10 @@ async def process_retroactive_lyrics_async(
     save_lrc = getattr(settings, "lrc_files", True)
     embed_lyrics = getattr(settings, "embed_lyrics", True)
 
+    lang_display = target_lang.upper() if target_lang else "ORIGINAL (Sem tradução forçada)"
     print(f"\n{CYAN}[*] Iniciando verificação e atualização de letras no Qobuz...{OFF}")
     print(f"{CYAN}  • Pasta raiz :{RESET} {directory_path}")
-    print(f"{CYAN}  • Idioma alvo:{RESET} {target_lang.upper()}\n")
+    print(f"{CYAN}  • Idioma alvo:{RESET} {lang_display}\n")
 
     engine = LyricsEngine(genius_token=genius_token)
 
@@ -280,7 +281,8 @@ async def process_retroactive_lyrics_async(
             orig_block = qobuz_orig_json.get("original", {})
             orig_lang = str(orig_block.get("lang", "")).lower()
 
-            if orig_lang == target_lang.lower():
+            # Verificação com segurança anti-erro (caso target_lang seja None)
+            if target_lang and orig_lang == target_lang.lower():
                 expected_lang = target_lang.lower()
                 if not has_lyrics:
                     engine.fetch_and_inject(
@@ -298,7 +300,7 @@ async def process_retroactive_lyrics_async(
                         (
                             display_name,
                             "ATUALIZADO",
-                            "Letra original inserida em PT (tradução desnecessária)",
+                            f"Letra original inserida em {target_lang.upper()} (tradução desnecessária)",
                         )
                     )
                 elif (
@@ -328,7 +330,8 @@ async def process_retroactive_lyrics_async(
                 else:
                     stats["unchanged_already_pt"] += 1
                     report_items.append(
-                        (display_name, "SEM ALTERAÇÃO", "Letra já presente e em PT")
+                        (display_name, "SEM ALTERAÇÃO",
+                         f"Letra já presente e em {target_lang.upper()}")
                     )
 
             elif not qobuz_trans_block:
@@ -349,7 +352,7 @@ async def process_retroactive_lyrics_async(
                         (
                             display_name,
                             "ATUALIZADO",
-                            f"Letra original ({orig_lang.upper()}) inserida (sem tradução PT no Qobuz)",
+                            f"Letra original ({orig_lang.upper()}) inserida (sem tradução no Qobuz)",
                         )
                     )
                 elif (
@@ -382,7 +385,7 @@ async def process_retroactive_lyrics_async(
                         (
                             display_name,
                             "SEM ALTERAÇÃO",
-                            "Letra original já presente; sem tradução PT no Qobuz no momento",
+                            "Letra original já presente; sem tradução no Qobuz no momento",
                         )
                     )
 
@@ -404,7 +407,7 @@ async def process_retroactive_lyrics_async(
                         (
                             display_name,
                             "ATUALIZADO",
-                            "Letra original e tradução PT inseridas diretamente (Bilíngue)",
+                            f"Letra original e tradução {target_lang.upper()} inseridas diretamente (Bilíngue)",
                         )
                     )
 
@@ -449,7 +452,7 @@ async def process_retroactive_lyrics_async(
                         (
                             display_name,
                             "ATUALIZADO -> BILÍNGUE",
-                            "Letra existente atualizada com a nova tradução PT do Qobuz",
+                            f"Letra existente atualizada com a nova tradução {target_lang.upper()} do Qobuz",
                         )
                     )
 
@@ -552,10 +555,10 @@ async def process_retroactive_lyrics_async(
         f"      - Novas letras Bilíngues completas inseridas: {stats['updated_bilingual_direct']}"
     )
     print(
-        f"      - Novas letras em Português nativo inseridas: {stats['updated_new_pt']}"
+        f"      - Novas letras no idioma alvo inseridas: {stats['updated_new_pt']}"
     )
     print(
-        f"      - Novas letras originais inseridas (sem tradução PT no Qobuz): {stats['updated_new_original']}"
+        f"      - Novas letras originais inseridas (sem tradução no Qobuz): {stats['updated_new_original']}"
     )
     print(
         f"      - Inseridas via fallback (LRCLIB/Genius): {stats['updated_fallback']}"

@@ -9,15 +9,6 @@ _MISSING = object()
 
 
 def _merge_bool_opt_out(arguments, dest, config_value):
-    """Resolve uma flag booleana de "desligar" (store_false + SUPPRESS).
-
-    A CLI so' define o atributo quando o usuario passa a flag explicitamente
-    (por causa de ``default=argparse.SUPPRESS``). Nesse caso a CLI ganha; se
-    nao, vale o valor vindo do config.ini.
-
-    Isso substitui o padrao antigo ``getattr(args, x, False) or config[...]``,
-    que tornava impossivel DESLIGAR pela CLI algo LIGADO no config.ini.
-    """
     cli_value = getattr(arguments, dest, _MISSING)
     if cli_value is _MISSING or cli_value is None:
         return bool(config_value)
@@ -25,12 +16,6 @@ def _merge_bool_opt_out(arguments, dest, config_value):
 
 
 def _merge_bool_opt_in(arguments, dest, config_value):
-    """Resolve uma flag booleana de "ligar" (store_true).
-
-    Aceita tambem o par negativo ``--no-<flag>`` (dest ``no_<dest>``): se o
-    usuario passou a forma negativa, ela vence, mesmo que o config.ini tenha
-    a opcao ligada.
-    """
     if getattr(arguments, f"no_{dest}", False):
         return False
     if getattr(arguments, dest, False):
@@ -41,21 +26,9 @@ def _merge_bool_opt_in(arguments, dest, config_value):
 class QobuzDLSettings:
     """
     Central configuration object for Qobuz-DL Ultimate Edition.
-
-    Maps and stores all user preferences, CLI flags, and config.ini variables.
-    This object dictates the behavior of the Downloader, Tagger, and Sync engines,
-    enforcing the 'Zero Hardcoding' philosophy across the entire application.
     """
 
     def __init__(self, **kwargs):
-        """
-        Initializes the configuration settings.
-
-        Args:
-            **kwargs: Arbitrary keyword arguments containing all parsed configuration
-                values (e.g., tagging flags, folder formats, thread counts).
-        """
-        # basic options
         self.email = kwargs.get("email")
         self.password = kwargs.get("password")
         self.default_folder = kwargs.get("default_folder", "QobuzDownloads")
@@ -63,9 +36,6 @@ class QobuzDLSettings:
         self.default_limit = kwargs.get("default_limit", 20)
         self.no_m3u = kwargs.get("no_m3u", False)
         self.albums_only = kwargs.get("albums_only", False)
-        # BUGFIX: este campo era atribuido invertido (`not kwargs.get(...)`),
-        # ou seja `no_fallback=True` virava `self.no_fallback = False`.
-        # O nome do campo passou a contradizer o proprio valor.
         self.no_fallback = kwargs.get("no_fallback", False)
         self.no_database = kwargs.get("no_database", False)
         self.app_id = kwargs.get("app_id")
@@ -79,8 +49,6 @@ class QobuzDLSettings:
         self.dry_run = kwargs.get("dry_run", False)
         self.tag_only = kwargs.get("tag_only", False)
         self.musicbrainz = kwargs.get("musicbrainz", False)
-        # Normaliza datas: aceita "YYYY" (expande pra "YYYY-01-01" / "YYYY-12-31")
-        # e "YYYY-MM-DD" direto. None desativa o filtro.
         _since = kwargs.get("since_date") or ""
         self.since_date = (
             (_since[:4] + "-01-01") if len(_since) == 4 else (_since or None)
@@ -90,21 +58,9 @@ class QobuzDLSettings:
             (_before[:4] + "-12-31") if len(_before) == 4 else (_before or None)
         )
         self.legacy_charmap = kwargs.get("legacy_charmap", False)
-
-        # Verificacao de integridade pos-download (decodifica cada FLAC/MP3
-        # final com ffmpeg pra pegar corrupcao real, nao so' tag). Off por
-        # padrao porque adiciona tempo real a cada faixa -- em discografias
-        # grandes isso soma. Ver qobuz_dl/utils.py:verify_audio_integrity()
-        # e o uso em downloader.py.
         self.verify_after_download = kwargs.get("verify_after_download", False)
-
-        # Emite uma linha JSON por evento de progresso em vez de (ou alem
-        # de) barra de progresso tqdm no terminal. Pensado pra frontends
-        # (GUI web, app) conseguirem acompanhar o progresso sem precisar
-        # fazer parsing de saida de terminal com barras ANSI.
         self.progress_json = kwargs.get("progress_json", False)
 
-        # tag options
         self.no_album_artist_tag = kwargs.get("no_album_artist_tag", False)
         self.no_album_title_tag = kwargs.get("no_album_title_tag", False)
         self.no_track_artist_tag = kwargs.get("no_track_artist_tag", False)
@@ -127,61 +83,40 @@ class QobuzDLSettings:
         self.no_isrc_tag = kwargs.get("no_isrc_tag", False)
         self.no_replaygain_tag = kwargs.get("no_replaygain_tag", False)
         self.no_album_url_tag = kwargs.get("no_album_url_tag", False)
+
         self.lrc_files = kwargs.get("lrc_files", True)
         self.embed_lyrics = kwargs.get("embed_lyrics", True)
+        self.fetch_translation = kwargs.get("fetch_translation", True)
+        self.only_synced_lyrics = kwargs.get("only_synced_lyrics", False)
+
         self.multi_value_tags = kwargs.get("multi_value_tags", False)
 
-        # cover options
         self.embed_art = kwargs.get("embed_art", False)
         self.cover_og_quality = kwargs.get("og_cover", False)
         self.no_cover = kwargs.get("no_cover", False)
         self.embedded_art_size = kwargs.get("embedded_art_size", "org")
         self.saved_art_size = kwargs.get("saved_art_size", "org")
 
-        # multiple disc option
         self.multiple_disc_prefix = kwargs.get("multiple_disc_prefix", "CD")
         self.multiple_disc_one_dir = kwargs.get("multiple_disc_one_dir", False)
         self.multiple_disc_track_format = kwargs.get(
             "multiple_disc_track_format", DEFAULT_MULTIPLE_DISC_TRACK
         )
 
-        # Add parallel download thread count option
         self.max_workers = int(kwargs.get("max_workers", 1))
 
-        # Threads usados DENTRO do fallback de download segmentado (uma
-        # unica faixa, quando o CDN normal bloqueia/Akamai). Antes era um
-        # ThreadPoolExecutor(max_workers=8) fixo no codigo, igual em
-        # qualquer dispositivo. "0" (ou nao configurado) = auto-detect com
-        # base em os.cpu_count(), com teto de 8 pra nao sobrecarregar
-        # dispositivos mais fracos (ex: iPhone rodando A-Shell) nem abrir
-        # conexoes demais a toa em desktops com muitos nucleos.
         segment_workers_raw = int(kwargs.get("segment_workers", 0) or 0)
         if segment_workers_raw > 0:
             self.segment_workers = segment_workers_raw
         else:
             self.segment_workers = min(8, max(2, (os.cpu_count() or 4) * 2))
 
-        # user_auth_token
         self.user_auth_token = kwargs.get("user_auth_token", "")
 
     @staticmethod
     def from_arguments_configparser(arguments, config):
-        """
-        Factory method to construct a QobuzDLSettings object by merging command-line
-        arguments with the config.ini file. CLI arguments inherently take precedence
-        over config.ini values.
-
-        Args:
-            arguments (argparse.Namespace): Parsed command line arguments from the CLI.
-            config (configparser.ConfigParser): The initialized ConfigParser object.
-
-        Returns:
-            QobuzDLSettings: The fully resolved configuration object.
-        """
-        # Determine the correct section to read from config.ini
         section = "qobuz" if config.has_section("qobuz") else "DEFAULT"
 
-        # basic options
         kwargs = {
             "email": config.get(section, "email", fallback=""),
             "password": config.get(section, "password", fallback=""),
@@ -214,16 +149,13 @@ class QobuzDLSettings:
             "tag_only": getattr(arguments, "tag_only", False),
             "musicbrainz": getattr(arguments, "musicbrainz", False),
             "since_date": getattr(arguments, "since", None) or
-            config.get(section, "since_date", fallback="") or
-            None,
+            config.get(section, "since_date", fallback="") or None,
             "before_date": getattr(arguments, "before", None) or
-            config.get(section, "before_date", fallback="") or
-            None,
+            config.get(section, "before_date", fallback="") or None,
             "verify_after_download": getattr(arguments, "verify_after_download", False) or
             config.getboolean(section, "verify_after_download", fallback=False),
             "progress_json": getattr(arguments, "progress_json", False) or
             config.getboolean(section, "progress_json", fallback=False),
-            # cover options
             "embed_art": getattr(arguments, "embed_art", None) or
             config.getboolean(section, "embed_art", fallback=True),
             "og_cover": getattr(arguments, "og_cover", None) or
@@ -234,7 +166,6 @@ class QobuzDLSettings:
             config.get(section, "embedded_art_size", fallback="org"),
             "saved_art_size": getattr(arguments, "saved_art_size", None) or
             config.get(section, "saved_art_size", fallback="org"),
-            # multiple disc option
             "multiple_disc_prefix": getattr(arguments, "multiple_disc_prefix", None) or
             config.get(section, "multiple_disc_prefix", fallback="CD"),
             "multiple_disc_one_dir": getattr(arguments, "multiple_disc_one_dir", False) or
@@ -247,7 +178,6 @@ class QobuzDLSettings:
                 "multiple_disc_track_format",
                 fallback=DEFAULT_MULTIPLE_DISC_TRACK,
             ),
-            # tag options
             "no_album_artist_tag": getattr(arguments, "no_album_artist_tag", False) or
             config.getboolean(section, "no_album_artist_tag", fallback=False),
             "no_album_title_tag": getattr(arguments, "no_album_title_tag", False) or
@@ -292,19 +222,11 @@ class QobuzDLSettings:
             config.getboolean(section, "no_replaygain_tag", fallback=False),
             "no_album_url_tag": getattr(arguments, "no_album_url_tag", False) or
             config.getboolean(section, "no_album_url_tag", fallback=False),
-            # Add parallel download thread count configuration
             "max_workers": getattr(arguments, "max_workers", None) or
             config.get(section, "max_workers", fallback="1"),
-            # Threads do fallback de download segmentado -- "0"/ausente =
-            # auto-detect adaptativo por dispositivo (ver settings.py).
             "segment_workers": getattr(arguments, "segment_workers", None) or
             config.get(section, "segment_workers", fallback="0"),
-            # user_auth_token
             "user_auth_token": config.get(section, "user_auth_token", fallback=""),
-            # BUGFIX: lia `arguments.no_lrc_files`, mas o argparse registra a
-            # flag `--no-lrc-files` com dest="lrc_files" (store_false), logo o
-            # atributo `no_lrc_files` NUNCA existe e o getattr sempre caia no
-            # default -> a flag de CLI era silenciosamente ignorada aqui.
             "lrc_files": _merge_bool_opt_out(
                 arguments,
                 "lrc_files",
@@ -315,6 +237,8 @@ class QobuzDLSettings:
                 if getattr(arguments, "no_embed_lyrics", False)
                 else config.getboolean(section, "embed_lyrics", fallback=True)
             ),
+            "fetch_translation": config.getboolean(section, "fetch_translation", fallback=True),
+            "only_synced_lyrics": config.getboolean(section, "only_synced_lyrics", fallback=False),
             "multi_value_tags": (
                 False
                 if getattr(arguments, "no_multi_tags", False)

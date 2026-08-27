@@ -234,7 +234,7 @@ def emit(text="", end="\n"):
 
 def _write_locked(text, end):
     try:
-        from tqdm import tqdm
+        from tqdm.rich import tqdm
 
         tqdm.write(str(text), end=end)
     except Exception:

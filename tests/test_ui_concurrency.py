@@ -21,7 +21,7 @@ import time
 
 import pytest
 
-from tqdm import tqdm
+from tqdm.rich import tqdm
 
 from qobuz_dl import ui
 
