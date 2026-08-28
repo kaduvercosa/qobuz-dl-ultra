@@ -1,3 +1,7 @@
+# # ============================================================================
+# # settings.py -- objeto central de configuração do Qobuz-DL.
+# # Reúne valores da CLI e do config.ini para serem consumidos pelo restante do projeto.
+# # ============================================================================
 import os
 from qobuz_dl.constants import (
     DEFAULT_FOLDER,
@@ -8,6 +12,7 @@ from qobuz_dl.constants import (
 _MISSING = object()
 
 
+# # Resolve uma opção em que o valor da CLI, quando fornecido, substitui o config.ini.
 def _merge_bool_opt_out(arguments, dest, config_value):
     cli_value = getattr(arguments, dest, _MISSING)
     if cli_value is _MISSING or cli_value is None:
@@ -15,6 +20,7 @@ def _merge_bool_opt_out(arguments, dest, config_value):
     return bool(cli_value)
 
 
+# # Resolve opção opt-in: no_<opção> tem prioridade para desligar, depois a CLI para ligar.
 def _merge_bool_opt_in(arguments, dest, config_value):
     if getattr(arguments, f"no_{dest}", False):
         return False
@@ -23,11 +29,13 @@ def _merge_bool_opt_in(arguments, dest, config_value):
     return bool(config_value)
 
 
+# # Estado imutável por convenção durante uma operação; downloader e tagging leem estes atributos.
 class QobuzDLSettings:
     """
     Central configuration object for Qobuz-DL Ultimate Edition.
     """
 
+    # # Constrói o objeto a partir de kwargs, aplicando defaults quando uma opção não foi informada.
     def __init__(self, **kwargs):
         self.email = kwargs.get("email")
         self.password = kwargs.get("password")
@@ -50,10 +58,12 @@ class QobuzDLSettings:
         self.tag_only = kwargs.get("tag_only", False)
         self.musicbrainz = kwargs.get("musicbrainz", False)
         _since = kwargs.get("since_date") or ""
+    # # Ano isolado vira o primeiro dia do ano; data completa é preservada.
         self.since_date = (
             (_since[:4] + "-01-01") if len(_since) == 4 else (_since or None)
         )
         _before = kwargs.get("before_date") or ""
+    # # Ano isolado vira o último dia do ano; data completa é preservada.
         self.before_date = (
             (_before[:4] + "-12-31") if len(_before) == 4 else (_before or None)
         )
@@ -94,7 +104,9 @@ class QobuzDLSettings:
         self.embed_art = kwargs.get("embed_art", False)
         self.cover_og_quality = kwargs.get("og_cover", False)
         self.no_cover = kwargs.get("no_cover", False)
+    # # Resolução da capa que será embutida no áudio.
         self.embedded_art_size = kwargs.get("embedded_art_size", "org")
+    # # Resolução da capa salva como arquivo separado.
         self.saved_art_size = kwargs.get("saved_art_size", "org")
 
         self.multiple_disc_prefix = kwargs.get("multiple_disc_prefix", "CD")
@@ -105,16 +117,21 @@ class QobuzDLSettings:
 
         self.max_workers = int(kwargs.get("max_workers", 1))
 
+    # # Define workers de segmentos; sem valor explícito usa até 2x os CPUs, limitado a 2–8.
         segment_workers_raw = int(kwargs.get("segment_workers", 0) or 0)
+    # # Define workers de segmentos; sem valor explícito usa até 2x os CPUs, limitado a 2–8.
         if segment_workers_raw > 0:
+            # # Define workers de segmentos; sem valor explícito usa até 2x os CPUs, limitado a 2–8.
             self.segment_workers = segment_workers_raw
         else:
             self.segment_workers = min(8, max(2, (os.cpu_count() or 4) * 2))
 
         self.user_auth_token = kwargs.get("user_auth_token", "")
 
+    # # Converte argparse + ConfigParser em kwargs normalizados para QobuzDLSettings.
     @staticmethod
     def from_arguments_configparser(arguments, config):
+        # # Prefere a seção [qobuz], mas permite configparser sem essa seção usando DEFAULT.
         section = "qobuz" if config.has_section("qobuz") else "DEFAULT"
 
         kwargs = {
@@ -134,6 +151,7 @@ class QobuzDLSettings:
             "no_database": getattr(arguments, "no_db", False) or
             config.getboolean(section, "no_database", fallback=False),
             "app_id": config.get(section, "app_id", fallback=""),
+            # # Segredos separados por vírgula; entradas vazias são descartadas.
             "secrets": [
                 s for s in config.get(section, "secrets", fallback="").split(",") if s
             ],
@@ -227,11 +245,13 @@ class QobuzDLSettings:
             "segment_workers": getattr(arguments, "segment_workers", None) or
             config.get(section, "segment_workers", fallback="0"),
             "user_auth_token": config.get(section, "user_auth_token", fallback=""),
+            # # Compatibilidade entre o nome positivo lrc_files e a opção negativa no_lrc_files.
             "lrc_files": _merge_bool_opt_out(
                 arguments,
                 "lrc_files",
                 config.getboolean(section, "no_lrc_files", fallback=False) is False,
             ),
+            # # --no-embed-lyrics força False; caso contrário, usa o valor do config.ini.
             "embed_lyrics": (
                 False
                 if getattr(arguments, "no_embed_lyrics", False)
@@ -239,6 +259,7 @@ class QobuzDLSettings:
             ),
             "fetch_translation": config.getboolean(section, "fetch_translation", fallback=True),
             "only_synced_lyrics": config.getboolean(section, "only_synced_lyrics", fallback=False),
+            # # --no-multi-tags força False; caso contrário, CLI tem precedência sobre config.ini.
             "multi_value_tags": (
                 False
                 if getattr(arguments, "no_multi_tags", False)

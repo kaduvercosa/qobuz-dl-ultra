@@ -1,3 +1,9 @@
+# ============================================================================
+# commands.py
+# Define TODOS os comandos (subcomandos) e opções de linha de comando (CLI)
+# do qobuz-dl-ultra usando argparse.
+# ============================================================================
+
 import argparse
 import os
 import re
@@ -5,6 +11,10 @@ import shutil
 from qobuz_dl.color import INFO as CYAN, RESET as OFF, BG
 
 
+# ----------------------------------------------------------------------------
+# Formatter customizado do argparse: ajusta a largura do texto de ajuda
+# de acordo com o tamanho do terminal (evita quebras de linha feias).
+# ----------------------------------------------------------------------------
 class CustomHelpFormatter(argparse.RawTextHelpFormatter):
     def __init__(self, prog, indent_increment=2, max_help_position=50, width=None):
         try:
@@ -15,10 +25,13 @@ class CustomHelpFormatter(argparse.RawTextHelpFormatter):
             term_width = 100
 
         max_pos = min(50, max(24, int(term_width * 0.4)))
-
         super().__init__(prog, indent_increment, max_pos, width)
 
 
+# ----------------------------------------------------------------------------
+# ArgumentParser customizado: traduz textos padrão do argparse para português
+# e colore títulos e flags no terminal.
+# ----------------------------------------------------------------------------
 class ColoredArgumentParser(argparse.ArgumentParser):
     def __init__(self, *args, **kwargs):
         kwargs["formatter_class"] = CustomHelpFormatter
@@ -60,10 +73,12 @@ class ColoredArgumentParser(argparse.ArgumentParser):
         )
 
         help_text = help_text.lstrip("\n")
-
         file.write(help_text)
 
 
+# ----------------------------------------------------------------------------
+# Pasta padrão de download.
+# ----------------------------------------------------------------------------
 def _default_download_folder():
     ios_home = os.environ.get("QOBUZ_DL_IOS_HOME")
     if ios_home:
@@ -71,6 +86,9 @@ def _default_download_folder():
     return "QobuzDownloads"
 
 
+# ----------------------------------------------------------------------------
+# Subcomando: "interactive" (aliases: "i", "fun")
+# ----------------------------------------------------------------------------
 def fun_args(subparsers, default_limit):
     interactive = subparsers.add_parser(
         "interactive",
@@ -89,6 +107,9 @@ def fun_args(subparsers, default_limit):
     return interactive
 
 
+# ----------------------------------------------------------------------------
+# Subcomando: "lucky"
+# ----------------------------------------------------------------------------
 def lucky_args(subparsers):
     lucky = subparsers.add_parser(
         "lucky",
@@ -114,6 +135,9 @@ def lucky_args(subparsers):
     return lucky
 
 
+# ----------------------------------------------------------------------------
+# Subcomando: "dl"
+# ----------------------------------------------------------------------------
 def dl_args(subparsers):
     download = subparsers.add_parser(
         "dl",
@@ -169,17 +193,43 @@ def dl_args(subparsers):
     return download
 
 
+# ----------------------------------------------------------------------------
+# Subcomando: "auth" (alias: "login")
+# ----------------------------------------------------------------------------
 def auth_args(subparsers):
     auth = subparsers.add_parser(
         "auth",
         usage="qobuz-dl auth",
         description="Atualiza suas credenciais de acesso (email e token) sem precisar redefinir toda a configuração.",
         help="atualiza credenciais de login",
-        aliases=["login"]
+        aliases=["login"],
     )
     return auth
 
 
+# ----------------------------------------------------------------------------
+# Subcomando: "user" (aliases: "account", "profile", "me", "info")
+# ----------------------------------------------------------------------------
+def user_args(subparsers):
+    user = subparsers.add_parser(
+        "user",
+        usage="qobuz-dl user [opções]",
+        description="Mostra o perfil do usuário, status da assinatura, limites e dados da conta.",
+        help="exibe informações do usuário e status da assinatura",
+        aliases=["account", "profile", "me", "info"],
+    )
+    user.add_argument(
+        "--json",
+        action="store_true",
+        default=False,
+        help="Exibe o JSON bruto retornado pelo endpoint user/get",
+    )
+    return user
+
+
+# ----------------------------------------------------------------------------
+# Subcomando: "lyrics"
+# ----------------------------------------------------------------------------
 def lyrics_args(subparsers, default_folder=None):
     lyrics = subparsers.add_parser(
         "lyrics",
@@ -197,6 +247,9 @@ def lyrics_args(subparsers, default_folder=None):
     return lyrics
 
 
+# ----------------------------------------------------------------------------
+# Subcomando: "sync-playlist" (alias: "sp")
+# ----------------------------------------------------------------------------
 def sync_playlist_args(subparsers):
     sync_pl = subparsers.add_parser(
         "sync-playlist",
@@ -219,6 +272,9 @@ def sync_playlist_args(subparsers):
     return sync_pl
 
 
+# ----------------------------------------------------------------------------
+# Subcomando: "import-playlist" (alias: "ip")
+# ----------------------------------------------------------------------------
 def import_playlist_args(subparsers):
     ip = subparsers.add_parser(
         "import-playlist",
@@ -263,6 +319,9 @@ def import_playlist_args(subparsers):
     return ip
 
 
+# ----------------------------------------------------------------------------
+# Opções de saída no terminal (-v/--verbose, --quiet, --no-color)
+# ----------------------------------------------------------------------------
 def add_output_args(parser, suppress=False):
     kwargs = {"default": argparse.SUPPRESS} if suppress else {}
     group = parser.add_argument_group("saída no terminal")
@@ -288,6 +347,9 @@ def add_output_args(parser, suppress=False):
     return parser
 
 
+# ----------------------------------------------------------------------------
+# Opções comuns de download
+# ----------------------------------------------------------------------------
 def add_common_arg(custom_parser, default_folder, default_quality):
     custom_parser.add_argument(
         "-d",
@@ -598,6 +660,9 @@ def add_common_arg(custom_parser, default_folder, default_quality):
     )
 
 
+# ----------------------------------------------------------------------------
+# Subcomando: "radar"
+# ----------------------------------------------------------------------------
 def radar_args(subparsers):
     radar = subparsers.add_parser(
         "radar",
@@ -608,6 +673,9 @@ def radar_args(subparsers):
     return radar
 
 
+# ----------------------------------------------------------------------------
+# Subcomando: "stats"
+# ----------------------------------------------------------------------------
 def stats_args(subparsers):
     stats = subparsers.add_parser(
         "stats",
@@ -623,6 +691,9 @@ def stats_args(subparsers):
     return stats
 
 
+# ----------------------------------------------------------------------------
+# Montagem do parser principal
+# ----------------------------------------------------------------------------
 def qobuz_dl_args(default_quality=6, default_limit=20, default_folder=None):
     if default_folder is None:
         default_folder = _default_download_folder()
@@ -696,6 +767,7 @@ def qobuz_dl_args(default_quality=6, default_limit=20, default_folder=None):
     radar = radar_args(subparsers)
     stats = stats_args(subparsers)
     auth_cmd = auth_args(subparsers)
+    user_cmd = user_args(subparsers)
 
     for subparser in (interactive, download, lucky, sync_pl_cmd):
         add_common_arg(subparser, default_folder, default_quality)
@@ -710,6 +782,7 @@ def qobuz_dl_args(default_quality=6, default_limit=20, default_folder=None):
         radar,
         stats,
         auth_cmd,
+        user_cmd,
     ):
         add_output_args(subparser, suppress=True)
 

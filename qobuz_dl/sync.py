@@ -1,3 +1,7 @@
+# # ============================================================================
+# # sync.py -- reconstrução do banco local e detecção de faixas duplicadas.
+# # Fluxo: varrer biblioteca → extrair IDs/ISRC → gravar no banco ou comparar fingerprints.
+# # ============================================================================
 import os
 import logging
 import asyncio
@@ -12,6 +16,7 @@ from qobuz_dl.color import GREEN, RED, WARNING as YELLOW, INFO as CYAN, OFF
 logger = logging.getLogger(__name__)
 
 
+# # Reconstrói o banco a partir dos arquivos já baixados, sem repetir chamadas de download.
 async def sync_database(directory, db_path, client):
     """
     Executes the Smart Reverse Lookup operation.
@@ -29,13 +34,12 @@ async def sync_database(directory, db_path, client):
         f"\n{YELLOW}[*] Iniciando Sincronização do Banco de Dados Local...{OFF}")
     logger.info(f"{YELLOW}[*] Escaneando diretório: {directory}{OFF}")
 
-    # --- PATCH OS.WALK: Immune a parentesi quadre e case-insensitive ---
+    # # Caminho absoluto evita problemas com nomes contendo colchetes ou variação de maiúsculas.
     all_files = []
     for root, _, files in os.walk(directory):
         for file in files:
             if file.lower().endswith((".flac", ".mp3")):
                 all_files.append(os.path.join(root, file))
-    # -------------------------------------------------------------------
 
     if not all_files:
         logger.info(
@@ -57,7 +61,6 @@ async def sync_database(directory, db_path, client):
             quality = 27
             file_format = "FLAC" if file_path.lower().endswith(".flac") else "MP3"
 
-            # --- Variáveis para Metadados Ricos (Stats) ---
             artist_name = ""
             album_name = ""
             release_date = ""
@@ -68,7 +71,7 @@ async def sync_database(directory, db_path, client):
                 if file_path.lower().endswith(".flac"):
                     audio = FLAC(file_path)
 
-                    # --- RICERCA GERARCHICA FLAC (Stealth -> Legacy) ---
+            # # Tenta primeiro a tag nova (QDL_*); cai para a tag legada (QOBUZ*) se ausente.
                     track_id_list = (
                         audio.get("QDL_TRACK_ID") or audio.get("QOBUZTRACKID") or [None]
                     )
@@ -81,7 +84,6 @@ async def sync_database(directory, db_path, client):
 
                     isrc = audio.get("isrc", [None])[0]
 
-                    # Extraindo metadados ricos para o banco de dados
                     artist_name = (audio.get("ALBUMARTIST") or
                                    audio.get("ARTIST") or [""])[0]
                     album_name = audio.get("ALBUM", [""])[0]
@@ -93,7 +95,7 @@ async def sync_database(directory, db_path, client):
                 elif file_path.lower().endswith(".mp3"):
                     audio = ID3(file_path)
 
-                    # --- RICERCA GERARCHICA MP3 (Stealth -> Legacy) ---
+            # # Mesma hierarquia de busca do FLAC, adaptada aos frames TXXX do MP3.
                     track_txxx = (
                         audio.get("TXXX:QDL_TRACK_ID") or
                         audio.get("TXXX:qdl_track_id") or
@@ -114,7 +116,6 @@ async def sync_database(directory, db_path, client):
                     if tsrc:
                         isrc = tsrc.text[0]
 
-                    # Extraindo metadados ricos para o banco de dados
                     tpe2 = audio.get("TPE2")
                     tpe1 = audio.get("TPE1")
                     talb = audio.get("TALB")
@@ -128,7 +129,7 @@ async def sync_database(directory, db_path, client):
                     sampling_rate = getattr(audio.info, "sample_rate", 44100) / \
                         1000.0 if getattr(audio.info, "sample_rate", None) else None
 
-                # --- REVERSE LOOKUP VIA API FOR OLD FILES ---
+        # # Arquivos antigos sem ID embutido são recuperados via busca por ISRC na API.
                 if not track_id and isrc:
                     logger.info(
                         f"{CYAN}[*] ID local ausente. Buscando via API (ISRC: {isrc})...{OFF}"
@@ -139,7 +140,6 @@ async def sync_database(directory, db_path, client):
                         track_id = str(q_track["id"])
                         album_id = str(q_track.get("album", {}).get("id", ""))
 
-                        # Preencher metadados ausentes via API
                         if not artist_name:
                             artist_name = q_track.get("performer", {}).get("name", "")
                         if not album_name:
@@ -151,10 +151,10 @@ async def sync_database(directory, db_path, client):
                         sampling_rate = q_track.get(
                             "maximum_sampling_rate", sampling_rate)
 
-                    # Human behavior delay to prevent Qobuz API throttling and hanging
+        # # Pequeno intervalo entre chamadas para não sobrecarregar a API durante a varredura.
                     await asyncio.sleep(0.2)
 
-                # Inject Track ID into DB with Full Rich Metadata
+        # # Registra a faixa como já obtida, evitando que o downloader tente buscá-la de novo.
                 if track_id:
                     await handle_download_id(
                         db_path=db_path,
@@ -163,7 +163,7 @@ async def sync_database(directory, db_path, client):
                         media_type="track",
                         quality=quality,
                         file_format=file_format,
-                        quality_met=1,  # Como já foi baixado, consideramos a qualidade como atingida
+                        quality_met=1,
                         bit_depth=str(bit_depth) if bit_depth else None,
                         sampling_rate=str(sampling_rate) if sampling_rate else None,
                         release_date=str(release_date),
@@ -173,7 +173,7 @@ async def sync_database(directory, db_path, client):
                     )
                     added_tracks += 1
 
-                # Inject Album ID into DB with Full Rich Metadata
+        # # Evita gravar o mesmo álbum mais de uma vez ao processar várias faixas dele.
                 if album_id and album_id not in added_albums:
                     await handle_download_id(
                         db_path=db_path,
@@ -207,6 +207,7 @@ async def sync_database(directory, db_path, client):
         f"{GREEN}[+] Sincronização concluída! Restauradas {added_tracks} faixas e {len(added_albums)} álbuns no banco de dados local com metadados completos.{OFF}")
 
 
+# # Prioriza Chromaprint; sem ele, cai em MD5 de áudio, depois ID/ISRC, depois metadados.
 def _compute_fingerprint(filepath, max_length=120):
     """
     Tenta calcular a fingerprint via Chromaprint primeiro. Se falhar, usa um
@@ -216,26 +217,23 @@ def _compute_fingerprint(filepath, max_length=120):
     3. Metadados Expandidos (Artista + Álbum + Título + Duração)
     """
     try:
-        # Tenta o método primário (Desktop)
+        # # Caminho preferido quando o Chromaprint/fpcalc está disponível no sistema.
         duration, fingerprint = acoustid.fingerprint_file(
             filepath, maxlength=max_length, force_fpcalc=False
         )
         return duration, fingerprint
     except Exception:
-        # PURE-PYTHON FALLBACK AVANÇADO (iOS / a-Shell)
         try:
             duration = 0
 
-            # Nível 1: Verificação de Áudio FLAC (Ignora Tags)
             if filepath.lower().endswith(".flac"):
                 audio_flac = FLAC(filepath)
                 duration = int(audio_flac.info.length)
 
-                # Se o FLAC tiver a assinatura de áudio original, é um match perfeito do PCM
+            # # MD5 nativo do FLAC identifica áudio idêntico mesmo com tags diferentes.
                 if getattr(audio_flac.info, "md5_signature", 0) != 0:
                     return duration, f"flac_audio_md5:{audio_flac.info.md5_signature}"
 
-                # Nível 2.1: Identificadores no FLAC
                 track_id = audio_flac.get("QOBUZTRACKID", [None])[0]
                 isrc = audio_flac.get("isrc", [None])[0]
 
@@ -244,7 +242,6 @@ def _compute_fingerprint(filepath, max_length=120):
                 if isrc:
                     return duration, f"isrc:{isrc}"
 
-            # Nível 2.2: Identificadores no MP3
             elif filepath.lower().endswith(".mp3"):
                 audio_id3 = ID3(filepath)
 
@@ -256,7 +253,6 @@ def _compute_fingerprint(filepath, max_length=120):
                 if tsrc:
                     return duration, f"isrc:{tsrc.text[0]}"
 
-            # Nível 3: Fallback de Metadados Expandidos
             audio = File(filepath, easy=True)
             if audio is None:
                 return None, None
@@ -266,7 +262,6 @@ def _compute_fingerprint(filepath, max_length=120):
             artist = audio.get("artist", [""])[0] if audio.get("artist") else ""
             album = audio.get("album", [""])[0] if audio.get("album") else ""
 
-            # Normaliza os textos para ignorar acentos e letras maiúsculas/minúsculas
             def norm(s):
                 return (
                     unicodedata.normalize("NFKD", str(s))
@@ -276,6 +271,7 @@ def _compute_fingerprint(filepath, max_length=120):
                     .strip()
                 )
 
+            # # Último recurso: assinatura baseada em artista, álbum, título e duração normalizados.
             meta_fp = f"meta_hash:{norm(artist)}|{norm(album)}|{norm(title)}|{duration}"
             return duration, meta_fp
 
@@ -286,6 +282,7 @@ def _compute_fingerprint(filepath, max_length=120):
             return None, None
 
 
+# # Agrupa arquivos pela mesma fingerprint para revelar duplicatas reais.
 async def find_duplicate_tracks(directory):
     """
     Detecta faixas de audio DUPLICADAS usando um sistema híbrido.
@@ -328,6 +325,7 @@ async def find_duplicate_tracks(directory):
         if idx % 25 == 0 or idx == len(all_files):
             logger.info(f"{CYAN}    [{idx}/{len(all_files)}] processados...{OFF}")
 
+    # # Só sobra no resultado quem tiver mais de um arquivo com a mesma fingerprint.
     duplicates = {fp: paths for fp, paths in fingerprints.items() if len(paths) > 1}
 
     if skipped:

@@ -1,3 +1,8 @@
+# Funções utilitárias diversas do qobuz-dl: geração de playlist .m3u,
+# filtragem de discografia, formatação de duração, checagem de binários
+# externos (ffmpeg/fpcalc), verificação de integridade de áudio, limpeza de
+# nomes de arquivo e resolução de caminhos de configuração multiplataforma.
+
 import re
 import string
 import os
@@ -16,15 +21,16 @@ EXTENSIONS = (".mp3", ".flac")
 
 
 class PartialFormatter(string.Formatter):
-    """
-    A custom string formatter that safely handles missing variables during string evaluation.
-    Prevents KeyErrors when a requested metadata tag is missing from the API response.
-    """
+    # Formatter customizado que trata variáveis ausentes sem lançar
+    # KeyError. Usado para montar nomes de arquivo/pasta a partir de tags
+    # de metadados que podem não vir preenchidas na resposta da API.
 
     def __init__(self, missing="n/a", bad_fmt="n/a"):
         self.missing, self.bad_fmt = missing, bad_fmt
 
     def get_field(self, field_name, args, kwargs):
+        # Campo ausente: em vez de lançar KeyError/AttributeError, devolve
+        # None para que format_field() substitua pelo valor `missing`.
         try:
             val = super(PartialFormatter, self).get_field(field_name, args, kwargs)
         except (KeyError, AttributeError):
@@ -32,6 +38,9 @@ class PartialFormatter(string.Formatter):
         return val
 
     def format_field(self, value, spec):
+        # Valor vazio/None vira `self.missing`. Spec de formatação inválido
+        # (ex.: aplicar formatação numérica a uma string) vira `self.bad_fmt`
+        # em vez de lançar ValueError.
         if not value:
             return self.missing
         try:
@@ -43,17 +52,13 @@ class PartialFormatter(string.Formatter):
 
 
 def make_m3u(pl_directory, remote_items=None):
-    """
-    Generates a UTF-8 encoded .m3u8 playlist file.
-
-    If remote_items (Qobuz API playlist order) is provided, it utilizes a robust O(1)
-    4-pass matching algorithm (ID -> ISRC -> Title -> Filename) to preserve the exact
-    online track order, completely ignoring physical local filenames.
-
-    Args:
-        pl_directory (str): The local directory containing the downloaded audio files.
-        remote_items (list, optional): The list of track dictionaries from the Qobuz API. Defaults to None.
-    """
+    # Gera um arquivo de playlist .m3u8 (UTF-8) a partir dos arquivos de
+    # áudio presentes em `pl_directory`.
+    #
+    # Quando `remote_items` (ordem da playlist vinda da API do Qobuz) é
+    # fornecido, usa um algoritmo de 4 passes para casar cada item remoto
+    # com o arquivo local correspondente e preservar a ordem exata da
+    # playlist online -- ignorando completamente o nome físico do arquivo.
     import os
     import re
     import logging
@@ -69,7 +74,7 @@ def make_m3u(pl_directory, remote_items=None):
     pl_name = rel_folder + ".m3u8"
     pl_full_path = os.path.join(pl_directory, pl_name)
 
-    # 1. Scan the local folder and extract deep tags
+    # 1. Varre a pasta local e extrai as tags de cada arquivo de áudio.
     local_files_info = []
     for local, dirs, files in os.walk(pl_directory):
         dirs.sort()
@@ -85,12 +90,13 @@ def make_m3u(pl_directory, remote_items=None):
                     "duration": 0,
                 }
                 try:
-                    # Generic length via mutagen.File
+                    # Duração genérica via mutagen.File (funciona para
+                    # qualquer formato suportado).
                     audio_gen = File(audio_full_path)
                     if audio_gen and audio_gen.info:
                         info["duration"] = int(audio_gen.info.length)
 
-                    # Deep Tag Parsing
+                    # Leitura das tags específicas de cada formato.
                     if audio_full_path.lower().endswith(".flac"):
                         audio = FLAC(audio_full_path)
                         info["qobuz_id"] = audio.get("QOBUZTRACKID", [None])[0]
@@ -99,7 +105,8 @@ def make_m3u(pl_directory, remote_items=None):
                         info["artist"] = audio.get("ARTIST", [""])[0]
                     else:
                         audio = ID3(audio_full_path)
-                        # Correct way to find custom TXXX frames in ID3
+                        # Frames TXXX customizados precisam ser varridos
+                        # manualmente (não têm chave direta como TIT2/TPE1).
                         for frame in audio.getall("TXXX"):
                             if frame.desc.upper() == "QOBUZTRACKID":
                                 info["qobuz_id"] = frame.text[0]
@@ -111,16 +118,16 @@ def make_m3u(pl_directory, remote_items=None):
                         tpe1 = audio.get("TPE1")
                         info["artist"] = tpe1.text[0] if tpe1 else ""
                 except Exception as e:
-                    logger.debug(f"Error reading tags for {f}: {e}")
-                    info["title"] = os.path.splitext(f)[0]  # Fallback title
+                    logger.debug(f"Erro ao ler tags de {f}: {e}")
+                    info["title"] = os.path.splitext(f)[0]  # título de fallback
 
                 local_files_info.append(info)
 
     ordered_files = []
 
-    # 2. Match with Qobuz API order (4-Pass Algorithm)
+    # 2. Casa os arquivos locais com a ordem da API do Qobuz (4 passes).
     if remote_items:
-        # Pre-index the local files into dictionaries for O(1) single lookups
+        # Pré-indexa os arquivos locais em dicionários para buscas O(1).
         by_tid = {str(f["qobuz_id"]): f for f in local_files_info if f.get("qobuz_id")}
         by_isrc = {str(f["isrc"]): f for f in local_files_info if f.get("isrc")}
         by_title = {
@@ -150,14 +157,16 @@ def make_m3u(pl_directory, remote_items=None):
                 else album_artist
             )
 
-            # Pass 1-3: Fast dictionary lookups
+            # Passes 1-3: buscas rápidas em dicionário, em ordem de
+            # confiabilidade (ID Qobuz > ISRC > título exato).
             best_match = (
                 by_tid.get(tid) or
                 by_isrc.get(isrc) or
                 by_title.get(track_title.strip().lower())
             )
 
-            # Pass 4: Fallback to filename substring match
+            # Passe 4: fallback por substring no nome do arquivo, quando
+            # nenhum dos anteriores encontrou correspondência.
             if not best_match and track_title != "Unknown Title":
                 for f_info in local_files_info:
                     if track_title.lower() in os.path.basename(f_info["path"]).lower():
@@ -166,8 +175,9 @@ def make_m3u(pl_directory, remote_items=None):
 
             if best_match:
                 ordered_files.append(best_match)
-                # La riga available_files.remove(best_match) è stata rimossa
-                # per permettere tracce duplicate all'interno della stessa playlist.
+                # Nota: não removemos best_match de local_files_info aqui de
+                # propósito, para permitir faixas duplicadas dentro da
+                # mesma playlist.
             else:
                 if missing_count == 0:
                     logger.warning(table_header)
@@ -178,7 +188,9 @@ def make_m3u(pl_directory, remote_items=None):
         if missing_count > 0:
             logger.warning(f"{RED}{'━' * 80}{OFF}\n")
 
-    # 3. Fallback (Albums or failed matching): Natural sort
+    # 3. Fallback (álbuns, ou quando o casamento com a API falhou):
+    #    ordenação natural pelo nome do arquivo (ex.: "Faixa 2" antes de
+    #    "Faixa 10").
     if not remote_items or len(ordered_files) == 0:
 
         def natural_sort_key(s):
@@ -192,7 +204,8 @@ def make_m3u(pl_directory, remote_items=None):
             key=lambda x: natural_sort_key(os.path.basename(x["path"])),
         )
 
-    # 4. Generate M3U
+    # 4. Gera as linhas do M3U e grava o arquivo (só se houver ao menos
+    #    uma faixa, além do cabeçalho #EXTM3U).
     for f_info in ordered_files:
         audio_rel_path = os.path.relpath(f_info["path"], pl_directory)
 
@@ -211,28 +224,15 @@ def make_m3u(pl_directory, remote_items=None):
 def smart_discography_filter(
     contents: list, save_space: bool = False, skip_extras: bool = False
 ) -> list:
-    """
-    Heuristic Engine for intelligent discography filtering.
+    # Filtro heurístico de discografia: ao baixar todos os álbuns de um
+    # artista, a API costuma trazer relançamentos, coletâneas e álbuns onde
+    # o artista aparece só como feature. Esta função remove:
+    #   - álbuns de outros artistas onde o artista pedido é apenas feature;
+    #   - álbuns duplicados em qualidades diferentes (mantém a melhor);
+    #   - (opcionalmente) edições de colecionador, deluxe e ao vivo.
 
-    When downloading some artists' discography, many random and spam-like
-    albums can get downloaded. This filters out duplicates and unwanted releases.
-
-    This function removes:
-        * albums by other artists, which may contain a feature from the requested artist
-        * duplicate albums in different qualities
-        * (optionally) removes collector's, deluxe, live albums
-
-    Args:
-        contents (list): Contents returned by Qobuz API.
-        save_space (bool): If True, chooses highest bit depth but lowest sampling rate.
-        skip_extras (bool): If True, removes albums with extra material (i.e. live, deluxe).
-
-    Returns:
-        list: The filtered items list.
-    """
-
-    # for debugging
     def print_album(album: dict) -> None:
+        # Auxiliar só para depuração (logger.debug).
         logger.debug(
             f"{album['title']} - {album.get('version', '~~')} "
             "({album['maximum_bit_depth']}/{album['maximum_sampling_rate']}"
@@ -245,24 +245,25 @@ def smart_discography_filter(
     }
 
     def is_type(album_t: str, album: dict) -> bool:
-        """Check if album is of type `album_t`"""
+        # Verifica se o título/versão do álbum casa com o regex do tipo
+        # pedido (ex.: "remaster" ou "extra").
         version = album.get("version", "")
         title = album.get("title", "")
         regex = TYPE_REGEXES[album_t]
         return re.search(regex, f"{title} {version}") is not None
 
     def essence(album: dict) -> str:
-        """Ignore text in parens/brackets, return all lowercase.
-        Used to group two albums that may be named similarly, but not exactly
-        the same.
-        """
+        # Reduz o título do álbum à sua "essência": ignora texto entre
+        # parênteses/colchetes e deixa tudo minúsculo. Usado para agrupar
+        # álbuns com nomes parecidos mas não idênticos (ex.: "Album" e
+        # "Album (Deluxe Edition)" caem no mesmo grupo).
         r = re.match(r"([^\(]+)(?:\s*[\(\[][^\)][\)\]])*", album)
         return r.group(1).strip().lower()
 
     requested_artist = contents[0]["name"]
     items = [item["albums"]["items"] for item in contents][0]
 
-    # use dicts to group duplicate albums together by title
+    # Agrupa os álbuns duplicados pelo título "essencial".
     title_grouped = dict()
     for item in items:
         title_ = essence(item["title"])
@@ -272,6 +273,9 @@ def smart_discography_filter(
 
     items = []
     for albums in title_grouped.values():
+        # Dentro de cada grupo, decide qual é a "melhor" versão: maior bit
+        # depth e, a partir dele, a taxa de amostragem mais alta (ou mais
+        # baixa, se save_space estiver ativo, para economizar espaço).
         best_bit_depth = max(a["maximum_bit_depth"] for a in albums)
         get_best = min if save_space else max
         best_sampling_rate = get_best(
@@ -281,14 +285,16 @@ def smart_discography_filter(
         )
         remaster_exists = any(is_type("remaster", a) for a in albums)
 
-        # BUGFIX (late binding / B023): esta closure lia `best_bit_depth`,
-        # `best_sampling_rate` e `remaster_exists` das variaveis do LOOP.
-        # Funcionava por sorte porque `filter()` era consumido na mesma
-        # iteracao; qualquer refatoracao que guardasse a funcao para chamar
-        # depois (lista de callbacks, generator lazy, thread pool) passaria a
-        # usar os valores da ULTIMA iteracao para todos os grupos, filtrando
-        # a discografia errada silenciosamente. Fixado via argumentos default,
-        # que capturam o valor no momento da definicao.
+        # IMPORTANTE (late binding / B023): esta closure lê best_bit_depth,
+        # best_sampling_rate e remaster_exists via ARGUMENTOS DEFAULT (não
+        # direto das variáveis do loop acima). Isso é proposital: se lesse
+        # das variáveis do loop, qualquer uso futuro que guardasse esta
+        # função para chamar depois (lista de callbacks, generator lazy,
+        # thread pool) passaria a usar os valores da ÚLTIMA iteração do
+        # loop para todos os grupos, filtrando a discografia errada
+        # silenciosamente. Os argumentos default capturam o valor no
+        # momento em que a função é definida, não no momento em que é
+        # chamada.
         def is_valid(
             album: dict,
             _bit_depth=best_bit_depth,
@@ -299,16 +305,15 @@ def smart_discography_filter(
                 album["maximum_bit_depth"] == _bit_depth and
                 album["maximum_sampling_rate"] == _sampling_rate and
                 album["artist"]["name"] == requested_artist and
-                not (  # states that are not allowed
+                not (  # estados não permitidos:
                     (_remaster_exists and not is_type("remaster", album)) or
                     (skip_extras and is_type("extra", album))
                 )
             )
 
         filtered = tuple(filter(is_valid, albums))
-        # most of the time, len is 0 or 1.
-        # if greater, it is a complete duplicate,
-        # so it doesn't matter which is chosen
+        # Na maioria dos casos len(filtered) é 0 ou 1. Se for maior, é uma
+        # duplicata completa -- não importa qual dos dois é escolhido.
         if len(filtered) >= 1:
             items.append(filtered[0])
 
@@ -316,42 +321,32 @@ def smart_discography_filter(
 
 
 def format_duration(duration):
-    """
-    Formats a duration given in seconds into a HH:MM:SS string.
-
-    Args:
-        duration (int): The duration in seconds.
-
-    Returns:
-        str: The formatted time string.
-    """
+    # Formata uma duração em segundos como string HH:MM:SS.
     return time.strftime("%H:%M:%S", time.gmtime(duration))
 
 
-# Cache do resultado da checagem de binarios externos. Chave = nome do
-# binario, valor = caminho encontrado ou None. Existe para que o aviso saia
-# UMA vez por execucao, nao uma vez por arquivo.
+# Cache do resultado da checagem de binários externos. Chave = nome do
+# binário, valor = caminho encontrado ou None. Existe para que o aviso saia
+# UMA vez por execução, não uma vez por arquivo processado.
 _BINARIOS_CHECADOS = {}
 
-# Onde procurar alem do PATH. O a-Shell (iOS/iPadOS) traz ffmpeg nativo em
-# $APPDIR/bin, que nem sempre esta no PATH do processo Python.
+# Onde procurar além do PATH. O a-Shell (iOS/iPadOS) traz ffmpeg nativo em
+# $APPDIR/bin, que nem sempre está no PATH do processo Python.
 _DIRS_EXTRA = [
     os.path.join(os.environ.get("APPDIR", ""), "bin"),
 ]
 
 
 def encontrar_binario(nome):
-    """Procura um executavel externo e memoriza o resultado.
-
-    Antes o projeto nao tinha nenhum `shutil.which`: descobria a ausencia do
-    ffmpeg via `FileNotFoundError` na hora de rodar o subprocess, dentro de
-    `verify_audio_integrity()`. Como aquela funcao roda **por arquivo**, um
-    album de 14 faixas produzia 14 mensagens que pareciam 14 arquivos
-    corrompidos, quando o problema era um so' e era de instalacao.
-
-    Returns:
-        str | None: caminho do executavel, ou None se nao existir.
-    """
+    # Procura um executável externo (ex.: ffmpeg, fpcalc) no PATH e nos
+    # diretórios extras conhecidos, memorizando o resultado em cache.
+    #
+    # Antes desta função existir, a ausência do ffmpeg só era descoberta
+    # via FileNotFoundError na hora de rodar o subprocess, dentro de
+    # verify_audio_integrity(). Como aquela função roda por arquivo, um
+    # álbum de 14 faixas produzia 14 mensagens de erro que pareciam 14
+    # arquivos corrompidos, quando o problema real era um só (falta de
+    # instalação).
     if nome in _BINARIOS_CHECADOS:
         return _BINARIOS_CHECADOS[nome]
 
@@ -370,51 +365,41 @@ def encontrar_binario(nome):
 
 
 def _avisar(titulo, detalhe):
-    """Emite um aviso quebrado na largura do terminal.
-
-    ANTES estes avisos eram um `logger.warning()` de ~200 caracteres em linha
-    unica. A ponte de logging (`ui.TqdmLoggingHandler`) serializa a escrita mas
-    NAO quebra linha, entao num terminal estreito -- o a-Shell no iPad chega a
-    40 colunas -- o proprio terminal quebrava onde dava, cortando palavra ao
-    meio.
-
-    O `try/except ImportError` existe para a funcao continuar utilizavel fora
-    da CLI (importada por um script, por exemplo), onde a UI pode nao estar
-    configurada. Nesse caso volta ao logging simples.
-    """
+    # Emite um aviso de duas partes (título curto + detalhe) já quebrado na
+    # largura do terminal, via qobuz_dl.ui quando disponível.
+    #
+    # O try/except ImportError existe para que esta função continue
+    # utilizável fora da CLI (ex.: importada por um script avulso), onde o
+    # módulo ui pode não estar configurado -- nesse caso cai para logging
+    # simples de uma linha só.
     try:
         from qobuz_dl import ui
 
         ui.warn(titulo)
         ui.wrapped(detalhe, indent=4)
-    except ImportError:  # pragma: no cover - so' fora da CLI
+    except ImportError:  # pragma: no cover - só fora da CLI
         logger.warning("%s %s", titulo, detalhe)
 
 
 def checar_binarios_externos(precisa_fpcalc=False):
-    """Verifica na inicializacao os executaveis que o pip NAO instala.
-
-    `ffmpeg` (checagem de integridade) e `fpcalc`/Chromaprint (usado pelo
-    `--find-duplicates` via pyacoustid) nao vem de pacote Python -- precisam
-    estar instalados no sistema. Avisa UMA vez, com a instrucao de instalacao,
-    em vez de deixar cada feature falhar do seu jeito mais adiante.
-
-    Args:
-        precisa_fpcalc: so' avisa sobre o fpcalc quando a execucao atual
-            realmente vai usar fingerprint de audio. Nao faz sentido cobrar
-            Chromaprint de quem so' quer baixar um album.
-
-    Returns:
-        dict: {"ffmpeg": caminho|None, "fpcalc": caminho|None}
-    """
+    # Verifica na inicialização os executáveis externos que o pip NÃO
+    # instala: ffmpeg (checagem de integridade) e fpcalc/Chromaprint (usado
+    # por --find-duplicates via pyacoustid). Avisa UMA vez, com instrução
+    # de instalação, em vez de deixar cada funcionalidade falhar do seu
+    # jeito mais adiante na execução.
+    #
+    # `precisa_fpcalc` controla se o aviso sobre fpcalc é exibido: só faz
+    # sentido cobrar Chromaprint de quem realmente vai usar fingerprint de
+    # áudio, não de quem só quer baixar um álbum.
     resultado = {"ffmpeg": encontrar_binario("ffmpeg"), "fpcalc": None}
 
     if not resultado["ffmpeg"]:
         _avisar(
-            # Titulo curto de proposito: `ui.warn()` NAO quebra linha -- so' o
-            # `ui.wrapped()` do detalhe quebra. Com a tag "[!] " ocupando 4
-            # colunas, o titulo precisa caber em ~28 para nao estourar num
-            # terminal de 32 colunas (a-Shell no iPad em tela dividida).
+            # Título curto de propósito: ui.warn() não quebra linha -- só
+            # ui.wrapped() (usado no detalhe) quebra. Com a tag "[!] "
+            # ocupando 4 colunas, o título precisa caber em ~28 caracteres
+            # para não estourar num terminal de 32 colunas (a-Shell no
+            # iPad em tela dividida).
             "ffmpeg nao encontrado",
             "A integridade dos arquivos baixados nao sera verificada. O "
             "download em si funciona normalmente. Instale com `apt install "
@@ -437,36 +422,22 @@ def checar_binarios_externos(precisa_fpcalc=False):
 
 
 def verify_audio_integrity(filepath, timeout=180):
-    """
-    Verifica se um arquivo de audio esta corrompido decodificando-o por
-    inteiro com o ffmpeg (nao so lendo os metadados/tags, que e o que
-    check_audio.py fazia ate agora via ffprobe -show_format/-show_streams).
-
-    Um FLAC/MP3 pode ter tags perfeitas e ainda assim ter o stream de audio
-    truncado ou corrompido no meio -- por exemplo, num download que caiu no
-    meio e o arquivo parcial passou despercebido. Decodificar o arquivo
-    inteiro (jogando a saida fora com "-f null -") e a unica forma
-    confiavel de pegar isso, na mesma linha do remux que ja existe em
-    downloader.py (mesmos flags: -nostdin, -v error).
-
-    Args:
-        filepath (str): Caminho do arquivo de audio a verificar.
-        timeout (int): Tempo maximo em segundos antes de desistir (arquivos
-            muito longos podem demorar; 180s cobre folgadamente um album
-            inteiro em FLAC hi-res numa maquina modesta).
-
-    Returns:
-        tuple[bool, str]: (True, "") se o arquivo decodifica sem erros.
-            (False, mensagem_de_erro) se o ffmpeg reportar corrupcao, o
-            arquivo nao existir, ou a checagem estourar o timeout/o ffmpeg
-            nao estiver instalado.
-    """
+    # Verifica se um arquivo de áudio está corrompido, decodificando-o por
+    # INTEIRO com o ffmpeg -- não só lendo metadados/tags (que é o que
+    # ffprobe -show_format/-show_streams fazia antes).
+    #
+    # Um FLAC/MP3 pode ter tags perfeitas e ainda assim ter o stream de
+    # áudio truncado/corrompido no meio (ex.: download que caiu na metade e
+    # o arquivo parcial passou despercebido). Decodificar o arquivo inteiro
+    # (descartando a saída com "-f null -") é a única forma confiável de
+    # pegar isso, usando os mesmos flags do remux que já existe em
+    # downloader.py (-nostdin, -v error).
     if not os.path.isfile(filepath):
         return False, "Arquivo nao encontrado."
 
-    # Consulta o cache em vez de descobrir a ausencia do ffmpeg via
-    # FileNotFoundError a cada arquivo. O aviso completo, com instrucao de
-    # instalacao, sai uma unica vez em checar_binarios_externos().
+    # Consulta o cache em vez de descobrir a ausência do ffmpeg via
+    # FileNotFoundError a cada arquivo. O aviso completo, com instrução de
+    # instalação, já saiu uma única vez em checar_binarios_externos().
     ffmpeg = encontrar_binario("ffmpeg")
     if not ffmpeg:
         return False, "ffmpeg nao disponivel -- integridade nao verificada."
@@ -499,7 +470,7 @@ def verify_audio_integrity(filepath, timeout=180):
 
     if result.returncode != 0 or result.stderr.strip():
         # Qualquer linha em stderr com "-v error" indica problema real de
-        # decodificacao (nao so avisos), entao tratamos como corrompido.
+        # decodificação (não apenas avisos), então tratamos como corrompido.
         return (
             False,
             result.stderr.strip() or f"ffmpeg saiu com codigo {result.returncode}.",
@@ -509,36 +480,20 @@ def verify_audio_integrity(filepath, timeout=180):
 
 
 def create_and_return_dir(directory):
-    """
-    Safely creates a directory path and returns its absolute path.
-
-    Args:
-        directory (str): The desired directory path.
-
-    Returns:
-        str: The absolute path of the created directory.
-    """
+    # Cria (se necessário) e devolve o caminho absoluto de um diretório,
+    # expandindo "~" quando presente.
     fix = os.path.abspath(os.path.expanduser(directory))
     os.makedirs(fix, exist_ok=True)
     return fix
 
 
 def get_url_info(url):
-    """
-    Parses a Qobuz URL to extract the media type and ID using regular expressions.
-
-    Compatible with urls of the form:
-        https://www.qobuz.com/us-en/{type}/{name}/{id}
-        https://open.qobuz.com/{type}/{id}
-        https://play.qobuz.com/{type}/{id}
-        /us-en/{type}/-/{id}
-
-    Args:
-        url (str): The input URL string.
-
-    Returns:
-        tuple: A tuple containing the extracted type (e.g., 'album', 'track') and the ID.
-    """
+    # Extrai o tipo de mídia (album/artist/track/playlist/label) e o ID de
+    # uma URL do Qobuz via regex. Compatível com os formatos:
+    #   https://www.qobuz.com/us-en/{type}/{name}/{id}
+    #   https://open.qobuz.com/{type}/{id}
+    #   https://play.qobuz.com/{type}/{id}
+    #   /us-en/{type}/-/{id}
     r = re.search(
         r"(?:https:\/\/(?:w{3}|open|play)\.qobuz\.com)?(?:\/[a-z]{2}-[a-z]{2})"
         r"?\/(album|artist|track|playlist|label)(?:\/[-\w\d]+)?\/([\w\d]+)",
@@ -548,24 +503,19 @@ def get_url_info(url):
 
 
 def get_album_artist(qobuz_album: dict) -> list:
-    """
-    Extracts the album's main artists from the Qobuz API response.
-    Returns a list of strings to ensure true Native Multi-Artist Tagging
-    (discrete Vorbis Comments for FLAC files).
-
-    Args:
-        qobuz_album (dict): Qobuz API response dictionary.
-
-    Returns:
-        list: A list of the album's main artists.
-    """
+    # Extrai os artistas principais de um álbum a partir da resposta da API
+    # do Qobuz, devolvendo uma LISTA de strings (não uma string única) para
+    # permitir Multi-Artist Tagging nativo -- Vorbis Comments discretos por
+    # artista em arquivos FLAC.
     try:
-        # Se la chiave 'artists' non esiste, ritorna il singolo artista in una lista
+        # Se a chave "artists" não existir, cai para o artista único do
+        # campo "artist".
         if not qobuz_album.get("artists"):
             single_artist = qobuz_album.get("artist", {}).get("name", "")
             return [single_artist] if single_artist else []
 
-        # Filtra l'array isolando solo chi ha il ruolo 'main-artist'
+        # Filtra o array mantendo só quem tem o papel "main-artist"
+        # (exclui produtores, remixers, featurings, etc.).
         main_artists = list(
             filter(
                 lambda a: "main-artist" in a.get("roles", []),
@@ -573,7 +523,7 @@ def get_album_artist(qobuz_album: dict) -> list:
             )
         )
 
-        # Estrae i nomi puri e li restituisce come lista separata
+        # Extrai só os nomes e devolve como lista.
         if main_artists:
             return [a["name"] for a in main_artists]
         else:
@@ -581,27 +531,22 @@ def get_album_artist(qobuz_album: dict) -> list:
             return [single_artist] if single_artist else []
 
     except Exception as e:
+        # Qualquer erro inesperado na estrutura do JSON cai para o
+        # artista único, em vez de propagar a exceção.
         logger.error(f"Error getting album artist: {str(e)}")
         single_artist = qobuz_album.get("artist", {}).get("name", "")
         return [single_artist] if single_artist else []
 
 
 def apply_legacy_charmap(filename: str) -> str:
-    """
-    Applies legacy character replacement rules for Windows path compatibility.
-    Specifically requested for users who prefer standard ASCII over Unicode fullwidth characters.
-
-    Args:
-        filename (str): The raw string.
-
-    Returns:
-        str: The sanitized string utilizing basic ASCII replacements.
-    """
-    # Specific rules requested by the community (JosiahDanger)
+    # Aplica regras de substituição de caracteres "legado" para
+    # compatibilidade com caminhos do Windows, usando ASCII simples em vez
+    # dos caracteres unicode full-width (para quem prefere ASCII puro).
+    # Regras específicas pedidas pela comunidade (JosiahDanger):
     filename = filename.replace(":", "-")
     filename = filename.replace("?", "")
 
-    # Standard legacy replacements for other invalid Windows characters
+    # Substituições padrão para os demais caracteres inválidos no Windows.
     filename = filename.replace("/", "-")
     filename = filename.replace("\\", "-")
     filename = filename.replace("*", "-")
@@ -610,38 +555,30 @@ def apply_legacy_charmap(filename: str) -> str:
     filename = filename.replace(">", "]")
     filename = filename.replace("|", "-")
 
-    # Clean up potential double dashes created by multiple replacements (e.g.,
-    # "A / B" -> "A - B")
+    # Remove traços duplos que as substituições acima podem gerar
+    # (ex.: "A / B" -> "A - B").
     filename = re.sub(r"\s*-\s*-+", " -", filename)
 
     return filename
 
 
 def clean_filename(filename: str, legacy_charmap: bool = False) -> str:
-    """
-    Cleans up redundant special characters, spaces, and separators in filenames.
-    Normalizes Unicode characters to NFC form to ensure cross-platform safety.
+    # Limpa caracteres especiais, espaços e separadores redundantes em
+    # nomes de arquivo, normalizando unicode para a forma NFC (garante
+    # compatibilidade entre sistemas operacionais diferentes).
 
-    Args:
-        filename (str): The raw string to clean.
-        legacy_charmap (bool, optional): If True, uses basic ASCII replacements instead of Unicode full-width characters. Defaults to False.
-
-    Returns:
-        str: The fully sanitized filename string.
-    """
-    # First normalize the Unicode string to NFC form
+    # Normaliza a string unicode para a forma NFC primeiro.
     filename = unicodedata.normalize("NFC", filename)
 
-    # Clean up redundant spaces, separators, and brackets
-
-    # Merge multiple separators (supports spaces, commas, periods, Chinese
-    # commas, colons, semicolons, vertical bars, slashes, backslashes,
-    # underscores. Does not support the - symbol) into one
+    # Funde múltiplos separadores consecutivos (espaços, vírgulas, pontos,
+    # vírgula chinesa, dois-pontos, ponto-e-vírgula, barra vertical,
+    # barras, underscore -- não inclui o símbolo "-") em um único.
     filename = re.sub(r"(?:\s*([,\.\:\;\|/\\_])\s*){2,}", r"\1 ", filename)
 
-    # Define all paired bracket patterns
+    # Padrões de pares de colchetes/parênteses a limpar.
     patterns = [
-        # Handle paired brackets containing only special characters
+        # Remove pares de colchetes/parênteses que contêm só caracteres
+        # especiais (sem texto útil dentro).
         (r"\(\s*\W*\s*\)", ""),  # (...)
         (r"\[\s*\W*\s*\]", ""),  # [...]
         (r"\{\s*\W*\s*\}", ""),  # {...}
@@ -653,24 +590,24 @@ def clean_filename(filename: str, legacy_charmap: bool = False) -> str:
         (r"（\s*\W*\s*）", ""),  # （...）
         (r"［\s*\W*\s*］", ""),  # ［...］
         (r"【\s*\W*\s*】", ""),  # 【...】
-        # Handle edge cases - remove all special characters and spaces at boundaries
-        # If a left bracket is followed by a separator, or a separator is followed
-        # by a right bracket, remove them
+        # Casos de borda: remove separador logo após um colchete de
+        # abertura, ou logo antes de um colchete de fechamento.
         (r"(?<=[\(\[\{<《〈「『（［【])(\s*[,\.\:\;\|/\\_]\s*)\b", ""),
         (r"\b(\s*[,\.\:\;\|/\\_]\s*)(?=[】］）』」〉》>\}\]\)])", ""),
     ]
 
-    # Apply each pattern sequentially
+    # Aplica cada padrão em sequência.
     for pattern, replacement in patterns:
         filename = re.sub(pattern, replacement, filename)
 
-    # Merge multiple spaces
+    # Funde múltiplos espaços em um só.
     filename = re.sub(r"\s+", " ", filename)
 
-    # Strip trailing dots and spaces
+    # Remove pontos e espaços nas extremidades.
     filename = filename.strip().strip(".").strip()
 
-    # --- NEW LOGIC FOR LEGACY CHARMAP ---
+    # Escolhe entre o charmap ASCII legado e os caracteres unicode
+    # full-width, conforme o parâmetro legacy_charmap.
     if legacy_charmap:
         return apply_legacy_charmap(filename)
     else:
@@ -678,16 +615,9 @@ def clean_filename(filename: str, legacy_charmap: bool = False) -> str:
 
 
 def invalid_chars_to_fullwidth(filename):
-    """
-    Converts illegal Windows filename characters to visually similar full-width Unicode characters.
-
-    Args:
-        filename (str): The raw string.
-
-    Returns:
-        str: The safely converted string.
-    """
-    # Illegal characters to full-width characters
+    # Converte caracteres ilegais em nomes de arquivo do Windows para os
+    # equivalentes unicode "full-width" visualmente parecidos, em vez de
+    # simplesmente removê-los ou trocar por "-".
     invalid_to_fullwidth = {
         "/": "／",
         "\\": "＼",
@@ -706,22 +636,15 @@ def invalid_chars_to_fullwidth(filename):
 
 
 def get_config_paths():
-    """
-    Resolves the cross-platform config directory (Windows, Linux/macOS, and
-    iOS/a-Shell), and returns the standard config.ini / database paths inside
-    it.
-
-    Centralizes the detection logic that used to live only in cli.py --
-    other entry points (e.g. radar.py) need the exact same resolution, and
-    keeping a single source of truth means a future change to this logic
-    (e.g. supporting a new platform) only needs to happen once.
-
-    Returns:
-        dict: {
-            "config_dir": ..., "config_path": ..., "config_file": ...,
-            "qobuz_db": ...,
-        }
-    """
+    # Resolve o diretório de configuração multiplataforma (Windows,
+    # Linux/macOS e iOS/a-Shell) e devolve os caminhos padrão de
+    # config.ini e do banco de dados dentro dele.
+    #
+    # Centraliza aqui a lógica de detecção que antes só existia em cli.py
+    # -- outros pontos de entrada (ex.: radar.py) precisam da mesma
+    # resolução exata, e manter uma única fonte de verdade significa que
+    # uma mudança futura nessa lógica (ex.: suportar uma nova plataforma)
+    # só precisa acontecer em um lugar.
     ios_home = os.environ.get("QOBUZ_DL_IOS_HOME")
     config_dir = os.environ.get("CONFIG_DIR")
 
@@ -729,12 +652,13 @@ def get_config_paths():
         if ios_home:
             config_dir = ios_home
         else:
-            # IOS / a-Shell Auto Detection
+            # Detecção automática de iOS / a-Shell.
             home_dir = os.environ.get("HOME", "")
             if "Containers/Data/Application" in home_dir:
                 config_dir = os.path.join(home_dir, "Documents")
             else:
-                # Windows, macOS, Linux e Android assumem o padrão nativo do SO
+                # Windows, macOS, Linux e Android assumem o padrão nativo
+                # do sistema operacional.
                 config_dir = platformdirs.user_config_dir()
 
     config_path = os.path.join(config_dir, "qobuz-dl")

@@ -26,27 +26,31 @@ def create_db(db_path):
     Returns:
         str: The path to the successfully initialized database.
     """
+    # Conexao sincrona (sqlite3) porque essa funcao roda uma unica vez
+    # na inicializacao do programa -- nao ha necessidade de async aqui,
+    # diferente de handle_download_id() que roda por faixa/album.
     with sqlite3.connect(db_path) as conn:
         cursor = conn.cursor()
 
-        # Check if the table already exists
+        # PASSO 1: verifica se a tabela "downloads" ja existe no banco
         cursor.execute(
             "SELECT count(name) FROM sqlite_master WHERE type='table' AND name='downloads'"
         )
 
         if cursor.fetchone()[0] == 1:
-            # Table exists. Read current columns
+            # Tabela existe -> le as colunas atuais pra decidir se precisa migrar
             cursor.execute("PRAGMA table_info(downloads)")
             columns = [info[1] for info in cursor.fetchall()]
 
-            # Legacy migration (v1 to v2)
+            # MIGRACAO LEGADA (v1 -> v2): banco antigo so tinha coluna "id",
+            # sem quality/file_format/etc. Se "quality" nao existe, e' banco v1.
             if "quality" not in columns:
                 logger.info(f"{YELLOW}Migrating old database to the new format...{OFF}")
 
-                # Rename the old table
+                # Renomeia a tabela antiga pra nao perder os dados
                 conn.execute("ALTER TABLE downloads RENAME TO downloads_old")
 
-                # Create the new table with updated schema including artist and album
+                # Cria a tabela nova ja no schema atual (com artist/album inclusos)
                 conn.execute("""
                 CREATE TABLE downloads (
                   "id" text NOT NULL,
@@ -66,7 +70,8 @@ def create_db(db_path):
                 );
                 """)
 
-                # Copy old historical IDs
+                # Copia so os IDs antigos (unico dado confiavel que a tabela v1 tinha);
+                # o resto das colunas fica com os valores DEFAULT definidos acima
                 try:
                     conn.execute(
                         "INSERT INTO downloads (id) SELECT id FROM downloads_old"
@@ -74,11 +79,14 @@ def create_db(db_path):
                 except sqlite3.Error as e:
                     logger.error(f"{RED}Failed to migrate old data: {e}{OFF}")
 
-                # Drop the temporary old table
+                # Remove a tabela temporaria depois de copiar os dados
                 conn.execute("DROP TABLE downloads_old")
                 logger.info(f"{YELLOW}Database successfully updated!{OFF}")
 
-            # New Migration (v2 to v2.1.4): Add artist and album if missing
+            # MIGRACAO NOVA (v2 -> v2.1.4): banco ja tem "quality" mas ainda
+            # nao tem "artist"/"album" (adicionados numa versao mais recente).
+            # ALTER TABLE ADD COLUMN aqui em vez de recriar a tabela toda,
+            # porque so' precisa adicionar 2 colunas, sem quebrar nada existente.
             elif "artist" not in columns:
                 logger.info(
                     f"{YELLOW}Upgrading database schema: Adding artist and album columns...{OFF}"
@@ -93,9 +101,10 @@ def create_db(db_path):
                     logger.info(f"{YELLOW}Schema upgrade complete!{OFF}")
                 except sqlite3.Error as e:
                     logger.error(f"{RED}Failed to add new columns: {e}{OFF}")
+            # se "artist" ja existe -> banco esta na versao mais atual, nao faz nada
 
         else:
-            # Table does not exist, create it from scratch
+            # Tabela nao existe -> primeira execucao, cria do zero ja no schema atual
             try:
                 conn.execute("""
                 CREATE TABLE downloads (
@@ -117,6 +126,7 @@ def create_db(db_path):
                 """)
                 logger.info(f"{YELLOW}Download-IDs database created{OFF}")
             except sqlite3.OperationalError:
+                # ja existe (corrida entre processos, por exemplo) -> ignora
                 pass
 
         return db_path
@@ -171,13 +181,16 @@ async def handle_download_id(
     Returns:
         tuple or None: If add_id is False, returns a tuple containing the ID if found, otherwise None.
     """
+    # Se nao foi passado db_path, feature de reverse lookup esta desligada -> no-op
     if not db_path:
         return
 
+    # Chave PRIMARY KEY e' (id, quality) -> mesmo item_id pode existir
+    # varias vezes com qualidades diferentes (ex: baixou em MP3 e depois em Hi-Res)
     async with aiosqlite.connect(db_path) as conn:
         if add_id:
+            # MODO INSERT: grava um novo download concluido
             try:
-                # Inject artist and album dynamically into the database
                 await conn.execute(
                     """
                     INSERT INTO downloads (id, media_type, quality, file_format, quality_met, bit_depth,
@@ -200,11 +213,14 @@ async def handle_download_id(
                 )
                 await conn.commit()
             except sqlite3.IntegrityError:
-                # Provide clean visual feedback instead of an error
+                # violou PRIMARY KEY (id, quality) -> ja foi baixado nessa mesma
+                # qualidade antes; nao e' erro real, so' avisa e segue
                 logger.info(f"{YELLOW}[i] Already in database, skipping.{OFF}")
             except sqlite3.Error as e:
                 logger.error(f"{RED}Unexpected DB error: {e}{OFF}")
         else:
+            # MODO CONSULTA (lookup): so' checa se (id, quality) ja foi baixado antes,
+            # usado pra decidir se pula o download (feature de Smart Reverse Lookup)
             cursor = await conn.execute(
                 "SELECT id FROM downloads WHERE id=? AND quality=?",
                 (item_id, quality),
@@ -217,9 +233,13 @@ def get_stats(db_path):
     Retorna um dicionario rico com todas as estatisticas do banco de downloads.
     Usado pelo comando `qobuz-dl stats` pra exibir um painel completo.
     """
+    # Sem banco configurado -> nada pra mostrar
     if not db_path:
         return {}
 
+    # Dicionario "vazio" usado como valor de retorno padrao quando o banco
+    # nao tem nenhum registro ainda, ou em caso de erro -- assim quem chama
+    # get_stats() nunca precisa checar None, so' checar total == 0
     empty = {
         "total": 0,
         "albums": 0,
@@ -244,7 +264,7 @@ def get_stats(db_path):
         with sqlite3.connect(db_path) as conn:
             c = conn.cursor()
 
-            # totais gerais
+            # --- totais gerais ---
             c.execute("SELECT COUNT(*) FROM downloads")
             total = c.fetchone()[0]
             if total == 0:
@@ -256,13 +276,13 @@ def get_stats(db_path):
             c.execute("SELECT COUNT(*) FROM downloads WHERE media_type='track'")
             tracks = c.fetchone()[0]
 
-            # hi-res: bit_depth >= 24
+            # --- hi-res: considera hi-res qualquer item com bit_depth >= 24 bits ---
             c.execute(
                 "SELECT COUNT(*) FROM downloads WHERE CAST(bit_depth AS INTEGER) >= 24"
             )
             hires = c.fetchone()[0]
 
-            # formatos
+            # --- distribuicao por formato de arquivo (FLAC, MP3, etc) ---
             c.execute(
                 "SELECT file_format, COUNT(*) FROM downloads GROUP BY file_format ORDER BY COUNT(*) DESC"
             )
@@ -270,20 +290,20 @@ def get_stats(db_path):
             flac_count = formats.get("FLAC", 0)
             mp3_count = formats.get("MP3", 0)
 
-            # qualidade atingida
+            # --- quantos downloads bateram a qualidade pedida vs nao bateram ---
             c.execute("SELECT COUNT(*) FROM downloads WHERE quality_met=1")
             qmet = c.fetchone()[0]
             c.execute("SELECT COUNT(*) FROM downloads WHERE quality_met=0")
             qnotmet = c.fetchone()[0]
 
-            # artistas e albums unicos
+            # --- contagem de artistas/albuns unicos (ignora string vazia) ---
             c.execute("SELECT COUNT(DISTINCT artist) FROM downloads WHERE artist != ''")
             unique_artists = c.fetchone()[0]
 
             c.execute("SELECT COUNT(DISTINCT album) FROM downloads WHERE album != ''")
             unique_albums = c.fetchone()[0]
 
-            # top 10 artistas por numero de downloads
+            # --- top 10 artistas com mais downloads ---
             c.execute("""
                 SELECT artist, COUNT(*) as cnt
                 FROM downloads
@@ -292,9 +312,9 @@ def get_stats(db_path):
                 ORDER BY cnt DESC
                 LIMIT 10
             """)
-            top_artists = c.fetchall()  # lista de (nome, count)
+            top_artists = c.fetchall()  # lista de tuplas (nome, count)
 
-            # distribuicao de bit depth
+            # --- distribuicao por bit depth (16, 24, etc), ordenada da maior pra menor ---
             c.execute("""
                 SELECT bit_depth, COUNT(*) FROM downloads
                 WHERE bit_depth IS NOT NULL AND bit_depth != ''
@@ -302,7 +322,7 @@ def get_stats(db_path):
             """)
             bit_depths = {row[0]: row[1] for row in c.fetchall()}
 
-            # distribuicao de sample rate
+            # --- distribuicao por sample rate (44.1, 96, 192 kHz, etc) ---
             c.execute("""
                 SELECT sampling_rate, COUNT(*) FROM downloads
                 WHERE sampling_rate IS NOT NULL AND sampling_rate != ''
@@ -310,7 +330,7 @@ def get_stats(db_path):
             """)
             sample_rates = {row[0]: row[1] for row in c.fetchall()}
 
-            # datas extremas
+            # --- data de lancamento mais antiga e mais recente da biblioteca baixada ---
             c.execute(
                 "SELECT MIN(release_date), MAX(release_date) FROM downloads WHERE release_date != ''"
             )
@@ -318,7 +338,7 @@ def get_stats(db_path):
             oldest = dates[0] if dates else None
             newest = dates[1] if dates else None
 
-            # lista completa de artistas
+            # --- lista completa de artistas, ordenada alfabeticamente (case-insensitive) ---
             c.execute(
                 "SELECT DISTINCT artist FROM downloads WHERE artist != '' ORDER BY artist COLLATE NOCASE ASC"
             )
@@ -345,4 +365,5 @@ def get_stats(db_path):
             }
 
     except sqlite3.Error:
+        # qualquer erro de SQL/conexao -> devolve o dict vazio em vez de quebrar
         return empty

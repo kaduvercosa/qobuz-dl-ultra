@@ -1,10 +1,15 @@
+# ============================================================================
+# qopy.py -- cliente assincrono da API Qobuz com autenticacao, criptografia e fallback.
+# Ponto de entrada: Client.create(...). Principais rotinas: api_call(), get_track_url().
+# ============================================================================
 import asyncio
 import base64
 import hashlib
 import logging
 import time
 import unicodedata
-
+from datetime import datetime, date
+from typing import Any, Dict
 import httpx
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.primitives import hashes, padding
@@ -14,6 +19,7 @@ from qobuz_dl.exceptions import (
     AuthenticationError,
     InvalidAppSecretError,
     InvalidQuality,
+    NoActiveSubscriptionError,
 )
 
 from qobuz_dl.color import GREEN, WARNING as YELLOW, RED, OFF, RESET, INFO as CYAN
@@ -26,6 +32,7 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+# Núcleo do cliente Qobuz: autentica, assina chamadas, gerencia sessão e chaves AES.
 class Client:
     """
     The core Qobuz API client for Qobuz-DL Ultra Edition.
@@ -33,16 +40,14 @@ class Client:
     Handles secure authentication, Anti-Ban Stealth Spoofing (WAF bypass), cryptographic
     token unwrapping for Web Player segment streams, and dynamic metadata fetching.
     Supports both standard email/password authentication and secure user_auth_token injection.
-
-    Fully async (httpx). Since network calls can't happen inside `__init__`,
-    construct instances with `await Client.create(...)` instead of `Client(...)`.
-    Call `await client.close()` (or use `async with Client.create(...) as client:`)
-    when done, to release the underlying httpx session/connections.
     """
 
     def __init__(self):
-        # Intentionally does no network I/O. Use `Client.create(...)`.
         self.session = None
+        self.user_info = {}
+        self.user_id = None
+        self.label = "Studio"
+        self.uat = None
 
     @classmethod
     async def create(
@@ -57,17 +62,6 @@ class Client:
     ):
         """
         Async factory. Initializes the API client and sets up the resilient session.
-
-        Args:
-            email (str): The user's Qobuz account email.
-            pwd (str): The user's Qobuz account password.
-            app_id (str): The Qobuz Application ID.
-            secrets (list): A list of potential Qobuz App Secrets for authentication fallback.
-            user_auth_token (str, optional): A pre-existing authentication token to bypass login. Defaults to None.
-            force_english (bool, optional): Injects specific Client Hints and locales to avoid bans. Defaults to True.
-
-        Returns:
-            Client: A fully authenticated Client instance.
         """
         self = cls()
         logger.info(f"{YELLOW}Logging...{OFF}")
@@ -92,7 +86,6 @@ class Client:
             logger.info(f"{GREEN}[+] Using custom legacy App ID: {self.id}{OFF}")
 
         headers = {}
-        # --- CONDITIONAL ENGLISH LANGUAGE OVERRIDE ---
         if self.force_english:
             headers.update(
                 {
@@ -110,7 +103,6 @@ class Client:
                     "X-App-Id": self.id,
                 }
             )
-        # ---------------------------------------------
 
         headers.update(
             {
@@ -118,11 +110,7 @@ class Client:
                 "X-App-Id": self.id,
             }
         )
-        # Timeout explicito em vez do default do httpx (total=None no httpx significa None)
-        # sock_connect -> connect, sock_read -> read
         client_timeout = httpx.Timeout(None, connect=15.0, read=90.0)
-
-        # Limits: mantem conexoes concorrentes controladas
         limits = httpx.Limits(max_keepalive_connections=10, max_connections=50)
 
         self.session = httpx.AsyncClient(
@@ -131,19 +119,10 @@ class Client:
 
         self.base = "https://www.qobuz.com/api.json/0.2/"
         self.sec = None
-        # Variables for encryption session management
         self.session_id = None
-        # Guarda a inicializacao unica do session_id/session_key contra
-        # downloads paralelos: sem isso, se 2+ faixas caem no fallback
-        # segmentado ao mesmo tempo e session_id ainda e' None pras duas,
-        # ambas passam no "if self.session_id is None" antes de qualquer
-        # uma escrever o valor -- a segunda pisa no session_id/session_key
-        # da primeira, e a primeira faixa acaba tentando descriptografar
-        # com a chave errada.
         self._session_init_lock = asyncio.Lock()
         self.session_infos = None
         self.session_key = None
-
         self.uat = None
 
         await self.auth(email, pwd, user_auth_token)
@@ -151,7 +130,7 @@ class Client:
         return self
 
     async def close(self):
-        """Closes the underlying httpx session. Always call this (or use `async with`) when done."""
+        """Closes the underlying httpx session."""
         if self.session is not None:
             await self.session.aclose()
 
@@ -162,22 +141,9 @@ class Client:
         await self.close()
 
     def _normalize_json_strings(self, obj):
-        """
-        Recursively normalizes Unicode strings in JSON objects (NFC form).
-        Prevents encoding crashes and fixes Windows path limitations (e.g., trailing ellipses).
-
-        Args:
-            obj (mixed): The JSON dictionary, list, or string to normalize.
-
-        Returns:
-            mixed: The normalized object.
-        """
         if isinstance(obj, str):
-            # --- WINDOWS PATH FIX: Convert '...' to Unicode Ellipsis (U+2026) ---
-            # Avoid modifying URL links (which contain '://')
             if "..." in obj and "://" not in obj:
                 obj = obj.replace("...", "…")
-            # --------------------------------------------------------------------
             return unicodedata.normalize("NFC", obj)
         elif isinstance(obj, dict):
             return {k: self._normalize_json_strings(v) for k, v in obj.items()}
@@ -189,13 +155,7 @@ class Client:
     async def auth(self, email, pwd, user_auth_token=None):
         """
         Authenticates the user session with Qobuz and retrieves account metadata.
-
-        Args:
-            email (str): The user's email address.
-            pwd (str): The user's password.
-            user_auth_token (str, optional): Direct token to bypass credential check. Defaults to None.
         """
-        # If the token is present, skip the password!
         if user_auth_token:
             self.uat = user_auth_token
         elif len(pwd) > 60:
@@ -208,41 +168,99 @@ class Client:
                 )
             self.uat = usr_info["user_auth_token"]
 
-        # Atualiza header da sessao (httpx AsyncClient suporta manipulacao de
-        # headers dinamica)
         if self.session is not None:
             self.session.headers.update({"X-User-Auth-Token": self.uat})
 
         try:
-            user_info = await self.api_call("user/get")
-            cred = user_info.get("credential") or user_info.get("user", {}).get(
-                "credential", {}
-            )
-            self.label = cred.get("parameters", {}).get("short_label", "Studio")
+            raw_user_info = await self.api_call("user/get")
+            self.user_info = raw_user_info.get("user", raw_user_info)
+            cred = self.user_info.get("credential") or {}
+            self.label = cred.get("parameters", {}).get(
+                "short_label") or cred.get("description", "Membro Qobuz")
+            self.user_id = self.user_info.get("id")
 
-            # --- FIX: Save user ID strictly required for favorites ---
-            self.user_id = user_info.get("id") or user_info.get("user", {}).get("id")
-            # -------------------------------------------------------------------------
-
-            logger.info(f"{GREEN}Logged: OK (Membership: {self.label}){OFF}")
+            sub = self.check_subscription()
+            if sub["is_active"]:
+                logger.info(
+                    f"{GREEN}Logged: OK (Membership: {self.label} | {sub['status']}){OFF}")
+            else:
+                logger.warning(
+                    f"{YELLOW}[!] Logged: OK, mas a assinatura está INATIVA ({sub['status']}){OFF}")
         except Exception:
             logger.info(f"{YELLOW}[!] Profile validation bypassed.{OFF}")
             self.label = "Studio"
             self.user_id = None
 
-    # NEW CRYPTOGRAPHIC FUNCTIONS (Patch 0004)
+    def check_subscription(self) -> Dict[str, Any]:
+        """
+        Valida o estado da assinatura a partir dos dados do usuário (user_info).
+        """
+        user_info = self.user_info or {}
+        sub = user_info.get("subscription")
+
+        if not sub or not isinstance(sub, dict):
+            return {
+                "is_active": False,
+                "status": "Inativa / Sem Assinatura",
+                "offer": "Nenhuma / Gratuita",
+                "start_date": None,
+                "end_date": None,
+                "is_canceled": False,
+                "periodicity": "N/A",
+                "household_size_max": 1,
+                "raw": {},
+            }
+
+        offer = (sub.get("offer") or "N/A").capitalize()
+        start_date = sub.get("start_date")
+        end_date = sub.get("end_date")
+        is_canceled = bool(sub.get("is_canceled", False))
+        periodicity = sub.get("periodicity") or "N/A"
+        household_size_max = sub.get("household_size_max", 1)
+
+        is_active = False
+        status = "Inativa"
+
+        if end_date:
+            try:
+                end_dt = datetime.strptime(str(end_date)[:10], "%Y-%m-%d").date()
+                today = date.today()
+                if end_dt >= today:
+                    is_active = True
+                    status = (
+                        f"Cancelada (Ativa até {end_date})"
+                        if is_canceled
+                        else f"Ativa (Renovação em {end_date})"
+                    )
+                else:
+                    is_active = False
+                    status = f"Expirada em {end_date}"
+            except Exception:
+                is_active = not is_canceled
+                status = "Cancelada" if is_canceled else "Ativa"
+        else:
+            is_active = bool(offer and offer.lower() != "free" and not is_canceled)
+            status = "Ativa" if is_active else "Inativa"
+
+        return {
+            "is_active": is_active,
+            "status": status,
+            "offer": offer,
+            "start_date": start_date,
+            "end_date": end_date,
+            "is_canceled": is_canceled,
+            "periodicity": periodicity,
+            "household_size_max": household_size_max,
+            "raw": sub,
+        }
+
+    async def get_user_profile(self) -> Dict[str, Any]:
+        """Consulta dados atualizados do endpoint user/get."""
+        raw = await self.api_call("user/get")
+        self.user_info = raw.get("user", raw)
+        return self.user_info
+
     def _modern_sig(self, epoint, params, sec):
-        """
-        Generates a modern MD5 signature for Qobuz protected endpoints.
-
-        Args:
-            epoint (str): The API endpoint path.
-            params (dict): The dictionary of request parameters.
-            sec (str): The application secret key.
-
-        Returns:
-            str: The computed MD5 signature hash.
-        """
         object_, method = epoint.split("/")
         r_sig = [object_, method]
         for key in sorted(params):
@@ -256,17 +274,9 @@ class Client:
 
     @staticmethod
     def _b64url_decode(value):
-        """Helper to decode base64 url-safe strings with proper padding."""
         return base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
 
     def _derive_session_key(self):
-        """
-        Derives an AES session key using HKDF based on Qobuz session infos.
-        Used for decrypting Web Player stream chunks.
-
-        Returns:
-            bytes: The 16-byte derived session key.
-        """
         salt, info = self.session_infos.split(".")
         hkdf = HKDF(
             algorithm=hashes.SHA256(),
@@ -277,15 +287,6 @@ class Client:
         return hkdf.derive(bytes.fromhex(self.sec))
 
     def _unwrap_track_key(self, key_token):
-        """
-        Decrypts the AES wrapped track key provided by the API.
-
-        Args:
-            key_token (str): The encrypted key token string.
-
-        Returns:
-            bytes: The unwrapped, decrypted raw track key.
-        """
         _, wrapped, iv = key_token.split(".")
         decryptor = Cipher(
             algorithms.AES(self.session_key), modes.CBC(self._b64url_decode(iv))
@@ -294,26 +295,7 @@ class Client:
         unpadder = padding.PKCS7(128).unpadder()
         return unpadder.update(padded) + unpadder.finalize()
 
-    # NEW API_CALL ENGINE
     async def api_call(self, epoint, **kwargs):
-        """
-        The central routing engine for all Qobuz API requests.
-
-        Dynamically handles HTTP methods (GET/POST), cryptographic signing, error parsing,
-        and automatic Unicode normalization for all responses.
-
-        Args:
-            epoint (str): The target Qobuz API endpoint (e.g., 'album/get').
-            **kwargs: Arbitrary keyword arguments corresponding to API parameters.
-
-        Raises:
-            AuthenticationError: On invalid login credentials.
-            InvalidAppIdError: On invalid App ID.
-            InvalidAppSecretError: On invalid App Secret.
-
-        Returns:
-            dict: The normalized JSON response from the Qobuz API.
-        """
         if epoint == "user/login":
             if "user_auth_token" in kwargs and kwargs["user_auth_token"]:
                 params = {
@@ -326,6 +308,11 @@ class Client:
                     "password": kwargs["pwd"],
                     "app_id": self.id,
                 }
+        elif epoint == "user/get":
+            params = {
+                "app_id": self.id,
+                "user_auth_token": getattr(self, "uat", kwargs.get("user_auth_token", "")),
+            }
         elif epoint == "track/getFileUrl":
             track_id = kwargs["id"]
             fmt_id = kwargs["fmt_id"]
@@ -386,14 +373,11 @@ class Client:
                 "request_sig": r_sig_hashed,
             }
         else:
-            # Restore behavior for standard calls like album/get
             params = {"app_id": self.id}
 
-            # --- CONDITIONAL ENGLISH PARAMS OVERRIDE ---
             if getattr(self, "force_english", True):
                 params["lang"] = "en"
                 params["locale"] = "en_US"
-            # -------------------------------------------
 
             val_id = kwargs.get("id")
             for k, v in kwargs.items():
@@ -424,7 +408,6 @@ class Client:
                 params["playlist_id"] = kwargs.get("playlist_id", "")
                 params["track_ids"] = kwargs.get("track_ids", "")
 
-        # PATCH: Added favorite/create to POST methods
         if epoint in [
             "user/login",
             "favorite/create",
@@ -454,7 +437,6 @@ class Client:
                 await asyncio.sleep(wait)
 
             try:
-                # httpx AsyncClient returns a Response object from request()
                 resp = await self.session.request(
                     method, self.base + epoint, **req_kwargs
                 )
@@ -486,7 +468,6 @@ class Client:
                 resp.raise_for_status()
                 data = resp.json()
 
-                # Apply string normalizer to the network call output
                 return self._normalize_json_strings(data)
 
             except (httpx.RequestError, asyncio.TimeoutError) as e:
@@ -495,19 +476,6 @@ class Client:
                     raise
 
     async def multi_meta(self, epoint, key, id, type):
-        """
-        An async generator that handles paginated API requests, automatically fetching
-        chunks of 50 items.
-
-        Args:
-            epoint (str): The API endpoint (e.g., 'playlist/get').
-            key (str): The JSON key containing total counts (e.g., 'tracks_count').
-            id (str): The target ID (playlist ID, artist ID, etc.).
-            type (str): The expected data type in the response ('albums', 'tracks').
-
-        Yields:
-            dict: The dictionary containing the chunked API response block.
-        """
         offset = 0
         limit = 50
 
@@ -530,38 +498,13 @@ class Client:
             if offset >= total_available:
                 break
 
-    # --- METADATA FUNCTIONS (Do not delete!) ---
     async def get_track_meta(self, id):
-        """Fetches metadata for a single track."""
         return await self.api_call("track/get", id=id)
 
-    # --- NEW LYRICS URL FUNCTION ---
     async def get_track_lyrics_url(self, id):
-        """Fetches the lyrics URL payload for a single track (track/lyricsUrl)."""
         return await self.api_call("track/lyricsUrl", track_id=id)
 
-    # --- NEW LAST.FM FUNCTIONS ---
     async def get_track_ids_from_list(self, tracks_list: list) -> list:
-        """
-        Matches a list of external tracks (e.g., scraped from Last.fm) against the Qobuz database.
-
-        Uses a Fuzzy Matching Algorithm to compare artist and title strings.
-        Features an interactive terminal prompt for borderline matches (60%-74% similarity).
-
-        Note: the interactive `input()` prompt below blocks the event loop while
-        waiting for the user, same as it would block a thread in sync code. This
-        is fine for a single-user CLI tool.
-
-        Args:
-            tracks_list (list): A list of dictionaries containing 'artist' and 'title' keys.
-
-        Returns:
-            list: A list of successfully matched Qobuz track IDs.
-        """
-        # Passa pelo qobuz_dl.fuzzy: usa rapidfuzz (C++/Cython, 10-100x mais
-        # rapido, perceptivel em playlist grande do Last.fm onde isso roda por
-        # faixa x candidato) quando esta instalado, e cai pro difflib da
-        # biblioteca padrao quando nao esta -- ver o docstring de fuzzy.py.
         from qobuz_dl import fuzzy
 
         print(
@@ -601,12 +544,6 @@ class Client:
                         target_str = f"{target_artist} {target_title}"
                         q_str = f"{q_artist} {q_title}"
 
-                        # fuzzy.ratio() ja devolve 0-1 nos dois motores. Antes
-                        # este ponto fazia `fuzz.ratio(...) / 100.0` na mao,
-                        # porque o rapidfuzz devolve 0-100 e o difflib 0-1 --
-                        # a normalizacao agora e' responsabilidade do modulo,
-                        # justamente pra ninguem trocar o motor e esquecer da
-                        # divisao (o que faria todo threshold passar sempre).
                         ratio = fuzzy.ratio(target_str, q_str)
 
                         if ratio > highest_ratio:
@@ -661,9 +598,7 @@ class Client:
         )
         return valid_track_ids
 
-    # --- SEARCH FUNCTIONS (Crash-Proof) ---
     async def search_by_isrc(self, isrc: str):
-        """Busca faixa no Qobuz por ISRC -- match exato. Retorna ID ou None."""
         if not isrc:
             return None
         try:
@@ -681,7 +616,6 @@ class Client:
         return None
 
     async def search_by_upc(self, upc: str):
-        """Busca álbum no Qobuz por UPC -- match exato. Retorna ID ou None."""
         if not upc:
             return None
         try:
@@ -699,16 +633,6 @@ class Client:
         return None
 
     async def match_external_tracks(self, tracks: list, auto: bool = False) -> list:
-        """
-        Matching ISRC-first com fuzzy fallback.
-        Cascade por faixa:
-          1. ISRC → catalog/search exato (~80-90% de acerto p/ Spotify/Deezer)
-          2. Fuzzy → get_track_ids_from_list() como fallback
-        Args:
-            tracks: lista de dicts com keys: title, artist, isrc, duration_ms, album
-            auto: aceita borderline fuzzy automaticamente
-        Returns: lista de IDs int do Qobuz
-        """
         matched_ids = []
         fuzzy_queue = []
         isrc_hits = 0
@@ -743,7 +667,6 @@ class Client:
         return matched_ids
 
     async def search_albums(self, query, limit=20):
-        """Searches the Qobuz catalog for albums. Crash-proof against API timeouts."""
         try:
             return await self.api_call(
                 "catalog/search", query=query, type="albums", limit=limit
@@ -752,7 +675,6 @@ class Client:
             return {}
 
     async def search_tracks(self, query, limit=20):
-        """Searches the Qobuz catalog for tracks. Crash-proof against API timeouts."""
         try:
             return await self.api_call(
                 "catalog/search", query=query, type="tracks", limit=limit
@@ -763,10 +685,6 @@ class Client:
     async def create_qobuz_playlist(
         self, name: str, description: str = "", is_public: bool = False
     ):
-        """
-        Cria uma nova playlist na conta Qobuz do usuário logado.
-        Returns: ID da playlist criada (str), ou None se falhar.
-        """
         try:
             resp = await self.api_call(
                 "playlist/create",
@@ -787,11 +705,6 @@ class Client:
     async def add_tracks_to_qobuz_playlist(
         self, playlist_id: str, track_ids: list
     ) -> bool:
-        """
-        Adiciona faixas a uma playlist existente no Qobuz.
-        Pagina automaticamente em lotes de 50 (limite da API).
-        Returns: True se todas as faixas foram adicionadas com sucesso.
-        """
         BATCH = 50
         success = True
         for i in range(0, len(track_ids), BATCH):
@@ -810,7 +723,6 @@ class Client:
         return success
 
     async def search_playlists(self, query, limit=20):
-        """Searches the Qobuz catalog for playlists. Crash-proof against API timeouts."""
         try:
             return await self.api_call(
                 "catalog/search", query=query, type="playlists", limit=limit
@@ -819,7 +731,6 @@ class Client:
             return {}
 
     async def search_artists(self, query, limit=20):
-        """Searches the Qobuz catalog for artists. Crash-proof against API timeouts."""
         try:
             return await self.api_call(
                 "catalog/search", query=query, type="artists", limit=limit
@@ -827,19 +738,7 @@ class Client:
         except Exception:
             return {}
 
-    # --- NEW FAVORITES FUNCTION ---
     async def get_favorites(self, fav_type="albums", limit=100, offset=0):
-        """
-        Fetches the authenticated user's favorites from their private library.
-
-        Args:
-            fav_type (str, optional): The type of favorites to fetch ('albums', 'tracks', 'artists', 'playlists'). Defaults to "albums".
-            limit (int, optional): The number of items to retrieve per call. Defaults to 100.
-            offset (int, optional): The pagination offset. Defaults to 0.
-
-        Returns:
-            dict: The API response containing the favorites list.
-        """
         try:
             return await self.api_call(
                 "favorite/getUserFavorites",
@@ -852,30 +751,16 @@ class Client:
             return {}
 
     async def add_favorite_album(self, album_id):
-        """
-        Adds a specific album to the user's Qobuz favorites.
-
-        Args:
-            album_id (str): The Qobuz ID of the album to favorite.
-
-        Returns:
-            dict: The API response acknowledging the addition.
-        """
         return await self.api_call(
             "favorite/create", album_ids=str(album_id), artist_ids="", track_ids=""
         )
 
     async def add_favorite_track(self, track_id):
-        """Adds a track to the user's Qobuz favorites."""
         return await self.api_call(
             "favorite/create", track_ids=str(track_id), album_ids="", artist_ids=""
         )
 
     async def add_favorite(self, item_id, item_type: str):
-        """
-        Adiciona um item aos favoritos do Qobuz.
-        item_type: "track" ou "album"
-        """
         if item_type == "track":
             return await self.add_favorite_track(item_id)
         elif item_type == "album":
@@ -883,37 +768,28 @@ class Client:
         else:
             raise ValueError(f"Tipo de favorito desconhecido: {item_type}")
 
-    # NEW GET_TRACK_URL (Patch 0004)
     async def get_track_url(self, id, fmt_id, force_segments=False):
         """
         Retrieves the streaming or download URL for a specific track.
-
-        Employs an intelligent fallback mechanism: attempts to fetch a fast Direct URL first,
-        and if blocked by Qobuz CDNs, automatically falls back to the Segmented Web Player
-        method (decrypting AES stream chunks).
-
-        Args:
-            id (str): The Qobuz track ID.
-            fmt_id (int): The audio format ID (e.g., 5 for MP3, 27 for Hi-Res FLAC).
-            force_segments (bool, optional): If True, bypasses Direct URL attempt. Defaults to False.
-
-        Returns:
-            dict: The track payload containing the URL or stream keys.
+        Bloqueia antecipadamente se a assinatura da conta estiver inativa.
         """
-        # Quick fallback for MP3
+        sub_info = self.check_subscription()
+        if not sub_info["is_active"]:
+            raise NoActiveSubscriptionError(
+                f"Assinatura inativa ou expirada ({sub_info['status']}). Download bloqueado."
+            )
+
         if int(fmt_id) == 5:
             return await self.api_call("track/getFileUrl", id=id, fmt_id=fmt_id)
 
-        # If not forcing segments, try the good old fast Direct URL first
         if not force_segments:
             try:
                 track = await self.api_call("track/getFileUrl", id=id, fmt_id=fmt_id)
                 if "url" in track:
                     return track
             except Exception:
-                pass  # If Qobuz refuses to give the direct URL, fallback to segments automatically
+                pass
 
-        # "WEB PLAYER" METHOD (SEGMENTED DOWNLOAD)
         if self.session_id is None:
             async with self._session_init_lock:
                 if self.session_id is None:
@@ -921,7 +797,6 @@ class Client:
                     self.session_id = session["session_id"]
                     self.session_infos = session["infos"]
                     self.session_key = self._derive_session_key()
-                    # httpx AsyncClient headers can be updated dynamically
                     self.session.headers.update({"X-Session-Id": self.session_id})
 
         track = await self.api_call("file/url", id=id, fmt_id=fmt_id)
@@ -934,26 +809,18 @@ class Client:
         return track
 
     def get_artist_meta(self, id):
-        """Fetches full metadata and discography for an artist. Returns an async generator."""
         return self.multi_meta("artist/get", "albums_count", id, None)
 
     def get_plist_meta(self, id):
-        """Fetches full metadata and tracklist for a playlist. Returns an async generator."""
         return self.multi_meta("playlist/get", "tracks_count", id, None)
 
     def get_label_meta(self, id):
-        """Fetches full metadata and release catalog for a record label. Returns an async generator."""
         return self.multi_meta("label/get", "albums_count", id, None)
 
     async def get_album_meta(self, id):
-        """Fetches full metadata for a specific album."""
         return await self.api_call("album/get", id=id)
 
     async def cfg_setup(self):
-        """
-        Validates available Application Secrets against the API to select the working one.
-        Raises an error if no valid secret is found.
-        """
         for secret in self.secrets:
             try:
                 await self.api_call(

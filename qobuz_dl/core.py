@@ -1,3 +1,53 @@
+# ==============================================================================
+# MÓDULO: core.py (QOBUZ-DL-ULTRA)
+# DESCRIÇÃO: "Motor" principal do programa. Contém:
+#   1. A interface de seleção interativa em tela cheia (TUI, feita com
+#      prompt_toolkit) usada nos modos "interactive" e ao explorar um artista.
+#   2. A classe QobuzDL: orquestra buscas, downloads (sequenciais e
+#      paralelos), importação de playlists externas e o modo interativo.
+#
+# ONDE PROCURAR quando precisar mexer em algo:
+#   TUI (tela de seleção com setas/espaço/enter):
+#   - Layout de colunas da tabela (larguras, cabeçalhos) -> _get_table_layout()
+#   - Trunca texto que não cabe na tela -> _align_text()
+#   - Tema de cores do prompt_toolkit (deriva do accent do color.py) -> pt_style/prompt_style
+#   - A tela de seleção em si (teclas, cabeçalho, lista, rodapé) -> _tui_select()
+#     - Atalhos de teclado (↑ ↓ espaço t enter ctrl-c) -> bindings dentro de _tui_select
+#     - Desenho de cada linha/cartão (título, tipo, qualidade, ícones) -> get_list_text()
+#       (é a função mais longa e mais repetitiva do arquivo: tem um bloco
+#       quase idêntico por item_category: album/track/playlist/artist)
+#
+#   Classe QobuzDL (motor de download):
+#   - Construtor / todas as opções aceitas -> QobuzDL.__init__
+#   - Login na API do Qobuz -> initialize_client()
+#   - Baixar 1 item (álbum/faixa) já sabendo o ID -> download_from_id()
+#   - Processar uma URL do Qobuz (álbum/faixa/artista/label/playlist),
+#     incluindo filtro de tipo de lançamento e paralelismo -> handle_url()
+#     (é a função mais longa e mais crítica do arquivo)
+#   - Baixar uma lista de URLs/arquivo .txt (usado pelo comando "dl") ->
+#     download_list_of_urls() / download_from_txt_file()
+#   - Modo "lucky" (busca automática, pega os N primeiros) -> lucky_mode()
+#   - Monta o dicionário de metadados exibido na TUI a partir da resposta
+#     da API -> _extract_rich_metadata() (é aqui que fica a heurística que
+#     classifica álbum/EP/single quando a API não informa isso claramente)
+#   - Busca por tipo (álbum/faixa/artista/playlist/favoritos) -> search_by_type()
+#   - MODO INTERATIVO completo (menus, prompt de busca, navegação por
+#     artista) -> interactive()
+#   - Importar playlist de outra plataforma (Spotify/Deezer/etc.) ou
+#     arquivo (TXT/CSV/JSON) -> import_playlist_from_url_or_file() /
+#     download_from_playlist_file()
+#
+# PADRÃO REPETIDO NESTE ARQUIVO -- download paralelo:
+#   Em handle_url(), download_list_of_urls() e download_from_playlist_file()
+#   existe o MESMO padrão: se max_workers > 1, cria um asyncio.Semaphore do
+#   tamanho de max_workers + uma função interna "_bounded_track_download"
+#   (ou "_bounded_track_url") que espera sua vez (semaphore), aplica um
+#   pequeno atraso escalonado (HEADER_STAGGER_DELAY) só nos primeiros itens
+#   pra evitar que todos os cabeçalhos de progresso apareçam ao mesmo tempo,
+#   e então chama download_from_id(). Se for mexer no paralelismo, mexer
+#   nos 3 lugares.
+# ==============================================================================
+
 import logging
 import os
 import sys
@@ -50,9 +100,18 @@ from qobuz_dl.settings import QobuzDLSettings
 
 HEADER_STAGGER_DELAY = 1.5
 
+# --------------------------------------------------------------------------
+# Deriva o tema visual do prompt_toolkit (pt_style/prompt_style) a partir da
+# MESMA cor de destaque escolhida pelo usuário no wizard (color.py -> _ACCENT).
+# Assim a TUI de seleção fica com a cor consistente com o resto do programa,
+# sem precisar duplicar a escolha de cor em outro lugar.
+# --------------------------------------------------------------------------
 _hex_accent = "#5fa8d3"
 _darker_accent = "#4c86a8"
 
+# Converte o escape ANSI TrueColor (\033[38;2;R;G;Bm) de volta pra hexadecimal
+# (formato que o prompt_toolkit entende). Se _ACCENT vier vazio (cor
+# desligada / --no-color), o regex não casa e os hex fixos acima são usados.
 _match = re.search(r"\033\[38;2;(\d+);(\d+);(\d+)m", _ACCENT)
 if _match:
     _r, _g, _b = map(int, _match.groups())
@@ -60,6 +119,10 @@ if _match:
     _darker_accent = f"#{int(_r * 0.8):02x}{int(_g * 0.8):02x}{int(_b * 0.8):02x}"
 
     def _shade(f):
+        # Clareia (f > 0, mistura com branco) ou escurece (f < 0, mistura
+        # com preto) a cor de destaque, usado pra diferenciar os "tipos"
+        # de lançamento (álbum/EP/single/etc.) na TUI sem cadastrar uma
+        # cor fixa pra cada tipo.
         if f > 0:
             return f"#{int(_r + (255 - _r) * f):02x}{int(_g + (255 - _g) * f):02x}{int(_b + (255 - _b) * f):02x}"
         else:
@@ -102,6 +165,10 @@ prompt_style = Style.from_dict(
 
 
 def _align_text(text, width):
+    """Corta o texto (respeitando largura visual de emojis/acentos via
+    get_cwidth) se ele não couber em `width`, adicionando "...", ou
+    completa com espaços se sobrar espaço. Usado em toda coluna de tabela
+    da TUI para manter as colunas alinhadas."""
     text = str(text) if text is not None else ""
     current_w = get_cwidth(text)
     if current_w > width:
@@ -118,6 +185,19 @@ def _align_text(text, width):
 
 
 def _get_table_layout(columns, is_multi, item_category):
+    """Decide se a tela é larga o bastante pra mostrar uma TABELA (>=78
+    colunas) ou se deve cair no modo "cartão" (mais compacto, usado em
+    telas estreitas/celular). Também calcula a largura de cada coluna com
+    base no espaço disponível e desenha as bordas ┌─┬─┐ / ├─┼─┤ / └─┴─┘.
+
+    Retorna: (is_table, larguras_das_colunas, cabeçalhos, bordas_prontas)
+    Se a tela for estreita ou item_category == "filter" (menus simples de
+    sim/não), retorna is_table=False e o restante vazio.
+
+    Para adicionar uma nova categoria de item na TUI: seguir o padrão dos
+    blocos elif abaixo (album/track/playlist/artist), definindo larguras
+    fixas + "flex" pra coluna de texto livre (título/nome).
+    """
     is_table = columns >= 78
     if not is_table or item_category == "filter":
         return False, [], [], {}
@@ -175,6 +255,26 @@ def _get_table_layout(columns, is_multi, item_category):
 
 
 async def _tui_select(title, options_dicts, is_multi=False, item_category="album"):
+    """Tela de seleção em tela cheia (prompt_toolkit), usada por TODOS os
+    menus interativos do programa: escolher tipo de busca, resultados de
+    busca, ações sobre um artista, sim/não, escolha de qualidade, etc.
+
+    Args:
+        title: texto do cabeçalho.
+        options_dicts: lista de opções. Pode ser lista de strings simples
+            (menus tipo "filter") ou lista de dicts {"meta": {...}, "url": ...}
+            (resultados de busca reais, ver _extract_rich_metadata()).
+        is_multi: se True, permite selecionar vários itens com [espaço] e
+            confirmar com [Enter]; se False, [Enter] já seleciona o item
+            sob o cursor.
+        item_category: "album" | "track" | "playlist" | "artist" | "filter"
+            -- controla como cada linha/cartão é desenhado (ver get_list_text).
+
+    Retorna:
+        - is_multi=True:  lista de tuplas (item, índice_original)
+        - is_multi=False: tupla única (item, índice_original)
+        - Ctrl+C: propaga KeyboardInterrupt (capturado no chamador)
+    """
     bindings = KeyBindings()
     selected_indices = set()
     cursor_pos = 0
@@ -193,6 +293,7 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
     if is_multi:
         @bindings.add("space")
         def _(event):
+            # Alterna seleção do item sob o cursor (não confirma nada ainda)
             if not options_dicts:
                 return
             if cursor_pos in selected_indices:
@@ -202,6 +303,7 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
 
         @bindings.add("t")
         def _(event):
+            # "Selecionar/desmarcar todos" -- alterna com base no estado atual
             if not options_dicts:
                 return
             if len(selected_indices) == len(options_dicts):
@@ -211,6 +313,8 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
 
     @bindings.add("enter")
     def _(event):
+        # Em modo multi, se nada foi marcado com [espaço], confirma pelo
+        # menos o item sob o cursor (evita "confirmar vazio" sem querer).
         if not options_dicts:
             return
         if is_multi:
@@ -227,6 +331,10 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
         event.app.exit(exception=KeyboardInterrupt)
 
     def get_header_text():
+        # Desenha o título + (se a tela for larga o bastante) o cabeçalho
+        # da tabela com as bordas superiores ┌─┬─┐. Recalculado a cada
+        # redesenho da tela (redimensionar terminal, mover cursor, etc.),
+        # por isso mede a largura do terminal toda vez.
         try:
             columns = get_app().output.get_size().columns
         except Exception:
@@ -256,6 +364,24 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
         return res
 
     def get_list_text():
+        # ------------------------------------------------------------
+        # Desenha CADA linha/cartão da lista de opções.
+        #
+        # Duas "sub-rotinas" de baixo nível fazem o trabalho pesado de
+        # truncar texto que não cabe e preencher o resto da linha com
+        # espaço/cor de fundo (pra dar efeito de "linha inteira destacada"
+        # quando o cursor está em cima):
+        #   - add_line(): usada no modo TABELA (colunas alinhadas)
+        #   - add_card_line(): usada no modo CARTÃO (bordas ╭─╮ ao redor
+        #     de cada item, mais legível em tela estreita)
+        #
+        # Depois disso vem um loop `for i, opt in enumerate(options_dicts)`
+        # com um bloco quase idêntico por item_category (album/track/
+        # playlist/artist/filter) -- cada bloco só decide QUAIS campos de
+        # `meta` mostrar e em que ordem. Se for adicionar uma nova
+        # categoria de item na TUI, é aqui (e em _get_table_layout) que
+        # entra o novo bloco, seguindo o padrão dos existentes.
+        # ------------------------------------------------------------
         try:
             columns = get_app().output.get_size().columns
         except Exception:
@@ -654,6 +780,8 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
         return res
 
     def get_footer_text():
+        # Rodapé: borda inferior da tabela (se aplicável), contador de
+        # selecionados (modo multi) e a dica de atalhos de teclado.
         try:
             columns = get_app().output.get_size().columns
         except Exception:
@@ -710,6 +838,8 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
         content=FormattedTextControl(text=get_footer_text), dont_extend_height=True
     )
 
+    # Monta a tela cheia (header + lista rolável + rodapé) e bloqueia
+    # aqui até o usuário confirmar (Enter) ou cancelar (Ctrl+C).
     layout = Layout(HSplit([header_window, list_window, footer_window]))
     app = Application(
         layout=layout, key_bindings=bindings, full_screen=True, style=pt_style
@@ -724,6 +854,9 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
 WEB_URL = "https://play.qobuz.com/"
 ARTISTS_SELECTOR = "td.chartlist-artist > a"
 TITLE_SELECTOR = "td.chartlist-name > a"
+# Mapa código-de-qualidade -> texto legível (mesmos códigos usados em
+# commands.py: -q/--quality). Se o Qobuz adicionar uma nova qualidade,
+# precisa espelhar aqui E em commands.py (choices=[5, 6, 7, 27]).
 QUALITIES = {
     5: "5 - MP3",
     6: "6 - 16 bit, 44.1kHz",
@@ -734,6 +867,12 @@ QUALITIES = {
 logger = logging.getLogger(__name__)
 
 
+# ==============================================================================
+# CLASSE QobuzDL -- motor principal: busca, download, importação de playlists
+# e o modo interativo. Uma instância é criada 1x por execução (em cli.py) e
+# guarda todas as preferências de download (qualidade, formatos, tags, etc.)
+# como atributos de instância, usados por todos os métodos abaixo.
+# ==============================================================================
 class QobuzDL:
     def __init__(
         self,
@@ -803,6 +942,9 @@ class QobuzDL:
                 logger.error(f"{RED}[!] Failed to load blacklist: {e}{OFF}")
 
     async def initialize_client(self, email, pwd, app_id, secrets):
+        """Faz login na API do Qobuz (qopy.Client) usando as credenciais
+        vindas do config.ini/keyring. Chamado 1x logo depois de instanciar
+        QobuzDL (exceto no comando "auth", que não precisa de sessão)."""
         self.client = await qopy.Client.create(
             email,
             pwd,
@@ -814,6 +956,10 @@ class QobuzDL:
         logger.info(f"{YELLOW}Set max quality: {QUALITIES[int(self.quality)]}")
 
     def get_tokens(self):
+        """Busca App ID + secrets "na hora" via bundle.py (scraping do
+        bundle.js). Não é chamado no fluxo normal (que lê app_id/secrets já
+        salvos no config.ini) -- serve como forma alternativa de obter
+        credenciais de API atualizadas sem passar pelo wizard -r."""
         bundle = Bundle()
         self.app_id = bundle.get_app_id()
         self.secrets = [secret for secret in bundle.get_secrets().values() if secret]
@@ -829,6 +975,13 @@ class QobuzDL:
         position_pool=None,
         suppress_header=False,
     ):
+        """Baixa UM item (álbum ou faixa) já sabendo o `item_id`. É o
+        "menor" ponto de entrada de download -- handle_url(),
+        download_list_of_urls() e download_from_playlist_file() todos
+        convergem pra cá no final. Cuida de: checar se já foi baixado
+        (banco local), instanciar o downloader.Download de fato, tratar
+        erros sem derrubar o programa inteiro (loga e segue pro próximo
+        item), e aplicar o --delay entre downloads se configurado."""
         if await handle_download_id(
             self.downloads_db, item_id, add_id=False, quality=self.quality
         ):
@@ -889,6 +1042,27 @@ class QobuzDL:
             await asyncio.sleep(self.delay)
 
     async def handle_url(self, url):
+        """Processa UMA URL do Qobuz. É o coração do comando `dl`.
+
+        Fluxo:
+        1. Identifica o tipo da URL (álbum/faixa/artista/label/playlist)
+           via get_url_info() e escolhe a função de busca certa em `possibles`.
+        2. Se for um "container" (artista/label/playlist), busca todos os
+           itens dele; se for artista E estiver em sessão interativa, abre
+           um filtro extra pra escolher Album/EP/Single/Live/Compilation.
+        3. Aplica smart_discography (filtra spam) e/ou blacklist.
+        4. Decide se baixa em paralelo (max_workers > 1) ou sequencial, e
+           dispara download_from_id() para cada item.
+        5. No final, gera o .m3u da playlist (se aplicável) e imprime um
+           resumo de sucesso/pulados/falhas.
+
+        ⚠️ Se for mexer na geração do .m3u, note que há uma chamada
+        DUPLICADA de make_m3u(new_path) logo abaixo (dois `if` idênticos
+        em sequência) -- parece bug residual, mas como make_m3u
+        provavelmente é idempotente (só reescreve o arquivo), não chega a
+        quebrar nada; ainda assim, ao mexer nessa área, considere remover
+        a duplicata.
+        """
         possibles = {
             "playlist": {
                 "func": self.client.get_plist_meta,
@@ -1159,6 +1333,10 @@ class QobuzDL:
             if url_type == "playlist" and not self.no_m3u_for_playlists:
                 make_m3u(new_path)
 
+            # 🔁 Duplicado: mesmo `if` e mesma chamada de novo logo acima.
+            # Provavelmente sobrou de um merge/edição. Seguro de remover
+            # (make_m3u só reescreve o arquivo .m3u), mas deixei como está
+            # para não mudar comportamento sem seu ok.
             if url_type == "playlist" and not self.no_m3u_for_playlists:
                 make_m3u(new_path)
 
@@ -1184,6 +1362,12 @@ class QobuzDL:
             await self.download_from_id(item_id, type_dict["album"])
 
     def mark_url_done_in_file(self, txt_file, url_to_mark):
+        """Quando o download veio de um arquivo .txt de URLs (qobuz-dl dl
+        lista.txt), marca a linha correspondente com "[DONE]" depois que
+        aquela URL termina de baixar -- assim, se o processo for
+        interrompido e rodado de novo, dá pra saber (visualmente) o que já
+        foi processado. Não impede reprocessar; quem evita reprocessar é o
+        banco de dados de downloads (--no-db desativa isso)."""
         if not txt_file or not os.path.isfile(txt_file):
             return
         try:
@@ -1200,6 +1384,15 @@ class QobuzDL:
             logger.error(f"{RED}Failed to update text file status: {e}{OFF}")
 
     async def download_list_of_urls(self, urls, txt_file=None):
+        """Ponto de entrada do comando `dl`: recebe uma lista de URLs (ou
+        de caminhos de arquivo .txt, que caem em download_from_txt_file).
+
+        Otimização importante: separa as URLs de FAIXA AVULSA (track_urls)
+        das demais (other_urls -- álbuns/artistas/playlists/arquivos), porque
+        só as faixas avulsas conseguem ser baixadas em paralelo direto aqui
+        (ver o bloco `if track_urls:` mais abaixo, mesmo padrão de semáforo
+        descrito no cabeçalho do arquivo). Álbuns/playlists/artistas mantêm
+        seu próprio paralelismo interno dentro de handle_url()."""
         if not urls or not isinstance(urls, list):
             logger.info(f"{OFF}Nothing to download")
             return
@@ -1305,6 +1498,10 @@ class QobuzDL:
                 self.mark_url_done_in_file(txt_file, original_url)
 
     async def download_from_txt_file(self, txt_file):
+        """Lê um arquivo .txt de URLs (uma por linha), ignora linhas vazias,
+        comentários (#) e URLs já marcadas com [DONE] por
+        mark_url_done_in_file(), valida cada URL com get_url_info() e
+        repassa a lista limpa pra download_list_of_urls()."""
         try:
             valid_urls = []
             with open(txt_file, "r", encoding="utf-8") as txt:
@@ -1334,6 +1531,9 @@ class QobuzDL:
         await self.download_list_of_urls(valid_urls, txt_file=txt_file)
 
     async def lucky_mode(self, query, download=True):
+        """Comando `lucky`: busca `query` do tipo self.lucky_type
+        (album/track/artist/playlist) e baixa os primeiros
+        self.lucky_limit resultados, sem passar por nenhuma seleção manual."""
         if len(query) < 3:
             logger.info(f"{RED}Your search query is too short or invalid")
             return
@@ -1353,6 +1553,16 @@ class QobuzDL:
         return results
 
     def _extract_rich_metadata(self, i, item_type, mode_dict, fav_subtype=None):
+        """Converte o JSON bruto da API do Qobuz (item `i`) num dict
+        "meta" enxuto e pronto pra exibir na TUI (ver get_list_text em
+        _tui_select). Aqui mora a HEURÍSTICA que classifica um álbum como
+        Album/EP/Single/Compilation/Live quando o campo release_type da
+        API vem "unknown" ou ausente -- baseada em número de faixas
+        (t_count), duração total e palavras-chave no título/versão
+        (ex. "live", "best of", " ep"). Se os lançamentos estiverem sendo
+        classificados errado na tela de busca, é AQUI que se ajusta essa
+        lógica (e o bloco irmão dela dentro de handle_url(), que faz uma
+        classificação parecida pro filtro de artista)."""
         meta_data = {}
         duration = int(i.get("duration") or 0)
         fmt_duration = format_duration(duration) if duration else "--:--"
@@ -1468,6 +1678,21 @@ class QobuzDL:
     async def search_by_type(
         self, query, item_type, limit=10, lucky=False, fav_subtype=None, sub_filter=None
     ):
+        """Busca genérica na API do Qobuz, usada tanto pelo modo interativo
+        quanto pelo `lucky`. `possibles` mapeia cada item_type pro método
+        certo do client (search_albums/search_artists/etc.).
+
+        Caso especial `item_type == "favorites"` com `fav_subtype ==
+        "playlists"`: a API pública não tem um endpoint direto e
+        documentado pra "minhas playlists", então esse bloco tenta 2
+        chamadas internas da API (playlist/getUserPlaylists, com fallback
+        pra getUserPlaylistIds + busca individual de cada playlist) -- é a
+        parte mais frágil desta função porque depende de endpoints não
+        oficiais; se "favoritos > playlists" parar de funcionar, é aqui
+        que revisar primeiro.
+
+        Retorna: lista de {"meta": ..., "url": ...} (ou lista de URLs puras
+        se lucky=True, usado direto por download_list_of_urls)."""
         limit = int(limit)
 
         if item_type != "favorites" and (not query or len(query) < 2):
@@ -1639,6 +1864,21 @@ class QobuzDL:
             return []
 
     async def interactive(self, download=True):
+        """Modo interativo completo (comando `interactive`/`i`/`fun`, ou
+        padrão quando nenhum subcomando é passado). Fluxo geral:
+        1. Pergunta o QUE buscar (faixas/álbuns/singles/artistas/
+           playlists/favoritos) via _tui_select.
+        2. Em loop: pede o termo de busca (ou lista favoritos direto),
+           mostra os resultados na TUI, deixa selecionar 1+ itens.
+           - Se for artista: abre um submenu de ações (ver álbuns/EPs,
+             singles, top tracks, ou discografia inteira).
+        3. Acumula tudo em `final_url_list` e pergunta se quer buscar mais.
+        4. No final, pergunta a qualidade máxima e chama
+           download_list_of_urls() com tudo que foi selecionado.
+
+        `self._is_interactive_session = True` é usado por handle_url()
+        para saber se deve oferecer o filtro extra de tipo de lançamento
+        ao explorar um artista por URL (mesmo fora deste método)."""
         self._is_interactive_session = True
 
         qualities = [
@@ -1966,6 +2206,16 @@ class QobuzDL:
         name: str = None,
         auto: bool = False,
     ):
+        """Comando `import-playlist`/`ip`: importa uma playlist de outra
+        plataforma (URL do Spotify/Deezer/Apple Music) ou de um arquivo
+        exportado (TXT/CSV/JSON). Faz o "matching" das faixas no Qobuz e
+        então pergunta ao usuário o que fazer: (1) baixar, (2) criar a
+        mesma playlist na conta Qobuz, ou (3) as duas coisas.
+
+        Delega a extração de faixas para:
+          - platform_fetcher.fetch_playlist_from_url()  (se `source` é URL)
+          - playlist_import.parse_playlist_file()       (se é arquivo local)
+        """
         import shutil as _shutil
 
         is_url = source.startswith("http://") or source.startswith("https://")
@@ -2083,6 +2333,16 @@ class QobuzDL:
         auto: bool = False,
         _preloaded_track_ids: list = None,
     ):
+        """Baixa as faixas já "matcheadas" no Qobuz (track_ids) numa pasta
+        própria da playlist. Pode ser chamado com um arquivo ainda não
+        processado (`file_path`, faz o parsing+matching aqui mesmo) ou já
+        com os IDs prontos (`_preloaded_track_ids`, usado por
+        import_playlist_from_url_or_file() quando a opção "1. Baixar
+        faixas" foi escolhida, pra não repetir o matching).
+
+        Usa o mesmo padrão de paralelismo (semáforo + stagger delay)
+        descrito no cabeçalho do arquivo, igual handle_url() e
+        download_list_of_urls()."""
         from qobuz_dl.playlist_import import parse_playlist_file
 
         if _preloaded_track_ids is not None:

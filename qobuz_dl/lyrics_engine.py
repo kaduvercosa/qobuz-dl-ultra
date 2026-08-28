@@ -1,3 +1,8 @@
+# ============================================================================
+# # lyrics_engine.py -- busca, normalização, fallback e gravação de letras.
+# # Fluxo principal: LyricsEngine.fetch_and_inject() → Qobuz → LRCLIB → Genius.
+# # As rotinas de persistência são _save_lrc_file() e _inject_metadata().
+# ============================================================================
 import os
 import re
 import httpx
@@ -13,7 +18,11 @@ except ImportError:
     lyricsgenius = None
 
 
+# # Responsável por transformar letras da API em LRC/texto e gravá-las
+# # em arquivos auxiliares e metadados FLAC/MP3.
 class LyricsEngine:
+    # # Aceita uma sessão HTTP externa para compartilhar conexões com o downloader.
+    # # Sem sessão externa, cria uma própria e marca _owns_session=True.
     def __init__(self, genius_token=None, session=None, settings=None):
         self.genius_token = genius_token
         self.genius = None
@@ -32,6 +41,7 @@ class LyricsEngine:
             self._owns_session = True
             self.session = httpx.Client(follow_redirects=True)
 
+    # # Fecha somente a sessão criada por esta classe; sessões externas continuam vivas.
     def close(self):
         if self._owns_session:
             try:
@@ -39,12 +49,15 @@ class LyricsEngine:
             except Exception:
                 pass
 
+    # # Converte milissegundos para o formato LRC [MM:SS.mmm].
     @staticmethod
     def _ms_to_lrc_timestamp(ms):
         minutes = ms // 60000
         seconds = (ms % 60000) / 1000.0
         return f"[{minutes:02d}:{seconds:06.3f}]"
 
+    # # Converte linhas sincronizadas do Qobuz para LRC.
+    # # O marcador inicial representa a introdução antes do primeiro verso.
     def _qobuz_lines_to_lrc(self, lines, inject_intro=False):
         lrc_rows = []
         intro_added = False
@@ -71,12 +84,15 @@ class LyricsEngine:
 
         return "\n".join(lrc_rows) if lrc_rows else None
 
+    # # Converte linhas sincronizadas para texto simples, uma linha por verso.
     @staticmethod
     def _qobuz_lines_to_plain(lines):
         plain_rows = [(entry.get("line") or "").strip() for entry in lines]
         text = "\n".join(plain_rows).strip("\n")
         return text if text else None
 
+    # # Normaliza letra original e tradução do Qobuz em um formato interno.
+    # # O resultado separa conteúdo sincronizado, texto simples e idiomas.
     def extract_qobuz_lyrics(self, lyrics_response, translation_response=None):
         if not lyrics_response or not isinstance(lyrics_response, dict):
             return None
@@ -120,6 +136,8 @@ class LyricsEngine:
 
         return result
 
+    # # Combina letra original e tradução ordenando os versos pelo timestamp.
+    # # Linhas traduzidas recebem o prefixo » para ficarem distinguíveis.
     def _build_bilingual_lrc(self, original_lrc, translated_lrc):
         if not original_lrc or not translated_lrc:
             return original_lrc or translated_lrc
@@ -161,6 +179,8 @@ class LyricsEngine:
 
         return "\n".join(final_lrc)
 
+    # # Orquestra Qobuz → LRCLIB → Genius, respeitando as opções de saída.
+    # # A tradução em português é priorizada quando estiver disponível.
     def fetch_and_inject(
         self,
         file_path,
@@ -185,7 +205,6 @@ class LyricsEngine:
             )
 
             if qobuz_lyrics:
-                # Regra estrita: remover versao `.txt` puro se requisitado
                 if only_synced:
                     qobuz_lyrics["plain"] = None
                     for t in qobuz_lyrics.get("translations", []):
@@ -295,7 +314,6 @@ class LyricsEngine:
                             )
                         return
 
-            # Falback LRCLIB
             lrclib_url = "https://lrclib.net/api/get"
             headers = {
                 "User-Agent": "qobuz-dl-ultra/1.0 (https://github.com/kaduvercosa/qobuz-dl-ultra)"
@@ -374,7 +392,6 @@ class LyricsEngine:
                         )
                     return
 
-            # Falback Genius: Provê somente texto plano. Pula direto se só quisermos as sincronizadas.
             if self.genius and not only_synced:
                 song = self.genius.search_song(track, artist)
                 if song and song.lyrics:
@@ -404,6 +421,7 @@ class LyricsEngine:
         except Exception as e:
             tqdm.write(f"    {RED}❌ Erro durante a pesquisa de letras: {e}{RESET}")
 
+    # # Salva a letra sincronizada em .lrc com fonte e idioma no cabeçalho.
     def _save_lrc_file(
         self, audio_file_path, synced_lyrics, source=None, language=None
     ):
@@ -425,6 +443,8 @@ class LyricsEngine:
         with open(lrc_path, "w", encoding="utf-8") as f:
             f.write(content)
 
+    # # FLAC usa campos Vorbis; MP3 usa USLT e TXXX para idioma/bilinguismo.
+    # # Falhas de tagging são ignoradas para não interromper o download.
     def _inject_metadata(self, file_path, lyrics, source=None, language=None, bilingual=False):
         if not lyrics:
             return

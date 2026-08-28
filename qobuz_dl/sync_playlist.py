@@ -1,30 +1,30 @@
+# # ============================================================================
+# # sync_playlist.py -- sincronização bidirecional entre playlist Qobuz e pasta local.
+# # Compara IDs, baixa faixas ausentes, remove órfãs e atualiza o arquivo .m3u.
+# # ============================================================================
 import os
 import logging
 from mutagen.flac import FLAC
 from mutagen.id3 import ID3
 
-# CYAN/YELLOW importados como INFO/WARNING renomeados: mesma cor de
-# YELLOW (mantida por convencao), mas CYAN agora e' LIGHTBLUE_EX --
-# visivel em terminal claro E escuro (CYAN puro quase some em fundo
-# branco). Ver comentario completo em qobuz_dl/color.py. Zero mudanca
-# de codigo neste arquivo: toda f-string que ja usa {CYAN}/{YELLOW}
-# continua funcionando, so' a cor de fato renderizada muda.
 from qobuz_dl.color import INFO as CYAN, GREEN, RED, WARNING as YELLOW, OFF
 
 logger = logging.getLogger(__name__)
 
 
+# # Varre FLAC/MP3 e cria mapa Qobuz track ID → caminho local; separa arquivos sem tag.
 def _scan_local_tracks(directory):
     """
-    Scans a local directory recursively to map existing audio files using their embedded Qobuz IDs.
+    Varre um diretório local recursivamente para mapear os arquivos de áudio existentes
+    usando seus IDs de faixa Qobuz embutidos nas tags.
 
     Args:
-        directory (str): The local directory path to scan.
+        directory (str): O caminho do diretório local a ser varrido.
 
     Returns:
-        tuple: A tuple containing:
-            - dict: A mapping of extracted Qobuz track IDs to their local file paths.
-            - list: A list of paths for files that lack a valid Qobuz track ID tag.
+        tuple: Uma tupla contendo:
+            - dict: Um mapeamento de IDs de faixa Qobuz extraídos para seus caminhos locais.
+            - list: Uma lista de caminhos de arquivos que não possuem uma tag de ID de faixa Qobuz válida.
     """
     local_tracks = {}
     untagged_files = []
@@ -54,7 +54,7 @@ def _scan_local_tracks(directory):
                     if track_txxx:
                         track_id = track_txxx.text[0]
             except Exception as e:
-                logger.debug(f"Failed to read tags from {fpath}: {e}")
+                logger.debug(f"Falha ao ler tags de {fpath}: {e}")
 
             if track_id:
                 local_tracks[str(track_id)] = fpath
@@ -64,24 +64,23 @@ def _scan_local_tracks(directory):
     return local_tracks, untagged_files
 
 
+# # Consome o gerador paginado do cliente e junta todas as faixas da playlist.
 async def _fetch_remote_tracks(client, playlist_id):
     """
-    Retrieves the complete tracklist and metadata of a playlist from the Qobuz API.
+    Recupera a lista completa de faixas e os metadados de uma playlist a partir da API Qobuz.
 
     Args:
-        client (Client): The initialized Qobuz API client.
-        playlist_id (str): The unique identifier of the target playlist.
+        client (Client): A instância inicializada do cliente da API Qobuz.
+        playlist_id (str): O identificador único da playlist alvo.
 
     Returns:
-        tuple: A tuple containing:
-            - str: The resolved playlist name.
-            - list: A list of dictionaries containing metadata for each track.
+        tuple: Uma tupla contendo:
+            - str: O nome resolvido da playlist.
+            - list: Uma lista de dicionários contendo os metadados de cada faixa.
     """
     all_items = []
     playlist_name = "Unknown Playlist"
-    # get_plist_meta() retorna um async generator (ver docstring em
-    # qopy.py) -- precisa de 'async for', nao 'for'. Um 'for' comum nesse
-    # objeto estoura TypeError na hora.
+    # # get_plist_meta() é async generator; async for é obrigatório para paginação.
     async for chunk in client.get_plist_meta(playlist_id):
         if "name" in chunk and playlist_name == "Unknown Playlist":
             playlist_name = chunk.get("name")
@@ -90,15 +89,17 @@ async def _fetch_remote_tracks(client, playlist_id):
     return playlist_name, all_items
 
 
+# # Substitui caracteres inválidos para manter o nome da pasta portátil entre sistemas.
 def _sanitize_dirname(name):
     """
-    Removes illegal characters to create safe directory names across different operating systems.
+    Remove caracteres ilegais para criar nomes de diretório seguros entre diferentes
+    sistemas operacionais.
 
     Args:
-        name (str): The original directory string.
+        name (str): A string original do diretório.
 
     Returns:
-        str: The sanitized directory string.
+        str: A string do diretório sanitizada.
     """
     invalid_chars = '<>:"/\\|?*'
     for char in invalid_chars:
@@ -106,13 +107,16 @@ def _sanitize_dirname(name):
     return name.strip()
 
 
+# # Remove diretórios vazios após exclusões, preservando _Playlists.
 def _clean_empty_dirs(base_directory, exclude_dirs=None):
     """
-    Recursively deletes empty subdirectories left behind after syncing tracks.
+    Exclui recursivamente subdiretórios vazios deixados para trás após a sincronização
+    das faixas.
 
     Args:
-        base_directory (str): The root directory to evaluate.
-        exclude_dirs (set, optional): A set of directory names to protect from deletion. Defaults to None.
+        base_directory (str): O diretório raiz a ser avaliado.
+        exclude_dirs (set, optional): Um conjunto de nomes de diretório a proteger contra
+            exclusão. O padrão é None.
     """
     exclude = set(exclude_dirs or [])
     exclude.add("_Playlists")
@@ -126,54 +130,59 @@ def _clean_empty_dirs(base_directory, exclude_dirs=None):
                 if not os.listdir(dir_path):
                     os.rmdir(dir_path)
                     rel = os.path.relpath(dir_path, base_directory)
-                    logger.info(f"  {RED}[-] Removed empty dir: {rel}{OFF}")
+                    logger.info(f"  {RED}[-] Diretório vazio removido: {rel}{OFF}")
             except OSError:
                 pass
 
 
+# # Fluxo principal: valida URL → busca remoto → compara local → confirma → sincroniza.
 async def sync_playlist(qobuz_dl, url, folder, auto_confirm=False):
     """
-    The main Bidirectional Playlist Synchronization engine.
+    O motor principal de Sincronização Bidirecional de Playlist.
 
-    Mirrors a Qobuz playlist locally by identifying missing tracks (to be downloaded)
-    and orphan tracks (to be physically deleted, along with associated .lrc files).
-    Maintains a "Flat Folder" architecture and automatically updates the .m3u playlist file.
+    Espelha uma playlist do Qobuz localmente, identificando faixas ausentes (a serem
+    baixadas) e faixas órfãs (a serem excluídas fisicamente, junto com os arquivos .lrc
+    associados). Mantém uma arquitetura de "Pasta Plana" e atualiza automaticamente o
+    arquivo de playlist .m3u.
 
     Args:
-        qobuz_dl (QobuzDL): The core application instance.
-        url (str): The valid Qobuz playlist URL.
-        folder (str): The base target directory on the local system.
-        auto_confirm (bool, optional): If True, bypasses the interactive confirmation prompt. Defaults to False.
+        qobuz_dl (QobuzDL): A instância principal da aplicação.
+        url (str): A URL válida da playlist Qobuz.
+        folder (str): O diretório alvo base no sistema local.
+        auto_confirm (bool, optional): Se True, ignora o prompt de confirmação interativo.
+            O padrão é False.
     """
     from qobuz_dl.utils import get_url_info, make_m3u
 
     try:
         url_type, playlist_id = get_url_info(url)
     except (AttributeError, IndexError):
-        logger.error(f"{RED}Invalid URL: {url}{OFF}")
+        logger.error(f"{RED}URL inválida: {url}{OFF}")
         return
 
     if url_type != "playlist":
         logger.error(
-            f"{RED}URL is not a playlist (detected type: '{url_type}'). "
-            f"Use a playlist URL like https://play.qobuz.com/playlist/12345{OFF}"
+            f"{RED}A URL não é uma playlist (tipo detectado: '{url_type}'). "
+            f"Use uma URL de playlist como https://play.qobuz.com/playlist/12345{OFF}"
         )
         return
 
-    logger.info(f"\n{YELLOW}━━━ PLAYLIST SYNC ━━━{OFF}")
+    logger.info(f"\n{YELLOW}━━━ SINCRONIZAÇÃO DE PLAYLIST ━━━{OFF}")
     logger.info(f"{YELLOW}URL : {url}{OFF}")
 
-    logger.info(f"{CYAN}[1/4] Fetching playlist from Qobuz...{OFF}")
+    logger.info(f"{CYAN}[1/4] Buscando playlist no Qobuz...{OFF}")
     playlist_name, remote_items = await _fetch_remote_tracks(
         qobuz_dl.client, playlist_id
     )
+    # # IDs remotos tornam a diferença entre playlist e pasta local O(n).
     remote_ids = {str(item["id"]): item for item in remote_items}
     logger.info(
-        f"{CYAN}      Found {len(remote_ids)} tracks in the Qobuz playlist.{OFF}"
+        f"{CYAN}      Encontradas {len(remote_ids)} faixas na playlist do Qobuz.{OFF}"
     )
 
     if not remote_ids:
-        logger.info(f"{YELLOW}The Qobuz playlist is empty. Nothing to sync.{OFF}")
+        logger.info(
+            f"{YELLOW}A playlist do Qobuz está vazia. Nada para sincronizar.{OFF}")
         return
 
     safe_playlist_name = _sanitize_dirname(playlist_name)
@@ -187,44 +196,46 @@ async def sync_playlist(qobuz_dl, url, folder, auto_confirm=False):
     logger.info(f"{YELLOW}DIR : {target_folder}{OFF}\n")
 
     os.makedirs(target_folder, exist_ok=True)
-    logger.info(f"{CYAN}[2/4] Scanning local folder...{OFF}")
+    logger.info(f"{CYAN}[2/4] Escaneando pasta local...{OFF}")
     local_tracks, untagged = _scan_local_tracks(target_folder)
-    logger.info(f"{CYAN}      Found {len(local_tracks)} tagged tracks locally.{OFF}")
+    logger.info(
+        f"{CYAN}      Encontradas {len(local_tracks)} faixas taggeadas localmente.{OFF}")
     if untagged:
         logger.info(
-            f"{YELLOW}      {len(untagged)} files have no QOBUZTRACKID tag "
-            f"and will be ignored.{OFF}"
+            f"{YELLOW}      {len(untagged)} arquivos não possuem tag QOBUZTRACKID "
+            f"e serão ignorados.{OFF}"
         )
 
     local_id_set = set(local_tracks.keys())
     remote_id_set = set(remote_ids.keys())
 
+    # # Faixas remotas ausentes precisam ser baixadas; IDs locais ausentes do remoto são órfãos.
     to_download_ids = remote_id_set - local_id_set
     to_delete_ids = local_id_set - remote_id_set
     already_synced = local_id_set & remote_id_set
 
-    logger.info(f"\n{CYAN}[3/4] Sync summary:{OFF}")
-    logger.info(f"  {GREEN}↓ To download : {len(to_download_ids)} tracks{OFF}")
-    logger.info(f"  {RED}✕ To delete   : {len(to_delete_ids)} files{OFF}")
-    logger.info(f"    Already synced: {len(already_synced)} tracks")
+    logger.info(f"\n{CYAN}[3/4] Resumo da sincronização:{OFF}")
+    logger.info(f"  {GREEN}↓ A baixar   : {len(to_download_ids)} faixas{OFF}")
+    logger.info(f"  {RED}✕ A excluir  : {len(to_delete_ids)} arquivos{OFF}")
+    logger.info(f"    Já sincronizadas: {len(already_synced)} faixas")
 
     if not to_download_ids and not to_delete_ids:
-        logger.info(f"\n{GREEN}✓ Folder is already in sync with the playlist!{OFF}")
+        logger.info(f"\n{GREEN}✓ A pasta já está sincronizada com a playlist!{OFF}")
 
         if not getattr(qobuz_dl, "no_m3u_for_playlists", False):
             make_m3u(target_folder, remote_items)
             logger.info(
-                f"{CYAN}✓ Playlist .m3u file updated with latest track order.{OFF}"
+                f"{CYAN}✓ Arquivo .m3u da playlist atualizado com a ordem mais recente das faixas.{OFF}"
             )
         return
 
     if to_delete_ids:
-        logger.info(f"\n{RED}Files to DELETE:{OFF}")
+        logger.info(f"\n{RED}Arquivos a EXCLUIR:{OFF}")
         for tid in sorted(to_delete_ids):
             logger.info(f"  {RED}✕ {os.path.basename(local_tracks[tid])}{OFF}")
 
     if to_download_ids:
-        logger.info(f"\n{GREEN}Tracks to DOWNLOAD:{OFF}")
+        logger.info(f"\n{GREEN}Faixas a BAIXAR:{OFF}")
         for tid in sorted(to_download_ids):
             item = remote_ids[tid]
             album_artist = item.get("album", {}).get("artist", {}).get("name")
@@ -237,40 +248,45 @@ async def sync_playlist(qobuz_dl, url, folder, auto_confirm=False):
             title = item.get("title", "Unknown")
             logger.info(f"  {GREEN}↓ {artist} -- {title}{OFF}")
 
+    # # Exclusões são destrutivas; sem auto_confirm, exige confirmação explícita do usuário.
     if not auto_confirm:
         try:
-            answer = input(f"\n{YELLOW}Proceed with sync? [y/N]: {OFF}").strip().lower()
+            answer = input(
+                f"\n{YELLOW}Prosseguir com a sincronização? [y/N]: {OFF}").strip().lower()
             if answer != "y":
-                logger.info(f"{YELLOW}Sync cancelled by user.{OFF}")
+                logger.info(f"{YELLOW}Sincronização cancelada pelo usuário.{OFF}")
                 return
         except (KeyboardInterrupt, EOFError):
-            logger.info(f"\n{YELLOW}Sync cancelled.{OFF}")
+            logger.info(f"\n{YELLOW}Sincronização cancelada.{OFF}")
             return
 
-    logger.info(f"\n{CYAN}[4/4] Executing sync...{OFF}")
+    logger.info(f"\n{CYAN}[4/4] Executando sincronização...{OFF}")
 
     deleted_count = 0
+    # # Remove áudio órfão e seu .lrc associado, depois limpa diretórios vazios.
     for tid in to_delete_ids:
         fpath = local_tracks[tid]
         try:
             os.remove(fpath)
             deleted_count += 1
-            logger.info(f"  {RED}[-] Deleted: {os.path.basename(fpath)}{OFF}")
+            logger.info(f"  {RED}[-] Excluído: {os.path.basename(fpath)}{OFF}")
 
             lrc_path = os.path.splitext(fpath)[0] + ".lrc"
             if os.path.isfile(lrc_path):
                 os.remove(lrc_path)
-                logger.info(f"  {RED}[-] Deleted: {os.path.basename(lrc_path)}{OFF}")
+                logger.info(f"  {RED}[-] Excluído: {os.path.basename(lrc_path)}{OFF}")
         except OSError as e:
-            logger.error(f"  {RED}[!] Failed to delete {fpath}: {e}{OFF}")
+            logger.error(f"  {RED}[!] Falha ao excluir {fpath}: {e}{OFF}")
 
     _clean_empty_dirs(target_folder, exclude_dirs={"_Playlists"})
 
+    # # Temporariamente força pasta plana para que faixas de playlist não sejam organizadas como álbuns.
     original_folder_format = qobuz_dl.folder_format
     original_multi_disc = qobuz_dl.settings.multiple_disc_one_dir
     qobuz_dl.folder_format = "."
     qobuz_dl.settings.multiple_disc_one_dir = True
 
+    # # Preserva a ordem remota para numerar faixas no download e no .m3u.
     position_map = {}
     for idx, item in enumerate(remote_items, start=1):
         position_map[str(item["id"])] = idx
@@ -279,10 +295,7 @@ async def sync_playlist(qobuz_dl, url, folder, auto_confirm=False):
     for tid in to_download_ids:
         playlist_idx = position_map.get(tid, 0)
         try:
-            # download_from_id() e' async def em core.py -- antes era
-            # chamado sem 'await', entao criava uma corrotina que nunca
-            # rodava de verdade: nada era baixado, mas downloaded_count
-            # incrementava do mesmo jeito (falso positivo no resumo final).
+            # # A chamada é assíncrona: await garante que a faixa terminou antes de contar sucesso.
             await qobuz_dl.download_from_id(
                 tid,
                 album=False,
@@ -292,15 +305,16 @@ async def sync_playlist(qobuz_dl, url, folder, auto_confirm=False):
             )
             downloaded_count += 1
         except Exception as e:
-            logger.error(f"  {RED}[!] Failed to download track {tid}: {e}{OFF}")
+            logger.error(f"  {RED}[!] Falha ao baixar faixa {tid}: {e}{OFF}")
 
+    # # Restaura as configurações originais mesmo após o bloco de downloads.
     qobuz_dl.folder_format = original_folder_format
     qobuz_dl.settings.multiple_disc_one_dir = original_multi_disc
 
     if not getattr(qobuz_dl, "no_m3u_for_playlists", False):
         make_m3u(target_folder, remote_items)
 
-    logger.info(f"\n{GREEN}━━━ SYNC COMPLETE ━━━{OFF}")
-    logger.info(f"  {GREEN}↓ Downloaded : {downloaded_count} tracks{OFF}")
-    logger.info(f"  {RED}✕ Deleted    : {deleted_count} files{OFF}")
-    logger.info(f"  {GREEN}✓ Total now  : {len(remote_ids)} tracks{OFF}\n")
+    logger.info(f"\n{GREEN}━━━ SINCRONIZAÇÃO CONCLUÍDA ━━━{OFF}")
+    logger.info(f"  {GREEN}↓ Baixadas  : {downloaded_count} faixas{OFF}")
+    logger.info(f"  {RED}✕ Excluídas : {deleted_count} arquivos{OFF}")
+    logger.info(f"  {GREEN}✓ Total agora: {len(remote_ids)} faixas{OFF}\n")

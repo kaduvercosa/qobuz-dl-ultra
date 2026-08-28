@@ -1,3 +1,21 @@
+# ==============================================================================
+# MÓDULO: color.py (QOBUZ-DL-ULTRA)
+# DESCRIÇÃO: Gerenciamento centralizado de cores ANSI, TrueColor (24-bit),
+#            detecção de capacidades do terminal (NO_COLOR, FORCE_COLOR, TTY),
+#            e prévias visuais para o assistente de temas (accent colors).
+#
+# ONDE PROCURAR quando precisar mexer em algo:
+#   - "Cor não desliga com --no-color/NO_COLOR" -> _detect_color_capability()
+#     e a variável COLOR_ON (é decidido 1x, na importação do módulo)
+#   - Adicionar/editar cor fixa (RED, GREEN, ERROR, etc.) -> bloco logo após COLOR_ON
+#   - Adicionar um novo preset de cor de destaque no wizard -> ACCENT_PRESETS
+#   - "Cor de destaque não persiste entre execuções" -> _find_config_file(),
+#     _load_accent_rgb() (lê accent_color do config.ini)
+#   - Preview de cor mostrado no wizard (-r) -> accent_preview()
+#   - NUNCA usar `colorama.init(...)` aqui de novo -- leia o bloco de BUGFIX
+#     logo abaixo dos imports antes de mexer nisso.
+# ==============================================================================
+
 import os
 import sys
 import configparser
@@ -58,6 +76,8 @@ def _detect_color_capability() -> bool:
         return False
 
 
+# Decisão global calculada 1x na importação do módulo (veja o comentário
+# acima sobre por que não dá pra esperar o argparse rodar).
 COLOR_ON = _detect_color_capability()
 
 
@@ -66,13 +86,16 @@ def _e(seq: str) -> str:
     return seq if COLOR_ON else ""
 
 
+# --------------------------------------------------------------------------
+# Cores/estilos fixos, já resolvidos via _e() (viram "" se COLOR_ON=False)
+# --------------------------------------------------------------------------
 # STYLE
 DF = _e(Style.NORMAL)
 BG = _e(Style.BRIGHT)
 RESET = _e(Style.RESET_ALL)
-# BUGFIX CRITICO: `OFF` era `Style.DIM` (\033[2m), mas as 239 ocorrencias de
+# BUGFIX CRITICO: `OFF` era `Style.DIM` ([2m), mas as 239 ocorrencias de
 # `{OFF}` no projeto usam ele como TERMINADOR -- `f"{GREEN}texto{OFF}"`.
-# `\033[2m` nao encerra nada: ele ATIVA o modo esmaecido e DEIXA a cor
+# `[2m` nao encerra nada: ele ATIVA o modo esmaecido e DEIXA a cor
 # anterior valendo. Consequencia dupla em cascata:
 #   1. tudo depois de um `{OFF}` saia esmaecido (o "aspecto apagado");
 #   2. a cor nunca era desligada, entao linhas seguintes SEM cor nenhuma
@@ -97,6 +120,9 @@ WARNING = _e(Fore.YELLOW)
 WARNING_SAFE = _e(Fore.LIGHTRED_EX)
 MUTED = _e(Style.DIM)
 
+# --------------------------------------------------------------------------
+# Cor de destaque (accent) -- personalizável pelo usuário via wizard
+# --------------------------------------------------------------------------
 # Cor de destaque padrao (azul aco) -- pode ser sobrescrita pelo usuario
 # no wizard de configuracao (qobuz-dl -r). O valor e' lido do config.ini
 # na importacao do modulo, entao vale pra toda a sessao sem precisar
@@ -107,6 +133,9 @@ _DEFAULT_ACCENT_RGB = (95, 168, 211)
 # Paleta de cores predefinidas exposta pro wizard. Cada entrada:
 #   (nome_exibicao, codigo_rgb_string, escape_ansi)
 # O campo rgb_string e' o que vai gravado em config.ini: "R;G;B"
+# Para adicionar um novo preset: só incluir uma nova tupla aqui, seguindo
+# o mesmo formato; o wizard (_pick_accent_color em cli.py) lista tudo
+# dinamicamente a partir desta lista.
 ACCENT_PRESETS = [
     ("Azul Aço     (padrão)", "95;168;211", "\033[38;2;95;168;211m"),
     ("Roxo Lavanda", "180;140;255", "\033[38;2;180;140;255m"),
@@ -193,12 +222,20 @@ def _load_accent_rgb() -> tuple:
     return _DEFAULT_ACCENT_RGB
 
 
+# Lida 1x no import: é o valor que vale durante toda a execução do programa
+# (não é relido depois, então se o usuário editar o config.ini manualmente
+# no meio de uma execução, o accent só muda na próxima vez que o programa rodar).
 _ACCENT_RGB = _load_accent_rgb()
 _ACCENT = _rgb_escape(*_ACCENT_RGB)
 
 
+# Variante mais escura da mesma cor de destaque (usada em elementos
+# secundários, ex. bordas, texto menos importante)
 ACCENT_DARK = _rgb_escape(*_darken(_ACCENT_RGB))
 
+# HIGHLIGHT/INFO/PROGRESS são todos apelidos da mesma cor de destaque (_ACCENT).
+# Existem como nomes separados só por legibilidade semântica no resto do
+# projeto (ex: usar INFO em mensagens informativas, PROGRESS em barras).
 HIGHLIGHT = _ACCENT
 INFO = _ACCENT
 PROGRESS = _ACCENT

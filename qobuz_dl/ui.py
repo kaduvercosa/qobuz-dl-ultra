@@ -1,47 +1,29 @@
-"""Camada unica de apresentacao no terminal do qobuz-dl-ultra.
-
-PROBLEMA QUE ESTE MODULO RESOLVE
---------------------------------
-Antes deste arquivo existir, a saida do programa vinha de tres canais
-totalmente independentes e sem coordenacao nenhuma entre eles:
-
-1. ``print()`` cru        -- cli.py, retro_tagger.py, radar.py, qopy.py, core.py
-2. ``logging`` / logger   -- core.py, sync_playlist.py, sync.py, downloader.py
-3. ``tqdm.write``         -- lyrics_engine.py, downloader.py (via ``safe_print``)
-
-O ``safe_print()`` (tqdm.write protegido por lock) existia SO' dentro do
-downloader.py. Resultado pratico: qualquer ``logger.info`` disparado de
-core.py/sync*.py durante um download em andamento escrevia direto no stdout
-por cima das barras de progresso do tqdm, picando a barra em varias linhas.
-
-Alem disso, a largura do terminal era recalculada em 7 lugares diferentes,
-cada um com teto e fallback proprios (100/90/nenhum, (80,24)/(70,24)/
-(100,24)), e os breakpoints "responsivos" eram 60, 115 e ~52 colunas
-dependendo do arquivo -- ou seja, a mesma tela ficava em "modo celular"
-num painel e em "modo PC" no painel seguinte.
-
-COMO USAR
----------
-Um unico ponto de saida::
-
-    from qobuz_dl import ui
-
-    ui.ok("Album baixado")            # [+] verde
-    ui.warn("Faixa indisponivel")     # [!] amarelo
-    ui.error("Falha de rede")         # [!] vermelho
-    ui.step("Buscando letras...")     # [*] cor de destaque
-    ui.detail("caminho/do/arquivo")   #     recuado e apagado
-
-    ui.header("ALBUM", [("Artista", "Daft Punk"), ("Faixas", "14")])
-    ui.section("ESTATISTICAS")
-    ui.kv("Total de downloads", "1234")
-
-E, uma vez no boot da CLI, para que o ``logging`` de TODOS os modulos passe
-a respeitar as barras de progresso::
-
-    ui.configure(quiet=args.quiet, verbose=args.verbose, color=not args.no_color)
-    ui.install_logging()
-"""
+# Camada única de apresentação no terminal do qobuz-dl-ultra.
+#
+# Centraliza tudo que é escrito na tela em UM ponto de saída (emit()),
+# protegido por UM lock (print_lock) e com UMA única fonte de verdade para
+# largura/breakpoints do terminal. Isso evita que:
+#   - print() cru, logger.info() e tqdm.write() disputem o stdout ao mesmo
+#     tempo e cortem as barras de progresso do tqdm no meio;
+#   - cada arquivo recalcule a largura do terminal com teto/fallback
+#     diferentes, fazendo a mesma tela parecer "celular" num painel e "PC"
+#     no outro.
+#
+# Uso básico:
+#   from qobuz_dl import ui
+#   ui.ok("Album baixado")            -> [+] verde
+#   ui.warn("Faixa indisponivel")     -> [!] amarelo
+#   ui.error("Falha de rede")         -> [!] vermelho
+#   ui.step("Buscando letras...")     -> [*] cor de destaque
+#   ui.detail("caminho/do/arquivo")   -> linha secundária recuada
+#   ui.header("ALBUM", [("Artista", "Daft Punk"), ("Faixas", "14")])
+#   ui.section("ESTATISTICAS")
+#   ui.kv("Total de downloads", "1234")
+#
+# No boot da CLI, para que o `logging` de todos os módulos também respeite
+# as barras de progresso do tqdm:
+#   ui.configure(quiet=args.quiet, verbose=args.verbose, color=not args.no_color)
+#   ui.install_logging()
 
 import logging
 import os
@@ -62,21 +44,21 @@ from qobuz_dl.color import (
 )
 
 # --------------------------------------------------------------------------
-# Lock unico de escrita no terminal
+# Lock único de escrita no terminal
 # --------------------------------------------------------------------------
-# O downloader.py importa este mesmo objeto como `print_lock`, para que
-# exista UM lock para todo o processo em vez de um por modulo. Sem isso,
-# duas threads com locks diferentes ainda embaralhariam a saida.
+# downloader.py importa este mesmo objeto como `print_lock` -- existe um
+# único lock para todo o processo, não um por módulo. Threads diferentes
+# usando locks diferentes ainda embaralhariam a saída entre si.
 print_lock = threading.Lock()
 
 # --------------------------------------------------------------------------
-# Larguras e breakpoints -- fonte unica de verdade
+# Larguras e breakpoints -- fonte única de verdade para todo o projeto
 # --------------------------------------------------------------------------
-MIN_WIDTH = 32     # piso: pipes/CI as vezes relatam 0 colunas
+MIN_WIDTH = 32     # piso: pipes/CI às vezes relatam 0 colunas
 MAX_WIDTH = 100    # teto: linha longa demais cansa de ler em monitor grande
 FALLBACK = (80, 24)
 
-# Breakpoints unificados (antes: 52, 60, 70, 90, 115 espalhados pelo codigo).
+# Breakpoints responsivos unificados.
 NARROW = 60        # celular / a-Shell no iPhone / Split View estreito
 MEDIUM = 90        # iPad retrato, terminal de meia tela
 # acima de MEDIUM -> "wide" (desktop, iPad paisagem)
@@ -87,10 +69,9 @@ LAYOUT_WIDE = "wide"
 
 
 def raw_width():
-    """Largura real relatada pelo terminal, sem teto nem piso.
-
-    Respeita ``COLUMNS`` quando definida (util em CI e para testes).
-    """
+    # Largura real do terminal, sem teto nem piso aplicados.
+    # Respeita a variável de ambiente COLUMNS quando definida (útil em CI
+    # e para forçar uma largura específica em testes).
     env = os.environ.get("COLUMNS")
     if env:
         try:
@@ -106,16 +87,16 @@ def raw_width():
 
 
 def width(max_width=MAX_WIDTH, min_width=MIN_WIDTH):
-    """Largura utilizavel para desenhar blocos de texto.
-
-    Substitui as 7 implementacoes divergentes que existiam em cli.py,
-    core.py, commands.py, retro_tagger.py e color.py.
-    """
+    # Largura utilizável para desenhar blocos de texto, já com teto e piso
+    # aplicados. Função única que substitui os cálculos redundantes que
+    # existiam espalhados por vários arquivos do projeto.
     return max(min(raw_width(), max_width), min_width)
 
 
 def layout():
-    """Retorna ``narrow`` / ``medium`` / ``wide`` para logica responsiva."""
+    # Classifica a largura atual do terminal em narrow/medium/wide, para
+    # que outras funções decidam como se adaptar (empilhar valor, quebrar
+    # linha, etc.).
     cols = raw_width()
     if cols < NARROW:
         return LAYOUT_NARROW
@@ -125,21 +106,22 @@ def layout():
 
 
 def is_narrow():
+    # Atalho para checagens rápidas de "estou em tela estreita?".
     return layout() == LAYOUT_NARROW
 
 
 def progress_ncols():
-    """Largura para as barras do tqdm.
-
-    Antes ``_get_safe_ncols()`` no downloader.py fazia ``cols - 1`` SEM teto
-    nenhum, entao numa janela de 300 colunas a barra ocupava 299 colunas.
-    """
+    # Largura usada pelas barras de progresso do tqdm.
+    # Com teto em MAX_WIDTH: sem isso, numa janela muito larga a barra de
+    # progresso ocuparia a tela inteira.
     return max(min(raw_width() - 1, MAX_WIDTH), 20)
 
 
 # --------------------------------------------------------------------------
-# Deteccao de capacidade do terminal (cor e unicode)
+# Detecção de capacidade do terminal (cor e unicode)
 # --------------------------------------------------------------------------
+# Cache module-level: a detecção só roda uma vez por processo, não a cada
+# chamada de emit().
 _color_enabled = None
 _unicode_enabled = None
 _quiet = False
@@ -147,27 +129,24 @@ _verbose = False
 
 
 def _detect_color():
-    """Decide se e' seguro emitir sequencias ANSI.
-
-    Antes o codigo emitia ``\\033[38;2;R;G;Bm`` (truecolor) sem nenhuma
-    verificacao, entao ao redirecionar a saida (``qobuz-dl dl ... > log.txt``)
-    o arquivo ficava cheio de lixo de escape.
-    """
-    # Delega para `color._detect_color_capability()` em vez de reimplementar a
-    # regra. Antes as duas logicas viviam separadas e podiam divergir: cor
-    # ligada aqui e desligada la' (ou o contrario) produzia saida inconsistente
-    # dependendo de qual caminho tinha emitido a linha.
+    # Decide se é seguro emitir sequências ANSI de cor.
+    # Delega para color._detect_color_capability() em vez de reimplementar
+    # a regra aqui -- assim as duas partes do projeto nunca divergem sobre
+    # quando a cor deve estar ligada ou desligada (ex.: saída redirecionada
+    # para um arquivo com `> log.txt`).
     from qobuz_dl.color import _detect_color_capability
 
     return _detect_color_capability()
 
 
 def _detect_unicode():
+    # Assume unicode disponível se a codificação do stdout contiver "utf".
     enc = (getattr(sys.stdout, "encoding", None) or "").lower()
     return "utf" in enc
 
 
 def color_enabled():
+    # Getter com cache preguiçoso (lazy) para o resultado de _detect_color().
     global _color_enabled
     if _color_enabled is None:
         _color_enabled = _detect_color()
@@ -175,6 +154,7 @@ def color_enabled():
 
 
 def unicode_enabled():
+    # Getter com cache preguiçoso para o resultado de _detect_unicode().
     global _unicode_enabled
     if _unicode_enabled is None:
         _unicode_enabled = _detect_unicode()
@@ -182,7 +162,9 @@ def unicode_enabled():
 
 
 def configure(quiet=None, verbose=None, color=None, unicode=None):
-    """Ajusta o comportamento global da UI (chamado uma vez, no boot)."""
+    # Ponto único de ajuste do comportamento global da UI. Chamado uma vez,
+    # no boot da CLI, com os valores vindos dos argumentos de linha de
+    # comando. Parâmetros None são ignorados (mantêm o valor atual).
     global _quiet, _verbose, _color_enabled, _unicode_enabled
     if quiet is not None:
         _quiet = bool(quiet)
@@ -195,37 +177,43 @@ def configure(quiet=None, verbose=None, color=None, unicode=None):
 
 
 def c(code):
-    """Devolve o codigo ANSI, ou string vazia quando cor esta desligada."""
+    # Devolve o código ANSI passado, ou string vazia quando a cor está
+    # desligada. Usado em toda função de emit para envolver texto com cor
+    # sem precisar de um `if color_enabled()` em cada chamada.
     return code if color_enabled() else ""
 
 
-# Glifos com degradacao graciosa para terminais que nao sao UTF-8.
 def _glyph(fancy, plain):
+    # Escolhe entre o glifo unicode "bonito" e o equivalente ASCII simples,
+    # dependendo do suporte detectado do terminal.
     return fancy if unicode_enabled() else plain
 
 
 def heavy_bar_char():
+    # Caractere usado nas barras/separadores grossos (títulos, banners).
     return _glyph("\u2501", "=")   # ━
 
 
 def light_bar_char():
+    # Caractere usado em separadores finos.
     return _glyph("\u2500", "-")   # ─
 
 
 def block_char():
+    # Caractere usado para preencher barras de progresso proporcionais
+    # (ex.: bar_gauge no ranking de artistas).
     return _glyph("\u2588", "#")   # █
 
 
 # --------------------------------------------------------------------------
-# Saida: um unico caminho para o terminal
+# Saída: um único caminho para o terminal
 # --------------------------------------------------------------------------
 def emit(text="", end="\n"):
-    """UNICO ponto de escrita no terminal de todo o programa.
-
-    Usa ``tqdm.write`` quando o tqdm esta disponivel, para que as barras de
-    progresso ativas sejam apagadas e redesenhadas em volta da mensagem em
-    vez de serem picadas ao meio. Sempre protegido pelo lock global.
-    """
+    # ÚNICO ponto de escrita no terminal usado pelo restante do módulo (e,
+    # por extensão, por todo o programa via as funções ok/warn/error/etc.).
+    # Usa tqdm.write() quando disponível, para que barras de progresso
+    # ativas sejam apagadas e redesenhadas ao redor da mensagem em vez de
+    # serem cortadas ao meio. Respeita --quiet (não imprime nada).
     if _quiet:
         return
     with print_lock:
@@ -233,6 +221,11 @@ def emit(text="", end="\n"):
 
 
 def _write_locked(text, end):
+    # Implementação real da escrita, já dentro do print_lock.
+    # Tenta tqdm.write primeiro; se tqdm não estiver disponível, cai para
+    # print() comum; se o terminal não suportar os caracteres unicode do
+    # texto, reescreve substituindo o que não encaixa em vez de derrubar o
+    # processo com UnicodeEncodeError.
     try:
         from tqdm.rich import tqdm
 
@@ -241,8 +234,6 @@ def _write_locked(text, end):
         try:
             print(text, end=end, flush=True)
         except UnicodeEncodeError:
-            # Terminal legado (cp437/cp1252): remove o que nao encaixa em
-            # vez de derrubar o download inteiro com UnicodeEncodeError.
             enc = getattr(sys.stdout, "encoding", None) or "ascii"
             print(
                 str(text).encode(enc, errors="replace").decode(enc),
@@ -252,49 +243,29 @@ def _write_locked(text, end):
 
 
 def emit_always(text="", end="\n"):
-    """Como ``emit``, mas ignora ``--quiet`` (erros fatais, prompts)."""
+    # Igual a emit(), mas ignora --quiet. Reservado para mensagens que o
+    # usuário precisa ver mesmo em modo silencioso: erros fatais e prompts
+    # de confirmação.
     with print_lock:
         _write_locked(text, end)
 
 
 # --------------------------------------------------------------------------
-# Mensagens semanticas
+# Mensagens semânticas (linhas com tag colorida: [+], [!], [*], [-])
 # --------------------------------------------------------------------------
-# Tamanho de "[x] " -- o recuo das linhas de continuacao alinha o texto sob o
-# texto, nao sob a tag.
+# Tamanho de "[x] " -- o recuo das linhas de continuação alinha o texto sob
+# o texto da primeira linha, não sob a tag.
 _LARGURA_TAG = 4
 
 
 def _tagged(color, tag, message):
-    """Monta uma mensagem com tag, quebrada na largura do terminal.
-
-    ANTES devolvia UMA string com a mensagem inteira, sem quebra nenhuma:
-
-        return f"{c(color)}[{tag}]{c(RESET)} {message}"
-
-    Qualquer mensagem maior que o terminal estourava e o terminal quebrava
-    onde dava, cortando palavra ao meio. Era inconsistente com `detail()` e
-    `wrapped()`, que ja' quebravam -- e as funcoes de tag (`ok`, `warn`,
-    `error`, `step`, `skip`) sao as mais usadas do programa.
-
-    Caso real que isso deixava passar: o `stats` num banco vazio imprimia
-    "[!] Nenhum dado encontrado. Comece a baixar para popular as
-    estatisticas." -- 73 caracteres, estourando em qualquer terminal de 72
-    colunas ou menos, o a-Shell no iPad incluso.
-
-    DEPOIS devolve uma LISTA de linhas. Em 40 colunas:
-
-        [!] Nenhum dado encontrado. Comece a
-            baixar para popular as
-            estatisticas.
-
-    O RESET e' emitido em CADA linha de proposito: o `emit()` escreve uma
-    linha por chamada, e sem fechar a cor em cada uma ela vaza para o texto
-    seguinte.
-
-    Returns:
-        list[str]: as linhas prontas para `emit()`.
-    """
+    # Monta uma mensagem com tag colorida, já quebrada na largura do
+    # terminal, e devolve a lista de linhas prontas para emit().
+    # A quebra é necessária porque mensagens longas (ex.: avisos com
+    # instruções de instalação) estourariam a largura do terminal sem isso.
+    # RESET é emitido em CADA linha de propósito, já que emit() escreve uma
+    # linha por chamada e sem fechar a cor em cada uma ela vazaria para o
+    # texto seguinte.
     limite = max(width() - _LARGURA_TAG, 12)
     partes = _wrap_lines(message, limite)
     pad = " " * _LARGURA_TAG
@@ -305,53 +276,48 @@ def _tagged(color, tag, message):
 
 
 def _emit_tagged(color, tag, message, sempre=False):
-    """Emite cada linha de `_tagged()` separadamente."""
+    # Emite cada linha produzida por _tagged() separadamente, escolhendo
+    # entre emit() e emit_always() conforme o parâmetro `sempre`.
     escrever = emit_always if sempre else emit
     for linha in _tagged(color, tag, message):
         escrever(linha)
 
 
 def ok(message):
-    """Sucesso -- prefixo ``[+]`` verde."""
+    # Mensagem de sucesso -- prefixo "[+]" verde.
     _emit_tagged(SUCCESS, "+", message)
 
 
 def step(message):
-    """Etapa em andamento -- prefixo ``[*]`` na cor de destaque."""
+    # Mensagem de etapa em andamento -- prefixo "[*]" na cor de destaque.
     _emit_tagged(HIGHLIGHT, "*", message)
 
 
 def info(message):
-    """Informacao neutra, sem prefixo colorido."""
+    # Informação neutra, sem prefixo colorido nem quebra automática de tag.
     emit(message)
 
 
 def warn(message):
-    """Aviso -- prefixo ``[!]`` amarelo."""
+    # Mensagem de aviso -- prefixo "[!]" amarelo.
     _emit_tagged(WARNING, "!", message)
 
 
 def error(message):
-    """Erro -- prefixo ``[!]`` vermelho. Ignora ``--quiet``."""
+    # Mensagem de erro -- prefixo "[!]" vermelho. Ignora --quiet (usa
+    # emit_always) porque erro é informação que o usuário sempre precisa ver.
     _emit_tagged(ERROR, "!", message, sempre=True)
 
 
 def skip(message):
-    """Item pulado -- prefixo ``[-]`` apagado."""
+    # Item ignorado/pulado -- prefixo "[-]" na cor apagada.
     _emit_tagged(MUTED, "-", message)
 
 
 def detail(message, indent=4):
-    """Linha secundaria: hierarquia pelo RECUO, nao pela cor.
-
-    Quebra na largura do terminal em vez de estourar a linha -- dicas de uso
-    como "use qobuz-dl stats --artistas ..." passavam de 60 caracteres.
-
-    MUDANCA: antes emitia `{OFF}texto{RESET}`, e como `OFF` era `Style.DIM`
-    o texto saia esmaecido POR CIMA da cor vazada da linha anterior --
-    resultado ilegivel. Linha secundaria agora e' texto limpo: o recuo ja'
-    comunica que e' subordinada, sem custar contraste.
-    """
+    # Linha secundária: comunica hierarquia pelo RECUO, não pela cor (texto
+    # sai na cor padrão do terminal). Quebra automaticamente na largura
+    # disponível, respeitando o recuo.
     message = str(message)
     pad = " " * indent
     if len(message) + indent <= width():
@@ -362,31 +328,30 @@ def detail(message, indent=4):
 
 
 def debug(message):
-    """So' aparece com ``--verbose``."""
+    # Só aparece quando --verbose está ativo.
     if _verbose:
         emit(f"{c(MUTED)}[debug] {message}{c(RESET)}")
 
 
 def blank():
+    # Atalho para uma linha em branco.
     emit("")
 
 
 # --------------------------------------------------------------------------
-# Estrutura visual
+# Estrutura visual (regras, banners, seções, tabelas chave/valor)
 # --------------------------------------------------------------------------
 def rule(char=None, cols=None, color=HIGHLIGHT):
-    """Linha divisoria de largura total."""
+    # Linha divisória de largura total (usa a largura do terminal por
+    # padrão, ou `cols` se especificado).
     ch = char or heavy_bar_char()
     n = cols if cols is not None else width()
     emit(f"{c(color)}{ch * n}{c(RESET)}")
 
 
 def banner(title, cols=None):
-    """Titulo centralizado entre duas linhas grossas.
-
-    Padroniza os blocos que cli.py (stats), core.py (menu de playlist) e
-    retro_tagger.py desenhavam cada um a sua maneira.
-    """
+    # Título centralizado entre duas linhas grossas -- usado para
+    # destacar seções importantes (relatório de stats, menu de playlist).
     n = cols if cols is not None else width()
     bar = heavy_bar_char() * n
     emit(f"\n{c(HIGHLIGHT)}{bar}{c(RESET)}")
@@ -395,23 +360,18 @@ def banner(title, cols=None):
 
 
 def section(title):
-    """Subtitulo de bloco dentro de um relatorio."""
+    # Subtítulo de bloco dentro de um relatório maior.
     emit(f"  {c(BG)}{title}{c(RESET)}")
 
 
 def kv(label, value, label_width=30, narrow_stack=False):
-    """Par rotulo/valor, sempre dentro da largura do terminal.
-
-    Tres modos, escolhidos pela largura real disponivel:
-      * coluna alinhada (padrao em telas medias/largas);
-      * rotulo e valor empilhados, com o valor quebrado em varias linhas,
-        quando o valor nao cabe na coluna -- e' o caso de listas longas como
-        "Sample rates";
-      * ``rotulo: valor`` corrido em telas estreitas.
-
-    Antes o valor era simplesmente concatenado, entao qualquer valor longo
-    vazava para a linha seguinte sem recuo e desalinhava o bloco todo.
-    """
+    # Par rótulo/valor, sempre dentro da largura do terminal. Escolhe entre
+    # três modos conforme o espaço disponível:
+    #   1) coluna alinhada (rótulo + valor lado a lado) -- padrão em telas
+    #      médias/largas;
+    #   2) rótulo e valor empilhados, com o valor quebrado em várias linhas,
+    #      quando o valor não cabe na coluna (ex.: listas longas);
+    #   3) "rotulo: valor" corrido em telas estreitas.
     value = str(value)
     total = width()
 
@@ -423,7 +383,7 @@ def kv(label, value, label_width=30, narrow_stack=False):
             emit(f"  {c(HIGHLIGHT)}{label}:{c(RESET)} {value}")
         return
 
-    # Espaco que sobra para o valor depois de "  " + rotulo + "  ".
+    # Espaço que sobra para o valor depois de "  " + rótulo + "  ".
     room = total - 2 - label_width - 2
     if len(value) <= room:
         emit(f"  {c(HIGHLIGHT)}{label:<{label_width}}{c(RESET)}  {value}")
@@ -433,16 +393,11 @@ def kv(label, value, label_width=30, narrow_stack=False):
 
 
 def header(kind, rows):
-    """Cabecalho de operacao (album, faixa, playlist, lote de urls).
-
-    Generalizacao de ``downloader.print_download_header`` -- que era o melhor
-    padrao visual do projeto, mas vivia preso dentro do downloader e usava
-    ``\\033[1m`` hardcoded em vez das constantes de color.py.
-
-    A largura da barra acompanha o conteudo real (piso 20, teto = largura
-    utilizavel), entao em telas estreitas ela nao vaza mais para a linha
-    seguinte.
-    """
+    # Cabeçalho de operação (álbum, faixa, playlist, lote de urls): uma
+    # barra grossa, o tipo entre colchetes, e uma lista de pares
+    # rótulo/valor alinhados. A largura da barra acompanha o conteúdo real
+    # (piso 20, teto = largura utilizável), então em telas estreitas ela
+    # não vaza para a linha seguinte.
     rows = list(rows)
     label_width = max((len(label) for label, _ in rows), default=8)
 
@@ -468,12 +423,10 @@ def header(kind, rows):
 
 
 def bar_gauge(value, peak, max_blocks=None):
-    """Barrinha horizontal proporcional (usada no ranking de artistas).
-
-    ``max_blocks`` deriva da largura real do terminal quando nao e' informado,
-    em vez de usar um numero fixo -- era o que fazia o ranking de artistas
-    estourar a linha em terminais de ~72 colunas.
-    """
+    # Barrinha horizontal proporcional (ex.: ranking de artistas por
+    # quantidade de faixas). `max_blocks` é derivado da largura real do
+    # terminal quando não informado, em vez de um número fixo -- isso evita
+    # que a barra estoure a linha em terminais estreitos.
     if max_blocks is None:
         max_blocks = max(6, min(24, width() - 56))
     peak = peak or 1
@@ -482,19 +435,16 @@ def bar_gauge(value, peak, max_blocks=None):
 
 
 def _wrap_lines(text, limit):
-    """``textwrap.wrap`` com piso de largura e sempre >= 1 linha."""
+    # Wrapper fino sobre textwrap.wrap: garante um piso mínimo de largura
+    # e sempre devolve pelo menos uma linha (mesmo que vazia).
     return textwrap.wrap(str(text), width=max(int(limit), 12)) or [""]
 
 
 def wrapped(text, indent=0, cols=None):
-    """Texto corrido quebrado na largura do terminal, com recuo.
-
-    Emite RESET no inicio de CADA linha de proposito. E' o que garante que
-    texto explicativo saia sempre na cor padrao do terminal, sem herdar
-    estado de cor de quem imprimiu antes -- foi exatamente isso que deixou
-    as descricoes da tela inicial coloridas e esmaecidas. Cor aqui e'
-    ruido: quem precisa se destacar e' o comando, nao a explicacao dele.
-    """
+    # Texto corrido quebrado na largura do terminal, com recuo opcional.
+    # Emite RESET no início de CADA linha de propósito: garante que texto
+    # explicativo sempre saia na cor padrão do terminal, sem herdar cor de
+    # quem escreveu antes.
     n = (cols if cols is not None else width()) - indent
     pad = " " * indent
     for line in _wrap_lines(text, n):
@@ -502,7 +452,8 @@ def wrapped(text, indent=0, cols=None):
 
 
 def truncate(text, limit):
-    """Encurta preservando o inicio, com reticencias."""
+    # Encurta uma string preservando o início, adicionando reticências
+    # quando o limite é ultrapassado.
     text = str(text)
     if len(text) <= limit:
         return text
@@ -512,16 +463,14 @@ def truncate(text, limit):
 
 
 # --------------------------------------------------------------------------
-# Ponte com o modulo logging
+# Ponte com o módulo logging
 # --------------------------------------------------------------------------
 class TqdmLoggingHandler(logging.Handler):
-    """Handler de logging que escreve pelo ``emit()`` deste modulo.
-
-    E' isto que conserta o bug visual antigo: ``logger.info`` de core.py,
-    sync.py e sync_playlist.py agora passa pelo mesmo lock e pelo mesmo
-    ``tqdm.write`` que o downloader, em vez de escrever direto no stdout
-    por cima das barras de progresso ativas.
-    """
+    # Handler de logging que redireciona toda mensagem (logger.info,
+    # logger.warning, etc. de qualquer módulo do projeto) para emit()/
+    # emit_always() deste arquivo -- ou seja, passa a usar o mesmo lock e o
+    # mesmo tqdm.write que as barras de progresso do downloader, em vez de
+    # escrever direto no stdout por cima delas.
 
     def emit(self, record):
         try:
@@ -536,10 +485,8 @@ class TqdmLoggingHandler(logging.Handler):
 
 
 def install_logging(level=None):
-    """Troca os handlers da raiz pelo ``TqdmLoggingHandler``.
-
-    Deve ser chamado uma vez, no inicio da CLI, depois de ``configure()``.
-    """
+    # Substitui os handlers do logger raiz pelo TqdmLoggingHandler. Deve
+    # ser chamado uma vez, no início da CLI, depois de configure().
     if level is None:
         if _quiet:
             level = logging.WARNING
@@ -557,13 +504,15 @@ def install_logging(level=None):
     root.addHandler(handler)
     root.setLevel(level)
 
-    # Bibliotecas de rede sao ruidosas em DEBUG; mantem elas um nivel acima.
+    # Bibliotecas de rede são ruidosas em DEBUG; mantém elas um nível acima
+    # para não poluir a saída em --verbose.
     for noisy in ("httpx", "httpcore", "urllib3", "asyncio", "PIL"):
         logging.getLogger(noisy).setLevel(max(level, logging.WARNING))
 
     return handler
 
 
+# Define explicitamente o que é exportado por `from qobuz_dl.ui import *`.
 __all__ = [
     "ACCENT_DARK",
     "LAYOUT_MEDIUM",

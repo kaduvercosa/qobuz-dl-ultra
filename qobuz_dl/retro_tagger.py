@@ -1,3 +1,7 @@
+# # ============================================================================
+# # retro_tagger.py -- inspeção e atualização retroativa de letras na biblioteca.
+# # Fluxo: localizar IDs/metadados → consultar Qobuz → atualizar letras → relatório.
+# # ============================================================================
 import os
 import re
 import time
@@ -13,6 +17,7 @@ from qobuz_dl.color import INFO as CYAN, GREEN, WARNING as YELLOW, RED, OFF, RES
 logger = logging.getLogger(__name__)
 
 
+# # Extrai o ID Qobuz de tags FLAC/MP3 ou do comentário técnico.
 def extract_track_id(file_path: str) -> str | None:
     ext = os.path.splitext(file_path)[1].lower()
     if ext == ".flac":
@@ -52,6 +57,7 @@ def extract_track_id(file_path: str) -> str | None:
     return None
 
 
+# # Inspeciona letras embutidas e arquivos .lrc/.txt sem modificar o áudio.
 def inspect_existing_lyrics(file_path: str) -> dict:
     ext = os.path.splitext(file_path)[1].lower()
     base_name = os.path.splitext(file_path)[0]
@@ -125,6 +131,7 @@ def inspect_existing_lyrics(file_path: str) -> dict:
     }
 
 
+# # Consulta diretamente o endpoint de letras do Qobuz usando assinatura do cliente.
 async def fetch_qobuz_lyrics_raw(client, track_id, language=None):
     try:
         params = {"track_id": track_id}
@@ -164,6 +171,7 @@ async def fetch_qobuz_lyrics_raw(client, track_id, language=None):
         return None
 
 
+# # Varre a biblioteca e decide se cada faixa precisa de letra, tradução ou correção.
 async def process_retroactive_lyrics_async(
     directory_path, client, genius_token=None, settings=None
 ):
@@ -181,6 +189,7 @@ async def process_retroactive_lyrics_async(
 
     engine = LyricsEngine(genius_token=genius_token)
 
+    # # Reúne primeiro todos os arquivos para ordenar o processamento e calcular o total.
     files_to_check = []
     for root, _, files in os.walk(directory_path):
         for f in files:
@@ -189,7 +198,9 @@ async def process_retroactive_lyrics_async(
 
     files_to_check.sort()
 
+    # # Guarda uma linha detalhada por arquivo para auditoria das alterações.
     report_items = []
+    # # Contadores usados no relatório final; cada caminho de decisão incrementa um deles.
     stats = {
         "total": len(files_to_check),
         "updated_new_original": 0,
@@ -231,9 +242,11 @@ async def process_retroactive_lyrics_async(
         if not title:
             title = os.path.splitext(file_name)[0]
 
+    # # IDs gravados pelo downloader são confiáveis; busca textual é usada apenas como fallback.
         track_id = extract_track_id(file_path)
         track_id_is_trusted = bool(track_id)
 
+    # # Match textual de segurança: evita abortar quando arquivos antigos não possuem Qobuz ID.
         if not track_id and client:
             try:
                 search_query = f"{artist} {title}".strip()
@@ -254,6 +267,7 @@ async def process_retroactive_lyrics_async(
             except Exception as e:
                 logger.debug(f"Falha ao casar faixa por busca textual: {e}")
 
+    # # Estado atual: presença, idioma e se a letra já é bilíngue.
         lyrics_state = inspect_existing_lyrics(file_path)
         has_lyrics = lyrics_state["has_lyrics"]
         is_bilingual = lyrics_state["is_bilingual"]
@@ -263,6 +277,7 @@ async def process_retroactive_lyrics_async(
         id_display = f"[Track ID: {track_id}]" if track_id else "[Sem Track ID]"
         print(f"{CYAN}› Analisando:{RESET} {display_name} {id_display}")
 
+    # # Mantém original e tradução separados para decidir com segurança o tipo de atualização.
         qobuz_orig_json = None
         qobuz_trans_block = None
 
@@ -280,8 +295,10 @@ async def process_retroactive_lyrics_async(
         if qobuz_orig_json and isinstance(qobuz_orig_json, dict):
             orig_block = qobuz_orig_json.get("original", {})
             orig_lang = str(orig_block.get("lang", "")).lower()
+            lines = orig_block.get("lines", [])
+            qobuz_has_sync = any(line.get("start") is not None for line in lines)
+            upgrade_to_sync = qobuz_has_sync and has_lyrics and not lyrics_state["lrc_exists"]
 
-            # Verificação com segurança anti-erro (caso target_lang seja None)
             if target_lang and orig_lang == target_lang.lower():
                 expected_lang = target_lang.lower()
                 if not has_lyrics:
@@ -306,7 +323,8 @@ async def process_retroactive_lyrics_async(
                 elif (
                     not existing_lang or
                     existing_lang == "unknown" or
-                    existing_lang != expected_lang
+                    existing_lang != expected_lang or
+                    upgrade_to_sync
                 ) and track_id_is_trusted:
                     engine.fetch_and_inject(
                         file_path=file_path,
@@ -318,15 +336,26 @@ async def process_retroactive_lyrics_async(
                         qobuz_lyrics_response=qobuz_orig_json,
                         qobuz_translation_response=None,
                     )
-                    stats["updated_new_pt"] += 1
-                    stats["corrected_wrong_language"] += 1
-                    report_items.append(
-                        (
-                            display_name,
-                            "CORRIGIDO",
-                            "Letra nativa do Qobuz sobrescreveu a existente (Fallback/Idioma diferente)",
+
+                    if upgrade_to_sync:
+                        stats["updated_new_pt"] += 1
+                        report_items.append(
+                            (
+                                display_name,
+                                "UPGRADE -> SYNC",
+                                "Letra￼ ￼em texto simples substituída por versão sincronizada do Qobuz",
+                            )
                         )
-                    )
+                    else:
+                        stats["updated_new_pt"] += 1
+                        stats["corrected_wrong_language"] += 1
+                        report_items.append(
+                            (
+                                display_name,
+                                "CORRIGIDO",
+                                "Letra nativa do Qobuz sobrescreveu a existente (Fallback/Idioma diferente)",
+                            )
+                        )
                 else:
                     stats["unchanged_already_pt"] += 1
                     report_items.append(
@@ -358,7 +387,8 @@ async def process_retroactive_lyrics_async(
                 elif (
                     not existing_lang or
                     existing_lang == "unknown" or
-                    existing_lang != expected_lang
+                    existing_lang != expected_lang or
+                    upgrade_to_sync
                 ) and track_id_is_trusted:
                     engine.fetch_and_inject(
                         file_path=file_path,
@@ -370,15 +400,26 @@ async def process_retroactive_lyrics_async(
                         qobuz_lyrics_response=qobuz_orig_json,
                         qobuz_translation_response=None,
                     )
-                    stats["updated_new_original"] += 1
-                    stats["corrected_wrong_language"] += 1
-                    report_items.append(
-                        (
-                            display_name,
-                            "CORRIGIDO",
-                            "Letra original do Qobuz sobrescreveu a existente (Fallback/Idioma diferente)",
+
+                    if upgrade_to_sync:
+                        stats["updated_new_original"] += 1
+                        report_items.append(
+                            (
+                                display_name,
+                                "UPGRADE -> SYNC",
+                                "Letra em texto simples substituída por versão sincronizada original do Qobuz",
+                            )
                         )
-                    )
+                    else:
+                        stats["updated_new_original"] += 1
+                        stats["corrected_wrong_language"] += 1
+                        report_items.append(
+                            (
+                                display_name,
+                                "CORRIGIDO",
+                                "Letra original do Qobuz sobrescreveu a existente (Fallback/Idioma diferente)",
+                            )
+                        )
                 else:
                     stats["unchanged_no_trans_yet"] += 1
                     report_items.append(
@@ -414,7 +455,8 @@ async def process_retroactive_lyrics_async(
                 elif (
                     not existing_lang or
                     existing_lang == "unknown" or
-                    existing_lang != expected_lang
+                    existing_lang != expected_lang or
+                    upgrade_to_sync
                 ) and track_id_is_trusted:
                     engine.fetch_and_inject(
                         file_path=file_path,
@@ -426,15 +468,26 @@ async def process_retroactive_lyrics_async(
                         qobuz_lyrics_response=qobuz_orig_json,
                         qobuz_translation_response=qobuz_trans_block,
                     )
-                    stats["updated_to_bilingual"] += 1
-                    stats["corrected_wrong_language"] += 1
-                    report_items.append(
-                        (
-                            display_name,
-                            "CORRIGIDO -> BILÍNGUE",
-                            "Letra do Qobuz sobrescreveu a existente (Fallback/Idioma diferente)",
+
+                    if upgrade_to_sync:
+                        stats["updated_to_bilingual"] += 1
+                        report_items.append(
+                            (
+                                display_name,
+                                "UPGRADE -> SYNC BILÍNGUE",
+                                "Letra em texto substituída por versão sincronizada (Original + Tradução)",
+                            )
                         )
-                    )
+                    else:
+                        stats["updated_to_bilingual"] += 1
+                        stats["corrected_wrong_language"] += 1
+                        report_items.append(
+                            (
+                                display_name,
+                                "CORRIGIDO -> BILÍNGUE",
+                                "Letra do Qobuz sobrescreveu a existente (Fallback/Idioma diferente)",
+                            )
+                        )
 
                 elif not is_bilingual and track_id_is_trusted:
                     engine.fetch_and_inject(
@@ -536,6 +589,7 @@ async def process_retroactive_lyrics_async(
         print(f" {color}{prefix} {name}{OFF}")
         print(f"     Status: {color}{status}{RESET} ➔ {desc}\n")
 
+    # # Soma somente operações que alteraram ou inseriram letras.
     total_updates = (
         stats["updated_new_original"] +
         stats["updated_new_pt"] +
@@ -574,6 +628,7 @@ async def process_retroactive_lyrics_async(
     print(f"{'=' * 75}\n")
 
 
+# # Entrada pública: resolve a pasta configurada e inicia o processamento retroativo.
 async def inject_lyrics_retroactively(
     directory_path=None, client=None, genius_token=None, settings=None
 ):
@@ -595,6 +650,7 @@ async def inject_lyrics_retroactively(
 
     directory_path = os.path.expanduser(directory_path)
 
+    # # Não cria uma biblioteca vazia automaticamente: informa o usuário e encerra.
     if not os.path.isdir(directory_path):
         print(
             f"{RED}[!] Erro: O diretório de downloads configurado não existe: '{directory_path}'{OFF}"

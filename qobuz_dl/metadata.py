@@ -1,3 +1,8 @@
+# # ============================================================================
+# # metadata.py -- normalização, tagging, arte e informações de áudio.
+# # Fluxo principal: _get_tags_to_add() cria tags; tag_flac()/tag_mp3() grava-as.
+# # Também cuida de capas embutidas, gêneros, IDs Qobuz, ReplayGain e tags clássicas.
+# # ============================================================================
 import re
 import os
 import io
@@ -14,12 +19,11 @@ from qobuz_dl.utils import get_album_artist
 logger = logging.getLogger(__name__)
 
 
-# unicode symbols
 COPYRIGHT, PHON_COPYRIGHT = "\u2117", "\u00a9"
-# if a metadata block exceeds this, mutagen will raise error
-# and the file won't be tagged
+# # Limite máximo de um bloco de metadados FLAC: 0xFFFFFF bytes.
 FLAC_MAX_BLOCKSIZE = 16777215
 
+# # Limite máximo de um bloco de metadados FLAC: 0xFFFFFF bytes.
 ID3_LEGEND = {
     "albumartist": id3.TPE2,
     "album": id3.TALB,
@@ -37,14 +41,11 @@ ID3_LEGEND = {
     "comment": id3.COMM,
     "year": id3.TYER,
     "performer": id3.TOPE,
-    # --- DB SYNC FEATURE: CUSTOM QOBUZ IDS ---
     "QOBUZ TRACK ID": id3.TXXX,
     "QOBUZ ALBUM ID": id3.TXXX,
     "QOBUZ ALBUM URL": id3.TXXX,
-    # --- REPLAYGAIN ---
     "replaygain_track_gain": id3.TXXX,
     "replaygain_track_peak": id3.TXXX,
-    # --- CLASSICAL MUSIC ---
     "conductor": id3.TPE3,
     "ensemble": id3.TXXX,
     "work": id3.TIT1,
@@ -52,6 +53,7 @@ ID3_LEGEND = {
 
 EMB_COVER_NAME = "embed_cover.jpg"
 
+# # Limite máximo de um bloco de metadados FLAC: 0xFFFFFF bytes.
 LOCAL_GENRE_MAP = {
     "Électronique": "Electronic",
     "Ambiance": "Ambient",
@@ -82,6 +84,7 @@ LOCAL_GENRE_MAP = {
 }
 
 
+# # Move artigos iniciais para o final: "The Beatles" -> "Beatles, The".
 def _make_sort_name(name) -> str:
     """
     Deriva o nome de ordenacao movendo artigos iniciais pro fim.
@@ -91,7 +94,6 @@ def _make_sort_name(name) -> str:
     if not name:
         return ""
 
-    # Se for uma lista enviada pelo Qobuz, processa cada artista e junta
     if isinstance(name, list):
         return ", ".join(_make_sort_name(n) for n in name if n)
 
@@ -125,6 +127,7 @@ def _make_sort_name(name) -> str:
     return name
 
 
+# # Acrescenta a versão sem duplicá-la quando ela já faz parte do título.
 def _get_title_with_version(title: str = "", version: str = "") -> str:
     item_title = title
     if version:
@@ -134,6 +137,7 @@ def _get_title_with_version(title: str = "", version: str = "") -> str:
     return item_title
 
 
+# # Monta o título de uma faixa, incluindo versão e obra clássica quando existir.
 def _get_title(track_dict):
     title = track_dict["title"]
     version = track_dict.get("version")
@@ -145,6 +149,7 @@ def _get_title(track_dict):
     return title
 
 
+# # Converte marcadores (P)/(C) nos símbolos Unicode usados nas tags.
 def _format_copyright(s: str) -> str:
     if s:
         s = s.replace("(P)", PHON_COPYRIGHT)
@@ -152,6 +157,7 @@ def _format_copyright(s: str) -> str:
     return s
 
 
+# # Remove caminhos/setas de gênero e elimina gêneros repetidos.
 def _format_genres(genres: list) -> str:
     genres = re.findall(r"([^\u2192\/]+)", "/".join(genres))
     no_repeats = []
@@ -159,6 +165,7 @@ def _format_genres(genres: list) -> str:
     return ", ".join(no_repeats)
 
 
+# # Procura a imagem temporária de embed na pasta atual e na pasta pai.
 def _get_cover_path(root_dir, override=None):
     """
     Auxiliary function to locate the embedded cover art path.
@@ -176,6 +183,7 @@ def _get_cover_path(root_dir, override=None):
     return None
 
 
+# # Normaliza nomes para comparação de duplicidade sem diferença de acentos/caixa.
 def _normalize_name(name) -> str:
     """Removes accents, invisible spaces, and converts to lowercase for strict duplicate checking."""
     if isinstance(name, list):
@@ -189,6 +197,7 @@ def _normalize_name(name) -> str:
     )
 
 
+# # Recompacta a capa em memória para respeitar o limite do bloco FLAC.
 def _shrink_image_to_fit(image_path, max_bytes):
     """
     Recompacta/redimensiona uma imagem ate' caber em max_bytes, priorizando
@@ -221,15 +230,12 @@ def _shrink_image_to_fit(image_path, max_bytes):
             if src.mode not in ("RGB", "L"):
                 src = src.convert("RGB")
 
-            # Fase 1: mesma resolucao, so' reduz qualidade de compressao.
             for quality in (95, 90, 85, 80, 75, 70, 60, 50):
                 buf = io.BytesIO()
                 src.save(buf, format="JPEG", quality=quality, optimize=True)
                 if buf.tell() <= max_bytes:
                     return buf.getvalue()
 
-            # Fase 2: nao coube so' reduzindo qualidade (imagem com
-            # resolucao muito alta) -- reduz as dimensoes tambem.
             width, height = src.size
             scale = 0.9
             while scale > 0.19:
@@ -247,6 +253,7 @@ def _shrink_image_to_fit(image_path, max_bytes):
         return None
 
 
+# # Embute a capa no FLAC; se necessário, usa uma cópia recompactada sem alterar cover.jpg.
 def _embed_flac_img(root_dir, audio: FLAC, cover_override=None):
     cover_image = _get_cover_path(root_dir, override=cover_override)
 
@@ -258,11 +265,8 @@ def _embed_flac_img(root_dir, audio: FLAC, cover_override=None):
         original_size = os.path.getsize(cover_image)
         image_data = None
 
+    # # O arquivo salvo continua original; somente os bytes enviados ao embed são reduzidos.
         if original_size > FLAC_MAX_BLOCKSIZE:
-            # A capa "org" excedeu o limite fisico de 24 bits do bloco de
-            # metadados do FLAC (16.777.215 bytes) -- NAO mexe no arquivo
-            # salvo em disco (continua em qualidade original), so'
-            # recompacta em memoria a copia que vai ser embutida.
             logger.info(
                 f"Capa ({humanize.naturalsize(original_size, binary=True)}) excede o limite de "
                 f"16MB de embed do FLAC -- recompactando so' o suficiente pra caber "
@@ -289,6 +293,7 @@ def _embed_flac_img(root_dir, audio: FLAC, cover_override=None):
         logger.error(f"Error embedding image: {e}", exc_info=True)
 
 
+# # Adiciona a capa como frame APIC no ID3 do MP3.
 def _embed_id3_img(root_dir, audio: id3.ID3, cover_override=None):
     cover_image = _get_cover_path(root_dir, override=cover_override)
 
@@ -300,6 +305,7 @@ def _embed_id3_img(root_dir, audio: id3.ID3, cover_override=None):
         audio.add(id3.APIC(3, "image/jpeg", 3, "", cover.read()))
 
 
+# # Aplica tags Vorbis, comentário técnico, capa e salva o FLAC final.
 def tag_flac(
     filename,
     root_dir,
@@ -321,6 +327,7 @@ def tag_flac(
         qobuz_item = d
         qobuz_album = album
 
+    # # Centraliza a montagem para manter FLAC e MP3 com o mesmo conteúdo lógico.
     tags = _get_tags_to_add(
         qobuz_album, qobuz_item, settings=settings, musicbrainz_ids=musicbrainz_ids
     )
@@ -334,7 +341,6 @@ def tag_flac(
     if not settings.no_disc_total_tag:
         tags["DISCTOTAL"] = str(qobuz_album.get("media_count", "1"))
 
-    # --- RICH COMMENT TAG INJECTION ---
     _bit = qobuz_item.get("maximum_bit_depth", 16)
     _rate = qobuz_item.get("maximum_sampling_rate", 44.1)
 
@@ -361,6 +367,7 @@ def tag_flac(
 
     _trk_id = qobuz_item.get("id", "?")
 
+    # # Comentário legível com qualidade, canais, duração, tipo, data e ID Qobuz.
     base_comment = (
         f"Qobuz | {_bit}b/{_rate}kHz | {_channels} | HiRes: {_hires}"
         f" | Duração: {_duration} | Tipo: {_rtype}"
@@ -377,6 +384,7 @@ def tag_flac(
 
     tags["COMMENT"] = base_comment
 
+    # # Só grava valores preenchidos; multi_value_tags troca separadores por " ; ".
     for k, v in tags.items():
         if v:
             if (
@@ -410,6 +418,7 @@ def tag_flac(
     os.rename(filename, final_name)
 
 
+# # Aplica frames ID3, comentário técnico, capa e salva o MP3 final.
 def tag_mp3(
     filename,
     root_dir,
@@ -434,11 +443,11 @@ def tag_mp3(
         qobuz_item = d
         qobuz_album = album
 
+    # # Centraliza a montagem para manter FLAC e MP3 com o mesmo conteúdo lógico.
     tags = _get_tags_to_add(
         qobuz_album, qobuz_item, settings=settings, musicbrainz_ids=musicbrainz_ids
     )
 
-    # --- RICH COMMENT TAG INJECTION ---
     _bit = qobuz_item.get("maximum_bit_depth", 16)
     _rate = qobuz_item.get("maximum_sampling_rate", 44.1)
 
@@ -465,6 +474,7 @@ def tag_mp3(
 
     _trk_id = qobuz_item.get("id", "?")
 
+    # # Comentário legível com qualidade, canais, duração, tipo, data e ID Qobuz.
     base_comment = (
         f"Qobuz | {_bit}b/{_rate}kHz | {_channels} | HiRes: {_hires}"
         f" | Duração: {_duration} | Tipo: {_rtype}"
@@ -481,6 +491,7 @@ def tag_mp3(
 
     tags["COMMENT"] = base_comment
 
+    # # Só grava valores preenchidos; multi_value_tags troca separadores por " ; ".
     for k, v in tags.items():
         if v:
             if (
@@ -510,6 +521,7 @@ def tag_mp3(
 
     _trck_n = qobuz_item.get("track_number", "1")
     _trck_total = qobuz_album.get("tracks_count", "1")
+    # # TRCK/TPOS usam o formato número/total reconhecido por players.
     audio["TRCK"] = id3.TRCK(encoding=3, text=f"{_trck_n}/{_trck_total}")
 
     _tpos_n = qobuz_item.get("media_number", "1")
@@ -526,7 +538,8 @@ def tag_mp3(
     os.rename(filename, final_name)
 
 
-def _get_tags_to_add(  # noqa: C901
+# # Constrói o dicionário unificado de tags a partir dos metadados Qobuz.
+def _get_tags_to_add(
     qobuz_album: dict,
     qobuz_item: dict,
     settings: QobuzDLSettings = None,
@@ -536,7 +549,6 @@ def _get_tags_to_add(  # noqa: C901
     if not qobuz_album or not qobuz_item:
         return tags
 
-    # Basic Information
     if not settings.no_album_title_tag:
         tags["ALBUM"] = _get_title_with_version(
             title=qobuz_album.get("title", ""), version=qobuz_album.get("version", "")
@@ -546,12 +558,12 @@ def _get_tags_to_add(  # noqa: C901
             title=qobuz_item.get("title", ""), version=qobuz_item.get("version", "")
         )
 
-    # Artist Information
     if not settings.no_album_artist_tag:
         _albumartist_val = get_album_artist(qobuz_album)
         tags["ALBUMARTIST"] = _albumartist_val
         tags["ALBUMARTISTSORT"] = _make_sort_name(_albumartist_val)
 
+    # # Deduplica artistas por nome normalizado e preserva a ordem recebida.
     if not settings.no_track_artist_tag:
         artists = []
         seen_artists = set()
@@ -568,7 +580,6 @@ def _get_tags_to_add(  # noqa: C901
             "name", ""
         ) or qobuz_album.get("artist", {}).get("name", "")
 
-        # Split just in case Qobuz sent a pre-merged string like "Jão, Danna Paola"
         if main_artist_raw:
             for part in main_artist_raw.split(","):
                 add_unique_artist(part.strip())
@@ -619,11 +630,11 @@ def _get_tags_to_add(  # noqa: C901
         else:
             tags["COMPOSER"] = ""
 
-    # Release Information
     release_date = qobuz_album.get("release_date_original", "")
     if not settings.no_release_date_tag:
         tags["DATE"] = release_date
     if not settings.no_genre_tag:
+        # # Substitui o gênero principal pelo equivalente LOCAL_GENRE_MAP antes de juntar a lista.
         raw_main_genre = qobuz_album.get("genre", {}).get("name")
         main_genre = (
             LOCAL_GENRE_MAP.get(raw_main_genre, raw_main_genre)
@@ -659,7 +670,6 @@ def _get_tags_to_add(  # noqa: C901
     if not settings.no_upc_tag:
         tags["BARCODE"] = qobuz_album.get("upc", "")
 
-    # Media Information
     if not settings.no_media_type_tag:
         tags["MEDIATYPE"] = qobuz_album.get("product_type", "").upper()
     if not settings.no_explicit_tag:
@@ -667,12 +677,10 @@ def _get_tags_to_add(  # noqa: C901
             "1" if qobuz_item.get("parental_warning", False) else ""
         )
 
-    # --- COMPILATION TAG ---
     release_type = qobuz_album.get("release_type", "") or ""
     if release_type.lower() == "compilation":
         tags["COMPILATION"] = "1"
 
-    # --- REPLAYGAIN TAGS ---
     if not getattr(settings, "no_replaygain_tag", False):
         audio_info = qobuz_item.get("audio_info", {})
         if audio_info:
@@ -691,7 +699,6 @@ def _get_tags_to_add(  # noqa: C901
             if rg_album_peak is not None:
                 tags["REPLAYGAIN_ALBUM_PEAK"] = str(rg_album_peak)
 
-    # --- CLASSICAL MUSIC TAGS ---
     work = qobuz_item.get("work")
     if work and not getattr(settings, "no_work_tag", False):
         tags["WORK"] = work
@@ -717,7 +724,7 @@ def _get_tags_to_add(  # noqa: C901
     if ensembles and not getattr(settings, "no_ensemble_tag", False):
         tags["ENSEMBLE"] = ensembles if len(ensembles) > 1 else ensembles[0]
 
-    # --- DB SYNC FEATURE: SAVE QOBUZ IDS ---
+    # # IDs são persistidos para sincronização posterior com o banco de dados.
     track_id = qobuz_item.get("id")
     if track_id:
         tags["QOBUZTRACKID"] = str(track_id)
@@ -726,7 +733,6 @@ def _get_tags_to_add(  # noqa: C901
     if album_id:
         tags["QOBUZALBUMID"] = str(album_id)
 
-    # --- DIRECT ALBUM URL TAGGING ---
     if not getattr(settings, "no_album_url_tag", False):
         if album_id:
             raw_title = str(qobuz_album.get("title", "album"))
