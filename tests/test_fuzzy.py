@@ -119,8 +119,11 @@ def test_cli_importa_sem_rapidfuzz(monkeypatch):
         if mod.startswith(("rapidfuzz", "qobuz_dl")):
             del sys.modules[mod]
 
-    real_import = __builtins__["__import__"] if isinstance(
-        __builtins__, dict) else __builtins__.__import__
+    real_import = (
+        __builtins__["__import__"]
+        if isinstance(__builtins__, dict)
+        else __builtins__.__import__
+    )
 
     def import_bloqueado(nome, *args, **kwargs):
         if nome.startswith("rapidfuzz"):

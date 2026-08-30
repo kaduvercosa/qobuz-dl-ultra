@@ -31,7 +31,8 @@ async def sync_database(directory, db_path, client):
         client (Client): The initialized Qobuz API client for fallback ISRC lookups.
     """
     logger.info(
-        f"\n{YELLOW}[*] Iniciando Sincronização do Banco de Dados Local...{OFF}")
+        f"\n{YELLOW}[*] Iniciando Sincronização do Banco de Dados Local...{OFF}"
+    )
     logger.info(f"{YELLOW}[*] Escaneando diretório: {directory}{OFF}")
 
     # # Caminho absoluto evita problemas com nomes contendo colchetes ou variação de maiúsculas.
@@ -43,7 +44,8 @@ async def sync_database(directory, db_path, client):
 
     if not all_files:
         logger.info(
-            f"{YELLOW}[!] Nenhum arquivo de áudio encontrado em {directory}.{OFF}")
+            f"{YELLOW}[!] Nenhum arquivo de áudio encontrado em {directory}.{OFF}"
+        )
         return
 
     logger.info(
@@ -71,7 +73,7 @@ async def sync_database(directory, db_path, client):
                 if file_path.lower().endswith(".flac"):
                     audio = FLAC(file_path)
 
-            # # Tenta primeiro a tag nova (QDL_*); cai para a tag legada (QOBUZ*) se ausente.
+                    # # Tenta primeiro a tag nova (QDL_*); cai para a tag legada (QOBUZ*) se ausente.
                     track_id_list = (
                         audio.get("QDL_TRACK_ID") or audio.get("QOBUZTRACKID") or [None]
                     )
@@ -84,30 +86,34 @@ async def sync_database(directory, db_path, client):
 
                     isrc = audio.get("isrc", [None])[0]
 
-                    artist_name = (audio.get("ALBUMARTIST") or
-                                   audio.get("ARTIST") or [""])[0]
+                    artist_name = (
+                        audio.get("ALBUMARTIST") or audio.get("ARTIST") or [""]
+                    )[0]
                     album_name = audio.get("ALBUM", [""])[0]
                     release_date = audio.get("DATE", [""])[0]
                     bit_depth = getattr(audio.info, "bits_per_sample", 16)
-                    sampling_rate = getattr(audio.info, "sample_rate", 44100) / \
-                        1000.0 if getattr(audio.info, "sample_rate", None) else None
+                    sampling_rate = (
+                        getattr(audio.info, "sample_rate", 44100) / 1000.0
+                        if getattr(audio.info, "sample_rate", None)
+                        else None
+                    )
 
                 elif file_path.lower().endswith(".mp3"):
                     audio = ID3(file_path)
 
-            # # Mesma hierarquia de busca do FLAC, adaptada aos frames TXXX do MP3.
+                    # # Mesma hierarquia de busca do FLAC, adaptada aos frames TXXX do MP3.
                     track_txxx = (
-                        audio.get("TXXX:QDL_TRACK_ID") or
-                        audio.get("TXXX:qdl_track_id") or
-                        audio.get("TXXX:QOBUZTRACKID")
+                        audio.get("TXXX:QDL_TRACK_ID")
+                        or audio.get("TXXX:qdl_track_id")
+                        or audio.get("TXXX:QOBUZTRACKID")
                     )
                     if track_txxx:
                         track_id = track_txxx.text[0]
 
                     album_txxx = (
-                        audio.get("TXXX:QDL_ALBUM_ID") or
-                        audio.get("TXXX:qdl_album_id") or
-                        audio.get("TXXX:QOBUZALBUMID")
+                        audio.get("TXXX:QDL_ALBUM_ID")
+                        or audio.get("TXXX:qdl_album_id")
+                        or audio.get("TXXX:QOBUZALBUMID")
                     )
                     if album_txxx:
                         album_id = album_txxx.text[0]
@@ -121,15 +127,19 @@ async def sync_database(directory, db_path, client):
                     talb = audio.get("TALB")
                     tdrc = audio.get("TDRC") or audio.get("TYER")
 
-                    artist_name = tpe2.text[0] if tpe2 else (
-                        tpe1.text[0] if tpe1 else "")
+                    artist_name = (
+                        tpe2.text[0] if tpe2 else (tpe1.text[0] if tpe1 else "")
+                    )
                     album_name = talb.text[0] if talb else ""
                     release_date = str(tdrc.text[0]) if tdrc else ""
                     bit_depth = 16
-                    sampling_rate = getattr(audio.info, "sample_rate", 44100) / \
-                        1000.0 if getattr(audio.info, "sample_rate", None) else None
+                    sampling_rate = (
+                        getattr(audio.info, "sample_rate", 44100) / 1000.0
+                        if getattr(audio.info, "sample_rate", None)
+                        else None
+                    )
 
-        # # Arquivos antigos sem ID embutido são recuperados via busca por ISRC na API.
+                # # Arquivos antigos sem ID embutido são recuperados via busca por ISRC na API.
                 if not track_id and isrc:
                     logger.info(
                         f"{CYAN}[*] ID local ausente. Buscando via API (ISRC: {isrc})...{OFF}"
@@ -146,15 +156,17 @@ async def sync_database(directory, db_path, client):
                             album_name = q_track.get("album", {}).get("title", "")
                         if not release_date:
                             release_date = q_track.get("album", {}).get(
-                                "release_date_original", "")
+                                "release_date_original", ""
+                            )
                         bit_depth = q_track.get("maximum_bit_depth", bit_depth)
                         sampling_rate = q_track.get(
-                            "maximum_sampling_rate", sampling_rate)
+                            "maximum_sampling_rate", sampling_rate
+                        )
 
-        # # Pequeno intervalo entre chamadas para não sobrecarregar a API durante a varredura.
+                    # # Pequeno intervalo entre chamadas para não sobrecarregar a API durante a varredura.
                     await asyncio.sleep(0.2)
 
-        # # Registra a faixa como já obtida, evitando que o downloader tente buscá-la de novo.
+                # # Registra a faixa como já obtida, evitando que o downloader tente buscá-la de novo.
                 if track_id:
                     await handle_download_id(
                         db_path=db_path,
@@ -173,7 +185,7 @@ async def sync_database(directory, db_path, client):
                     )
                     added_tracks += 1
 
-        # # Evita gravar o mesmo álbum mais de uma vez ao processar várias faixas dele.
+                # # Evita gravar o mesmo álbum mais de uma vez ao processar várias faixas dele.
                 if album_id and album_id not in added_albums:
                     await handle_download_id(
                         db_path=db_path,
@@ -204,7 +216,8 @@ async def sync_database(directory, db_path, client):
         )
 
     logger.info(
-        f"{GREEN}[+] Sincronização concluída! Restauradas {added_tracks} faixas e {len(added_albums)} álbuns no banco de dados local com metadados completos.{OFF}")
+        f"{GREEN}[+] Sincronização concluída! Restauradas {added_tracks} faixas e {len(added_albums)} álbuns no banco de dados local com metadados completos.{OFF}"
+    )
 
 
 # # Prioriza Chromaprint; sem ele, cai em MD5 de áudio, depois ID/ISRC, depois metadados.
@@ -230,7 +243,7 @@ def _compute_fingerprint(filepath, max_length=120):
                 audio_flac = FLAC(filepath)
                 duration = int(audio_flac.info.length)
 
-            # # MD5 nativo do FLAC identifica áudio idêntico mesmo com tags diferentes.
+                # # MD5 nativo do FLAC identifica áudio idêntico mesmo com tags diferentes.
                 if getattr(audio_flac.info, "md5_signature", 0) != 0:
                     return duration, f"flac_audio_md5:{audio_flac.info.md5_signature}"
 

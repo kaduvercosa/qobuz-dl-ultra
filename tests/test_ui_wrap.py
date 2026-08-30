@@ -29,9 +29,7 @@ from qobuz_dl import ui
 ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 
 # Mensagem real do programa que causou a descoberta do bug.
-MENSAGEM_REAL = (
-    "Nenhum dado encontrado. Comece a baixar para popular as estatísticas."
-)
+MENSAGEM_REAL = "Nenhum dado encontrado. Comece a baixar para popular as estatísticas."
 
 MENSAGENS = [
     MENSAGEM_REAL,
@@ -67,7 +65,9 @@ def test_nenhuma_linha_estoura(funcao, mensagem, colunas, monkeypatch):
     linhas = _capturar(funcao, mensagem, colunas, monkeypatch)
 
     estouros = [
-        f"{len(linha)} de {colunas}: {linha!r}" for linha in linhas if len(linha) > colunas
+        f"{len(linha)} de {colunas}: {linha!r}"
+        for linha in linhas
+        if len(linha) > colunas
     ]
     # A palavra unica gigante nao pode ser quebrada sem hifenizar; o textwrap
     # a deixa passar de proposito, e forcar corte no meio da palavra seria pior.

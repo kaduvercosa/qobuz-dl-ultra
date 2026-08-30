@@ -43,9 +43,7 @@ class TestFonteDeVerdadeUnica:
         ali, as duas listas voltam a poder divergir em silencio."""
         texto = (RAIZ / "setup.py").read_text(encoding="utf-8")
         codigo = "\n".join(
-            linha
-            for linha in texto.splitlines()
-            if not linha.strip().startswith("#")
+            linha for linha in texto.splitlines() if not linha.strip().startswith("#")
         )
         # Ignora a docstring, que MENCIONA install_requires ao explicar o
         # historico -- so' o codigo executavel importa aqui.
@@ -76,8 +74,9 @@ class TestNucleoInstalavelEmAmbienteRestrito:
     EXCECAO_JUSTIFICADA = {"cryptography"}
 
     def test_sem_pacote_compilado_desnecessario_no_nucleo(self, meta):
-        nomes = {re.split(r"[<>=!\[; ]", d)[0].strip().lower()
-                 for d in meta["dependencies"]}
+        nomes = {
+            re.split(r"[<>=!\[; ]", d)[0].strip().lower() for d in meta["dependencies"]
+        }
         infratores = (nomes & self.COMPILADOS) - self.EXCECAO_JUSTIFICADA
         assert not infratores, (
             f"pacote compilado voltou pro nucleo: {sorted(infratores)}. "
@@ -113,8 +112,9 @@ class TestExtras:
             assert nome in declarado, f"extra '{nome}' faltando no [all]"
 
     def test_features_opcionais_nao_estao_no_nucleo(self, meta):
-        nucleo = {re.split(r"[<>=!\[; ]", d)[0].strip().lower()
-                  for d in meta["dependencies"]}
+        nucleo = {
+            re.split(r"[<>=!\[; ]", d)[0].strip().lower() for d in meta["dependencies"]
+        }
         for pkg in ("pillow", "watchdog", "pyacoustid", "rapidfuzz", "lyricsgenius"):
             assert pkg not in nucleo
 
@@ -156,7 +156,8 @@ class TestImportsDoNucleoSaoDeclarados:
 
     def test_lyricsgenius_declarado_como_extra(self, meta):
         usa = any(
-            "lyricsgenius" in p.read_text(encoding="utf-8") for p in PACOTE.rglob("*.py")
+            "lyricsgenius" in p.read_text(encoding="utf-8")
+            for p in PACOTE.rglob("*.py")
         )
         if not usa:
             pytest.skip("o codigo nao usa mais lyricsgenius")

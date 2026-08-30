@@ -81,7 +81,8 @@ class Bundle:
                 # DICA DE MANUTENÇÃO: Se disparar este erro, o Qobuz mudou a estrutura
                 # do link da tag <script> no HTML da página de login.
                 raise NotImplementedError(
-                    "URL do Bundle não encontrada no HTML de login")
+                    "URL do Bundle não encontrada no HTML de login"
+                )
 
             bundle_url = bundle_url_match.group(1)
 

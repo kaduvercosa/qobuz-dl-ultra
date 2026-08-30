@@ -46,6 +46,26 @@
 #   pra evitar que todos os cabeçalhos de progresso apareçam ao mesmo tempo,
 #   e então chama download_from_id(). Se for mexer no paralelismo, mexer
 #   nos 3 lugares.
+#
+# CHANGELOG desta revisão (melhorias de uso em iPad/celular + correções):
+#   - _tui_select(): + atalhos j/k (equivalentes a ↑/↓), esc (equivalente a
+#     Ctrl+C), pageup/pagedown (pula 10 itens), g/G (topo/fim), dígitos 1-9
+#     (pula direto pro item daquela posição), r (força redesenho da tela).
+#   - Application(...) agora com mouse_support=True (permite rolar a lista
+#     com mouse/trackpad/scroll de dois dedos; NÃO inclui "tocar pra
+#     selecionar" item por item -- ver comentário no local).
+#   - get_footer_text(): + indicador "Item X de Y" (serve de indicador de
+#     scroll em telas touch, que não têm scrollbar visível).
+#   - get_tokens() agora é `async def` e usa `await Bundle.create()` em vez
+#     de `Bundle()` síncrono -- evita travar o event loop. Qualquer chamada
+#     existente a `.get_tokens()` fora deste arquivo PRECISA ganhar `await`.
+#   - Removida chamada duplicada de make_m3u(new_path) em handle_url().
+#   - Nova função `_classify_release_type()` (nível de módulo, antes da
+#     classe) substitui as DUAS cópias quase idênticas da heurística de
+#     Album/EP/Single/Live/Compilation que existiam em handle_url() e em
+#     _extract_rich_metadata() -- agora é um só lugar pra ajustar a regra.
+#   - Excludes silenciosos (`except Exception: pass`) na classificação de
+#     tipo de lançamento em handle_url() agora logam em debug.
 # ==============================================================================
 
 import logging
@@ -77,6 +97,7 @@ except ImportError:
 
 from qobuz_dl.bundle import Bundle
 from qobuz_dl import downloader, qopy
+from qobuz_dl import ui
 
 from qobuz_dl.color import (
     INFO as CYAN,
@@ -251,7 +272,12 @@ def _get_table_layout(columns, is_multi, item_category):
     mid_border = "├─" + "─┼─".join("─" * w for w in widths) + "─┤"
     bot_border = "└─" + "─┴─".join("─" * w for w in widths) + "─┘"
 
-    return True, widths, headers, {"top": top_border, "mid": mid_border, "bot": bot_border}
+    return (
+        True,
+        widths,
+        headers,
+        {"top": top_border, "mid": mid_border, "bot": bot_border},
+    )
 
 
 async def _tui_select(title, options_dicts, is_multi=False, item_category="album"):
@@ -270,27 +296,97 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
         item_category: "album" | "track" | "playlist" | "artist" | "filter"
             -- controla como cada linha/cartão é desenhado (ver get_list_text).
 
+    Atalhos de teclado disponíveis:
+        ↑/↓ ou j/k    -- move o cursor
+        PageUp/PageDown -- pula 10 itens
+        g / G          -- vai pro primeiro / último item
+        1-9            -- pula direto pro item daquela posição
+        r              -- força redesenho da tela (útil após girar
+                          iPad/iPhone, se o terminal não reagir sozinho)
+        espaço (multi) -- marca/desmarca o item sob o cursor
+        t (multi)      -- marca/desmarca todos
+        Enter          -- confirma
+        Ctrl+C ou Esc  -- cancela (propaga KeyboardInterrupt)
+
     Retorna:
         - is_multi=True:  lista de tuplas (item, índice_original)
         - is_multi=False: tupla única (item, índice_original)
-        - Ctrl+C: propaga KeyboardInterrupt (capturado no chamador)
+        - Ctrl+C/Esc: propaga KeyboardInterrupt (capturado no chamador)
     """
     bindings = KeyBindings()
     selected_indices = set()
     cursor_pos = 0
 
-    @bindings.add("up")
-    def _(event):
+    # --- Navegação vertical: setas ↑/↓ + alternativas "vim-style" j/k ---
+    # As teclas j/k existem em QUALQUER teclado (não exigem trocar de layout
+    # nem apertar um modificador), o que ajuda bastante em apps SSH de
+    # iPad/iPhone onde as setas às vezes ficam numa barra extra escondida.
+    def _move_up(event):
         nonlocal cursor_pos
         cursor_pos = max(0, cursor_pos - 1)
 
-    @bindings.add("down")
-    def _(event):
+    def _move_down(event):
         nonlocal cursor_pos
         if options_dicts:
             cursor_pos = min(len(options_dicts) - 1, cursor_pos + 1)
 
+    bindings.add("up")(_move_up)
+    bindings.add("k")(_move_up)
+    bindings.add("down")(_move_down)
+    bindings.add("j")(_move_down)
+
+    # --- Navegação rápida: PageUp/PageDown pulam de 10 em 10, g/G vão
+    # direto pro topo/fim. Em listas de 20-50 resultados isso evita ter
+    # que ir item por item numa tela touch. ---
+    _PAGE_JUMP = 10
+
+    @bindings.add("pageup")
+    def _(event):
+        nonlocal cursor_pos
+        cursor_pos = max(0, cursor_pos - _PAGE_JUMP)
+
+    @bindings.add("pagedown")
+    def _(event):
+        nonlocal cursor_pos
+        if options_dicts:
+            cursor_pos = min(len(options_dicts) - 1, cursor_pos + _PAGE_JUMP)
+
+    @bindings.add("g")
+    def _(event):
+        nonlocal cursor_pos
+        cursor_pos = 0
+
+    @bindings.add("G")
+    def _(event):
+        nonlocal cursor_pos
+        if options_dicts:
+            cursor_pos = len(options_dicts) - 1
+
+    # --- Atalho numérico: dígitos 1-9 pulam DIRETO pro item daquela
+    # posição (1 = primeiro item, 9 = nono). Útil em telas touch pra não
+    # precisar "andar" o cursor manualmente até um item visível. ---
+    def _make_digit_jump(n):
+        def _jump(event):
+            nonlocal cursor_pos
+            idx = n - 1
+            if options_dicts and idx < len(options_dicts):
+                cursor_pos = idx
+
+        return _jump
+
+    for _digit in range(1, 10):
+        bindings.add(str(_digit))(_make_digit_jump(_digit))
+
+    # --- Força um redesenho manual da tela. Útil quando o terminal do
+    # iPad/iPhone não avisa corretamente sobre mudança de tamanho (ex. ao
+    # girar a tela ou entrar/sair do modo Split View) e a UI fica com um
+    # layout desatualizado até a próxima tecla ser pressionada. ---
+    @bindings.add("r")
+    def _(event):
+        event.app.invalidate()
+
     if is_multi:
+
         @bindings.add("space")
         def _(event):
             # Alterna seleção do item sob o cursor (não confirma nada ainda)
@@ -330,6 +426,13 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
     def _(event):
         event.app.exit(exception=KeyboardInterrupt)
 
+    # "esc" como alternativa ao Ctrl+C: em vários apps de terminal do iOS
+    # (a-Shell, Termius) Ctrl exige um toque extra num modificador virtual,
+    # enquanto Esc costuma ter uma tecla dedicada na barra de atalhos.
+    @bindings.add("escape")
+    def _(event):
+        event.app.exit(exception=KeyboardInterrupt)
+
     def get_header_text():
         # Desenha o título + (se a tela for larga o bastante) o cabeçalho
         # da tabela com as bordas superiores ┌─┬─┐. Recalculado a cada
@@ -341,7 +444,8 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
             columns, _ = shutil.get_terminal_size((80, 24))
 
         is_table, widths, headers, borders = _get_table_layout(
-            columns, is_multi, item_category)
+            columns, is_multi, item_category
+        )
 
         prefix_len = 5 if is_multi else 3
         hdr_pref = " " * prefix_len
@@ -388,7 +492,8 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
             columns, _ = shutil.get_terminal_size((80, 24))
 
         is_table, widths, headers, borders = _get_table_layout(
-            columns, is_multi, item_category)
+            columns, is_multi, item_category
+        )
         res = []
 
         def add_line(fragments, fill_bg=False):
@@ -431,12 +536,17 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
 
         inner_w = max(10, columns - 6)
 
-        def add_card_line(fragments, hovered=False, is_checked=False, border_style="class:meta"):
+        def add_card_line(
+            fragments, hovered=False, is_checked=False, border_style="class:meta"
+        ):
             final_fragments = []
             current_w = 0
 
-            row_st = "class:hovered" if hovered else (
-                "class:highlight" if is_checked else "")
+            row_st = (
+                "class:hovered"
+                if hovered
+                else ("class:highlight" if is_checked else "")
+            )
             border_st = "class:hovered" if hovered else border_style
 
             # Caractere físico mais grosso (Heavy Box Drawing) se estiver marcado
@@ -457,21 +567,30 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
                         trunc_txt += char
                         temp_w += cw
 
-                    st_use = "class:hovered" if hovered else (
-                        "class:highlight" if is_checked else st)
+                    st_use = (
+                        "class:hovered"
+                        if hovered
+                        else ("class:highlight" if is_checked else st)
+                    )
                     final_fragments.append((st_use, trunc_txt))
                     current_w += temp_w
                     break
                 else:
-                    st_use = "class:hovered" if hovered else (
-                        "class:highlight" if is_checked else st)
+                    st_use = (
+                        "class:hovered"
+                        if hovered
+                        else ("class:highlight" if is_checked else st)
+                    )
                     final_fragments.append((st_use, txt))
                     current_w += txt_w
 
             padding = max(0, inner_w - current_w)
             if padding > 0:
-                pad_st = "class:hovered" if hovered else (
-                    "class:highlight" if is_checked else "")
+                pad_st = (
+                    "class:hovered"
+                    if hovered
+                    else ("class:highlight" if is_checked else "")
+                )
                 final_fragments.append((pad_st, " " * padding))
 
             final_fragments.append((border_st, f" {vt}\n"))
@@ -495,10 +614,16 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
                 prefix = f" {ptr} "
 
             row_st = "class:hovered" if hovered else style
-            tit_st = "class:hovered" if hovered else (
-                "class:highlight" if checked else "class:item_title")
-            border_st = "class:hovered" if hovered else (
-                "class:highlight" if checked else "class:meta")
+            tit_st = (
+                "class:hovered"
+                if hovered
+                else ("class:highlight" if checked else "class:item_title")
+            )
+            border_st = (
+                "class:hovered"
+                if hovered
+                else ("class:highlight" if checked else "class:meta")
+            )
 
             # Borda superior e quinas desenhadas com linhas grossas se marcado
             if not is_table:
@@ -512,14 +637,22 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
                     add_line([(tit_st, f"{prefix}{opt}")], fill_bg=hovered)
                 else:
                     add_card_line(
-                        [(tit_st, f"{prefix}{opt}")], hovered=hovered, is_checked=checked, border_style=border_st)
+                        [(tit_st, f"{prefix}{opt}")],
+                        hovered=hovered,
+                        is_checked=checked,
+                        border_style=border_st,
+                    )
 
             elif isinstance(opt, str):
                 if is_table:
                     add_line([(row_st, f"{prefix}{opt}")], fill_bg=hovered)
                 else:
                     add_card_line(
-                        [(row_st, f"{prefix}{opt}")], hovered=hovered, is_checked=checked, border_style=border_st)
+                        [(row_st, f"{prefix}{opt}")],
+                        hovered=hovered,
+                        is_checked=checked,
+                        border_style=border_st,
+                    )
 
             else:
                 meta = opt.get("meta", {})
@@ -527,8 +660,11 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
                 typ = meta.get("type", "")
 
                 ql_color = "fg:#c59b27 bold" if "24b" in ql else f"fg:{_hex_accent}"
-                ql_st = "class:hovered" if hovered else (
-                    "class:highlight" if checked else ql_color)
+                ql_st = (
+                    "class:hovered"
+                    if hovered
+                    else ("class:highlight" if checked else ql_color)
+                )
 
                 raw_typ = typ.strip().lower()
                 if raw_typ == "album":
@@ -565,29 +701,35 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
 
                         if hovered:
                             p1 = f"│ {tit_align} │ {art_align} │ {typ_align} │ {yr_align} │ {fx_align} │ "
-                            add_line([
-                                (style, prefix),
-                                (row_st, p1),
-                                (ql_st, ql_align),
-                                (row_st, " │")
-                            ], fill_bg=False)
+                            add_line(
+                                [
+                                    (style, prefix),
+                                    (row_st, p1),
+                                    (ql_st, ql_align),
+                                    (row_st, " │"),
+                                ],
+                                fill_bg=False,
+                            )
                         else:
-                            add_line([
-                                (style, prefix),
-                                (style, "│ "),
-                                (tit_st, tit_align),
-                                (style, " │ "),
-                                (style, art_align),
-                                (style, " │ "),
-                                (typ_st, typ_align),
-                                (style, " │ "),
-                                (style, yr_align),
-                                (style, " │ "),
-                                (style, fx_align),
-                                (style, " │ "),
-                                (ql_st, ql_align),
-                                (style, " │")
-                            ], fill_bg=False)
+                            add_line(
+                                [
+                                    (style, prefix),
+                                    (style, "│ "),
+                                    (tit_st, tit_align),
+                                    (style, " │ "),
+                                    (style, art_align),
+                                    (style, " │ "),
+                                    (typ_st, typ_align),
+                                    (style, " │ "),
+                                    (style, yr_align),
+                                    (style, " │ "),
+                                    (style, fx_align),
+                                    (style, " │ "),
+                                    (ql_st, ql_align),
+                                    (style, " │"),
+                                ],
+                                fill_bg=False,
+                            )
                     else:
                         l1 = [(tit_st, f"{prefix}{tit_str}")]
                         ql_str = f"[{ql}]"
@@ -595,24 +737,49 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
                         if pad_len > 0:
                             l1.append(("", " " * pad_len))
                             l1.append((ql_st, ql_str))
-                        add_card_line(l1, hovered=hovered,
-                                      is_checked=checked, border_style=border_st)
+                        add_card_line(
+                            l1,
+                            hovered=hovered,
+                            is_checked=checked,
+                            border_style=border_st,
+                        )
 
                         if hovered:
                             add_card_line(
-                                [(row_st, f"   👤 {art}")], hovered=hovered, is_checked=checked, border_style=border_st)
+                                [(row_st, f"   👤 {art}")],
+                                hovered=hovered,
+                                is_checked=checked,
+                                border_style=border_st,
+                            )
                             add_card_line(
-                                [(row_st, f"   💿 {typ} · {yr}")], hovered=hovered, is_checked=checked, border_style=border_st)
+                                [(row_st, f"   💿 {typ} · {yr}")],
+                                hovered=hovered,
+                                is_checked=checked,
+                                border_style=border_st,
+                            )
                             add_card_line(
-                                [(row_st, f"   🎵 {fx} faixas")], hovered=hovered, is_checked=checked, border_style=border_st)
+                                [(row_st, f"   🎵 {fx} faixas")],
+                                hovered=hovered,
+                                is_checked=checked,
+                                border_style=border_st,
+                            )
                             add_card_line(
-                                [(row_st, f"   🎚 {ql}")], hovered=hovered, is_checked=checked, border_style=border_st)
+                                [(row_st, f"   🎚 {ql}")],
+                                hovered=hovered,
+                                is_checked=checked,
+                                border_style=border_st,
+                            )
                         else:
-                            add_card_line([
-                                (style, f"   👤 {art} · "),
-                                (typ_st, typ),
-                                (style, f" · {yr}")
-                            ], hovered=hovered, is_checked=checked, border_style=border_st)
+                            add_card_line(
+                                [
+                                    (style, f"   👤 {art} · "),
+                                    (typ_st, typ),
+                                    (style, f" · {yr}"),
+                                ],
+                                hovered=hovered,
+                                is_checked=checked,
+                                border_style=border_st,
+                            )
 
                 elif item_category == "track":
                     tit_str = meta.get("title", "")
@@ -630,29 +797,35 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
 
                         if hovered:
                             p1 = f"│ {tit_align} │ {art_align} │ {alb_align} │ {typ_align} │ {dur_align} │ "
-                            add_line([
-                                (style, prefix),
-                                (row_st, p1),
-                                (ql_st, ql_align),
-                                (row_st, " │")
-                            ], fill_bg=False)
+                            add_line(
+                                [
+                                    (style, prefix),
+                                    (row_st, p1),
+                                    (ql_st, ql_align),
+                                    (row_st, " │"),
+                                ],
+                                fill_bg=False,
+                            )
                         else:
-                            add_line([
-                                (style, prefix),
-                                (style, "│ "),
-                                (tit_st, tit_align),
-                                (style, " │ "),
-                                (style, art_align),
-                                (style, " │ "),
-                                (style, alb_align),
-                                (style, " │ "),
-                                (typ_st, typ_align),
-                                (style, " │ "),
-                                (style, dur_align),
-                                (style, " │ "),
-                                (ql_st, ql_align),
-                                (style, " │")
-                            ], fill_bg=False)
+                            add_line(
+                                [
+                                    (style, prefix),
+                                    (style, "│ "),
+                                    (tit_st, tit_align),
+                                    (style, " │ "),
+                                    (style, art_align),
+                                    (style, " │ "),
+                                    (style, alb_align),
+                                    (style, " │ "),
+                                    (typ_st, typ_align),
+                                    (style, " │ "),
+                                    (style, dur_align),
+                                    (style, " │ "),
+                                    (ql_st, ql_align),
+                                    (style, " │"),
+                                ],
+                                fill_bg=False,
+                            )
                     else:
                         l1 = [(tit_st, f"{prefix}{tit_str}")]
                         ql_str = f"[{ql}]"
@@ -660,24 +833,49 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
                         if pad_len > 0:
                             l1.append(("", " " * pad_len))
                             l1.append((ql_st, ql_str))
-                        add_card_line(l1, hovered=hovered,
-                                      is_checked=checked, border_style=border_st)
+                        add_card_line(
+                            l1,
+                            hovered=hovered,
+                            is_checked=checked,
+                            border_style=border_st,
+                        )
 
                         if hovered:
                             add_card_line(
-                                [(row_st, f"   👤 {art}")], hovered=hovered, is_checked=checked, border_style=border_st)
+                                [(row_st, f"   👤 {art}")],
+                                hovered=hovered,
+                                is_checked=checked,
+                                border_style=border_st,
+                            )
                             add_card_line(
-                                [(row_st, f"   💿 {alb}")], hovered=hovered, is_checked=checked, border_style=border_st)
+                                [(row_st, f"   💿 {alb}")],
+                                hovered=hovered,
+                                is_checked=checked,
+                                border_style=border_st,
+                            )
                             add_card_line(
-                                [(row_st, f"   📀 {typ} · ⏱ {dur}")], hovered=hovered, is_checked=checked, border_style=border_st)
+                                [(row_st, f"   📀 {typ} · ⏱ {dur}")],
+                                hovered=hovered,
+                                is_checked=checked,
+                                border_style=border_st,
+                            )
                             add_card_line(
-                                [(row_st, f"   🎚 {ql}")], hovered=hovered, is_checked=checked, border_style=border_st)
+                                [(row_st, f"   🎚 {ql}")],
+                                hovered=hovered,
+                                is_checked=checked,
+                                border_style=border_st,
+                            )
                         else:
-                            add_card_line([
-                                (style, f"   👤 {art} · "),
-                                (typ_st, typ),
-                                (style, f" · ⏱ {dur}")
-                            ], hovered=hovered, is_checked=checked, border_style=border_st)
+                            add_card_line(
+                                [
+                                    (style, f"   👤 {art} · "),
+                                    (typ_st, typ),
+                                    (style, f" · ⏱ {dur}"),
+                                ],
+                                hovered=hovered,
+                                is_checked=checked,
+                                border_style=border_st,
+                            )
 
                 elif item_category == "playlist":
                     n = meta.get("name", "")
@@ -693,36 +891,56 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
 
                         if hovered:
                             p1 = f"│ {n_align} │ {o_align} │ {c_align} │ {dur_align} │"
-                            add_line([
-                                (style, prefix),
-                                (row_st, p1)
-                            ], fill_bg=False)
+                            add_line([(style, prefix), (row_st, p1)], fill_bg=False)
                         else:
-                            add_line([
-                                (style, prefix),
-                                (style, "│ "),
-                                (tit_st, n_align),
-                                (style, " │ "),
-                                (style, o_align),
-                                (style, " │ "),
-                                (style, c_align),
-                                (style, " │ "),
-                                (style, dur_align),
-                                (style, " │")
-                            ], fill_bg=False)
+                            add_line(
+                                [
+                                    (style, prefix),
+                                    (style, "│ "),
+                                    (tit_st, n_align),
+                                    (style, " │ "),
+                                    (style, o_align),
+                                    (style, " │ "),
+                                    (style, c_align),
+                                    (style, " │ "),
+                                    (style, dur_align),
+                                    (style, " │"),
+                                ],
+                                fill_bg=False,
+                            )
                     else:
                         add_card_line(
-                            [(tit_st, f"{prefix}{n}")], hovered=hovered, is_checked=checked, border_style=border_st)
+                            [(tit_st, f"{prefix}{n}")],
+                            hovered=hovered,
+                            is_checked=checked,
+                            border_style=border_st,
+                        )
                         if hovered:
                             add_card_line(
-                                [(row_st, f"   👤 {o}")], hovered=hovered, is_checked=checked, border_style=border_st)
+                                [(row_st, f"   👤 {o}")],
+                                hovered=hovered,
+                                is_checked=checked,
+                                border_style=border_st,
+                            )
                             add_card_line(
-                                [(row_st, f"   🎵 {c} faixas")], hovered=hovered, is_checked=checked, border_style=border_st)
+                                [(row_st, f"   🎵 {c} faixas")],
+                                hovered=hovered,
+                                is_checked=checked,
+                                border_style=border_st,
+                            )
                             add_card_line(
-                                [(row_st, f"   ⏱ {dur}")], hovered=hovered, is_checked=checked, border_style=border_st)
+                                [(row_st, f"   ⏱ {dur}")],
+                                hovered=hovered,
+                                is_checked=checked,
+                                border_style=border_st,
+                            )
                         else:
                             add_card_line(
-                                [(style, f"   👤 {o} · 🎵 {c} · ⏱ {dur}")], hovered=hovered, is_checked=checked, border_style=border_st)
+                                [(style, f"   👤 {o} · 🎵 {c} · ⏱ {dur}")],
+                                hovered=hovered,
+                                is_checked=checked,
+                                border_style=border_st,
+                            )
 
                 elif item_category == "artist":
                     n = meta.get("name", "")
@@ -734,30 +952,46 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
 
                         if hovered:
                             p1 = f"│ {n_align} │ {c_align} │"
-                            add_line([
-                                (style, prefix),
-                                (row_st, p1)
-                            ], fill_bg=False)
+                            add_line([(style, prefix), (row_st, p1)], fill_bg=False)
                         else:
-                            add_line([
-                                (style, prefix),
-                                (style, "│ "),
-                                (tit_st, n_align),
-                                (style, " │ "),
-                                (style, c_align),
-                                (style, " │")
-                            ], fill_bg=False)
+                            add_line(
+                                [
+                                    (style, prefix),
+                                    (style, "│ "),
+                                    (tit_st, n_align),
+                                    (style, " │ "),
+                                    (style, c_align),
+                                    (style, " │"),
+                                ],
+                                fill_bg=False,
+                            )
                     else:
                         add_card_line(
-                            [(tit_st, f"{prefix}👤 {n}")], hovered=hovered, is_checked=checked, border_style=border_st)
+                            [(tit_st, f"{prefix}👤 {n}")],
+                            hovered=hovered,
+                            is_checked=checked,
+                            border_style=border_st,
+                        )
                         if hovered:
                             add_card_line(
-                                [(row_st, f"   🎵 {c_str}")], hovered=hovered, is_checked=checked, border_style=border_st)
-                            add_card_line([(row_st, f"   [Enter] para abrir opções")],
-                                          hovered=hovered, is_checked=checked, border_style=border_st)
+                                [(row_st, f"   🎵 {c_str}")],
+                                hovered=hovered,
+                                is_checked=checked,
+                                border_style=border_st,
+                            )
+                            add_card_line(
+                                [(row_st, f"   [Enter] para abrir opções")],
+                                hovered=hovered,
+                                is_checked=checked,
+                                border_style=border_st,
+                            )
                         else:
                             add_card_line(
-                                [(style, f"   🎵 {c_str}")], hovered=hovered, is_checked=checked, border_style=border_st)
+                                [(style, f"   🎵 {c_str}")],
+                                hovered=hovered,
+                                is_checked=checked,
+                                border_style=border_st,
+                            )
 
             # Borda inferior e quinas desenhadas com linhas grossas se marcado
             if not is_table:
@@ -768,8 +1002,9 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
             else:
                 if i < len(options_dicts) - 1:
                     empty_prefix = " " * len(prefix)
-                    add_line([("class:meta", empty_prefix + borders["mid"])],
-                             fill_bg=False)
+                    add_line(
+                        [("class:meta", empty_prefix + borders["mid"])], fill_bg=False
+                    )
 
         if not is_table:
             res.append(("", " \n" * 8))
@@ -788,7 +1023,8 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
             columns, _ = shutil.get_terminal_size((80, 24))
 
         is_table, widths, headers, borders = _get_table_layout(
-            columns, is_multi, item_category)
+            columns, is_multi, item_category
+        )
         res = []
 
         if is_table:
@@ -798,15 +1034,24 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
 
         res.append(("", "\n"))
 
+        # Indicador de posição "Item X de Y": em telas touch (sem mouse
+        # wheel/scrollbar visível), é a forma mais simples de o usuário
+        # perceber que a lista continua além do que está visível na tela
+        # -- se cursor_pos+1 < total, ainda tem mais itens abaixo.
+        if options_dicts:
+            res.append(
+                ("class:meta", f" Item {cursor_pos + 1} de {len(options_dicts)}\n")
+            )
+
         if is_multi:
             res.append(
                 ("class:checkbox", f" ✓ Selecionados: {len(selected_indices)}\n")
             )
-            footer_msg = " [↑ ↓] Mover   [Espaço] Selecionar   [t] Selecionar Todos   [Enter] Confirmar"
+            footer_msg = " [↑↓/jk] Mover   [Espaço] Selecionar   [t] Todos   [1-9] Ir para   [Enter] Confirmar"
         elif item_category == "artist":
-            footer_msg = " [↑ ↓] Mover   [Enter] Abrir artista"
+            footer_msg = " [↑↓/jk] Mover   [1-9] Ir para   [Enter] Abrir artista"
         else:
-            footer_msg = " [↑ ↓] Mover   [Enter] Confirmar"
+            footer_msg = " [↑↓/jk] Mover   [1-9] Ir para   [Enter] Confirmar"
 
         if get_cwidth(footer_msg) > columns:
             trunc_msg = ""
@@ -842,7 +1087,19 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
     # aqui até o usuário confirmar (Enter) ou cancelar (Ctrl+C).
     layout = Layout(HSplit([header_window, list_window, footer_window]))
     app = Application(
-        layout=layout, key_bindings=bindings, full_screen=True, style=pt_style
+        layout=layout,
+        key_bindings=bindings,
+        full_screen=True,
+        style=pt_style,
+        # mouse_support habilita rolagem com mouse/trackpad/scroll de duas
+        # dedos (útil com Magic Keyboard/trackpad no iPad, e em terminais
+        # desktop). NOTA: isso NÃO adiciona "toque pra selecionar" em cada
+        # linha -- pra isso seria preciso anexar um mouse_handler a cada
+        # fragmento de texto em get_list_text(), o que não foi feito aqui
+        # (mudança maior, deixada de fora por enquanto pra não arriscar
+        # quebrar o desenho das linhas). Selecionar continua sendo por
+        # teclado: setas/j-k, dígitos 1-9, espaço, enter.
+        mouse_support=True,
     )
 
     res = await app.run_async()
@@ -865,6 +1122,66 @@ QUALITIES = {
 }
 
 logger = logging.getLogger(__name__)
+
+
+# ------------------------------------------------------------------------
+# Heurística ÚNICA de classificação de tipo de lançamento (Album/EP/Single/
+# Live/Compilation), usada em dois lugares que antes tinham cada um sua
+# própria cópia quase idêntica desta lógica: _extract_rich_metadata() (pra
+# exibir na TUI de busca) e handle_url() (pro filtro de tipo ao explorar
+# um artista por URL). Antes, se alguém ajustasse a regra num lugar e
+# esquecesse do outro, os dois caminhos podiam divergir silenciosamente.
+#
+# A API do Qobuz nem sempre informa release_type/product_type de forma
+# confiável, então isso combina: (1) o valor da API quando disponível,
+# (2) palavras-chave no título/versão ("live", "best of", " ep"), e
+# (3) contagem de faixas / duração total como último recurso.
+# ------------------------------------------------------------------------
+def _classify_release_type(
+    title,
+    version,
+    track_count,
+    duration_seconds=0,
+    api_release_type=None,
+    item_type="album",
+):
+    base_title = (title or "").lower()
+    version_tag = (version or "").lower()
+    r_type = (api_release_type or "unknown").lower()
+    track_count = int(track_count or 0)
+    duration_seconds = int(duration_seconds or 0)
+
+    if "live" in version_tag or "(live" in base_title or "- live" in base_title:
+        return "live"
+
+    if any(
+        kw in base_title or kw in version_tag
+        for kw in ["best of", "greatest hits", "anthology", "collection", "compilation"]
+    ):
+        return "compilation"
+
+    if " ep" in base_title or version_tag == "ep":
+        return "ep"
+    elif r_type == "single" and track_count >= 4:
+        return "ep"
+    elif r_type == "ep" and 1 <= track_count <= 3:
+        return "single"
+    elif r_type == "album" and 1 <= track_count <= 3:
+        return "single"
+    elif r_type == "unknown":
+        if item_type == "album":
+            if duration_seconds >= 1740 or track_count >= 7:
+                return "album"
+            elif 1 <= track_count <= 3:
+                return "single"
+            elif 4 <= track_count <= 6:
+                return "ep"
+            else:
+                return "album"
+        else:
+            return item_type
+
+    return r_type
 
 
 # ==============================================================================
@@ -955,12 +1272,23 @@ class QobuzDL:
         )
         logger.info(f"{YELLOW}Set max quality: {QUALITIES[int(self.quality)]}")
 
-    def get_tokens(self):
+    async def get_tokens(self):
         """Busca App ID + secrets "na hora" via bundle.py (scraping do
         bundle.js). Não é chamado no fluxo normal (que lê app_id/secrets já
         salvos no config.ini) -- serve como forma alternativa de obter
-        credenciais de API atualizadas sem passar pelo wizard -r."""
-        bundle = Bundle()
+        credenciais de API atualizadas sem passar pelo wizard -r.
+
+        ⚠️ MUDANÇA: este método era `def` (síncrono) e chamava `Bundle()`
+        (que faz requisições HTTP síncronas com httpx.Client). Rodar isso
+        dentro de um app assíncrono TRAVA o event loop inteiro durante o
+        download do bundle.js. Agora usa `await Bundle.create()` (versão
+        assíncrona, ver bundle.py) para não bloquear.
+        SE ALGO FORA DESTE ARQUIVO CHAMA `qobuz_dl_instance.get_tokens()`
+        sem `await`, essa chamada vai parar de funcionar (vira coroutine
+        não executada) -- procure por "get_tokens(" em cli.py e outros
+        arquivos e adicione `await` na chamada.
+        """
+        bundle = await Bundle.create()
         self.app_id = bundle.get_app_id()
         self.secrets = [secret for secret in bundle.get_secrets().values() if secret]
 
@@ -1116,7 +1444,13 @@ class QobuzDL:
                     items.extend(batch)
 
             if getattr(self, "_is_interactive_session", False) and url_type == "artist":
-                options = ["💿 Album", "📀 EP", "🎵 Single", "🎤 Live", "🗂️ Compilation"]
+                options = [
+                    "💿 Album",
+                    "📀 EP",
+                    "🎵 Single",
+                    "🎤 Live",
+                    "🗂️ Compilation",
+                ]
                 title_text = (
                     f"Encontrados {len(items)} lançamentos "
                     f"para {content_name}. Filtre por tipo:"
@@ -1139,8 +1473,8 @@ class QobuzDL:
 
             logger.debug(f"Number of chunks: {len(content)}")
             if content:
-                _first_items = content[0].get(type_dict["iterable_key"], {}).get(
-                    "items", []
+                _first_items = (
+                    content[0].get(type_dict["iterable_key"], {}).get("items", [])
                 )
                 logger.debug(f"Items in first chunk: {len(_first_items)}")
             if getattr(self, "allowed_release_types", None) is not None:
@@ -1165,10 +1499,10 @@ class QobuzDL:
             is_track_batch = type_dict["iterable_key"] == "tracks"
             batch_workers = int(getattr(self.settings, "max_workers", 1))
             can_parallelize = (
-                is_track_batch and
-                batch_workers > 1 and
-                len(items) > 1 and
-                getattr(self, "delay", 0) <= 0
+                is_track_batch
+                and batch_workers > 1
+                and len(items) > 1
+                and getattr(self, "delay", 0) <= 0
             )
             position_pool = (
                 downloader._PositionPool(batch_workers) if can_parallelize else None
@@ -1209,8 +1543,8 @@ class QobuzDL:
 
             for idx, item in enumerate(items, start=1):
                 if (
-                    getattr(self, "allowed_release_types", None) and
-                    url_type == "artist"
+                    getattr(self, "allowed_release_types", None)
+                    and url_type == "artist"
                 ):
                     try:
                         r_type = "unknown"
@@ -1223,55 +1557,31 @@ class QobuzDL:
 
                         if full_meta:
                             r_type = (
-                                full_meta.get("release_type") or
-                                full_meta.get("product_type") or
-                                "unknown"
+                                full_meta.get("release_type")
+                                or full_meta.get("product_type")
+                                or "unknown"
                             ).lower()
 
-                        base_title = str(item.get("title", "")).lower()
-                        version_tag = str(item.get("version", "")).lower()
-                        t_count = int(item.get("tracks_count") or 0)
-
-                        if (
-                            "live" in version_tag or
-                            "(live" in base_title or
-                            "- live" in base_title
-                        ):
-                            r_type = "live"
-                        elif any(
-                            kw in base_title or kw in version_tag
-                            for kw in [
-                                "best of",
-                                "greatest hits",
-                                "anthology",
-                                "collection",
-                                "compilation",
-                            ]
-                        ):
-                            r_type = "compilation"
-                        elif " ep" in base_title or version_tag == "ep":
-                            r_type = "ep"
-
-                        elif r_type == "single" and t_count >= 4:
-                            r_type = "ep"
-                        elif r_type == "ep" and 1 <= t_count <= 3:
-                            r_type = "single"
-                        elif r_type == "album" and 1 <= t_count <= 3:
-                            r_type = "single"
-
-                        elif r_type == "unknown":
-                            if 1 <= t_count <= 3:
-                                r_type = "single"
-                            elif 4 <= t_count <= 6:
-                                r_type = "ep"
-                            else:
-                                r_type = "album"
+                        # Classificação unificada (ver _classify_release_type
+                        # no topo do arquivo) -- mesma regra usada na tela
+                        # de busca, pra não divergir entre os dois lugares.
+                        r_type = _classify_release_type(
+                            title=item.get("title", ""),
+                            version=item.get("version", ""),
+                            track_count=item.get("tracks_count"),
+                            duration_seconds=item.get("duration"),
+                            api_release_type=r_type,
+                            item_type="album",
+                        )
 
                         if r_type not in self.allowed_release_types:
                             continue
 
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.debug(
+                            f"Falha ao classificar tipo de lançamento do item "
+                            f"{item.get('id')}: {e}"
+                        )
 
                 if getattr(self, "blacklist_patterns", None):
                     base_title = item.get("title") or item.get("name") or ""
@@ -1331,13 +1641,8 @@ class QobuzDL:
                 self.settings.multiple_disc_one_dir = original_multi_disc_setting
 
             if url_type == "playlist" and not self.no_m3u_for_playlists:
-                make_m3u(new_path)
-
-            # 🔁 Duplicado: mesmo `if` e mesma chamada de novo logo acima.
-            # Provavelmente sobrou de um merge/edição. Seguro de remover
-            # (make_m3u só reescreve o arquivo .m3u), mas deixei como está
-            # para não mudar comportamento sem seu ok.
-            if url_type == "playlist" and not self.no_m3u_for_playlists:
+                # ✅ Removida a chamada duplicada que existia aqui (mesmo
+                # `if` + make_m3u(new_path) repetido duas vezes seguidas).
                 make_m3u(new_path)
 
             if is_playlist:
@@ -1348,7 +1653,7 @@ class QobuzDL:
                 from qobuz_dl.downloader import safe_print
 
                 safe_print(f"\n{CYAN}{'━' * 40}{RESET}")
-                safe_print(f"📊 {GREEN}RESUMO DA PLAYLIST:{RESET} {content_name}")
+                safe_print(f"  📊 {GREEN}RESUMO DA PLAYLIST:{RESET} {content_name}")
                 safe_print(f"   • Sucesso : {GREEN}{succ}/{len(items)}{RESET}")
                 if skip > 0:
                     safe_print(
@@ -1569,9 +1874,9 @@ class QobuzDL:
 
         if mode_dict.get("requires_extra") or item_type in ["album", "track"]:
             artist = (
-                i.get("artist", {}).get("name") or
-                i.get("performer", {}).get("name") or
-                "Unknown"
+                i.get("artist", {}).get("name")
+                or i.get("performer", {}).get("name")
+                or "Unknown"
             )
             title = i.get("title") or i.get("name") or "Unknown"
             if i.get("version"):
@@ -1595,36 +1900,28 @@ class QobuzDL:
                 else i.get("label", "")
             )
 
-            raw_type = (i.get("release_type") or i.get(
-                "product_type") or "unknown").lower()
+            raw_type = (
+                i.get("release_type") or i.get("product_type") or "unknown"
+            ).lower()
 
             if raw_type == "unknown" and isinstance(i.get("album"), dict):
-                raw_type = (i["album"].get("release_type") or i["album"].get(
-                    "product_type") or "unknown").lower()
+                raw_type = (
+                    i["album"].get("release_type")
+                    or i["album"].get("product_type")
+                    or "unknown"
+                ).lower()
 
-            base_title = (i.get("title") or i.get("name") or "Unknown").lower()
-            version_tag = (i.get("version") or "").lower()
-            t_count = int(i.get("tracks_count") or 0)
-            duration = int(i.get("duration") or 0)
-
-            if " ep" in base_title or version_tag == "ep":
-                raw_type = "ep"
-            elif raw_type == "single" and t_count >= 4:
-                raw_type = "ep"
-            elif raw_type == "ep" and 1 <= t_count <= 3:
-                raw_type = "single"
-            elif raw_type == "album" and 1 <= t_count <= 3:
-                raw_type = "single"
-            elif raw_type == "unknown":
-                if item_type == "album":
-                    if duration >= 1740 or t_count >= 7:
-                        raw_type = "album"
-                    elif 1 <= t_count <= 3:
-                        raw_type = "single"
-                    elif 4 <= t_count <= 6:
-                        raw_type = "ep"
-                else:
-                    raw_type = item_type
+            # Classificação unificada (ver _classify_release_type no topo
+            # do arquivo) -- mesma regra usada no filtro de artista em
+            # handle_url(), pra não divergir entre os dois lugares.
+            raw_type = _classify_release_type(
+                title=i.get("title") or i.get("name"),
+                version=i.get("version"),
+                track_count=i.get("tracks_count"),
+                duration_seconds=i.get("duration"),
+                api_release_type=raw_type,
+                item_type=item_type,
+            )
 
             rel_type = "EP" if raw_type.lower() == "ep" else raw_type.title()
 
@@ -1742,9 +2039,9 @@ class QobuzDL:
                     iterable = []
                     user_id = getattr(self.client, "user_id", None)
                     if (
-                        not user_id and
-                        hasattr(self.client, "user") and
-                        isinstance(self.client.user, dict)
+                        not user_id
+                        and hasattr(self.client, "user")
+                        and isinstance(self.client.user, dict)
                     ):
                         user_id = self.client.user.get("id")
 
@@ -1813,7 +2110,9 @@ class QobuzDL:
 
                     mode_dict["requires_extra"] = False
                 else:
-                    results = await mode_dict["func"](fav_type=fav_subtype, limit=fetch_limit)
+                    results = await mode_dict["func"](
+                        fav_type=fav_subtype, limit=fetch_limit
+                    )
                     iterable = (
                         results.get(fav_subtype, {}).get("items", [])
                         if isinstance(results, dict)
@@ -1895,7 +2194,7 @@ class QobuzDL:
                 "📀 Singles",
                 "🎤 Artists",
                 "📋 Playlists",
-                "⭐ Favorites"
+                "⭐ Favorites",
             ]
 
             scelta_res = await _tui_select(
@@ -1928,8 +2227,13 @@ class QobuzDL:
             while True:
                 selected_fav = None
                 if selected_type == "favorites":
-                    fav_types = ["🎵 Tracks", "💿 Albums",
-                                 "📀 Singles", "🎤 Artists", "📋 Playlists"]
+                    fav_types = [
+                        "🎵 Tracks",
+                        "💿 Albums",
+                        "📀 Singles",
+                        "🎤 Artists",
+                        "📋 Playlists",
+                    ]
                     fav_res = await _tui_select(
                         "Quais favoritos deseja explorar?",
                         fav_types,
@@ -1963,7 +2267,7 @@ class QobuzDL:
                         selected_type,
                         limit=self.interactive_limit,
                         fav_subtype=selected_fav,
-                        sub_filter=sub_filter
+                        sub_filter=sub_filter,
                     )
                     query_title = f"Meus Favoritos ({display_name})"
                     display_cat = selected_fav[:-1]
@@ -1973,38 +2277,64 @@ class QobuzDL:
 
                     cols = min(shutil.get_terminal_size((80, 24)).columns, 80)
                     bar = "━" * cols
-                    print(f"\n{CYAN}{bar}{RESET}")
-                    print(f"{CYAN}  🔎 {GREEN}NOVA PESQUISA{RESET}")
-                    print(f"{CYAN}{bar}{RESET}\n")
+                    ui.emit(f"\n{CYAN}{bar}{RESET}")
+                    ui.emit(f"{CYAN}  🔎 {GREEN}NOVA PESQUISA{RESET}")
+                    ui.emit(f"{CYAN}{bar}{RESET}\n")
 
-                    prompt_message = FormattedText([
-                        ("class:prompt_text", " O que você deseja ouvir? "),
-                        ("class:prompt_hint", "[Ctrl + C para cancelar]\n"),
-                        ("class:prompt_cursor", " ❯ "),
-                    ])
+                    prompt_message = FormattedText(
+                        [
+                            ("class:prompt_text", " O que você deseja ouvir? "),
+                            ("class:prompt_hint", "[Ctrl + C para cancelar]\n"),
+                            ("class:prompt_cursor", " ❯ "),
+                        ]
+                    )
 
                     try:
-                        query = await session.prompt_async(prompt_message, style=prompt_style)
+                        query = await session.prompt_async(
+                            prompt_message, style=prompt_style
+                        )
                     except (EOFError, KeyboardInterrupt):
                         break
 
                     if not query.strip():
                         continue
 
-                    print(f"\n{YELLOW}Pesquisando por '{query}'...{RESET}")
+                    ui.emit(f"\n{YELLOW}Pesquisando por '{query}'...{RESET}")
                     options = await self.search_by_type(
-                        query, selected_type, self.interactive_limit, sub_filter=sub_filter
+                        query,
+                        selected_type,
+                        self.interactive_limit,
+                        sub_filter=sub_filter,
                     )
                     query_title = query.title()
                     display_cat = selected_type
 
                 if not options:
-                    print(
-                        f"\n{RED}Nenhum resultado válido encontrado ou erro na busca.{RESET}")
+                    ui.emit(
+                        f"\n{RED}Nenhum resultado válido encontrado ou erro na busca.{RESET}"
+                    )
                     if selected_type == "favorites":
-                        await session.prompt_async(FormattedText([("class:prompt_hint", "Pressione [Enter] para voltar...")]))
+                        await session.prompt_async(
+                            FormattedText(
+                                [
+                                    (
+                                        "class:prompt_hint",
+                                        "Pressione [Enter] para voltar...",
+                                    )
+                                ]
+                            )
+                        )
                         break
-                    await session.prompt_async(FormattedText([("class:prompt_hint", "Pressione [Enter] para tentar novamente...")]))
+                    await session.prompt_async(
+                        FormattedText(
+                            [
+                                (
+                                    "class:prompt_hint",
+                                    "Pressione [Enter] para tentar novamente...",
+                                )
+                            ]
+                        )
+                    )
                     continue
 
                 title = f'RESULTADOS PARA "{query_title}"'
@@ -2047,7 +2377,9 @@ class QobuzDL:
                                         f"{YELLOW}Buscando faixas populares de {art_name}...{RESET}"
                                     )
                                     top_tracks = []
-                                    async for chunk in self.client.get_artist_meta(art_id):
+                                    async for chunk in self.client.get_artist_meta(
+                                        art_id
+                                    ):
                                         tracks_data = chunk.get("tracks", {}).get(
                                             "items", []
                                         )
@@ -2093,17 +2425,24 @@ class QobuzDL:
                                     logger.info(
                                         f"{YELLOW}Buscando toda a discografia de {art_name}...{RESET}"
                                     )
-                                    async for chunk in self.client.get_artist_meta(art_id):
-                                        for a in chunk.get("albums", {}).get("items", []):
+                                    async for chunk in self.client.get_artist_meta(
+                                        art_id
+                                    ):
+                                        for a in chunk.get("albums", {}).get(
+                                            "items", []
+                                        ):
                                             final_url_list.append(
-                                                f"{WEB_URL}album/{a.get('id')}")
+                                                f"{WEB_URL}album/{a.get('id')}"
+                                            )
 
                                 else:
                                     logger.info(
                                         f"{YELLOW}Buscando catálogo de {art_name}...{RESET}"
                                     )
                                     content = []
-                                    async for chunk in self.client.get_artist_meta(art_id):
+                                    async for chunk in self.client.get_artist_meta(
+                                        art_id
+                                    ):
                                         content.extend(
                                             chunk.get("albums", {}).get("items", [])
                                         )
@@ -2116,7 +2455,8 @@ class QobuzDL:
 
                                     allowed_filter = (
                                         ["album", "ep", "compilation", "live"]
-                                        if "Álbuns" in action else ["single"]
+                                        if "Álbuns" in action
+                                        else ["single"]
                                     )
 
                                     art_options = []
@@ -2150,7 +2490,8 @@ class QobuzDL:
                                             ]
                                     else:
                                         logger.info(
-                                            f"{YELLOW}Nenhum lançamento desse tipo encontrado.{OFF}")
+                                            f"{YELLOW}Nenhum lançamento desse tipo encontrado.{OFF}"
+                                        )
                         else:
                             [
                                 final_url_list.append(item[0]["url"])
@@ -2257,24 +2598,26 @@ class QobuzDL:
 
         cols = min(_shutil.get_terminal_size((70, 24)).columns, 90)
         bar = "━" * cols
-        print(f"\n{CYAN}{bar}{OFF}")
-        print(f"\033[1m{CYAN}{'  O QUE DESEJA FAZER?':^{cols}}{OFF}")
-        print(f"{CYAN}{bar}{OFF}\n")
-        print(f"  {CYAN}[1]{OFF} Baixar faixas             (matching Qobuz → download)")
-        print(
+        ui.emit(f"\n{CYAN}{bar}{OFF}")
+        ui.emit(f"\033[1m{CYAN}{'  O QUE DESEJA FAZER?':^{cols}}{OFF}")
+        ui.emit(f"{CYAN}{bar}{OFF}\n")
+        ui.emit(
+            f"  {CYAN}[1]{OFF} Baixar faixas             (matching Qobuz → download)"
+        )
+        ui.emit(
             f"  {CYAN}[2]{OFF} Copiar para o Qobuz       (cria playlist na sua conta)"
         )
-        print(
+        ui.emit(
             f"  {CYAN}[3]{OFF} As duas                   (baixar + criar playlist no Qobuz)"
         )
-        print(f"  {CYAN}[0]{OFF} Cancelar")
-        print()
+        ui.emit(f"  {CYAN}[0]{OFF} Cancelar")
+        ui.emit()
 
         while True:
             choice = input("  Escolha (0-3): ").strip()
             if choice in ("0", "1", "2", "3"):
                 break
-            print(f"  {YELLOW}Por favor, escolha entre 0 e 3.{OFF}")
+            ui.emit(f"  {YELLOW}Por favor, escolha entre 0 e 3.{OFF}")
 
         if choice == "0":
             logger.info(f"{YELLOW}[*] Cancelado.{OFF}")
@@ -2398,14 +2741,17 @@ class QobuzDL:
         pending_tasks = []
 
         from qobuz_dl.downloader import print_download_header
-        mode_label = f"Paralelo ({batch_workers} workers)" if can_parallelize else "Sequencial"
+
+        mode_label = (
+            f"Paralelo ({batch_workers} workers)" if can_parallelize else "Sequencial"
+        )
         print_download_header(
             "PLAYLIST IMPORTADA",
             [
                 ("Nome", playlist_name),
                 ("Faixas", str(len(track_ids))),
                 ("Modo", mode_label),
-            ]
+            ],
         )
 
         for idx, track_id in enumerate(track_ids):
@@ -2413,7 +2759,9 @@ class QobuzDL:
                 track_id_captured = track_id
                 idx_captured = idx
 
-                async def _bounded_track_download(t_id=track_id_captured, t_idx=idx_captured):
+                async def _bounded_track_download(
+                    t_id=track_id_captured, t_idx=idx_captured
+                ):
                     if t_idx < batch_workers:
                         await asyncio.sleep(t_idx * HEADER_STAGGER_DELAY)
                     async with semaphore:
@@ -2427,6 +2775,7 @@ class QobuzDL:
                             position_pool=position_pool,
                             suppress_header=True,
                         )
+
                 pending_tasks.append(_bounded_track_download())
             else:
                 await self.download_from_id(
@@ -2453,7 +2802,7 @@ class QobuzDL:
         from qobuz_dl.downloader import safe_print
 
         safe_print(f"\n{CYAN}{'━' * 44}{RESET}")
-        safe_print(f"📊 {GREEN}RESUMO DA PLAYLIST IMPORTADA:{RESET} {playlist_name}")
+        safe_print(f"  📊 {GREEN}RESUMO DA PLAYLIST IMPORTADA:{RESET} {playlist_name}")
         safe_print(f"   • Sucesso : {GREEN}{succ}/{len(track_ids)}{RESET}")
         if skip > 0:
             safe_print(f"   • Puladas : {YELLOW}{skip}{RESET} (Já baixado/Demo)")

@@ -69,8 +69,9 @@ def main() -> int:
     esperado = gerar()
 
     if args.check:
-        atual = REQUIREMENTS.read_text(
-            encoding="utf-8") if REQUIREMENTS.exists() else ""
+        atual = (
+            REQUIREMENTS.read_text(encoding="utf-8") if REQUIREMENTS.exists() else ""
+        )
         if atual != esperado:
             print(
                 "requirements.txt esta fora de sincronia com o pyproject.toml.\n"

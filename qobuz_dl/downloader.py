@@ -50,9 +50,6 @@ from tenacity import (
 FALLBACK_TIERS = [27, 7, 6, 5]
 
 
-# Filtra faixas que a API devolve no listing mas que na verdade nao dao pra baixar
-# completas (demo/compra avulsa/bloqueio de regiao). Chamada ANTES de gastar uma
-# chamada de API pedindo a URL real -- evita erro tardio la' na hora do download.
 def is_track_streamable(track: dict) -> tuple[bool, str]:
     """
     [OPÇÃO A] Checagem prévia se a faixa está liberada para streaming completo.
@@ -71,10 +68,6 @@ def is_track_streamable(track: dict) -> tuple[bool, str]:
     return True, ""
 
 
-# Gera um .missing.txt dentro da pasta do album explicando por que uma faixa
-# nao foi baixada (usado tanto p/ pre-check quanto p/ falhas de URL/amostra).
-# Best-effort: qualquer erro de IO aqui e' engolido de proposito (nao pode
-# derrubar o download por causa de um arquivo de aviso).
 def create_missing_placeholder(track: dict, folder_path: str, reason: str):
     """
     [OPÇÃO C] Cria o arquivo .missing.txt na pasta do álbum
@@ -99,25 +92,14 @@ def create_missing_placeholder(track: dict, folder_path: str, reason: str):
         pass
 
 
-# Exception dedicada para erros de download DEFINITIVOS (HTTP 401/403/404/451).
-# Diferenca de uma exception generica: quem pega isso NAO deve tentar de novo
-# (nem trocar de qualidade, nem cair no download segmentado) -- e' sempre o
-# mesmo motivo (sem permissao/nao existe), entao repetir so' perde tempo.
-# Ver onde e' levantada em tqdm_download() e onde e' pega em
-# _download_and_tag() / tqdm_download_segments().
 class _PermanentDownloadError(Exception):
     """
-    Erro de download que NAO deve ser tentado de novo -- 401 (nao
-    autenticado), 403 (sem licenca/regiao bloqueada), 404 (nao existe),
+    Erro de download que NÃO deve ser tentado de novo -- 401 (nao
+    autenticado), 403 (sem licenca/regiao bloqueada), 404 (não existe),
     451 (indisponivel por motivo legal). Tentar de novo um desses e'
     tempo perdido, sempre vai falhar do mesmo jeito -- diferente de um
     timeout ou erro 5xx, que pode ser so' uma soneca passageira do
-    servidor. Antes disso, qualquer erro nao-404 (incluindo 403/401)
-    caia no mesmo loop de retry com backoff de ate' ~62s e imprimia
-    "[!] Server block. Retrying..." repetidas vezes -- poluindo o
-    terminal e dando a falsa impressao de que a conexao estava
-    instavel quando na verdade a faixa so' nao estava disponivel
-    mesmo (ex.: bloqueio de regiao, direito autoral).
+    servidor.
     """
 
     pass
@@ -128,27 +110,17 @@ print_lock = ui.print_lock
 abort_event = threading.Event()
 
 
-# Largura segura do terminal para as barras de progresso -- delega para ui.py
-# (fonte unica; nao recalcular largura em outro lugar do modulo).
 def _get_safe_ncols():
-    """Delegado para ``ui.progress_ncols()`` (fonte unica de largura).
-
-    Mantido como nome publico porque varios pontos do modulo o chamam.
-    """
+    """Delegado para ``ui.progress_ncols()`` (fonte unica de largura)."""
     return ui.progress_ncols()
 
 
-# Quanto espaco (em colunas) sobra pra a descricao da faixa na barra tqdm,
-# depois de reservar espaco fixo pra percentual/contador/bordas. Entre 6 e 30.
 def _desc_budget(ncols):
     FIXED_OVERHEAD = 2 + 4 + 1 + 1 + 1 + 13
     MIN_BAR = 6
     return max(6, min(30, ncols - FIXED_OVERHEAD - MIN_BAR - 1))
 
 
-# Pool de posicoes (0..N-1) para as barras tqdm concorrerem sem se sobrepor
-# quando o download e' paralelo (--max-workers > 1). Cada worker pega um slot
-# livre no inicio da faixa e devolve no final (tqdm_download/_segments).
 class _PositionPool:
     def __init__(self, size):
         self._lock = threading.Lock()
@@ -172,75 +144,38 @@ class _PositionPool:
 _dir_locks: dict = {}
 
 
-# Um asyncio.Lock por pasta de destino (evita duas coroutines baixarem/gravarem
-# a mesma capa/arquivo ao mesmo tempo dentro do mesmo diretorio).
 def _get_dir_lock(dirn: str) -> asyncio.Lock:
     return _dir_locks.setdefault(dirn, asyncio.Lock())
 
 
-# print() thread-safe: usar SEMPRE isto (nunca print() puro) pra nao embaralhar
-# a saida quando varias threads/coroutines escrevem no terminal ao mesmo tempo.
-# Delega para ui.emit(), que e' o unico ponto real de escrita no terminal.
 def safe_print(*args, **kwargs):
     """
-    Thread-safe print function. Prevents UI glitches ("cursor wars")
-    when multiple download threads attempt to log to the terminal simultaneously.
+    Funcao de print thread-safe. Evita falhas visuais na interface
+    ("guerra de cursores") quando varias threads de download tentam
+    escrever no terminal ao mesmo tempo.
 
-    REFATORACAO: agora delega para ``ui.emit()``, o unico ponto de escrita no
-    terminal do projeto -- assim ``--quiet``, deteccao de TTY e o fallback
-    para terminais nao-UTF-8 valem tambem aqui.
+    Delega para ``ui.emit()``, o unico ponto real de escrita no terminal
+    do projeto -- assim ``--quiet``, deteccao de TTY e o fallback para
+    terminais nao-UTF-8 valem tambem aqui.
     """
     text = " ".join(map(str, args))
     ui.emit(text, end=kwargs.get("end", "\n"))
 
 
-# Cabecalho padrao impresso 1x no inicio de qualquer download (album/faixa/
-# playlist/lote). 'kind' = rotulo entre colchetes; 'rows' = lista (label, valor).
-# Implementacao de fato mora em ui.header() -- mudar layout/cor la'.
 def print_download_header(kind: str, rows: list) -> None:
     """
-    Cabecalho padronizado impresso uma unica vez, no inicio de qualquer
-    download (album, faixa unica, playlist ou lote de urls). Mesmo formato
-    pros 4 tipos -- so' as linhas (rows) mudam -- pra ficar facil escanear
-    visualmente o que vai ser baixado antes das linhas de progresso comecarem.
-
-    kind: rotulo do topo ("ALBUM", "FAIXA", "PLAYLIST", "LOTE DE URLS"...) --
-          impresso entre colchetes (ex: "[ÁLBUM]"), com uma linha em branco
-          logo depois pra separar visualmente do bloco de dados.
-    rows: lista de tuplas (label, valor) exibidas alinhadas, ex.:
-          [("Artista", "Daft Punk"), ("Faixas", "14")]
-
-    Cor: usa RESET (Style.RESET_ALL) apos cada trecho colorido, nao OFF
-    (Style.DIM) -- DIM so' reduz o brilho, nao limpa a cor de fato, entao o
-    ciano "vazava" pro resto da linha (inclusive os valores, que nunca
-    tinham cor propria). RESET limpa de verdade, os valores voltam a usar a
-    cor padrao do terminal.
-
-    Barra: largura calculada com base no conteudo real (maior linha entre o
-    "[kind]" e as rows), com teto de 44 e piso de 20 -- antes era sempre 44
-    fixo, estourando a tela em telas estreitas (ex: A-Shell no iPhone) mesmo
-    quando o conteudo era bem mais curto que isso.
+    Cabecalho padronizado impresso uma unica vez no inicio de qualquer
+    download (album, faixa unica, playlist ou lote de urls).
     """
     ui.header(kind, rows)
 
 
-# Emite uma linha JSON em stdout (evento track_start/track_done) para GUIs/apps
-# consumirem progresso sem parsear tqdm/ANSI. So' faz algo se
-# settings.progress_json estiver ligado (--progress-json); senao e' no-op.
 def emit_progress_json(settings, event, **fields):
     """
     Emite uma linha JSON em stdout descrevendo um evento de progresso
-    (inicio/fim de faixa), pra frontends (GUI web, app) conseguirem
-    acompanhar downloads sem precisar fazer parsing de barra tqdm/ANSI no
-    terminal. So' emite algo se settings.progress_json estiver ligado
-    (--progress-json / progress_json=true no config.ini); sem isso, e' um
-    no-op e o comportamento de sempre (so' tqdm + prints coloridos)
-    continua identico.
-
-    Cobre hoje os eventos "track_start" e "track_done" (ver chamadas em
-    download_track() e _download_and_tag()). Falha de faixa (exceptions
-    tratadas mais acima, em core.py) ainda NAO emite um evento
-    "track_failed" -- e' o proximo passo natural se isso for util.
+    (inicio/fim de faixa), para frontends (GUI web, app) conseguirem
+    acompanhar downloads sem parsear a barra tqdm/ANSI no terminal.
+    So' emite algo se settings.progress_json estiver ligado.
     """
     if not getattr(settings, "progress_json", False):
         return
@@ -251,10 +186,9 @@ def emit_progress_json(settings, event, **fields):
         print(_json.dumps(payload, ensure_ascii=False), flush=True)
 
 
-# Normaliza o rotulo do tipo de release ("ep" -> "EP", resto -> Title Case).
 def format_release_type(release_type: str) -> str:
     if not release_type:
-        return "Unknown"
+        return "Desconhecido"
 
     release_type = release_type.lower()
     if release_type == "ep":
@@ -266,48 +200,40 @@ def format_release_type(release_type: str) -> str:
 legacy_flag = False
 
 
-# Formata folder_format (pode ter '/' = subpastas) preenchendo {placeholders}
-# com attr_dict, sanitiza cada pedaco do caminho e trunca nomes longos demais
-# (>120 chars) preservando inicio+fim. Se {placeholder} nao existir em
-# attr_dict, cai no fallback (usa o texto literal do formato).
 def process_folder_format_with_subdirs(
     folder_format, attr_dict, path=None, legacy_charmap=False
 ):
     path_parts = folder_format.split("/")
     cleaned_parts = []
     for part in path_parts:
-        if part:
-            try:
-                formatted_part = part.format(**attr_dict)
-                cleaned_part = sanitize_filepath(
-                    clean_filename(
-                        formatted_part,
-                        legacy_charmap=legacy_charmap,
-                    ),
-                    replacement_text="_",
-                )
-
-                if cleaned_part and len(cleaned_part) > 120:
-                    start_f = cleaned_part[:60].rstrip(" .\"-_'")
-                    end_f = cleaned_part[-50:].lstrip(" .\"-_'")
-                    cleaned_part = f"{start_f}...{end_f}"
-
-                if cleaned_part:
-                    cleaned_parts.append(cleaned_part)
-            except KeyError as e:
-                logger.warning(f"{YELLOW}Format error ({e}), using original text.{OFF}")
-                cleaned_part = sanitize_filepath(
-                    clean_filename(part, legacy_charmap=legacy_charmap),
-                    replacement_text="_",
-                )
-
-                if cleaned_part and len(cleaned_part) > 120:
-                    start_f = cleaned_part[:60].rstrip(" .\"-_'")
-                    end_f = cleaned_part[-50:].lstrip(" .\"-_'")
-                    cleaned_part = f"{start_f}...{end_f}"
-
-                if cleaned_part:
-                    cleaned_parts.append(cleaned_part)
+        if not part:
+            continue
+        try:
+            formatted_part = part.format(**attr_dict)
+            cleaned_part = sanitize_filepath(
+                clean_filename(formatted_part, legacy_charmap=legacy_charmap),
+                replacement_text="_",
+            )
+            if cleaned_part and len(cleaned_part) > 120:
+                start_f = cleaned_part[:60].rstrip(" .\"-_'")
+                end_f = cleaned_part[-50:].lstrip(" .\"-_'")
+                cleaned_part = f"{start_f}...{end_f}"
+            if cleaned_part:
+                cleaned_parts.append(cleaned_part)
+        except KeyError as e:
+            logger.warning(
+                f"{YELLOW}Erro de formato ({e}), usando texto original.{OFF}"
+            )
+            cleaned_part = sanitize_filepath(
+                clean_filename(part, legacy_charmap=legacy_charmap),
+                replacement_text="_",
+            )
+            if cleaned_part and len(cleaned_part) > 120:
+                start_f = cleaned_part[:60].rstrip(" .\"-_'")
+                end_f = cleaned_part[-50:].lstrip(" .\"-_'")
+                cleaned_part = f"{start_f}...{end_f}"
+            if cleaned_part:
+                cleaned_parts.append(cleaned_part)
 
     final_path = os.path.join(*cleaned_parts) if cleaned_parts else ""
     if path is not None:
@@ -333,17 +259,13 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 
-# Motor principal de download: uma instancia = 1 item (album, faixa ou faixa
-# de playlist). Ponto de entrada publico: download_id_by_type().
 class Download:
     """
-    The main Download engine handling the retrieval of audio files, booklets, and metadata.
+    O motor principal de Download, responsavel por buscar os arquivos de
+    audio, booklets e metadados. Uma instancia = 1 item (album, faixa ou
+    faixa de playlist). Ponto de entrada publico: download_id_by_type().
     """
 
-    # Guarda toda a configuracao do download (qualidade, formatos de pasta/faixa,
-    # flags de capa/letra/creditos) e cria a sessao HTTP compartilhada.
-    # follow_redirects=True e' obrigatorio aqui: httpx (diferente de requests) NAO
-    # segue redirect por padrao, e URLs de CDN costumam redirecionar.
     def __init__(
         self,
         client,
@@ -394,7 +316,10 @@ class Download:
         self.fetch_lyrics = fetch_lyrics
         self.no_lrc_files = no_lrc_files
         if self.fetch_lyrics:
-            self.lyrics_engine = LyricsEngine(genius_token, session=self.http_session)
+            self.lyrics_engine = LyricsEngine(
+                genius_token,
+                settings=self.settings,
+            )
 
         self.settings = settings or QobuzDLSettings()
         self.download_db = download_db
@@ -411,10 +336,6 @@ class Download:
             else DEFAULT_MULTIPLE_DISC_TRACK
         )
 
-    # Ponto de entrada publico. Restaura os formatos originais (por causa do
-    # fallback de _determine_formats, que pode ter sobrescrito self.folder_format)
-    # e despacha para download_release() ou download_track(). Sempre fecha a
-    # sessao HTTP no finally, mesmo se o download falhar/for abortado.
     async def download_id_by_type(
         self, track=True, is_parallel=False, position_pool=None, suppress_header=False
     ):
@@ -437,8 +358,6 @@ class Download:
         finally:
             await self.close_session()
 
-    # Fecha lyrics_engine e http_session no final do download. Falhas aqui sao
-    # so' logadas em debug (best-effort cleanup, nunca deve travar o encerramento).
     async def close_session(self):
         if hasattr(self, "lyrics_engine"):
             try:
@@ -453,20 +372,17 @@ class Download:
             except Exception as e:
                 logger.debug(f"Falha ao fechar http_session (ignorado): {e}")
 
-    # Baixa um album inteiro. Fluxo: valida streamable -> resolve formato/pasta ->
-    # renomeia pasta pra [IN PROGRESS] -> baixa faixas em paralelo/sequencial ->
-    # renomeia pasta final pra nome definitivo ou [INCOMPLETE] se algo falhou.
     async def download_release(self, suppress_header=False):
         album_meta = await self.client.get_album_meta(self.item_id)
 
         if not album_meta.get("streamable"):
-            raise NonStreamable("This release is not streamable")
+            raise NonStreamable("Este lançamento nao está disponível para streaming")
 
         if self.albums_only and (
-            album_meta.get("release_type") != "album" or
-            album_meta.get("artist").get("name") == "Various Artists"
+            album_meta.get("release_type") != "album"
+            or album_meta.get("artist").get("name") == "Various Artists"
         ):
-            safe_print(f'{OFF}Ignoring Single/EP/VA: {album_meta.get("title", "n/a")}')
+            safe_print(f'{OFF}Ignorando Single/EP/VA: {album_meta.get("title", "n/a")}')
             return
 
         album_title = _get_title(album_meta)
@@ -478,7 +394,7 @@ class Download:
 
         if not self.downgrade_quality and not quality_met:
             safe_print(
-                f"{OFF}Skipping {album_title} as it doesn't meet quality requirement"
+                f"{OFF}Pulando {album_title} pois não atende ao requisito de qualidade{OFF}"
             )
             return
 
@@ -505,14 +421,13 @@ class Download:
             if hasattr(self, "settings")
             else False
         )
+
         target_dirn = process_folder_format_with_subdirs(
             self.folder_format, album_attr, self.path, legacy_charmap=legacy_flag
         )
+
         base_path, folder_name = os.path.split(target_dirn)
 
-        # Renomeia a pasta pra [IN PROGRESS]/[INCOMPLETE] durante o download e volta
-        # pro nome definitivo so' no final, sem falhas (ver bloco 'finally' mais abaixo).
-        # So' se aplica a album 'padrao' (nao playlist) -- is_standard_album.
         incomplete_dirn = os.path.join(base_path, f"[INCOMPLETE] {folder_name}")
         inprogress_dirn = os.path.join(base_path, f"[IN PROGRESS] {folder_name}")
 
@@ -527,7 +442,8 @@ class Download:
                     os.rename(target_dirn, working_dirn)
             except OSError as e:
                 safe_print(
-                    f"{YELLOW}[!] Could not rename existing folder to [IN PROGRESS]. Operating in standard mode. ({e}){OFF}"
+                    f"{YELLOW}[!] Não foi possível renomear a pasta existente para [IN PROGRESS]. "
+                    f"Operando em modo padrão. ({e}){OFF}"
                 )
                 working_dirn = target_dirn
         else:
@@ -539,8 +455,6 @@ class Download:
         media_count = album_meta.get("media_count", 1)
         is_multiple = True if media_count > 1 else False
 
-        # --delay ainda nao esta' em settings.delay (so' em sys.argv) neste ponto --
-        # fallback manual pra ler direto da linha de comando se necessario.
         delay_time = getattr(self.settings, "delay", 0)
         if delay_time == 0 and "--delay" in sys.argv:
             try:
@@ -552,8 +466,6 @@ class Download:
         is_parallel = False
         mode_label = "Sequencial"
 
-        # Decide sequencial vs paralelo: --delay > 0 forca sequencial (throttle de
-        # seguranca contra rate-limit); paralelo so' compensa com >1 faixa.
         if delay_time > 0:
             active_workers = 1
             mode_label = "Sequencial (Safety Delay ativo)"
@@ -587,9 +499,6 @@ class Download:
         aborted_by_user = False
         abort_event.clear()
 
-        # Instala handler de SIGINT proprio so' durante o download das faixas, pra
-        # Ctrl+C sinalizar abort_event e permitir fechar/renomear pastas com calma
-        # em vez de matar o processo no meio de uma escrita de arquivo.
         original_sigint = None
         try:
             original_sigint = signal.getsignal(signal.SIGINT)
@@ -608,7 +517,7 @@ class Download:
             )
 
             if self.settings.no_cover:
-                safe_print(f"{OFF}[*] Skipping cover{OFF}")
+                safe_print(f"{OFF}[*] Pulando capa{OFF}")
 
             if self.settings.no_cover and not self.settings.embed_art:
                 pass
@@ -638,22 +547,19 @@ class Download:
 
             if getattr(self, "booklet_only", False):
                 safe_print(
-                    f"{YELLOW}[*] --booklet-only flag active. Skipping audio tracks.{OFF}"
+                    f"{YELLOW}[*] Flag --booklet-only ativa. Pulando faixas de audio.{OFF}"
                 )
                 if is_standard_album and working_dirn == inprogress_dirn:
                     try:
                         os.rename(working_dirn, incomplete_dirn)
                     except OSError as e:
                         logger.warning(
-                            f"{YELLOW}[!] Impossibile rinominare la cartella in [INCOMPLETE]. ({e}){OFF}"
+                            f"{YELLOW}[!] Não foi possível renomear a pasta para [INCOMPLETE]. ({e}){OFF}"
                         )
                 return
 
             semaphore = asyncio.Semaphore(active_workers)
 
-            # Corrotina por faixa (rodada em paralelo, limitada por 'semaphore').
-            # Ordem de checagem: 1) abort? 2) streamable? (pre-check, sem gastar API)
-            # 3) pega URL real -> se vier so' 'sample', trata como pulada tambem.
             async def process_track(idx, i):
                 if abort_event.is_set():
                     return False
@@ -675,7 +581,8 @@ class Download:
                         )
                     except Exception as e:
                         safe_print(
-                            f"{RED}[!] Erro de API na faixa {t_num} (ID: {i['id']}): {e}{OFF}")
+                            f"{RED}[!] Erro de API na faixa {t_num} (ID: {i['id']}): {e}{OFF}"
+                        )
                         create_missing_placeholder(i, dirn, f"Erro de API: {e}")
                         return False
 
@@ -696,21 +603,17 @@ class Download:
                         return res
                     else:
                         safe_print(
-                            f"{CYAN}[PULADA]{RESET} Faixa {t_num} - {t_title} ({YELLOW}Apenas amostra/demo{RESET})"
+                            f"{CYAN}[PULADA]{RESET} Faixa {t_num} - {t_title} "
+                            f"({YELLOW}Apenas amostra/demo{RESET})"
                         )
                         create_missing_placeholder(i, dirn, "Apenas amostra/demo (30s)")
                         return "skipped"
 
-            # Dispara todas as faixas de uma vez (mesmo em modo sequencial -- quem
-            # limita a concorrencia real e' o 'semaphore' acima, nao esta lista).
             task_objs = [
                 asyncio.create_task(process_track(idx, i))
                 for idx, i in enumerate(album_meta["tracks"]["items"])
             ]
 
-            # Ctrl+C durante o gather(): cancela as tasks pendentes e fecha a sessao HTTP
-            # na forca pra destravar downloads parados no meio de um socket, depois
-            # propaga a excecao pra cair no 'except (KeyboardInterrupt, SystemExit)' abaixo.
             try:
                 results = await asyncio.gather(*task_objs, return_exceptions=True)
             except (KeyboardInterrupt, asyncio.CancelledError):
@@ -738,117 +641,114 @@ class Download:
             abort_event.set()
             aborted_by_user = True
             safe_print(
-                f"\n{RED}[!] CTRL+C Intercepted: Securing files and folders...{OFF}"
+                f"\n{RED}[!] CTRL+C Interceptado: Protegendo arquivos e pastas...{OFF}"
             )
-
         finally:
             try:
                 if original_sigint:
                     signal.signal(signal.SIGINT, original_sigint)
             except Exception as e:
                 logger.debug(
-                    f"Nao foi possivel restaurar handler de SIGINT original: {e}"
+                    f"Não foi possível restaurar handler de SIGINT original: {e}"
                 )
-
-        if aborted_by_user:
-            time.sleep(1.5)
-
-        # Renomeia a pasta de trabalho pro nome final: sem nenhuma falha -> nome
-        # limpo (target_dirn); com falha/abort -> mantem o prefixo [INCOMPLETE].
-        if is_standard_album and working_dirn == inprogress_dirn:
-            final_dirn = (
-                target_dirn
-                if (failed_tracks == 0 and not aborted_by_user)
-                else incomplete_dirn
-            )
-            try:
-                os.rename(working_dirn, final_dirn)
-            except OSError as e:
-                safe_print(
-                    f"{YELLOW}[!] Could not rename final folder state (OS Lock might still be active). ({e}){OFF}"
-                )
-                final_dirn = working_dirn
 
             if aborted_by_user:
-                safe_print(
-                    f"{YELLOW}[!] Download aborted. Folder successfully marked as [INCOMPLETE].{OFF}"
-                )
-            elif failed_tracks > 0:
-                safe_print(
-                    f"\n{YELLOW}[!] Album downloaded partially ({failed_tracks} tracks skipped). Folder marked as [INCOMPLETE].{OFF}"
-                )
-        else:
+                time.sleep(1.5)
+
             final_dirn = working_dirn
+            if is_standard_album and working_dirn == inprogress_dirn:
+                final_dirn = (
+                    target_dirn
+                    if (failed_tracks == 0 and not aborted_by_user)
+                    else incomplete_dirn
+                )
+                try:
+                    os.rename(working_dirn, final_dirn)
+                except OSError as e:
+                    safe_print(
+                        f"{YELLOW}[!] Não foi possível renomear a pasta final "
+                        f"(o bloqueio do SO ainda pode estar ativo). ({e}){OFF}"
+                    )
+                    final_dirn = working_dirn
 
-        if aborted_by_user:
-            os._exit(1)
+                if aborted_by_user:
+                    safe_print(
+                        f"{YELLOW}[!] Download abortado. Pasta marcada com sucesso como [INCOMPLETE].{OFF}"
+                    )
+                elif failed_tracks > 0:
+                    safe_print(
+                        f"\n{YELLOW}[!] Álbum baixado parcialmente ({failed_tracks} faixas puladas). "
+                        f"Pasta marcada como [INCOMPLETE].{OFF}"
+                    )
 
-        # !! ATENCAO - possivel bug: 'await handle_download_id(...)' abaixo esta'
-        # no MESMO nivel de indentacao do 'if' (8 espacos), ou seja, roda sempre --
-        # mas db_artist/db_album so' sao definidos DENTRO do if. Se failed_tracks>0
-        # ou aborted_by_user, isso deveria estourar UnboundLocalError. Verificar se
-        # a intencao era indentar handle_download_id() pra dentro do if.
-        if failed_tracks == 0 and not aborted_by_user:
-            db_artist = album_attr.get("album_artist", "Unknown")
-            db_album = album_attr.get("album_title", "Unknown")
+            if aborted_by_user:
+                os._exit(1)
 
-        await handle_download_id(
-            db_path=self.download_db,
-            item_id=self.item_id,
-            add_id=True,
-            media_type="album",
-            quality=self.quality,
-            file_format=file_format,
-            quality_met=quality_met,
-            bit_depth=bit_depth,
-            sampling_rate=sampling_rate,
-            saved_path=final_dirn,
-            url=url,
-            release_date=release_date,
-            artist=db_artist,
-            album=db_album,
-        )
+            # [FIX] handle_download_id() agora vive DENTRO deste 'if', junto com db_artist/db_album -- antes havia risco (sinalizado em revisao) de essas variaveis nao existirem quando failed_tracks>0/aborted_by_user e o handle_download_id ainda assim tentar rodar.
+            if failed_tracks == 0 and not aborted_by_user:
+                db_artist = album_attr.get("album_artist", "Unknown")
+                db_album = album_attr.get("album_title", "Unknown")
 
-        # Sumario final impresso no terminal (contagem de sucesso/pulada/falha),
-        # baseado nos retornos de process_track(): True/False/'skipped'.
-        skipped_count = sum(1 for r in results if r == "skipped")
-        real_failed = sum(1 for r in results if r is False)
-        downloaded_count = sum(1 for r in results if r is True)
+                await handle_download_id(
+                    db_path=self.download_db,
+                    item_id=self.item_id,
+                    add_id=True,
+                    media_type="album",
+                    quality=self.quality,
+                    file_format=file_format,
+                    quality_met=quality_met,
+                    bit_depth=bit_depth,
+                    sampling_rate=sampling_rate,
+                    saved_path=final_dirn,
+                    url=url,
+                    release_date=release_date,
+                    artist=db_artist,
+                    album=db_album,
+                )
 
-        safe_print(f"\n{CYAN}{'━' * 44}{RESET}")
-        safe_print(f"📊 {GREEN}RESUMO DO ALBÚM:{RESET} {album_title}")
-        safe_print(
-            f"   • Baixadas com sucesso : {GREEN}{downloaded_count}/{track_count}{RESET}"
-        )
-        if skipped_count > 0:
+            skipped_count = sum(1 for r in results if r == "skipped")
+            real_failed = sum(1 for r in results if r is False)
+            downloaded_count = sum(1 for r in results if r is True)
+
+            safe_print(f"\n{CYAN}{'-' * 44}{RESET}")
+            safe_print(f"  📊 RESUMO DO ÁLBUM: {GREEN}{RESET} {album_title}")
             safe_print(
-                f"   • Faixas puladas (Demo/Indisponível) : {YELLOW}{skipped_count}{RESET} (marcadas em .missing.txt)"
+                f" - Baixadas com sucesso : {GREEN}{downloaded_count}/{track_count}{RESET}"
             )
-        if real_failed > 0:
-            safe_print(f"   • Falhas de rede/download : {RED}{real_failed}{RESET}")
-        safe_print(f"{CYAN}{'━' * 44}{RESET}\n")
+            if skipped_count > 0:
+                safe_print(
+                    f" - Faixas puladas (Demo/Indisponivel) : {YELLOW}{skipped_count}{RESET} "
+                    f"(marcadas em .missing.txt)"
+                )
+            if real_failed > 0:
+                safe_print(f" - Falhas de rede/download : {RED}{real_failed}{RESET}")
+            safe_print(f"{CYAN}{'-' * 44}{RESET}\n")
 
-    # Baixa uma unica faixa (chamado tambem por playlists, uma faixa por vez).
-    # Se for faixa de playlist (nao playlist_as_albums), usa nome de pasta
-    # 'clean_playlist_format' e pula a capa salva padrao (so' capa embutida).
     async def download_track(
         self, is_parallel=False, position_pool=None, suppress_header=False
     ):
         parse = await self.client.get_track_url(self.item_id, self.quality)
-        # So' segue com o download se a URL devolvida NAO for so' amostra e tiver
-        # sampling_rate (senao a faixa e' so' preview de 30s -- cai direto no fim
-        # da funcao sem 'success' definido, ver nota de bug abaixo em 'if success:').
-        if "sample" not in parse and parse.get("sampling_rate"):
-            track_meta = await self.client.get_track_meta(self.item_id)
 
+        track_meta = await self.client.get_track_meta(self.item_id)
+        track_title = _get_title(track_meta)
+
+        is_sample_only = "sample" in parse or not parse.get("sampling_rate")
+
+        if is_sample_only:
+            safe_print(
+                f"{CYAN}[PULADA]{RESET} {track_title} "
+                f"({YELLOW}Apenas amostra/demo (30s){RESET})"
+            )
+            success = False
+            track_attr = None
+        else:
             if (
-                getattr(self, "is_playlist", False) and
-                not getattr(self, "playlist_as_albums", False) and
-                getattr(self, "playlist_track_number", None)
+                getattr(self, "is_playlist", False)
+                and not getattr(self, "playlist_as_albums", False)
+                and getattr(self, "playlist_track_number", None)
             ):
                 track_meta["track_number"] = self.playlist_track_number
 
-            track_title = _get_title(track_meta)
             artist = _safe_get(track_meta, "performer", "name")
             album_name = track_meta.get("album", {}).get("title", "--")
 
@@ -876,6 +776,7 @@ class Download:
                         ),
                     ],
                 )
+
             emit_progress_json(
                 self.settings,
                 "track_start",
@@ -890,98 +791,100 @@ class Download:
 
             if not self.downgrade_quality and not quality_met:
                 safe_print(
-                    f"{OFF}Skipping {track_title} as it doesn't meet quality requirement{OFF}"
+                    f"{OFF}Pulando {track_title} pois não atende ao requisito de qualidade{OFF}"
                 )
-                return
-
-            track_attr = self._get_track_attr(
-                track_meta, track_title, bit_depth, sampling_rate, file_format
-            )
-
-            self._determine_formats(
-                album_meta=track_meta.get("album", {}),
-                album_attr=None,
-                tracks_meta=[track_meta],
-                track_attr=track_attr,
-                is_track=True,
-                file_format=file_format,
-                settings=self.settings,
-            )
-
-            legacy_flag = (
-                getattr(self.settings, "legacy_charmap", False)
-                if hasattr(self, "settings")
-                else False
-            )
-            dirn = process_folder_format_with_subdirs(
-                self.folder_format, track_attr, self.path, legacy_charmap=legacy_flag
-            )
-            os.makedirs(dirn, exist_ok=True)
-
-            skip_saved_cover = getattr(self, "is_playlist", False) and not getattr(
-                self, "playlist_as_albums", False
-            )
-            if skip_saved_cover:
-                if getattr(self, "playlist_track_number", 1) == 1:
-                    safe_print(
-                        f"{OFF}[*] Skipping standard cover save to keep playlist folder clean{OFF}"
-                    )
-            elif self.settings.no_cover:
-                safe_print(f"{OFF}[*] Skipping cover{OFF}")
-
-            embed_cover_path = None
-            if self.settings.embed_art:
-                unique_embed_name = f".embed_{self.item_id}.jpg"
-                embed_cover_path = os.path.join(dirn, unique_embed_name)
+                success = False
+                track_attr = None
             else:
-                safe_print(f"{OFF}[*] Skipping embedded art{OFF}")
+                track_attr = self._get_track_attr(
+                    track_meta, track_title, bit_depth, sampling_rate, file_format
+                )
 
-            save_cover_now = not skip_saved_cover and not self.settings.no_cover
-            if save_cover_now or self.settings.embed_art:
-                async with _get_dir_lock(dirn):
-                    await _get_cover_and_embed(
-                        track_meta["album"]["image"]["large"],
-                        dirn,
-                        save_cover=save_cover_now,
-                        embed_art=self.settings.embed_art,
-                        saved_name="cover.jpg",
-                        embed_name=(
-                            embed_cover_path and os.path.basename(embed_cover_path)
-                        ) or
-                        "",
-                        saved_art_size=self.settings.saved_art_size,
-                        embedded_art_size=self.settings.embedded_art_size,
-                        session=self.http_session,
-                        is_parallel=is_parallel,
-                        position_pool=position_pool,
-                    )
+                self._determine_formats(
+                    album_meta=track_meta.get("album", {}),
+                    album_attr=None,
+                    tracks_meta=[track_meta],
+                    track_attr=track_attr,
+                    is_track=True,
+                    file_format=file_format,
+                    settings=self.settings,
+                )
 
-            is_mp3 = True if int(self.quality) == 5 else False
+                legacy_flag = (
+                    getattr(self.settings, "legacy_charmap", False)
+                    if hasattr(self, "settings")
+                    else False
+                )
 
-            success = await self._download_and_tag(
-                dirn,
-                self.item_id,
-                parse,
-                track_meta,
-                track_meta,
-                True,
-                is_mp3,
-                False,
-                is_parallel=is_parallel,
-                position_pool=position_pool,
-                embed_cover_path=embed_cover_path,
-            )
+                dirn = process_folder_format_with_subdirs(
+                    self.folder_format,
+                    track_attr,
+                    self.path,
+                    legacy_charmap=legacy_flag,
+                )
+                os.makedirs(dirn, exist_ok=True)
 
-            if embed_cover_path and os.path.isfile(embed_cover_path):
-                try:
-                    os.remove(embed_cover_path)
-                except OSError:
-                    pass
+                skip_saved_cover = getattr(self, "is_playlist", False) and not getattr(
+                    self, "playlist_as_albums", False
+                )
 
-        # !! ATENCAO - mesmo padrao de bug de download_release(): este bloco esta'
-        # FORA do 'if "sample" not in parse...' de cima (8 espacos, nao 12). Se a
-        # faixa for so' amostra, 'success'/'track_attr'/'file_format'/'dirn' nunca
-        # foram definidos e isso estoura UnboundLocalError.
+                if skip_saved_cover:
+                    if getattr(self, "playlist_track_number", 1) == 1:
+                        safe_print(
+                            f"{OFF}[*] Pulando salvamento padrao de capa para manter a pasta da playlist limpa{OFF}"
+                        )
+                elif self.settings.no_cover:
+                    safe_print(f"{OFF}[*] Pulando capa{OFF}")
+
+                embed_cover_path = None
+                if self.settings.embed_art:
+                    unique_embed_name = f".embed_{self.item_id}.jpg"
+                    embed_cover_path = os.path.join(dirn, unique_embed_name)
+                else:
+                    safe_print(f"{OFF}[*] Pulando arte incorporada{OFF}")
+
+                save_cover_now = not skip_saved_cover and not self.settings.no_cover
+                if save_cover_now or self.settings.embed_art:
+                    async with _get_dir_lock(dirn):
+                        await _get_cover_and_embed(
+                            track_meta["album"]["image"]["large"],
+                            dirn,
+                            save_cover=save_cover_now,
+                            embed_art=self.settings.embed_art,
+                            saved_name="cover.jpg",
+                            embed_name=(
+                                embed_cover_path and os.path.basename(embed_cover_path)
+                            )
+                            or "",
+                            saved_art_size=self.settings.saved_art_size,
+                            embedded_art_size=self.settings.embedded_art_size,
+                            session=self.http_session,
+                            is_parallel=is_parallel,
+                            position_pool=position_pool,
+                        )
+
+                is_mp3 = True if int(self.quality) == 5 else False
+
+                success = await self._download_and_tag(
+                    dirn,
+                    self.item_id,
+                    parse,
+                    track_meta,
+                    track_meta,
+                    True,
+                    is_mp3,
+                    False,
+                    is_parallel=is_parallel,
+                    position_pool=position_pool,
+                    embed_cover_path=embed_cover_path,
+                )
+
+                if embed_cover_path and os.path.isfile(embed_cover_path):
+                    try:
+                        os.remove(embed_cover_path)
+                    except OSError:
+                        pass
+
         if success:
             db_artist = track_attr.get("artist", "Unknown")
             db_album = track_attr.get("album", "Unknown")
@@ -1003,34 +906,30 @@ class Download:
                 album=db_album,
             )
 
-        # Playlist ou lote de URLs (--from-file, pl_success ja setado): nao imprime
-        # resumo por faixa, so' incrementa contadores usados no painel final do lote.
-        is_batch_or_playlist = getattr(self, "is_playlist", False) or getattr(
-            self.settings, "pl_success", None) is not None
+        is_batch_or_playlist = (
+            getattr(self, "is_playlist", False)
+            or getattr(self.settings, "pl_success", None) is not None
+        )
 
         if not is_batch_or_playlist:
             try:
-                safe_print(f"\n{CYAN}{'━' * 44}{RESET}")
-                safe_print(f"📊 {GREEN}RESUMO DA FAIXA:{RESET} {track_title}")
+                safe_print(f"\n{CYAN}{'-' * 44}{RESET}")
+                safe_print(f" RESUMO DA FAIXA: {GREEN}{RESET} {track_title}")
                 if success:
-                    safe_print(f"   • Status : {GREEN}Concluída com Sucesso{RESET}")
+                    safe_print(f" - Status : {GREEN}Concluida com Sucesso{RESET}")
                 else:
-                    safe_print(f"   • Status : {RED}Falhou ou foi pulada{RESET}")
-                safe_print(f"{CYAN}{'━' * 44}{RESET}\n")
+                    safe_print(f" - Status : {RED}Falhou ou foi pulada{RESET}")
+                safe_print(f"{CYAN}{'-' * 44}{RESET}\n")
             except Exception as e:
                 safe_print(
-                    f"\n{RED}[!] Erro ao gerar painel de resumo da Faixa: {e}{RESET}\n")
+                    f"\n{RED}[!] Erro ao gerar painel de resumo da Faixa: {e}{RESET}\n"
+                )
         else:
             if success:
                 self.settings.pl_success = getattr(self.settings, "pl_success", 0) + 1
             else:
                 self.settings.pl_skipped = getattr(self.settings, "pl_skipped", 0) + 1
 
-    # Baixa o audio de fato e aplica as tags. Contem a logica de:
-    #   1) fallback de qualidade (FALLBACK_TIERS) quando o tier pedido falha;
-    #   2) deteccao de bloqueio Akamai -> troca para download_segments;
-    #   3) tagging (mp3/flac) + letras (Genius/Qobuz) + verificacao de integridade.
-    # Retorna True/False -- usado pelo caller para contar sucesso/falha da faixa.
     async def _download_and_tag(
         self,
         root_dir,
@@ -1046,9 +945,6 @@ class Download:
         embed_cover_path=None,
     ) -> bool:
         extension = ".mp3" if is_mp3 else ".flac"
-        # get_running_loop() (nao get_event_loop(), deprecated em async desde o
-        # Python 3.10 e removido em versoes futuras) -- falha alto se nao houver
-        # loop rodando, em vez de criar um loop novo por acidente.
         loop = asyncio.get_running_loop()
 
         track_artist = _safe_get(track_metadata, "performer", "name")
@@ -1068,10 +964,6 @@ class Download:
             else False
         )
 
-        # 3 esquemas de nome de arquivo dependendo do contexto: playlist solta
-        # ('artist - track_title', sem pasta de album), disco multiplo numa unica
-        # pasta (multiple_disc_track_format), ou o track_format normal (com pasta
-        # 'CD 0N' separada se multiple_disc_one_dir estiver desligado).
         if getattr(self, "is_playlist", False) and not getattr(
             self, "playlist_as_albums", False
         ):
@@ -1116,13 +1008,11 @@ class Download:
             end_part = formatted_path[-60:].lstrip(" .\"-_'")
             formatted_path = f"{start_part}...{end_part}"
 
-        # Se o arquivo final JA existe, considera sucesso e sai sem baixar de novo
-        # (idempotencia -- permite retomar um album parcialmente baixado).
         final_file = os.path.join(root_dir, formatted_path) + extension
 
         if os.path.exists(final_file):
             safe_print(
-                f"{CYAN}[*] Pulando: {os.path.basename(final_file)} (Já existe){OFF}"
+                f"{CYAN}[*] Pulando: {os.path.basename(final_file)} (Ja existe){OFF}"
             )
             return True
 
@@ -1133,7 +1023,7 @@ class Download:
         try:
             track_url_dict["url"]
         except KeyError:
-            safe_print(f"{OFF}Track not available for download{OFF}")
+            safe_print(f"{OFF}Faixa nao disponivel para download{OFF}")
             return False
 
         total_discs = album_or_track_metadata.get("media_count", 1)
@@ -1145,7 +1035,6 @@ class Download:
             root_dir = os.path.join(
                 root_dir, f"{self.settings.multiple_disc_prefix} {d_num:02}"
             )
-
         if not os.path.exists(root_dir):
             os.makedirs(root_dir, exist_ok=True)
 
@@ -1154,10 +1043,7 @@ class Download:
         track_no = str(track_metadata.get("track_number", 0)).zfill(2)
         desc = f"{track_no}. {track_title}"
 
-        # Tiers redeclarados localmente (ja existe FALLBACK_TIERS global no topo do
-        # arquivo) -- comeca do tier pedido (self.quality) e desce so' em caso de
-        # FALHA DE REDE/SERVIDOR (nunca por faixa indisponivel).
-        FALLBACK_TIERS = [27, 7, 6, 5]
+        FALLBACK_TIERS_LOCAL = [27, 7, 6, 5]
         TIER_NAMES = {
             27: "24-bit/>96kHz",
             7: "24-bit/96kHz",
@@ -1166,25 +1052,21 @@ class Download:
         }
 
         try:
-            start_idx = FALLBACK_TIERS.index(int(self.quality))
+            start_idx = FALLBACK_TIERS_LOCAL.index(int(self.quality))
         except ValueError:
             start_idx = 0
 
-        qualities_to_try = FALLBACK_TIERS[start_idx:]
+        qualities_to_try = FALLBACK_TIERS_LOCAL[start_idx:]
         success = False
         final_fmt = int(self.quality)
 
-        # Loop de fallback: tenta o tier atual -> se vier bloqueio Akamai (Exception
-        # generica no tqdm_download), tenta download SEGMENTADO no mesmo tier -> se
-        # falhar de vez ou for erro permanente (401/403/404/451), desiste da faixa e
-        # NAO desce de tier. So' desce pro proximo tier em erro de rede real.
         for attempt_fmt in qualities_to_try:
             if abort_event.is_set():
                 return False
 
             if attempt_fmt != int(self.quality):
                 safe_print(
-                    f"{YELLOW}[!] Automatic downgrade: Attempting to save in "
+                    f"{YELLOW}[!] Downgrade automatico: tentando salvar em "
                     f"{TIER_NAMES[attempt_fmt]}...{OFF}"
                 )
 
@@ -1196,12 +1078,10 @@ class Download:
             try:
                 fresh_track_dict = await get_fresh_url(force_segments=False)
 
-                # Mesma checagem de 'so' amostra' de is_track_streamable(), mas feita de
-                # novo aqui porque a URL fresca (por tier) pode devolver isso mesmo quando
-                # o pre-check inicial passou.
                 if fresh_track_dict.get("sample") is True:
                     safe_print(
-                        f"{CYAN}[PULADA]{RESET} Faixa {track_no} - {track_title} ({YELLOW}URL retornada é apenas amostra{RESET})"
+                        f"{CYAN}[PULADA]{RESET} Faixa {track_no} - {track_title} "
+                        f"({YELLOW}URL retornada e apenas amostra{RESET})"
                     )
                     create_missing_placeholder(
                         track_metadata, root_dir, "URL retornada é apenas amostra"
@@ -1217,57 +1097,85 @@ class Download:
                             is_parallel=is_parallel,
                             session=self.http_session,
                             position_pool=position_pool,
-                        ),
+                        )
                         success = True
                         final_fmt = attempt_fmt
                         break
                     except _PermanentDownloadError as e:
                         if abort_event.is_set():
                             return False
-                        safe_print(f"{YELLOW}[!] Faixa indisponível, pulando: {e}{OFF}")
+                        safe_print(f"{YELLOW}[!] Faixa indisponivel, pulando: {e}{OFF}")
                         return False
-                    # Exception generica aqui = suspeita de bloqueio Akamai (nao e' 401/403/404/
-                    # 451, que ja' caem no except _PermanentDownloadError acima). Pede uma nova
-                    # URL com force_segments=True e tenta o caminho segmentado abaixo.
-                    except Exception:
+                    except Exception as e:
+                        # [FIX] Antes este bloco so' avisava sobre "bloqueio Akamai"
+                        # e tentava o caminho segmentado; agora tambem loga o
+                        # motivo real da primeira falha, pra facilitar debug.
                         if abort_event.is_set():
                             return False
+                        logger.debug(
+                            f"Falha no download direto (tier {attempt_fmt}): {e}"
+                        )
                         safe_print(
-                            f"{YELLOW}[!] Bloqueio Akamai detectado. Ativando download segmentado de fallback...{OFF}"
+                            f"{YELLOW}[!] Bloqueio Akamai detectado (ou falha de rede: {e}). "
+                            f"Ativando download segmentado de fallback...{OFF}"
                         )
                         fresh_track_dict = await get_fresh_url(force_segments=True)
 
-                if "url_template" in fresh_track_dict:
-                    await tqdm_download_segments(
-                        fresh_track_dict,
-                        filename,
-                        desc,
-                        is_parallel=is_parallel,
-                        session=self.http_session,
-                        segment_workers=getattr(self.settings, "segment_workers", None),
-                        position_pool=position_pool,
-                    ),
-                    success = True
-                    final_fmt = attempt_fmt
-                    break
-                elif not success:
-                    raise Exception("No valid format returned by the server.")
+                        if "url_template" in fresh_track_dict:
+                            try:
+                                await tqdm_download_segments(
+                                    fresh_track_dict,
+                                    filename,
+                                    desc,
+                                    is_parallel=is_parallel,
+                                    session=self.http_session,
+                                    segment_workers=getattr(
+                                        self.settings, "segment_workers", None
+                                    ),
+                                    position_pool=position_pool,
+                                )
+                                success = True
+                                final_fmt = attempt_fmt
+                                break
+                            except Exception as seg_e:
+                                # [FIX] Antes esse erro era engolido em silencio pelo
+                                # "except Exception: pass" la embaixo -- agora e'
+                                # sempre reportado ao usuario, com o motivo real.
+                                logger.debug(
+                                    f"Download segmentado falhou (tier {attempt_fmt}): {seg_e}"
+                                )
+                                safe_print(
+                                    f"{RED}[!] Download segmentado falhou no tier "
+                                    f"{TIER_NAMES.get(attempt_fmt, attempt_fmt)}: {seg_e}{OFF}"
+                                )
+                                continue
+                        else:
+                            safe_print(
+                                f"{RED}[!] Nenhum formato valido retornado pelo servidor "
+                                f"para o tier {TIER_NAMES.get(attempt_fmt, attempt_fmt)}.{OFF}"
+                            )
+                            continue
 
             except _PermanentDownloadError as e:
                 if abort_event.is_set():
                     return False
                 safe_print(f"{YELLOW}[!] Faixa indisponível, pulando: {e}{OFF}")
                 return False
-            except Exception:
-                pass
+            except Exception as e:
+                # [FIX] Agora reporta o motivo em vez de "pass" silencioso, para
+                # que falhas ao obter a URL fresca (get_fresh_url) do tier atual
+                # fiquem visiveis antes de tentar o proximo tier.
+                logger.debug(f"Falha ao processar tier {attempt_fmt}: {e}")
+                safe_print(
+                    f"{YELLOW}[!] Falha no tier {TIER_NAMES.get(attempt_fmt, attempt_fmt)}: {e}{OFF}"
+                )
+                continue
 
-        # Esgotou todos os tiers de FALLBACK_TIERS sem sucesso -- desiste da faixa
-        # (nao do album inteiro; o caller conta isso como 1 faixa falhada).
         if not success and not abort_event.is_set():
             safe_print(
-                f"\n{RED}[!] TRACK {track_no} DEFINITIVELY DISCARDED AFTER ALL DOWNGRADES.{OFF}"
+                f"\n{RED}[!] FAIXA {track_no} DESCARTADA DEFINITIVAMENTE APOS TODOS OS DOWNGRADES.{OFF}"
             )
-            safe_print(f"{YELLOW}[!] Skipping to the next track...{OFF}\n")
+            safe_print(f"{YELLOW}[!] Pulando para a proxima faixa...{OFF}\n")
             return False
 
         if abort_event.is_set():
@@ -1276,8 +1184,6 @@ class Download:
         is_mp3 = True if final_fmt == 5 else False
         extension = ".mp3" if is_mp3 else ".flac"
 
-        # Tag e' feita em thread separada (run_in_executor) porque as libs de tag
-        # (mutagen etc, dentro de metadata.py) sao sincronas e bloqueantes.
         tag_function = metadata.tag_mp3 if is_mp3 else metadata.tag_flac
         try:
             await loop.run_in_executor(
@@ -1295,15 +1201,12 @@ class Download:
                 ),
             )
         except Exception as e:
-            safe_print(f"{RED}[!] Error tagging: {e}{OFF}")
+            safe_print(f"{RED}[!] Erro ao aplicar tags: {e}{OFF}")
 
-        # Busca letras (Genius/Qobuz) e injeta no arquivo + gera .lrc. Busca a
-        # traducao (idioma default 'pt') separadamente; se nao houver traducao,
-        # so' avisa no terminal (translation_note) sem quebrar o download.
         if (
-            getattr(self, "fetch_lyrics", False) and
-            hasattr(self, "lyrics_engine") and
-            not abort_event.is_set()
+            getattr(self, "fetch_lyrics", False)
+            and hasattr(self, "lyrics_engine")
+            and not abort_event.is_set()
         ):
             album_artist = _safe_get(track_metadata, "album", "artist", "name")
             performer_name = _safe_get(
@@ -1314,7 +1217,6 @@ class Download:
                 if album_artist in [None, "Various Artists"]
                 else album_artist
             )
-
             search_album = _safe_get(track_metadata, "album", "title", default="")
 
             qobuz_lyrics_response = await self._fetch_qobuz_lyrics_json(
@@ -1332,9 +1234,9 @@ class Download:
 
             translation_note = None
             if (
-                translation_lang and
-                not qobuz_translation_response and
-                isinstance(qobuz_lyrics_response, dict)
+                translation_lang
+                and not qobuz_translation_response
+                and isinstance(qobuz_lyrics_response, dict)
             ):
                 original_block = qobuz_lyrics_response.get("original")
                 original_lang = (
@@ -1345,17 +1247,15 @@ class Download:
                 if original_lang:
                     if original_lang.lower() == translation_lang.lower():
                         translation_note = (
-                            f"    ℹ️ Letras já em {translation_lang.upper()} "
-                            f"-- sem necessidade de tradução."
+                            f" Letras ja em {translation_lang.upper()} "
+                            f"-- sem necessidade de traducao."
                         )
                     else:
                         translation_note = (
-                            f"    ℹ️ Nenhuma tradução em {translation_lang.upper()} "
-                            f"disponível no Qobuz ainda para esta faixa."
+                            f" Nenhuma traducao em {translation_lang.upper()} "
+                            f"disponivel no Qobuz ainda para esta faixa."
                         )
 
-            # Roda dentro do print_lock porque escreve no terminal (tqdm.write) e grava
-            # tags no arquivo -- evita I/O e print misturado de threads diferentes.
             def _inject_lyrics_and_print():
                 with print_lock:
                     self.lyrics_engine.fetch_and_inject(
@@ -1380,13 +1280,9 @@ class Download:
             path=final_file,
         )
 
-        # Verificacao de integridade pos-download (opcional, off por padrao via
-        # settings.verify_after_download / --verify-download). Decodifica o arquivo
-        # final com ffmpeg pra pegar corrupcao real que passa batido em downloads
-        # cortados no meio mas com tamanho/tags plausiveis.
         if (
-            getattr(self.settings, "verify_after_download", False) and
-            not abort_event.is_set()
+            getattr(self.settings, "verify_after_download", False)
+            and not abort_event.is_set()
         ):
 
             def _run_verify():
@@ -1396,7 +1292,7 @@ class Download:
             if not ok:
                 with print_lock:
                     tqdm.write(
-                        f"{RED}[!] Verificação de integridade falhou para "
+                        f"{RED}[!] Verificacao de integridade falhou para "
                         f"{os.path.basename(final_file)}: {verify_message}{OFF}"
                     )
                 logger.debug(f"Falha de integridade em {final_file}: {verify_message}")
@@ -1410,15 +1306,12 @@ class Download:
 
         if delay_time > 0 and not abort_event.is_set():
             safe_print(
-                f"{YELLOW}[*] Sleeping for {delay_time} seconds to prevent rate limiting...{OFF}"
+                f"{YELLOW}[*] Aguardando {delay_time} segundos para evitar rate limiting...{OFF}"
             )
             await asyncio.sleep(delay_time)
 
         return True
 
-    # Monta o dict de {placeholders} usado em track_format/multiple_disc_track_format
-    # (nomes de ARQUIVO). '_flatten_artists' pega so' o 1o artista quando a API
-    # devolve uma lista (evita nomes de arquivo gigantes tipo 'A, B, C, D - Musica').
     @staticmethod
     def _get_filename_attr(track_artist, track_metadata: dict, album_metadata: dict):
         def _flatten_artists(artist_data):
@@ -1455,9 +1348,6 @@ class Download:
             "explicit": "[E]" if track_metadata.get("parental_warning") else "",
         }
 
-    # Mesma ideia de _get_filename_attr, mas pro FORMATO DE PASTA de faixa solta
-    # (nao album) -- inclui campos extras (label, copyright, quality_tag, etc.)
-    # que so' fazem sentido pra pasta, nao pro nome do arquivo em si.
     @staticmethod
     def _get_track_attr(meta, track_title, bit_depth, sampling_rate, file_format):
         album_meta = meta.get("album", {})
@@ -1489,7 +1379,7 @@ class Download:
             "album_composer": meta.get("composer", {}).get("name", ""),
             "label": re.sub(
                 r"\s*[\;\/]\s*|\s+\-\s+",
-                " ／ ",
+                " / ",
                 " ".join(meta.get("label", {}).get("name", "").split()),
             ).strip(),
             "copyright": meta.get("copyright", ""),
@@ -1515,9 +1405,6 @@ class Download:
             "release_type": format_release_type(album_meta.get("release_type")),
         }
 
-    # Mesma ideia de _get_track_attr, mas para o FORMATO DE PASTA DO ALBUM.
-    # Note o separador do campo 'label' diferente (' ∕ ' aqui vs ' ／ ' em
-    # _get_track_attr) -- parece inconsistencia visual, nao funcional.
     @staticmethod
     def _get_album_attr(meta, album_title, file_format, bit_depth, sampling_rate):
         def _flatten_artists(artist_data):
@@ -1540,7 +1427,7 @@ class Download:
             "album_composer": meta.get("composer", {}).get("name", ""),
             "label": re.sub(
                 r"\s*[\;\/]\s*|\s+\-\s+",
-                " ∕ ",
+                " / ",
                 " ".join(meta.get("label", {}).get("name", "").split()),
             ).strip(),
             "copyright": meta.get("copyright", ""),
@@ -1566,14 +1453,12 @@ class Download:
             "release_type": format_release_type(meta.get("release_type")),
         }
 
-    # Consulta a API pra saber o formato real (FLAC/MP3), bit_depth, sampling_rate
-    # e se a qualidade pedida foi atendida. Se a API devolver 'restrictions' com
-    # code == QL_DOWNGRADE, marca quality_met=False (o caller pode pular o item).
     async def _get_format(self, item_dict, is_track_id=False, track_url_dict=None):
         if not is_track_id:
             if "tracks" not in item_dict or not item_dict["tracks"].get("items"):
                 raise NonStreamable(
-                    "This release has no tracks available (possibly region-locked or removed)"
+                    "Este lancamento nao tem faixas disponiveis (possivelmente "
+                    "bloqueado por regiao ou removido)"
                 )
 
         track_dict = item_dict if is_track_id else item_dict["tracks"]["items"][0]
@@ -1587,7 +1472,7 @@ class Download:
             )
 
             if not new_track_dict:
-                raise KeyError("No URL dict returned by API")
+                raise KeyError("Nenhuma URL retornada pela API")
 
             restrictions = new_track_dict.get("restrictions")
             if isinstance(restrictions, list):
@@ -1605,15 +1490,10 @@ class Download:
                 new_track_dict["bit_depth"],
                 new_track_dict["sampling_rate"],
             )
-
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Não foi possível determinar o formato real: {e}")
             return ("Unknown", quality_met, None, None)
 
-    # Tenta combinacoes de formatos (folder/track/multi-disc) em ordem de
-    # preferencia: 1) formatos originais do usuario; 2) fallback_folder_format +
-    # track original; 3) fallback + defaults; 4) defaults totais. A primeira
-    # combinacao que nao estourar KeyError/ValueError (placeholder faltando)
-    # e' aplicada em self.folder_format/self.track_format e retorna.
     def _determine_formats(
         self,
         album_meta,
@@ -1653,6 +1533,7 @@ class Download:
             folder_fmt, track_fmt = _clean_format_str(
                 folder_fmt, track_fmt, file_format
             )
+
             valid_combination = True
 
             try:
@@ -1694,7 +1575,6 @@ class Download:
                             ),
                             replacement_text="_",
                         )
-
             except (KeyError, ValueError):
                 valid_combination = False
                 continue
@@ -1709,9 +1589,6 @@ class Download:
         self.folder_format = DEFAULT_FOLDER
         self.track_format = DEFAULT_TRACK
 
-    # Gera o arquivo 'Tracklist.txt' (Digital Booklet) com creditos, review
-    # do album e lista de faixas com duracao. So' roda se --no-credits nao
-    # estiver ligado e abort_event nao estiver setado.
     def _generate_tracklist(
         self, meta, dirn, album_title, file_format, bit_depth, sampling_rate
     ):
@@ -1742,15 +1619,15 @@ class Download:
                 explicit_tag = " [E]" if meta.get("parental_warning") else ""
 
                 f.write("=" * 70 + "\n")
-                f.write(f"ALBUM      : {album_title}{explicit_tag}\n")
+                f.write(f"ÁLBUM : {album_title}{explicit_tag}\n")
                 if composer != "N/A":
-                    f.write(f"COMPOSITOR   : {composer}\n")
-                f.write(f"MAIN ART.  : {artist_name}\n")
-                f.write(f"RÓTULO      : {label}\n")
-                f.write(f"GÊNERO      : {genre}\n")
-                f.write(f"DATA DE LANÇAMENTO    : {release_date}\n")
+                    f.write(f"COMPOSITOR : {composer}\n")
+                f.write(f"MAIN ART. : {artist_name}\n")
+                f.write(f"ROTULO : {label}\n")
+                f.write(f"GENERO : {genre}\n")
+                f.write(f"DATA DE LANÇAMENTO : {release_date}\n")
                 f.write(
-                    f"QUALITY    : {file_format} ({bit_depth}-Bit / {sampling_rate} kHz)\n"
+                    f"QUALITY : {file_format} ({bit_depth}-Bit / {sampling_rate} kHz)\n"
                 )
                 f.write("=" * 70 + "\n\n")
 
@@ -1783,18 +1660,18 @@ class Download:
                     if performers_raw:
                         for line in re.split(r"\r?\n|\s+-\s+", str(performers_raw)):
                             if line.strip():
-                                f.write(f"    * {line.strip()}\n")
+                                f.write(f"  * {line.strip()}\n")
                     else:
                         t_artist = _safe_get(
                             track, "performer", "name", default=artist_name
                         )
-                        f.write(f"    {t_artist}\n")
+                        f.write(f"  {t_artist}\n")
                     f.write("\n")
 
                 description = meta.get("description")
                 if description:
                     f.write(
-                        "\n" + "=" * 70 + "\nALBUM REVIEW / NOTES\n" + "=" * 70 + "\n\n"
+                        "\n" + "=" * 70 + "\nÁLBUM REVIEW / NOTES\n" + "=" * 70 + "\n\n"
                     )
                     clean_desc = re.sub(
                         r"<[^<]+>", "", re.sub(r"<br\s*/?>", "\n", str(description))
@@ -1804,13 +1681,11 @@ class Download:
                             f.write(textwrap.fill(p.strip(), width=70) + "\n\n")
 
             safe_print(
-                f"{GREEN}  L Concluído: Digital Booklet.txt (Credits & Review){OFF}"
+                f"{GREEN} > Concluído: Digital Booklet.txt (Credits & Review){OFF}"
             )
         except Exception as e:
             safe_print(f"{RED}[!] Erro criando booklet: {e}{OFF}")
 
-    # Busca o JSON de letras do Qobuz (original + traducao opcional). Retorna
-    # None se a API falhar (403/404/timeout) -- o caller trata como 'sem letra'.
     async def _fetch_qobuz_lyrics_json(self, track_id, language=None):
         try:
             params = {"track_id": track_id}
@@ -1843,17 +1718,13 @@ class Download:
                 return None
 
             resp = await self.http_session.get(lyrics_json_url, timeout=12)
-
             if resp.status_code in (403, 404):
                 return None
-
             resp.raise_for_status()
             return resp.json()
         except Exception:
             return None
 
-    # Varre a pasta do album em busca de .lrc/.txt e anexa as letras no final do
-    # Tracklist.txt (formato limpo, sem timestamps). So' roda se houver letras.
     def _append_lyrics_to_booklet(self, dirn, album_title):
         if abort_event.is_set():
             return
@@ -1868,8 +1739,8 @@ class Download:
             for f in files:
                 if f.lower().endswith((".flac", ".mp3")):
                     audio_files.append(os.path.join(root, f))
-
         audio_files.sort()
+
         lyrics_to_append = []
 
         for audio_path in audio_files:
@@ -1903,13 +1774,12 @@ class Download:
                     f.write("\n" + "=" * 70 + "\nALBUM LYRICS\n" + "=" * 70 + "\n\n")
                     f.writelines(lyrics_to_append)
                 safe_print(
-                    f"{CYAN}[+] Lyrics cleanly formatted and appended to Digital Booklet.{OFF}"
+                    f"{CYAN}[+] Letras formatadas e anexadas ao Digital Booklet.{OFF}"
                 )
             except Exception:
                 pass
 
 
-# Rotulo de progresso para faixas (usado em barras tqdm).
 def _get_description(item: dict, track_title, multiple=None):
     downloading_title = (
         f"{track_title} [{item.get('bit_depth', '')}/{item.get('sampling_rate', '')}]"
@@ -1919,9 +1789,6 @@ def _get_description(item: dict, track_title, multiple=None):
     return downloading_title
 
 
-# Download direto (nao segmentado) com retry inteligente (Tenacity) e suporte a
-# resume parcial (Range header). So' desiste de vez em _PermanentDownloadError;
-# erro de rede generica -> tenta de novo com backoff exponencial (2,4,8,16,32s).
 async def tqdm_download(
     url_or_callable,
     fname,
@@ -1944,7 +1811,7 @@ async def tqdm_download(
 
     if not is_parallel:
         safe_print(f"{C}[+] Em Progresso: {track_name}{R}")
-        tqdm_desc = f" {R}⬇️{R}"
+        tqdm_desc = f" {R}v{R}"
         b_format = "{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]"
         ncols = None
         dynamic_ncols = True
@@ -1997,29 +1864,25 @@ async def tqdm_download(
                     if attempt.retry_state.attempt_number > 1:
                         _n = attempt.retry_state.attempt_number
                         safe_print(
-                            f"\n{Y}[!] Falha de Rede. Tentativa {_n}/5 "
-                            f"para {track_name}{R}"
+                            f"\n{Y}[!] Falha de Rede. Tentativa {_n}/5 para {track_name}{R}"
                         )
 
                     async with http.stream(
-                        "GET",
-                        url,
-                        headers=headers,
-                        timeout=timeout_cfg,
+                        "GET", url, headers=headers, timeout=timeout_cfg
                     ) as r:
                         if r.status_code == 416:
                             return
                         if r.status_code == 404:
                             raise _PermanentDownloadError(
-                                "HTTP 404: File not found on server."
+                                "HTTP 404: arquivo não encontrado no servidor."
                             )
                         if r.status_code in (401, 403, 451):
                             raise _PermanentDownloadError(
-                                f"HTTP {r.status_code}: faixa indisponível (bloqueio de "
+                                f"HTTP {r.status_code}: faixa indisponivel (bloqueio de "
                                 f"região, direitos autorais ou sessão expirada)."
                             )
                         if r.status_code not in [200, 206]:
-                            raise Exception(f"Status Server: {r.status_code}")
+                            raise Exception(f"Status do servidor: {r.status_code}")
 
                         if total_size == 0:
                             total_size = downloaded_size + int(
@@ -2027,9 +1890,9 @@ async def tqdm_download(
                             )
 
                         if (
-                            is_parallel and
-                            downloaded_size == 0 and
-                            attempt.retry_state.attempt_number == 1
+                            is_parallel
+                            and downloaded_size == 0
+                            and attempt.retry_state.attempt_number == 1
                         ):
                             size_mb = total_size / (1024 * 1024) if total_size else 0
                             safe_print(
@@ -2051,7 +1914,6 @@ async def tqdm_download(
                                 dynamic_ncols=dynamic_ncols,
                                 disable=is_parallel,
                             ) as bar:
-
                                 async for data in r.aiter_bytes(chunk_size=524288):
                                     if abort_event.is_set():
                                         return
@@ -2060,9 +1922,9 @@ async def tqdm_download(
                                         downloaded_size += size
                                         bar.update(size)
 
-                    if downloaded_size >= total_size:
-                        safe_print(f"{G}  L Concluído: {track_name}{R}")
-                        return
+                        if downloaded_size >= total_size:
+                            safe_print(f"{G} > Concluído: {track_name}{R}")
+                            return
 
         except _PermanentDownloadError as e:
             if os.path.exists(fname):
@@ -2083,13 +1945,13 @@ async def tqdm_download(
             if os.path.exists(fname):
                 os.remove(fname)
             raise Exception(
-                f"Definitive timeout after 5 attempts, Last Error: {e}"
+                f"Timeout definitivo após 5 tentativas. Ultimo erro: {e}"
             ) from e
 
         if downloaded_size < total_size and not abort_event.is_set():
             if os.path.exists(fname):
                 os.remove(fname)
-            raise Exception("Incomplete download")
+            raise Exception("Download Incompleto")
     finally:
         if owns_session:
             try:
@@ -2100,7 +1962,6 @@ async def tqdm_download(
             position_pool.release(position)
 
 
-# Adiciona '(Version)' ao titulo da faixa se a versao ainda nao estiver incluida.
 def _get_title(item_dict):
     item_title = item_dict.get("title")
     version = item_dict.get("version")
@@ -2113,14 +1974,13 @@ def _get_title(item_dict):
     return item_title
 
 
-# Construtor de URL de capa: troca '_600.' pelo tamanho pedido (50/100/.../org).
 def _resolve_art_url(item, art_size, og_quality=False):
     """
-    Aplica a mesma substituicao de resolucao que _get_extra() sempre fez
-    internamente (troca o "_600." da URL pelo tamanho pedido). Extraido pra
-    funcao separada pra dar pra COMPARAR duas URLs resolvidas -- por
-    exemplo, saved_art_size vs embedded_art_size -- sem ter que duplicar
-    essa logica de substituicao em outro lugar.
+    Aplica a mesma substituicao de resolucao que sempre foi feita
+    internamente (troca o "_600." da URL pelo tamanho pedido). Extraida
+    como funcao separada para permitir COMPARAR duas URLs resolvidas --
+    por exemplo, saved_art_size vs embedded_art_size -- sem duplicar essa
+    logica em outro lugar.
     """
     if og_quality:
         art_size = "org"
@@ -2129,7 +1989,6 @@ def _resolve_art_url(item, art_size, og_quality=False):
     return item
 
 
-# Baixa um arquivo extra (capa, booklet PDF) com retry e tratamento de falha.
 async def _get_extra(
     item,
     dirn,
@@ -2145,7 +2004,7 @@ async def _get_extra(
         return
     extra_file = os.path.join(dirn, extra)
     if os.path.isfile(extra_file):
-        safe_print(f"{CYAN}[*] Skipping {label}: {extra} (Already downloaded){OFF}")
+        safe_print(f"{CYAN}[*] Pulando {label}: {extra} (Já baixado){OFF}")
         return
 
     item = _resolve_art_url(item, art_size, og_quality)
@@ -2161,12 +2020,10 @@ async def _get_extra(
         )
     except Exception as e:
         safe_print(
-            f"  {YELLOW}[!] Skipping {label} '{extra}': URL unreachable ({e}){OFF}"
+            f" {YELLOW}[!] Pulando {label} '{extra}': URL inacessível ({e}){OFF}"
         )
 
 
-# Baixa capa salva (cover.jpg) e capa de embed, reutilizando a mesma URL quando
-# saved_art_size == embedded_art_size (evita baixar 2x a mesma imagem).
 async def _get_cover_and_embed(
     item,
     dirn,
@@ -2182,17 +2039,14 @@ async def _get_cover_and_embed(
 ):
     """
     Baixa a capa salva (cover.jpg) e a capa de embed, evitando baixar a
-    MESMA imagem duas vezes quando saved_art_size e embedded_art_size
-    resolvem pra' URL identica (que e' o caso mais comum -- por padrao
-    ambos vem "org" do template de config.ini gerado por cli.py). Antes,
-    _get_extra() era chamado duas vezes sempre que embed_art estava
-    ligado, sem checar se a segunda chamada ia baixar bytes identicos aos
-    da primeira.
+    mesma imagem duas vezes quando saved_art_size e embedded_art_size
+    resolvem para a mesma URL (caso mais comum -- por padrao ambos vem
+    "org" no template de config.ini gerado por cli.py).
 
-    Quando os tamanhos realmente diferem (usuario configurou resoluções
+    Quando os tamanhos realmente diferem (usuario configurou resolucoes
     diferentes de proposito), baixa os dois de verdade -- nao ha' como
     reaproveitar sem redimensionar a imagem localmente, e o projeto nao
-    tem Pillow como dependencia pra isso.
+    tem Pillow como dependencia para isso.
     """
     if abort_event.is_set():
         return
@@ -2227,7 +2081,7 @@ async def _get_cover_and_embed(
     if save_cover and saved_url == embed_url and os.path.isfile(saved_file):
         try:
             shutil.copyfile(saved_file, embed_file)
-            safe_print(f"  {OFF}[*] Reutilizando cover.jpg, para o embed..{OFF}")
+            safe_print(f" {OFF}[*] Reutilizando cover.jpg, para o embed..{OFF}")
             return
         except OSError as e:
             logger.debug(f"Falha ao copiar cover.jpg pra embed, baixando de novo: {e}")
@@ -2244,7 +2098,6 @@ async def _get_cover_and_embed(
     )
 
 
-# Remove extensoes .mp3/.flac do fim dos formatos e limpa espacos.
 def _clean_format_str(folder: str, track: str, file_format: str) -> Tuple[str, str]:
     final = []
     for _i, fs in enumerate((folder, track)):
@@ -2257,7 +2110,6 @@ def _clean_format_str(folder: str, track: str, file_format: str) -> Tuple[str, s
     return tuple(final)
 
 
-# Acesso seguro a chaves aninhadas em dicts da API (evita KeyError).
 def _safe_get(d: dict, *keys, default=None):
     curr = d
     res = default
@@ -2270,8 +2122,6 @@ def _safe_get(d: dict, *keys, default=None):
     return res
 
 
-# Download segmentado (bypass de bloqueio Akamai): baixa cada segmento em
-# paralelo, descriptografa (AES-CTR) e remuxa com ffmpeg pra FLAC final.
 async def tqdm_download_segments(
     track_url_dict,
     fname,
@@ -2294,9 +2144,7 @@ async def tqdm_download_segments(
 
     owns_session = session is None
     timeout_cfg = httpx.Timeout(60.0, connect=10.0)
-    http = session or httpx.AsyncClient(
-        follow_redirects=True, timeout=timeout_cfg
-    )
+    http = session or httpx.AsyncClient(follow_redirects=True, timeout=timeout_cfg)
 
     async def get_seg_size(seg_num):
         url = url_template.replace("$SEGMENT$", str(seg_num))
@@ -2337,7 +2185,7 @@ async def tqdm_download_segments(
         dynamic_ncols = False
     else:
         safe_print(f"{C}[+] Em Progresso: {track_name}{R}")
-        tqdm_desc = f" {R}Segmented Download{R}"
+        tqdm_desc = f" {R}Download Segmentado{R}"
         b_format = "{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]"
         ncols = None
         dynamic_ncols = True
@@ -2371,7 +2219,7 @@ async def tqdm_download_segments(
                             return bytearray()
                         seg_data.extend(chunk)
                         bar.update(len(chunk))
-        return seg_data
+                return seg_data
 
     try:
         async with aiofiles.open(tmp_fname, "wb") as file:
@@ -2399,12 +2247,11 @@ async def tqdm_download_segments(
                         segment_uuid = _get_qobuz_segment_uuid(seg_data)
                         if segment_uuid is None:
                             raise ConnectionError(
-                                f"Cannot find segment UUID for {fname}"
+                                f"Não foi possivel encontrar o UUID do segmento para {fname}"
                             )
-
-                    decrypted_data = _decrypt_qobuz_segment(
-                        seg_data, raw_key, segment_uuid
-                    )
+                        decrypted_data = _decrypt_qobuz_segment(
+                            seg_data, raw_key, segment_uuid
+                        )
 
                 if n_segments >= 2:
                     semaphore = asyncio.Semaphore(workers)
@@ -2426,32 +2273,32 @@ async def tqdm_download_segments(
         if abort_event.is_set():
             return
         if not is_parallel:
-            safe_print(f" {G}  > Assembling the final FLAC file...{R}")
+            safe_print(f" {G} > Montando o arquivo FLAC final...{R}")
 
         remux = await asyncio.create_subprocess_exec(
-            [
-                "ffmpeg",
-                "-nostdin",
-                "-v",
-                "error",
-                "-y",
-                "-i",
-                tmp_fname,
-                "-c:a",
-                "copy",
-                "-f",
-                "flac",
-                fname,
-            ],
+            "ffmpeg",
+            "-nostdin",
+            "-v",
+            "error",
+            "-y",
+            "-i",
+            tmp_fname,
+            "-c:a",
+            "copy",
+            "-f",
+            "flac",
+            fname,
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.PIPE,
         )
         _, stderr = await remux.communicate()
 
         if remux.returncode != 0:
-            raise ConnectionError(f"FFmpeg remux failed for {fname}: {stderr.decode()}")
+            raise ConnectionError(
+                f"Falha no remux do FFmpeg para {fname}: {stderr.decode()}"
+            )
 
-        safe_print(f"{G}  L Concluído: {track_name}{R}")
+        safe_print(f"{G} > Concluído: {track_name}{R}")
 
     except (KeyboardInterrupt, SystemExit):
         abort_event.set()
@@ -2472,27 +2319,24 @@ async def tqdm_download_segments(
                 await http.aclose()
             except Exception as e:
                 logger.debug(
-                    f"Falha ao fechar sessao HTTP no cleanup final (ignorado): {e}"
+                    f"Falha ao fechar sessão HTTP no cleanup final (ignorado): {e}"
                 )
         if is_parallel and position_pool:
             position_pool.release(position)
 
 
-# Extrai o UUID do primeiro segmento (necessario pra descriptografia).
 def _get_qobuz_segment_uuid(segment_data):
     pos = 0
     while pos + 24 <= len(segment_data):
-        size = int.from_bytes(segment_data[pos: pos + 4], "big")
+        size = int.from_bytes(segment_data[pos : pos + 4], "big")
         if size <= 0 or pos + size > len(segment_data):
             break
-
-        if bytes(segment_data[pos + 4: pos + 8]) == b"uuid":
-            return bytes(segment_data[pos + 8: pos + 24])
+        if bytes(segment_data[pos + 4 : pos + 8]) == b"uuid":
+            return bytes(segment_data[pos + 8 : pos + 24])
         pos += size
     return None
 
 
-# Descriptografa um segmento usando AES-CTR com o UUID como counter.
 def _decrypt_qobuz_segment(segment_data, raw_key, segment_uuid):
     if segment_uuid is None:
         return bytes(segment_data)
@@ -2500,39 +2344,39 @@ def _decrypt_qobuz_segment(segment_data, raw_key, segment_uuid):
     buf = bytearray(segment_data)
     pos = 0
     while pos + 8 <= len(buf):
-        size = int.from_bytes(buf[pos: pos + 4], "big")
+        size = int.from_bytes(buf[pos : pos + 4], "big")
         if size <= 0 or pos + size > len(buf):
             break
 
         if (
-            bytes(buf[pos + 4: pos + 8]) == b"uuid" and
-            bytes(buf[pos + 8: pos + 24]) == segment_uuid
+            bytes(buf[pos + 4 : pos + 8]) == b"uuid"
+            and bytes(buf[pos + 8 : pos + 24]) == segment_uuid
         ):
             pointer = pos + 28
-            data_end = pos + int.from_bytes(buf[pointer: pointer + 4], "big")
+            data_end = pos + int.from_bytes(buf[pointer : pointer + 4], "big")
             pointer += 4
             counter_len = buf[pointer]
             pointer += 1
-            frame_count = int.from_bytes(buf[pointer: pointer + 3], "big")
+            frame_count = int.from_bytes(buf[pointer : pointer + 3], "big")
             pointer += 3
 
             for _ in range(frame_count):
-                frame_len = int.from_bytes(buf[pointer: pointer + 4], "big")
+                frame_len = int.from_bytes(buf[pointer : pointer + 4], "big")
                 pointer += 6
-                flags = int.from_bytes(buf[pointer: pointer + 2], "big")
+                flags = int.from_bytes(buf[pointer : pointer + 2], "big")
                 pointer += 2
                 frame_start, data_end = data_end, data_end + frame_len
 
                 if flags:
-                    counter = bytes(buf[pointer: pointer + counter_len]) + (
+                    counter = bytes(buf[pointer : pointer + counter_len]) + (
                         b"\x00" * (16 - counter_len)
                     )
                     decryptor = Cipher(
                         algorithms.AES(raw_key), modes.CTR(counter)
                     ).decryptor()
                     plaintext = (
-                        decryptor.update(bytes(buf[frame_start:data_end])) +
-                        decryptor.finalize()
+                        decryptor.update(bytes(buf[frame_start:data_end]))
+                        + decryptor.finalize()
                     )
                     buf[frame_start:data_end] = plaintext
                 pointer += counter_len
@@ -2540,7 +2384,6 @@ def _decrypt_qobuz_segment(segment_data, raw_key, segment_uuid):
     return bytes(buf)
 
 
-# Baixa 'goodies' do album (booklets PDF extras) se existirem.
 async def _download_goodies(
     album_meta, dirn, session=None, is_parallel=False, position_pool=None
 ):
@@ -2565,10 +2408,9 @@ async def _download_goodies(
                 position_pool=position_pool,
             )
     except Exception as e:
-        logger.error(f"{RED}Error downloading goodies: {e}", exc_info=True)
+        logger.error(f"{RED}Erro ao baixar goodies: {e}", exc_info=True)
 
 
-# Remove a capa temporaria de embed (EMB_COVER_NAME) apos o uso.
 def _clean_embed_art(dirn, settings=None):
     embed_file = os.path.join(dirn, EMB_COVER_NAME)
     if os.path.exists(embed_file):

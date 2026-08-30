@@ -54,13 +54,13 @@ print_lock = threading.Lock()
 # --------------------------------------------------------------------------
 # Larguras e breakpoints -- fonte única de verdade para todo o projeto
 # --------------------------------------------------------------------------
-MIN_WIDTH = 32     # piso: pipes/CI às vezes relatam 0 colunas
-MAX_WIDTH = 100    # teto: linha longa demais cansa de ler em monitor grande
+MIN_WIDTH = 32  # piso: pipes/CI às vezes relatam 0 colunas
+MAX_WIDTH = 100  # teto: linha longa demais cansa de ler em monitor grande
 FALLBACK = (80, 24)
 
 # Breakpoints responsivos unificados.
-NARROW = 60        # celular / a-Shell no iPhone / Split View estreito
-MEDIUM = 90        # iPad retrato, terminal de meia tela
+NARROW = 60  # celular / a-Shell no iPhone / Split View estreito
+MEDIUM = 90  # iPad retrato, terminal de meia tela
 # acima de MEDIUM -> "wide" (desktop, iPad paisagem)
 
 LAYOUT_NARROW = "narrow"
@@ -191,18 +191,18 @@ def _glyph(fancy, plain):
 
 def heavy_bar_char():
     # Caractere usado nas barras/separadores grossos (títulos, banners).
-    return _glyph("\u2501", "=")   # ━
+    return _glyph("\u2501", "=")  # ━
 
 
 def light_bar_char():
     # Caractere usado em separadores finos.
-    return _glyph("\u2500", "-")   # ─
+    return _glyph("\u2500", "-")  # ─
 
 
 def block_char():
     # Caractere usado para preencher barras de progresso proporcionais
     # (ex.: bar_gauge no ranking de artistas).
-    return _glyph("\u2588", "#")   # █
+    return _glyph("\u2588", "#")  # █
 
 
 # --------------------------------------------------------------------------
@@ -402,9 +402,7 @@ def header(kind, rows):
     label_width = max((len(label) for label, _ in rows), default=8)
 
     header_line = f" [{kind}]"
-    row_lines = [
-        f" {label.upper():<{label_width}}  {value}" for label, value in rows
-    ]
+    row_lines = [f" {label.upper():<{label_width}}  {value}" for label, value in rows]
     content_width = max([len(header_line)] + [len(r) for r in row_lines], default=20)
     bar_width = max(20, min(content_width, width()))
     bar = heavy_bar_char() * bar_width

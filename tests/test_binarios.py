@@ -73,9 +73,11 @@ class TestEncontrarBinario:
         falso.write_text("#!/bin/sh\n")
         falso.chmod(0o755)
 
-        monkeypatch.setattr(utils.shutil, "which", lambda n, path=None, **k: (
-            str(falso) if path == str(bin_dir) else None
-        ))
+        monkeypatch.setattr(
+            utils.shutil,
+            "which",
+            lambda n, path=None, **k: (str(falso) if path == str(bin_dir) else None),
+        )
         monkeypatch.setattr(utils, "_DIRS_EXTRA", [str(bin_dir)])
 
         assert utils.encontrar_binario("ffmpeg") == str(falso)

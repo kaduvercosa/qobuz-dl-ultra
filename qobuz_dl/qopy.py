@@ -23,6 +23,7 @@ from qobuz_dl.exceptions import (
 )
 
 from qobuz_dl.color import GREEN, WARNING as YELLOW, RED, OFF, RESET, INFO as CYAN
+from qobuz_dl import ui
 
 try:
     from qobuz_dl.bundle import Bundle
@@ -35,11 +36,10 @@ logger = logging.getLogger(__name__)
 # Núcleo do cliente Qobuz: autentica, assina chamadas, gerencia sessão e chaves AES.
 class Client:
     """
-    The core Qobuz API client for Qobuz-DL Ultra Edition.
-
-    Handles secure authentication, Anti-Ban Stealth Spoofing (WAF bypass), cryptographic
-    token unwrapping for Web Player segment streams, and dynamic metadata fetching.
-    Supports both standard email/password authentication and secure user_auth_token injection.
+    O cliente principal da API Qobuz para o Qobuz-DL Ultra Edition.
+    Lida com autenticação segura, Anti-Ban Stealth Spoofing (WAF bypass), criptográfico
+    Desembrulhamento de token para fluxos de segmento do Web Player e pesquisa dinâmica de metadados.
+    Suporta autenticação padrão de e-mail/senha e injeção segura de user_auth_token.
     """
 
     def __init__(self):
@@ -61,10 +61,10 @@ class Client:
         **kwargs,
     ):
         """
-        Async factory. Initializes the API client and sets up the resilient session.
+        Fábrica assíncrona. Inicializa o cliente API e configura a sessão resiliente.
         """
         self = cls()
-        logger.info(f"{YELLOW}Logging...{OFF}")
+        logger.info(f"{YELLOW}Logando...{OFF}")
         self.secrets = secrets
         self.id = str(app_id)
         self.force_english = force_english
@@ -78,12 +78,14 @@ class Client:
                         self.id = fresh_id
                         self.secrets = list(b.get_secrets().values())
                         logger.info(
-                            f"{GREEN}[+] App ID dynamically updated: {self.id}{OFF}"
+                            f"{GREEN}[+] ID do aplicativo atualizado dinamicamente: {self.id}{OFF}"
                         )
                 except Exception:
                     pass
         else:
-            logger.info(f"{GREEN}[+] Using custom legacy App ID: {self.id}{OFF}")
+            logger.info(
+                f"{GREEN}[+] Usando ID de aplicativo legado personalizado: {self.id}{OFF}"
+            )
 
         headers = {}
         if self.force_english:
@@ -130,7 +132,7 @@ class Client:
         return self
 
     async def close(self):
-        """Closes the underlying httpx session."""
+        """Fecha a sessão httpx subjacente."""
         if self.session is not None:
             await self.session.aclose()
 
@@ -154,7 +156,7 @@ class Client:
 
     async def auth(self, email, pwd, user_auth_token=None):
         """
-        Authenticates the user session with Qobuz and retrieves account metadata.
+        Autentica a sessão do usuário com o Qobuz e recupera os metadados da conta.
         """
         if user_auth_token:
             self.uat = user_auth_token
@@ -164,7 +166,7 @@ class Client:
             usr_info = await self.api_call("user/login", email=email, pwd=pwd)
             if not usr_info.get("user", {}).get("credential", {}).get("parameters"):
                 logger.info(
-                    f"{YELLOW}[!] Free account detected or validation bypassed.{OFF}"
+                    f"{YELLOW}[!] Conta gratuita detectada ou validação ignorada.{OFF}"
                 )
             self.uat = usr_info["user_auth_token"]
 
@@ -175,19 +177,22 @@ class Client:
             raw_user_info = await self.api_call("user/get")
             self.user_info = raw_user_info.get("user", raw_user_info)
             cred = self.user_info.get("credential") or {}
-            self.label = cred.get("parameters", {}).get(
-                "short_label") or cred.get("description", "Membro Qobuz")
+            self.label = cred.get("parameters", {}).get("short_label") or cred.get(
+                "description", "Membro Qobuz"
+            )
             self.user_id = self.user_info.get("id")
 
             sub = self.check_subscription()
             if sub["is_active"]:
                 logger.info(
-                    f"{GREEN}Logged: OK (Membership: {self.label} | {sub['status']}){OFF}")
+                    f"{GREEN}Logado: OK (Associação: {self.label} | {sub['status']}){OFF}"
+                )
             else:
                 logger.warning(
-                    f"{YELLOW}[!] Logged: OK, mas a assinatura está INATIVA ({sub['status']}){OFF}")
+                    f"{YELLOW}[!] Logado: OK, mas a assinatura está INATIVA ({sub['status']}){OFF}"
+                )
         except Exception:
-            logger.info(f"{YELLOW}[!] Profile validation bypassed.{OFF}")
+            logger.info(f"{YELLOW}[!] Validação do perfil ignorada.{OFF}")
             self.label = "Studio"
             self.user_id = None
 
@@ -200,14 +205,14 @@ class Client:
 
         if not sub or not isinstance(sub, dict):
             return {
-                "is_active": False,
+                "Está Ativo": False,
                 "status": "Inativa / Sem Assinatura",
-                "offer": "Nenhuma / Gratuita",
-                "start_date": None,
-                "end_date": None,
-                "is_canceled": False,
-                "periodicity": "N/A",
-                "household_size_max": 1,
+                "Oferta": "Nenhuma / Gratuita",
+                "Data de Início": None,
+                "Data de término": None,
+                "Está cancelado": False,
+                "Periodicidade": "N/A",
+                "Tamanho máximo do agregado familiar": 1,
                 "raw": {},
             }
 
@@ -243,14 +248,14 @@ class Client:
             status = "Ativa" if is_active else "Inativa"
 
         return {
-            "is_active": is_active,
+            "Está ativo": is_active,
             "status": status,
-            "offer": offer,
+            "Oferta": offer,
             "start_date": start_date,
-            "end_date": end_date,
-            "is_canceled": is_canceled,
-            "periodicity": periodicity,
-            "household_size_max": household_size_max,
+            "Data de início": end_date,
+            "Está cancelado": is_canceled,
+            "Periodicidade": periodicity,
+            "Tamanho máximo do agregado familiar": household_size_max,
             "raw": sub,
         }
 
@@ -311,13 +316,17 @@ class Client:
         elif epoint == "user/get":
             params = {
                 "app_id": self.id,
-                "user_auth_token": getattr(self, "uat", kwargs.get("user_auth_token", "")),
+                "user_auth_token": getattr(
+                    self, "uat", kwargs.get("user_auth_token", "")
+                ),
             }
         elif epoint == "track/getFileUrl":
             track_id = kwargs["id"]
             fmt_id = kwargs["fmt_id"]
             if int(fmt_id) not in (5, 6, 7, 27):
-                raise InvalidQuality("Invalid quality id: choose between 5, 6, 7 or 27")
+                raise InvalidQuality(
+                    "ID de qualidade inválido: escolha entre 5, 6, 7 or 27"
+                )
             params = {
                 "track_id": track_id,
                 "format_id": fmt_id,
@@ -339,7 +348,9 @@ class Client:
             track_id = kwargs["id"]
             fmt_id = kwargs["fmt_id"]
             if int(fmt_id) not in (6, 7, 27):
-                raise InvalidQuality("Invalid quality id: choose between 6, 7 or 27")
+                raise InvalidQuality(
+                    "ID de qualidade inválido: escolha entre 6, 7 or 27"
+                )
             params = {
                 "track_id": track_id,
                 "format_id": fmt_id,
@@ -454,8 +465,8 @@ class Client:
                         "favorite/getUserFavorites",
                         "file/url",
                         "track/lyricsUrl",
-                    ] and
-                    resp.status_code == 400
+                    ]
+                    and resp.status_code == 400
                 ):
                     body = resp.json()
                     raise InvalidAppSecretError(
@@ -507,8 +518,8 @@ class Client:
     async def get_track_ids_from_list(self, tracks_list: list) -> list:
         from qobuz_dl import fuzzy
 
-        print(
-            f"{CYAN}[*] Matching Last.fm tracks with Qobuz database (Fuzzy matching & Interactive mode enabled)...{OFF}"
+        ui.emit(
+            f"{CYAN}[*] Correspondência de faixas Last.fm com o banco de dados Qobuz (correspondência Fuzzy e modo interativo ativado)...{OFF}"
         )
         valid_track_ids = []
 
@@ -528,9 +539,9 @@ class Client:
                 highest_ratio = 0.0
 
                 if (
-                    search_results and
-                    "tracks" in search_results and
-                    search_results["tracks"]["items"]
+                    search_results
+                    and "tracks" in search_results
+                    and search_results["tracks"]["items"]
                 ):
                     for q_track in search_results["tracks"]["items"]:
                         q_artist_raw = q_track.get("performer", {}).get(
@@ -555,18 +566,18 @@ class Client:
                         valid_track_ids.append(best_match_id)
 
                     elif highest_ratio >= PROMPT_THRESHOLD and best_match_id:
-                        print(
-                            f"\n{YELLOW}[?] Borderline match detected "
-                            f"({highest_ratio * 100:.0f}% similarity){OFF}"
+                        ui.emit(
+                            f"\n{YELLOW}[?] Correspondência limítrofe detectada "
+                            f"({highest_ratio * 100:.0f}% de semelhança){OFF}"
                         )
-                        print(
+                        ui.emit(
                             f"    Target (Last.fm): {item['artist']} - {item['title']}"
                         )
-                        print(f"    Found  (Qobuz)  : {best_match_name}")
+                        ui.emit(f"    Found  (Qobuz)  : {best_match_name}")
 
                         choice = (
                             input(
-                                f"{CYAN}    Do you want to download this track anyway? [y/n]: {OFF}"
+                                f"{CYAN}    Você quer baixar esta faixa de qualquer maneira? [y/n]: {OFF}"
                             )
                             .strip()
                             .lower()
@@ -574,27 +585,27 @@ class Client:
 
                         if choice == "y":
                             valid_track_ids.append(best_match_id)
-                            print(f"{GREEN}    [+] Track accepted manually.{OFF}")
+                            ui.emit(f"{GREEN}    [+] Faixa aceita manualmente.{OFF}")
                         else:
-                            print(f"{RED}    [-] Track skipped manually.{OFF}")
+                            ui.emit(f"{RED}    [-] Faixa ignorada manualmente.{OFF}")
 
                     else:
-                        print(
-                            f"{YELLOW}[!] Skipping: '{query}' (Best match was only "
+                        ui.emit(
+                            f"{YELLOW}[!] Pulando: '{query}' (A melhor combinação foi apenas "
                             f"{highest_ratio * 100:.0f}% similar){OFF}"
                         )
 
                 else:
-                    print(
-                        f"{YELLOW}[!] Skipping (No results on Qobuz for): '{query}'{OFF}"
+                    ui.emit(
+                        f"{YELLOW}[!] Pulando (Sem resultados no Qobuz para): '{query}'{OFF}"
                     )
 
             except Exception as e:
-                print(f"{RED}[!] Error searching for '{query}': {e}{OFF}")
+                ui.emit(f"{RED}[!] Erro ao procurar por '{query}': {e}{OFF}")
 
-        print(
-            f"\n{GREEN}[+] Successfully matched {len(valid_track_ids)} "
-            f"out of {len(tracks_list)} tracks!{OFF}"
+        ui.emit(
+            f"\n{GREEN}[+] Combinado com sucesso {len(valid_track_ids)} "
+            f"Fora de {len(tracks_list)} faixas!{OFF}"
         )
         return valid_track_ids
 
@@ -612,7 +623,7 @@ class Client:
             if items:
                 return items[0].get("id")
         except Exception as e:
-            logger.debug(f"ISRC search failed for {isrc}: {e}")
+            logger.debug(f"Falha na pesquisa ISRC para {isrc}: {e}")
         return None
 
     async def search_by_upc(self, upc: str):
@@ -629,7 +640,7 @@ class Client:
             if items:
                 return items[0].get("id")
         except Exception as e:
-            logger.debug(f"UPC search failed for {upc}: {e}")
+            logger.debug(f"Falha na pesquisa UPC para {upc}: {e}")
         return None
 
     async def match_external_tracks(self, tracks: list, auto: bool = False) -> list:
@@ -651,8 +662,8 @@ class Client:
 
         if isrc_hits or isrc_misses:
             logger.info(
-                f"{GREEN}[+] ISRC: {isrc_hits} match(es) exato(s){OFF}" +
-                (
+                f"{GREEN}[+] ISRC: {isrc_hits} match(es) exato(s){OFF}"
+                + (
                     f", {YELLOW}{isrc_misses} miss(es) → fuzzy fallback{OFF}"
                     if isrc_misses
                     else ""
@@ -660,7 +671,9 @@ class Client:
             )
 
         if fuzzy_queue:
-            logger.info(f"{CYAN}[*] Fuzzy matching {len(fuzzy_queue)} faixa(s)...{OFF}")
+            logger.info(
+                f"{CYAN}[*] Correspondência difusa {len(fuzzy_queue)} faixa(s)...{OFF}"
+            )
             fuzzy_ids = await self.get_track_ids_from_list(fuzzy_queue)
             matched_ids.extend(fuzzy_ids)
 
@@ -708,7 +721,7 @@ class Client:
         BATCH = 50
         success = True
         for i in range(0, len(track_ids), BATCH):
-            batch = track_ids[i: i + BATCH]
+            batch = track_ids[i : i + BATCH]
             try:
                 await self.api_call(
                     "playlist/addTracks",
@@ -770,7 +783,7 @@ class Client:
 
     async def get_track_url(self, id, fmt_id, force_segments=False):
         """
-        Retrieves the streaming or download URL for a specific track.
+        Recupera a URL de streaming ou download para uma faixa específica.
         Bloqueia antecipadamente se a assinatura da conta estiver inativa.
         """
         sub_info = self.check_subscription()
@@ -833,4 +846,4 @@ class Client:
         if not self.sec and self.secrets:
             self.sec = self.secrets[0]
         if not self.sec:
-            raise InvalidAppSecretError("No secret found.")
+            raise InvalidAppSecretError("Nenhum segredo encontrado.")

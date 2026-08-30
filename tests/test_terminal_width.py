@@ -62,7 +62,8 @@ def test_nenhuma_linha_estoura(largura, args, dir_config_temp):
         limpa = ANSI.sub("", linha)
         if len(limpa) > largura:
             estouros.append(
-                f"  linha {n}: {len(limpa)} de {largura} chars -> {limpa!r}")
+                f"  linha {n}: {len(limpa)} de {largura} chars -> {limpa!r}"
+            )
 
     assert not estouros, (
         f"{len(estouros)} linha(s) estouraram em {largura} colunas "

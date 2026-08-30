@@ -90,14 +90,42 @@ def _keyring_load(key: str):
 
 def validate_config_formats(formats_to_check: dict):
     VALID_KEYS = {
-        "artist", "album", "album_id", "album_url", "album_title",
-        "album_title_base", "album_artist", "album_genre", "album_composer",
-        "label", "copyright", "upc", "barcode", "release_date", "year",
-        "media_type", "format", "bit_depth", "sampling_rate", "album_version",
-        "version_tag", "disc_count", "track_count", "ExplicitFlag", "explicit",
-        "release_type", "tracktitle", "track_title", "track_title_base",
-        "track_id", "track_artist", "track_composer", "track_number",
-        "isrc", "version", "disc_number",
+        "artist",
+        "album",
+        "album_id",
+        "album_url",
+        "album_title",
+        "album_title_base",
+        "album_artist",
+        "album_genre",
+        "album_composer",
+        "label",
+        "copyright",
+        "upc",
+        "barcode",
+        "release_date",
+        "year",
+        "media_type",
+        "format",
+        "bit_depth",
+        "sampling_rate",
+        "album_version",
+        "version_tag",
+        "disc_count",
+        "track_count",
+        "ExplicitFlag",
+        "explicit",
+        "release_type",
+        "tracktitle",
+        "track_title",
+        "track_title_base",
+        "track_id",
+        "track_artist",
+        "track_composer",
+        "track_number",
+        "isrc",
+        "version",
+        "disc_number",
     }
 
     has_errors = False
@@ -143,9 +171,7 @@ def validate_config_formats(formats_to_check: dict):
 
 def _pick_accent_color() -> str:
     print(f"\n{BG}[?] Cor de destaque do programa:{OFF}")
-    ui.wrapped(
-        "Aparece em nomes de faixas, cabeçalhos, barras e progresso.", indent=4
-    )
+    ui.wrapped("Aparece em nomes de faixas, cabeçalhos, barras e progresso.", indent=4)
     print()
 
     for idx, (name, _rgb, escape) in enumerate(ACCENT_PRESETS, 1):
@@ -192,8 +218,11 @@ def _pick_accent_color() -> str:
 
         print("\n  Preview da sua cor:")
         print(accent_preview(escape, "━━ [FAIXA]  ARTISTA  The Weeknd\n"))
-        confirm = input(
-            "  Confirmar esta cor? (Enter = sim, n = escolher outra): ").strip().lower()
+        confirm = (
+            input("  Confirmar esta cor? (Enter = sim, n = escolher outra): ")
+            .strip()
+            .lower()
+        )
         if confirm in ("n", "nao", "no"):
             return _pick_accent_color()
 
@@ -228,10 +257,19 @@ def _reset_config(config_file: str):
     config["qobuz"]["password"] = ""
 
     print(f"\n{C_ACCENT}[?] Armazenamento de Senhas (OS Keyring):{OFF}")
-    print("    Por padrão, os tokens são guardados criptografados no cofre do sistema operacional.")
-    print("    Em ambientes sem interface gráfica (Linux headless, Docker, NAS), isso pode falhar.")
-    disable_kr = input(
-        "    Desativar Keyring e salvar tokens em texto puro no config.ini? (yes/no) [Padrão: no]\n- ").strip().lower()
+    print(
+        "    Por padrão, os tokens são guardados criptografados no cofre do sistema operacional."
+    )
+    print(
+        "    Em ambientes sem interface gráfica (Linux headless, Docker, NAS), isso pode falhar."
+    )
+    disable_kr = (
+        input(
+            "    Desativar Keyring e salvar tokens em texto puro no config.ini? (yes/no) [Padrão: no]\n- "
+        )
+        .strip()
+        .lower()
+    )
 
     use_keyring = False if disable_kr in ["yes", "y", "true"] else True
     config["qobuz"]["disable_keyring"] = "true" if not use_keyring else "false"
@@ -241,15 +279,22 @@ def _reset_config(config_file: str):
     else:
         config["qobuz"]["auth_token"] = auth_token
 
-    fetch_lyrics = input(
-        "\nBaixar e embutir letras/traduções automaticamente? (yes/no) [Padrão: yes]\n- ").strip().lower()
-    config["qobuz"]["fetch_lyrics"] = "false" if fetch_lyrics in [
-        "no", "n", "false"] else "true"
+    fetch_lyrics = (
+        input(
+            "\nBaixar e embutir letras/traduções automaticamente? (yes/no) [Padrão: yes]\n- "
+        )
+        .strip()
+        .lower()
+    )
+    config["qobuz"]["fetch_lyrics"] = (
+        "false" if fetch_lyrics in ["no", "n", "false"] else "true"
+    )
 
     genius_token = ""
     if config["qobuz"]["fetch_lyrics"] == "true":
         print(
-            f"\n{C_ACCENT}[!] Para usar o Genius como fallback, insira seu API Token (Enter para pular e usar apenas LRCLIB):{OFF}")
+            f"\n{C_ACCENT}[!] Para usar o Genius como fallback, insira seu API Token (Enter para pular e usar apenas LRCLIB):{OFF}"
+        )
         genius_token = input("Genius API Token:\n- ").strip()
 
     if use_keyring and _keyring_save("genius_token", genius_token):
@@ -257,12 +302,20 @@ def _reset_config(config_file: str):
     else:
         config["qobuz"]["genius_token"] = genius_token
 
-    config["qobuz"]["directory"] = input(
-        "\nPasta de download (pressione Enter para 'Qobuz Downloads')\n- ") or "Qobuz Downloads"
-    config["qobuz"]["folder_format"] = input(
-        f"\nFormato da pasta (pressione Enter para '{DEFAULT_FOLDER}')\n- ") or DEFAULT_FOLDER
-    config["qobuz"]["default_quality"] = input(
-        "\nQualidade (5:MP3 320k, 6:FLAC 16-bit, 7:Hi-Res 24b<=96kHz, 27:Hi-Res Max) [Padrão 27]\n- ") or "27"
+    config["qobuz"]["directory"] = (
+        input("\nPasta de download (pressione Enter para 'Qobuz Downloads')\n- ")
+        or "Qobuz Downloads"
+    )
+    config["qobuz"]["folder_format"] = (
+        input(f"\nFormato da pasta (pressione Enter para '{DEFAULT_FOLDER}')\n- ")
+        or DEFAULT_FOLDER
+    )
+    config["qobuz"]["default_quality"] = (
+        input(
+            "\nQualidade (5:MP3 320k, 6:FLAC 16-bit, 7:Hi-Res 24b<=96kHz, 27:Hi-Res Max) [Padrão 27]\n- "
+        )
+        or "27"
+    )
 
     config["qobuz"]["default_limit"] = "500"
     config["qobuz"]["no_m3u"] = "false"
@@ -279,7 +332,9 @@ def _reset_config(config_file: str):
     config["qobuz"]["blacklist"] = "blacklist.txt"
 
     print(f"\n{C_ACCENT}[?] Idioma de Tradução de Letras:{OFF}")
-    print("    Opções: pt (Português), en (Inglês), es (Espanhol), fr (Francês), original (Manter nativo)")
+    print(
+        "    Opções: pt (Português), en (Inglês), es (Espanhol), fr (Francês), original (Manter nativo)"
+    )
     lang_choice = input("    Idioma [Padrão: pt]:\n- ").strip().lower()
     if lang_choice in ["original", "orig"]:
         config["qobuz"]["lyrics_translation_lang"] = ""
@@ -289,7 +344,8 @@ def _reset_config(config_file: str):
         config["qobuz"]["lyrics_translation_lang"] = "pt"
 
     logging.info(
-        f"\n{C_ACCENT}Obtendo credenciais da API via bundle.js... Por favor, aguarde.{OFF}")
+        f"\n{C_ACCENT}Obtendo credenciais da API via bundle.js... Por favor, aguarde.{OFF}"
+    )
     bundle = Bundle()
     config["qobuz"]["app_id"] = str(bundle.get_app_id())
     config["qobuz"]["secrets"] = ",".join(bundle.get_secrets().values())
@@ -321,7 +377,9 @@ def _reset_config(config_file: str):
     config["qobuz"]["saved_art_size"] = "org"
     config["qobuz"]["multiple_disc_prefix"] = "CD"
     config["qobuz"]["multiple_disc_one_dir"] = "false"
-    config["qobuz"]["multiple_disc_track_format"] = "{disc_number}.{track_number} - {track_title}"
+    config["qobuz"][
+        "multiple_disc_track_format"
+    ] = "{disc_number}.{track_number} - {track_title}"
     config["qobuz"]["max_workers"] = "1"
     config["qobuz"]["user_auth_token"] = ""
 
@@ -350,7 +408,8 @@ def _remove_leftovers(directory: str):
                 send2trash.send2trash(i)
             except Exception as e:
                 logger.debug(
-                    f"Falha ao mover arquivo temporário '{i}' para a lixeira: {e}")
+                    f"Falha ao mover arquivo temporário '{i}' para a lixeira: {e}"
+                )
 
 
 def _format_timestamp(ts: int) -> str:
@@ -371,7 +430,9 @@ def _formatar_valor(valor):
     return valor
 
 
-def _imprimir_campos_extras(dados: dict, titulo: str, ja_mostrados: set, indent: str = "   "):
+def _imprimir_campos_extras(
+    dados: dict, titulo: str, ja_mostrados: set, indent: str = "   "
+):
     """
     Imprime, em formato de árvore, TODO campo de `dados` que ainda não
     apareceu no relatório curado (ou seja, tudo que não está em
@@ -415,7 +476,9 @@ def _imprimir_campos_extras(dados: dict, titulo: str, ja_mostrados: set, indent:
 # ==============================================================================
 # SUBCOMANDO UNIFICADO: AUTH / USER / ME / PROFILE (GERENCIAMENTO DE CONTA)
 # ==============================================================================
-async def _auth_command(config_file: str, update_credentials: bool = False, show_json: bool = False):
+async def _auth_command(
+    config_file: str, update_credentials: bool = False, show_json: bool = False
+):
     """
     Subcomando unificado:
     - Se update_credentials=True: solicita novos dados, valida na API e salva.
@@ -426,7 +489,8 @@ async def _auth_command(config_file: str, update_credentials: bool = False, show
 
     if not os.path.isfile(config_file):
         print(
-            f"{RED}[!] Arquivo de configuração não encontrado. Execute 'qobuz-dl -r' primeiro.{OFF}")
+            f"{RED}[!] Arquivo de configuração não encontrado. Execute 'qobuz-dl -r' primeiro.{OFF}"
+        )
         return False
 
     config = configparser.ConfigParser(interpolation=None)
@@ -441,10 +505,12 @@ async def _auth_command(config_file: str, update_credentials: bool = False, show
 
     if disable_keyring:
         token = config.get(section, "auth_token", fallback="") or config.get(
-            section, "password", fallback="")
+            section, "password", fallback=""
+        )
     else:
         token = _keyring_load("auth_token") or config.get(
-            section, "auth_token", fallback="")
+            section, "auth_token", fallback=""
+        )
 
     # 1. Se foi chamado explicitamente para atualizar credenciais (ou não tem token)
     if update_credentials or not token:
@@ -492,7 +558,8 @@ async def _auth_command(config_file: str, update_credentials: bool = False, show
             if not disable_keyring and _keyring_save("auth_token", token):
                 config.set(section, "auth_token", "")
                 print(
-                    f"{GREEN}[+] Token salvo com segurança no Keyring do sistema!{OFF}")
+                    f"{GREEN}[+] Token salvo com segurança no Keyring do sistema!{OFF}"
+                )
             else:
                 config.set(section, "auth_token", token)
                 config.set(section, "password", "")
@@ -515,58 +582,76 @@ async def _auth_command(config_file: str, update_credentials: bool = False, show
         print("=" * 68)
 
         print(f"\n {CYAN}[👤 PERFIL DO USUÁRIO]{OFF}")
-        nome_completo = f"{user_info.get('firstname', '')} {user_info.get('lastname', '')}".strip(
-        ) or "N/A"
+        nome_completo = (
+            f"{user_info.get('firstname', '')} {user_info.get('lastname', '')}".strip()
+            or "N/A"
+        )
         print(f"   • Nome Completo:     {nome_completo}")
         print(f"   • Display Name:      {user_info.get('display_name', 'N/A')}")
         print(f"   • E-mail:            {user_info.get('email', 'N/A')}")
         print(f"   • Login:             {user_info.get('login', 'N/A')}")
         print(
-            f"   • ID do Usuário:     {user_info.get('id', 'N/A')} [Public ID: {user_info.get('publicId', 'N/A')}]")
+            f"   • ID do Usuário:     {user_info.get('id', 'N/A')} [Public ID: {user_info.get('publicId', 'N/A')}]"
+        )
         print(
-            f"   • País / Zona:       {user_info.get('country', 'N/A')} / {user_info.get('zone', 'N/A')}")
+            f"   • País / Zona:       {user_info.get('country', 'N/A')} / {user_info.get('zone', 'N/A')}"
+        )
         print(
-            f"   • Loja / Idioma:     {user_info.get('store', 'N/A')} ({user_info.get('language_code', 'N/A')})")
+            f"   • Loja / Idioma:     {user_info.get('store', 'N/A')} ({user_info.get('language_code', 'N/A')})"
+        )
         print(
-            f"   • Nascimento / Idade:{user_info.get('birthdate', 'N/A')} ({user_info.get('age', 'N/A')} anos, {user_info.get('genre', 'N/A')})")
+            f"   • Nascimento / Idade:{user_info.get('birthdate', 'N/A')} ({user_info.get('age', 'N/A')} anos, {user_info.get('genre', 'N/A')})"
+        )
         print(f"   • Conta Criada em:   {user_info.get('creation_date', 'N/A')}")
 
         print(f"\n {CYAN}[💳 STATUS DA SUBSCRIÇÃO (ASSINATURA)]{OFF}")
         print(
-            f"   • Status Atual:      {status_color}● {sub_info['status'].upper()}{OFF}")
+            f"   • Status Atual:      {status_color}● {sub_info['status'].upper()}{OFF}"
+        )
         print(f"   • Plano / Oferta:    {sub_info['offer']}")
         print(f"   • Periodicidade:     {sub_info['periodicity'].capitalize()}")
         print(f"   • Data de Início:    {sub_info['start_date'] or 'N/A'}")
         print(f"   • Data de Término:   {sub_info['end_date'] or 'N/A'}")
         print(
-            f"   • Cancelamento:      {'Sim (Cancelada pelo usuário)' if sub_info['is_canceled'] else 'Não'}")
+            f"   • Cancelamento:      {'Sim (Cancelada pelo usuário)' if sub_info['is_canceled'] else 'Não'}"
+        )
         print(f"   • Vagas Família:     {sub_info['household_size_max']} membro(s)")
 
         print(f"\n {CYAN}[🎛️ CREDENCIAL & RECURSOS DA CONTA]{OFF}")
         print(f"   • Tipo de Membro:    {cred.get('description', 'Membro Qobuz')}")
         print(
-            f"   • Streaming:         {'Disponível' if sf.get('streaming') else 'Indisponível'}")
+            f"   • Streaming:         {'Disponível' if sf.get('streaming') else 'Indisponível'}"
+        )
         print(
-            f"   • Download Direto:   {'Disponível' if sf.get('download') else 'Indisponível'}")
+            f"   • Download Direto:   {'Disponível' if sf.get('download') else 'Indisponível'}"
+        )
         print(
-            f"   • Letras (Lyrics):   {'Disponível' if sf.get('lyrics') else 'Indisponível'}")
+            f"   • Letras (Lyrics):   {'Disponível' if sf.get('lyrics') else 'Indisponível'}"
+        )
         print(
-            f"   • Importação Músicas:{'Disponível' if sf.get('music_import') else 'Indisponível'}")
+            f"   • Importação Músicas:{'Disponível' if sf.get('music_import') else 'Indisponível'}"
+        )
         print(
-            f"   • Rádio / Club / Q:  {'Disponível' if sf.get('radio') or sf.get('club') else 'Indisponível'}")
+            f"   • Rádio / Club / Q:  {'Disponível' if sf.get('radio') or sf.get('club') else 'Indisponível'}"
+        )
 
         if last_update:
             print(f"\n {CYAN}[📊 ATIVIDADES & ÚLTIMAS ATUALIZAÇÕES]{OFF}")
             print(
-                f"   • Playlists:         {_format_timestamp(last_update.get('playlist'))}")
+                f"   • Playlists:         {_format_timestamp(last_update.get('playlist'))}"
+            )
             print(
-                f"   • Álbuns Favoritos:  {_format_timestamp(last_update.get('favorite_album'))}")
+                f"   • Álbuns Favoritos:  {_format_timestamp(last_update.get('favorite_album'))}"
+            )
             print(
-                f"   • Faixas Favoritas:  {_format_timestamp(last_update.get('favorite_track'))}")
+                f"   • Faixas Favoritas:  {_format_timestamp(last_update.get('favorite_track'))}"
+            )
             print(
-                f"   • Artistas Favoritos:{_format_timestamp(last_update.get('favorite_artist'))}")
+                f"   • Artistas Favoritos:{_format_timestamp(last_update.get('favorite_artist'))}"
+            )
             print(
-                f"   • Compras na Loja:   {_format_timestamp(last_update.get('purchase'))}")
+                f"   • Compras na Loja:   {_format_timestamp(last_update.get('purchase'))}"
+            )
 
         # --------------------------------------------------------------------
         # Campos completos: garante que NENHUM dado de user_info/sub_info
@@ -577,33 +662,69 @@ async def _auth_command(config_file: str, update_credentials: bool = False, show
             user_info,
             "📦 DEMAIS CAMPOS DA CONTA (user_info completo)",
             ja_mostrados={
-                "firstname", "lastname", "display_name", "email", "login",
-                "id", "publicId", "country", "zone", "store",
-                "language_code", "birthdate", "age", "genre", "creation_date",
-                "store_features", "credential", "last_update",
+                "firstname",
+                "lastname",
+                "display_name",
+                "email",
+                "login",
+                "id",
+                "publicId",
+                "country",
+                "zone",
+                "store",
+                "language_code",
+                "birthdate",
+                "age",
+                "genre",
+                "creation_date",
+                "store_features",
+                "credential",
+                "last_update",
             },
         )
         if cred:
             _imprimir_campos_extras(
-                cred, "🎛️ DEMAIS CAMPOS DA CREDENCIAL", ja_mostrados={"description"},
+                cred,
+                "🎛️ DEMAIS CAMPOS DA CREDENCIAL",
+                ja_mostrados={"description"},
             )
         if sf:
             _imprimir_campos_extras(
-                sf, "📶 DEMAIS RECURSOS DA LOJA (store_features)",
-                ja_mostrados={"streaming", "download",
-                              "lyrics", "music_import", "radio", "club"},
+                sf,
+                "📶 DEMAIS RECURSOS DA LOJA (store_features)",
+                ja_mostrados={
+                    "streaming",
+                    "download",
+                    "lyrics",
+                    "music_import",
+                    "radio",
+                    "club",
+                },
             )
         if last_update:
             _imprimir_campos_extras(
-                last_update, "📊 DEMAIS ATUALIZAÇÕES (last_update)",
-                ja_mostrados={"playlist", "favorite_album",
-                              "favorite_track", "favorite_artist", "purchase"},
+                last_update,
+                "📊 DEMAIS ATUALIZAÇÕES (last_update)",
+                ja_mostrados={
+                    "playlist",
+                    "favorite_album",
+                    "favorite_track",
+                    "favorite_artist",
+                    "purchase",
+                },
             )
         _imprimir_campos_extras(
-            sub_info, "💳 DEMAIS CAMPOS DA ASSINATURA",
+            sub_info,
+            "💳 DEMAIS CAMPOS DA ASSINATURA",
             ja_mostrados={
-                "is_active", "status", "offer", "periodicity", "start_date",
-                "end_date", "is_canceled", "household_size_max",
+                "is_active",
+                "status",
+                "offer",
+                "periodicity",
+                "start_date",
+                "end_date",
+                "is_canceled",
+                "household_size_max",
             },
         )
 
@@ -611,16 +732,26 @@ async def _auth_command(config_file: str, update_credentials: bool = False, show
         if not sub_info["is_active"]:
             print(f"\n{YELLOW}⚠️  AVISO DE ASSINATURA INATIVA:{OFF}")
             print(
-                f"   Sua assinatura expirou em {sub_info['end_date']}. Para baixar álbuns e faixas")
-            print("   completas em alta resolução, é necessário possuir uma conta ativa.")
+                f"   Sua assinatura expirou em {sub_info['end_date']}. Para baixar álbuns e faixas"
+            )
+            print(
+                "   completas em alta resolução, é necessário possuir uma conta ativa."
+            )
             print("=" * 68)
 
             if not update_credentials:
-                trocar = input(
-                    f"\n{CYAN}[?] Deseja alterar o e-mail e o user_token agora? (s/N): {OFF}").strip().lower()
+                trocar = (
+                    input(
+                        f"\n{CYAN}[?] Deseja alterar o e-mail e o user_token agora? (s/N): {OFF}"
+                    )
+                    .strip()
+                    .lower()
+                )
                 if trocar in ("s", "sim", "y", "yes"):
                     await client.close()
-                    return await _auth_command(config_file, update_credentials=True, show_json=show_json)
+                    return await _auth_command(
+                        config_file, update_credentials=True, show_json=show_json
+                    )
         else:
             print("=" * 68 + "\n")
 
@@ -655,21 +786,34 @@ async def _garantir_assinatura_ativa(qobuz: QobuzDL) -> bool:
         print(f"\n{RED}[✗] CONTA SEM ASSINATURA ATIVA NO QOBUZ{OFF}")
         print(f" {CYAN}•{OFF} Status Atual:       {RED}{sub_info['status']}{OFF}")
         print(
-            f" {CYAN}•{OFF} Plano:              {sub_info['offer']} ({sub_info['periodicity']})")
+            f" {CYAN}•{OFF} Plano:              {sub_info['offer']} ({sub_info['periodicity']})"
+        )
         print(f" {CYAN}•{OFF} Validade / Término: {sub_info['end_date'] or 'N/A'}")
         print(
-            f" {CYAN}•{OFF} Cancelamento:       {'Sim (Cancelada)' if sub_info['is_canceled'] else 'Não'}")
-        print(f"\n{YELLOW}ℹ️  Sem uma assinatura ativa, a API da Qobuz não permite o download de faixas completas.{OFF}")
-        print(f"{YELLOW}   É obrigatório informar o e-mail e o user_token de uma conta com assinatura ativa para continuar.{OFF}")
+            f" {CYAN}•{OFF} Cancelamento:       {'Sim (Cancelada)' if sub_info['is_canceled'] else 'Não'}"
+        )
+        print(
+            f"\n{YELLOW}ℹ️  Sem uma assinatura ativa, a API da Qobuz não permite o download de faixas completas.{OFF}"
+        )
+        print(
+            f"{YELLOW}   É obrigatório informar o e-mail e o user_token de uma conta com assinatura ativa para continuar.{OFF}"
+        )
 
-        resp = input(
-            f"\n{CYAN}[?] Atualizar e-mail/user_token agora? (Enter = atualizar, 'cancelar' = sair): {OFF}"
-        ).strip().lower()
+        resp = (
+            input(
+                f"\n{CYAN}[?] Atualizar e-mail/user_token agora? (Enter = atualizar, 'cancelar' = sair): {OFF}"
+            )
+            .strip()
+            .lower()
+        )
 
         if resp in ("cancelar", "cancel", "sair", "n", "nao", "não"):
             print(
-                f"\n{RED}[!] Operação cancelada. Nenhum comando de download roda sem assinatura ativa.{OFF}")
-            print(f"{YELLOW}    Para ver os detalhes da conta, use: {GREEN}qobuz-dl auth{OFF}\n")
+                f"\n{RED}[!] Operação cancelada. Nenhum comando de download roda sem assinatura ativa.{OFF}"
+            )
+            print(
+                f"{YELLOW}    Para ver os detalhes da conta, use: {GREEN}qobuz-dl auth{OFF}\n"
+            )
             return False
 
         # _auth_command já pede o novo e-mail/token, valida na API e salva
@@ -689,14 +833,17 @@ async def _garantir_assinatura_ativa(qobuz: QobuzDL) -> bool:
         disable_kr = config.getboolean(section, "disable_keyring", fallback=False)
         if disable_kr:
             new_token = config.get(section, "auth_token", fallback="") or config.get(
-                section, "password", fallback="")
+                section, "password", fallback=""
+            )
         else:
             new_token = _keyring_load("auth_token") or config.get(
-                section, "auth_token", fallback="")
+                section, "auth_token", fallback=""
+            )
 
         app_id = config.get(section, "app_id", fallback="")
-        secrets = [s for s in config.get(
-            section, "secrets", fallback="").split(",") if s]
+        secrets = [
+            s for s in config.get(section, "secrets", fallback="").split(",") if s
+        ]
 
         try:
             await qobuz.initialize_client(new_email, new_token, app_id, secrets)
@@ -734,8 +881,17 @@ async def _handle_commands(qobuz: QobuzDL, arguments):
 
     signal.signal(signal.SIGINT, sigint_handler)
 
-    DOWNLOAD_COMMANDS = {"dl", "lucky", "interactive", "i",
-                         "fun", "sync-playlist", "sp", "import-playlist", "ip"}
+    DOWNLOAD_COMMANDS = {
+        "dl",
+        "lucky",
+        "interactive",
+        "i",
+        "fun",
+        "sync-playlist",
+        "sp",
+        "import-playlist",
+        "ip",
+    }
 
     if arguments.command in DOWNLOAD_COMMANDS or arguments.command is None:
         if not await _garantir_assinatura_ativa(qobuz):
@@ -747,6 +903,7 @@ async def _handle_commands(qobuz: QobuzDL, arguments):
 
         elif arguments.command in ("sync-playlist", "sp"):
             from qobuz_dl.sync_playlist import sync_playlist
+
             await sync_playlist(
                 qobuz,
                 arguments.URL,
@@ -897,7 +1054,9 @@ def _print_welcome_screen():
     ui.rule("=")
     print(f"{BG}Uso: qobuz-dl <comando> [opções]{OFF}")
     ui.wrapped(
-        f"qobuz-dl <comando> --help {OFF}(lista todas as opções daquele comando){OFF}", indent=5)
+        f"qobuz-dl <comando> --help {OFF}(lista todas as opções daquele comando){OFF}",
+        indent=5,
+    )
     print()
 
     parser = qobuz_dl_args()
@@ -911,7 +1070,9 @@ def _print_welcome_screen():
     print()
 
     if cols >= 62:
-        print(f"{BG}Flags globais:{RESET} {OFF}(não pertencem a nenhum comando específico){OFF}\n")
+        print(
+            f"{BG}Flags globais:{RESET} {OFF}(não pertencem a nenhum comando específico){OFF}\n"
+        )
     else:
         print(f"{BG}Flags globais:{RESET}\n")
 
@@ -951,8 +1112,11 @@ def check_for_updates():
 
         if versao_remota > versao_local:
             print(
-                f"\n{YELLOW}[*] ATUALIZAÇÃO DISPONÍVEL: Ultra Edition v{latest_version_str} está disponível!{OFF}")
-            print(f"{YELLOW}    - PyPI: rode 'pip install --upgrade qobuz-dl-ultra'{OFF}")
+                f"\n{YELLOW}[*] ATUALIZAÇÃO DISPONÍVEL: Ultra Edition v{latest_version_str} está disponível!{OFF}"
+            )
+            print(
+                f"{YELLOW}    - PyPI: rode 'pip install --upgrade qobuz-dl-ultra'{OFF}"
+            )
             print(f"{YELLOW}    - Docker: puxe a imagem mais recente{OFF}")
 
     except Exception as e:
@@ -979,6 +1143,7 @@ async def async_main():
 
     if offline_command == "radar":
         from qobuz_dl.radar import run_radar
+
         try:
             await run_radar()
         except KeyboardInterrupt:
@@ -988,6 +1153,7 @@ async def async_main():
 
     if offline_command == "stats":
         from qobuz_dl.stats_view import render_stats
+
         sys.exit(
             render_stats(
                 QOBUZ_DB,
@@ -1039,7 +1205,8 @@ async def async_main():
             legacy_val = config.get(section, "default_folder", fallback=None)
             if legacy_val is not None:
                 print(
-                    f"{YELLOW}[!] Aviso: 'default_folder' está obsoleto. Renomeie para 'directory' no config.ini.{RESET}")
+                    f"{YELLOW}[!] Aviso: 'default_folder' está obsoleto. Renomeie para 'directory' no config.ini.{RESET}"
+                )
                 default_folder = legacy_val
             else:
                 default_folder = "Qobuz Downloads"
@@ -1060,17 +1227,20 @@ async def async_main():
         no_credits_config = config.getboolean(section, "no_credits", fallback=False)
         blacklist_config = config.get(section, "blacklist", fallback="blacklist.txt")
         playlist_as_albums_config = config.getboolean(
-            section, "playlist_as_albums", fallback=False)
+            section, "playlist_as_albums", fallback=False
+        )
 
         app_id = config.get(section, "app_id")
         secrets = [s for s in config.get(section, "secrets").split(",") if s]
         smart_discography = config.getboolean(
-            section, "smart_discography", fallback=False)
+            section, "smart_discography", fallback=False
+        )
         folder_format = config.get(section, "folder_format", fallback=DEFAULT_FOLDER)
         track_format = config.get(section, "track_format", fallback=DEFAULT_TRACK)
 
-        arguments = qobuz_dl_args(default_quality, default_limit,
-                                  default_folder).parse_args()
+        arguments = qobuz_dl_args(
+            default_quality, default_limit, default_folder
+        ).parse_args()
 
         if getattr(arguments, "no_lyrics", False):
             fetch_lyrics = False
@@ -1109,9 +1279,18 @@ async def async_main():
         sys.exit(f"{GREEN}O banco de dados foi deletado com sucesso.{OFF}")
 
     # Subcomando Unificado: AUTH / LOGIN / USER / ACCOUNT / ME / PROFILE
-    if arguments.command in ("auth", "login", "user", "account", "profile", "me", "info"):
+    if arguments.command in (
+        "auth",
+        "login",
+        "user",
+        "account",
+        "profile",
+        "me",
+        "info",
+    ):
         is_login = getattr(arguments, "login", False) or (
-            "--login" in sys.argv or "-l" in sys.argv or arguments.command in ("login",))
+            "--login" in sys.argv or "-l" in sys.argv or arguments.command in ("login",)
+        )
         await _auth_command(
             CONFIG_FILE,
             update_credentials=is_login,
@@ -1130,9 +1309,16 @@ async def async_main():
 
         create_db(QOBUZ_DB)
         sync_client = await Client.create(
-            email, password, app_id, secrets, user_auth_token=token, force_english=force_english
+            email,
+            password,
+            app_id,
+            secrets,
+            user_auth_token=token,
+            force_english=force_english,
         )
-        sync_dir = default_folder if arguments.sync_db == "DEFAULT" else arguments.sync_db
+        sync_dir = (
+            default_folder if arguments.sync_db == "DEFAULT" else arguments.sync_db
+        )
 
         if os.name == "nt":
             sync_dir = os.path.abspath(sync_dir)
@@ -1140,7 +1326,9 @@ async def async_main():
                 sync_dir = "\\\\?\\" + sync_dir
 
         await sync_database(sync_dir, QOBUZ_DB, sync_client)
-        sys.exit(f"\n{GREEN}Sincronização do banco de dados concluída com sucesso.{OFF}")
+        sys.exit(
+            f"\n{GREEN}Sincronização do banco de dados concluída com sucesso.{OFF}"
+        )
 
     if getattr(arguments, "find_duplicates", None):
         try:
@@ -1153,7 +1341,11 @@ async def async_main():
                 f"    (Detalhe técnico: {e})"
             )
 
-        dup_dir = default_folder if arguments.find_duplicates == "DEFAULT" else arguments.find_duplicates
+        dup_dir = (
+            default_folder
+            if arguments.find_duplicates == "DEFAULT"
+            else arguments.find_duplicates
+        )
         if os.name == "nt":
             dup_dir = os.path.abspath(dup_dir)
             if not dup_dir.startswith("\\\\?\\"):
@@ -1191,18 +1383,27 @@ async def async_main():
         watch_client = None
         try:
             watch_client = await Client.create(
-                email, password, app_id, secrets, user_auth_token=token, force_english=force_english
+                email,
+                password,
+                app_id,
+                secrets,
+                user_auth_token=token,
+                force_english=force_english,
             )
         except Exception as e:
             logging.debug(f"Aviso de autenticação para o cliente de letras: {e}")
 
         try:
             await watch_directory(
-                watch_dir, client=watch_client, genius_token=genius_token, settings=watch_settings
+                watch_dir,
+                client=watch_client,
+                genius_token=genius_token,
+                settings=watch_settings,
             )
         except KeyboardInterrupt:
             print(
-                f"\n\n{RED}[!] Monitoramento interrompido pelo usuário (CTRL+C).{RESET}")
+                f"\n\n{RED}[!] Monitoramento interrompido pelo usuário (CTRL+C).{RESET}"
+            )
         finally:
             if watch_client:
                 await watch_client.close()
@@ -1221,7 +1422,8 @@ async def async_main():
             if not target_dir.startswith(docs_dir):
                 base_name = os.path.basename(target_dir.rstrip("/\\"))
                 target_dir = os.path.join(
-                    docs_dir, base_name if base_name else "Qobuz Downloads")
+                    docs_dir, base_name if base_name else "Qobuz Downloads"
+                )
 
         if os.name == "nt":
             target_dir = os.path.abspath(target_dir)
@@ -1239,18 +1441,27 @@ async def async_main():
         lyrics_client = None
         try:
             lyrics_client = await Client.create(
-                email, password, app_id, secrets, user_auth_token=token, force_english=force_english
+                email,
+                password,
+                app_id,
+                secrets,
+                user_auth_token=token,
+                force_english=force_english,
             )
         except Exception as e:
             logging.debug(f"Aviso de autenticação para o cliente de letras: {e}")
 
         try:
             await inject_lyrics_retroactively(
-                target_dir, client=lyrics_client, genius_token=genius_token, settings=local_settings
+                target_dir,
+                client=lyrics_client,
+                genius_token=genius_token,
+                settings=local_settings,
             )
         except KeyboardInterrupt:
             print(
-                f"\n\n{RED}[!] Operação interrompida manualmente pelo usuário (CTRL+C).{RESET}")
+                f"\n\n{RED}[!] Operação interrompida manualmente pelo usuário (CTRL+C).{RESET}"
+            )
             print(f"{YELLOW}Os arquivos já processados estão seguros. Saindo...{RESET}")
         finally:
             if lyrics_client:
@@ -1270,7 +1481,8 @@ async def async_main():
         if not directory_to_use.startswith(docs_dir):
             base_name = os.path.basename(directory_to_use.rstrip("/\\"))
             directory_to_use = os.path.join(
-                docs_dir, base_name if base_name else "Qobuz Downloads")
+                docs_dir, base_name if base_name else "Qobuz Downloads"
+            )
 
     if os.name == "nt":
         directory_to_use = os.path.abspath(directory_to_use)
@@ -1308,8 +1520,8 @@ async def async_main():
         ),
         folder_format=getattr(arguments, "folder_format", None) or folder_format,
         track_format=getattr(arguments, "track_format", None) or track_format,
-        smart_discography=getattr(arguments, "smart_discography",
-                                  False) or smart_discography,
+        smart_discography=getattr(arguments, "smart_discography", False)
+        or smart_discography,
         fetch_lyrics=fetch_lyrics,
         no_lrc_files=not settings.lrc_files,
         genius_token=genius_token,
@@ -1318,11 +1530,19 @@ async def async_main():
         settings=settings,
         booklet_only=getattr(arguments, "booklet_only", False),
         blacklist=getattr(arguments, "blacklist", None) or blacklist_config,
-        playlist_as_albums=getattr(
-            arguments, "playlist_as_albums", False) or playlist_as_albums_config,
+        playlist_as_albums=getattr(arguments, "playlist_as_albums", False)
+        or playlist_as_albums_config,
     )
 
-    if arguments.command not in ("auth", "login", "user", "account", "profile", "me", "info"):
+    if arguments.command not in (
+        "auth",
+        "login",
+        "user",
+        "account",
+        "profile",
+        "me",
+        "info",
+    ):
         await qobuz.initialize_client(email, password, app_id, secrets)
 
     try:

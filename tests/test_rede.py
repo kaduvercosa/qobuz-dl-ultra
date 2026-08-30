@@ -37,7 +37,9 @@ class TestCheckForUpdates:
         assert "ATUALIZAÇÃO DISPONÍVEL" in saida
         assert "99.0.0" in saida
 
-    def test_silencio_quando_ja_esta_atualizado(self, httpx_mock, capsys, check_updates):
+    def test_silencio_quando_ja_esta_atualizado(
+        self, httpx_mock, capsys, check_updates
+    ):
         import qobuz_dl
 
         httpx_mock.add_response(
@@ -132,4 +134,6 @@ class TestCheckForUpdates:
         with caplog.at_level(logging.DEBUG, logger="qobuz_dl.cli"):
             check_updates()
 
-        assert [r for r in caplog.records if "atualizacao falhou" in r.getMessage().lower()]
+        assert [
+            r for r in caplog.records if "atualizacao falhou" in r.getMessage().lower()
+        ]

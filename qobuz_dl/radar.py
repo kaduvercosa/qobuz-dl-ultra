@@ -13,6 +13,7 @@ from qobuz_dl.qopy import Client
 # continua funcionando, so' a cor de fato renderizada muda.
 from qobuz_dl.color import GREEN, WARNING as YELLOW, RED, INFO as CYAN, OFF
 from qobuz_dl.utils import get_config_paths
+from qobuz_dl import ui
 
 
 async def setup_client(config, section):
@@ -43,7 +44,7 @@ async def get_or_save_rss_link(config_path, config, section):
         if rss_link:
             return rss_link
 
-    print(f"{YELLOW}[!] No RSS feed found.{OFF}")
+    ui.emit(f"{YELLOW}[!] No RSS feed found.{OFF}")
     # ask_async() em vez de ask() -- nao bloqueia o event loop enquanto
     # espera o usuario digitar (relevante se, no futuro, algo mais estiver
     # rodando concorrentemente).
@@ -55,14 +56,14 @@ async def get_or_save_rss_link(config_path, config, section):
         config.set(section, "musicbutler_rss", rss_link)
         with open(config_path, "w") as configfile:
             config.write(configfile)
-        print(f"{GREEN}[+] Link permanently saved to config!{OFF}\n")
+        ui.emit(f"{GREEN}[+] Link permanently saved to config!{OFF}\n")
 
     return rss_link
 
 
 def _fetch_rss_releases_sync(rss_url):
     """Downloads and parses the RSS/Atom feed ignoring XML namespaces (blocking)."""
-    print(f"{CYAN}[*] Syncing with MusicButler...{OFF}")
+    ui.emit(f"{CYAN}[*] Syncing with MusicButler...{OFF}")
     try:
         req = urllib.request.Request(
             rss_url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
@@ -85,7 +86,7 @@ def _fetch_rss_releases_sync(rss_url):
 
         return releases
     except Exception as e:
-        print(f"{RED}[!] Error reading RSS feed: {e}{OFF}")
+        ui.emit(f"{RED}[!] Error reading RSS feed: {e}{OFF}")
         return []
 
 
@@ -111,7 +112,7 @@ async def run_radar():
     config = configparser.ConfigParser()
     config.read(config_file)
     if not config.sections():
-        print(f"{RED}[!] config.ini file not found at {config_file}{OFF}")
+        ui.emit(f"{RED}[!] config.ini file not found at {config_file}{OFF}")
         return
 
     section = config.sections()[0]
@@ -119,7 +120,7 @@ async def run_radar():
     # 1. RSS Link Management
     rss_url = await get_or_save_rss_link(config_file, config, section)
     if not rss_url:
-        print(f"{RED}[!] Operation cancelled. No link provided.{OFF}")
+        ui.emit(f"{RED}[!] Operation cancelled. No link provided.{OFF}")
         return
 
     # 2. Connect to Qobuz API
@@ -127,7 +128,7 @@ async def run_radar():
     try:
         api = await setup_client(config, section)
     except Exception as e:
-        print(f"{RED}[!] Connection error to Qobuz: {e}{OFF}")
+        ui.emit(f"{RED}[!] Connection error to Qobuz: {e}{OFF}")
         return
 
     try:
@@ -135,10 +136,10 @@ async def run_radar():
         releases = await fetch_rss_releases(rss_url)
 
         if not releases:
-            print(f"{YELLOW}[!] No new releases found in the feed.{OFF}")
+            ui.emit(f"{YELLOW}[!] No new releases found in the feed.{OFF}")
             return
 
-        print(
+        ui.emit(
             f"{GREEN}[+] Found {len(releases)} new releases! Searching on Qobuz...{OFF}\n"
         )
 
@@ -152,9 +153,9 @@ async def run_radar():
             search_result = await api.search_albums(release_title, limit=1)
 
             if (
-                search_result and
-                "albums" in search_result and
-                search_result["albums"]["items"]
+                search_result
+                and "albums" in search_result
+                and search_result["albums"]["items"]
             ):
                 album_data = search_result["albums"]["items"][0]
                 album_id = album_data["id"]
@@ -165,37 +166,37 @@ async def run_radar():
 
                 choices.append(questionary.Choice(title=display_name, value=album_id))
             else:
-                print(f"{YELLOW}[!] Not found on Qobuz: {release_title}{OFF}")
+                ui.emit(f"{YELLOW}[!] Not found on Qobuz: {release_title}{OFF}")
 
         if not choices:
-            print(
+            ui.emit(
                 f"{YELLOW}\n[!] None of the releases in the feed are currently available on Qobuz.{OFF}"
             )
             return
 
         # 5. Interactive UI Menu
-        print("\n")
+        ui.emit("\n")
         selected_album_ids = await questionary.checkbox(
             "🎧 Select releases to add to Favorites (Space to select, Enter to confirm):",
             choices=choices,
         ).ask_async()
 
         if not selected_album_ids:
-            print(f"{YELLOW}[*] No albums selected. Exiting.{OFF}")
+            ui.emit(f"{YELLOW}[*] No albums selected. Exiting.{OFF}")
             return
 
         # 6. Add to Favorites
-        print(
+        ui.emit(
             f"\n{CYAN}[*] Adding {len(selected_album_ids)} albums to favorites...{OFF}"
         )
         for album_id in selected_album_ids:
             try:
                 await api.add_favorite_album(album_id)
-                print(f"{GREEN}  [+] Added: ID {album_id}{OFF}")
+                ui.emit(f"{GREEN}  [+] Added: ID {album_id}{OFF}")
             except Exception as e:
-                print(f"{RED}  [-] Error with ID {album_id}: {e}{OFF}")
+                ui.emit(f"{RED}  [-] Error with ID {album_id}: {e}{OFF}")
 
-        print(
+        ui.emit(
             f"\n{GREEN}✅ Operation complete! You can now run qobuz-dl to download them.{OFF}"
         )
     finally:

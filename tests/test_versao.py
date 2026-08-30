@@ -90,7 +90,7 @@ class TestComparacaoContraVersaoAtual:
         assert not (normalizar(tag) > self.ATUAL)
 
     def test_comparacao_numerica_nao_lexicografica(self):
-        """"2.4.10" > "2.4.9" numericamente, mas < como texto. Comparar tags
+        """ "2.4.10" > "2.4.9" numericamente, mas < como texto. Comparar tags
         como string daria a resposta errada e nunca ofereceria a 2.4.10."""
         assert Version("2.4.10") > Version("2.4.9")
         assert "2.4.10" < "2.4.9"  # o que aconteceria comparando texto

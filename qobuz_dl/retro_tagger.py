@@ -1,7 +1,7 @@
-# # ============================================================================
-# # retro_tagger.py -- inspeção e atualização retroativa de letras na biblioteca.
-# # Fluxo: localizar IDs/metadados → consultar Qobuz → atualizar letras → relatório.
-# # ============================================================================
+# ============================================================================
+# retro_tagger.py -- inspecao e atualizacao retroativa de letras na biblioteca.
+# Fluxo: localizar IDs/metadados -> consultar Qobuz -> atualizar letras -> relatorio.
+# ============================================================================
 import os
 import re
 import time
@@ -11,14 +11,17 @@ import mutagen.id3 as id3
 
 from qobuz_dl.settings import QobuzDLSettings
 from qobuz_dl.lyrics_engine import LyricsEngine
+from qobuz_dl import ui
 import shutil as _shutil
 from qobuz_dl.color import INFO as CYAN, GREEN, WARNING as YELLOW, RED, OFF, RESET, BG
 
 logger = logging.getLogger(__name__)
 
 
-# # Extrai o ID Qobuz de tags FLAC/MP3 ou do comentário técnico.
 def extract_track_id(file_path: str) -> str | None:
+    """
+    Extrai o ID Qobuz de tags FLAC/MP3 ou do comentario tecnico.
+    """
     ext = os.path.splitext(file_path)[1].lower()
     if ext == ".flac":
         try:
@@ -51,14 +54,16 @@ def extract_track_id(file_path: str) -> str | None:
                     return m.group(1).strip()
         except Exception as e:
             logger.debug(
-                f"Falha ao extrair Trk ID do frame COMM (MP3), tag probabilmente ausente: {e}"
+                f"Falha ao extrair Trk ID do frame COMM (MP3), tag provavelmente ausente: {e}"
             )
 
     return None
 
 
-# # Inspeciona letras embutidas e arquivos .lrc/.txt sem modificar o áudio.
 def inspect_existing_lyrics(file_path: str) -> dict:
+    """
+    Inspeciona letras embutidas e arquivos .lrc/.txt sem modificar o audio.
+    """
     ext = os.path.splitext(file_path)[1].lower()
     base_name = os.path.splitext(file_path)[0]
     lrc_path = f"{base_name}.lrc"
@@ -115,8 +120,8 @@ def inspect_existing_lyrics(file_path: str) -> dict:
 
     is_bilingual = False
     if has_lyrics:
-        if "»" in lyrics_content or re.search(
-            r"---\s*TRADU[CÇ][AÃ]O", lyrics_content, re.IGNORECASE
+        if " » " in lyrics_content or re.search(
+            r"---\s*TRADU[CÇ§][AÃ§]O", lyrics_content, re.IGNORECASE
         ):
             is_bilingual = True
         elif language and "+" in language:
@@ -131,8 +136,11 @@ def inspect_existing_lyrics(file_path: str) -> dict:
     }
 
 
-# # Consulta diretamente o endpoint de letras do Qobuz usando assinatura do cliente.
 async def fetch_qobuz_lyrics_raw(client, track_id, language=None):
+    """
+    Consulta diretamente o endpoint de letras do Qobuz usando assinatura do cliente.
+    [FIX] Corrigido de r.status para r.status_code.
+    """
     try:
         params = {"track_id": track_id}
         if language:
@@ -145,7 +153,8 @@ async def fetch_qobuz_lyrics_raw(client, track_id, language=None):
         r = await client.session.request(
             "get", client.base + "track/lyricsUrl", params=params
         )
-        if r.status != 200:
+
+        if r.status_code != 200:
             return None
         meta = r.json()
 
@@ -171,10 +180,13 @@ async def fetch_qobuz_lyrics_raw(client, track_id, language=None):
         return None
 
 
-# # Varre a biblioteca e decide se cada faixa precisa de letra, tradução ou correção.
 async def process_retroactive_lyrics_async(
     directory_path, client, genius_token=None, settings=None
 ):
+    """
+    Varre a biblioteca e decide se cada faixa precisa de letra, traducao ou correcao.
+    [FIX] Agora fecha a engine no finally e verifica retorno de fetch_and_inject().
+    """
     if settings is None:
         settings = QobuzDLSettings()
 
@@ -182,242 +194,475 @@ async def process_retroactive_lyrics_async(
     save_lrc = getattr(settings, "lrc_files", True)
     embed_lyrics = getattr(settings, "embed_lyrics", True)
 
-    lang_display = target_lang.upper() if target_lang else "ORIGINAL (Sem tradução forçada)"
-    print(f"\n{CYAN}[*] Iniciando verificação e atualização de letras no Qobuz...{OFF}")
-    print(f"{CYAN}  • Pasta raiz :{RESET} {directory_path}")
-    print(f"{CYAN}  • Idioma alvo:{RESET} {lang_display}\n")
+    lang_display = (
+        target_lang.upper() if target_lang else "ORIGINAL (Sem traducao forcada)"
+    )
+    ui.emit(
+        f"\n{CYAN}[*] Iniciando verificacao e atualizacao de letras no Qobuz...{OFF}"
+    )
+    ui.emit(f"{CYAN} • Pasta raiz :{RESET} {directory_path}")
+    ui.emit(f"{CYAN} • Idioma alvo:{RESET} {lang_display}\n")
 
-    engine = LyricsEngine(genius_token=genius_token)
+    engine = LyricsEngine(genius_token=genius_token, settings=settings)
 
-    # # Reúne primeiro todos os arquivos para ordenar o processamento e calcular o total.
-    files_to_check = []
-    for root, _, files in os.walk(directory_path):
-        for f in files:
-            if f.lower().endswith((".flac", ".mp3")):
-                files_to_check.append(os.path.join(root, f))
+    try:
+        # Reune primeiro todos os arquivos para ordenar o processamento e calcular o total.
+        files_to_check = []
+        for root, _, files in os.walk(directory_path):
+            for f in files:
+                if f.lower().endswith((".flac", ".mp3")):
+                    files_to_check.append(os.path.join(root, f))
 
-    files_to_check.sort()
+        files_to_check.sort()
 
-    # # Guarda uma linha detalhada por arquivo para auditoria das alterações.
-    report_items = []
-    # # Contadores usados no relatório final; cada caminho de decisão incrementa um deles.
-    stats = {
-        "total": len(files_to_check),
-        "updated_new_original": 0,
-        "updated_new_pt": 0,
-        "updated_to_bilingual": 0,
-        "updated_bilingual_direct": 0,
-        "updated_fallback": 0,
-        "unchanged_already_bilingual": 0,
-        "unchanged_already_pt": 0,
-        "unchanged_no_trans_yet": 0,
-        "not_found": 0,
-        "corrected_wrong_language": 0,
-    }
+        # Guarda uma linha detalhada por arquivo para auditoria das alteracoes.
+        report_items = []
 
-    for file_path in files_to_check:
-        file_name = os.path.basename(file_path)
-        ext = os.path.splitext(file_path)[1].lower()
+        # Contadores usados no relatorio final; cada caminho de decisao incrementa um deles.
+        stats = {
+            "total": len(files_to_check),
+            "updated_new_original": 0,
+            "updated_new_pt": 0,
+            "updated_to_bilingual": 0,
+            "updated_bilingual_direct": 0,
+            "updated_fallback": 0,
+            "unchanged_already_bilingual": 0,
+            "unchanged_already_pt": 0,
+            "unchanged_no_trans_yet": 0,
+            "not_found": 0,
+            "corrected_wrong_language": 0,
+        }
 
-        title, artist, album = "", "", ""
-        if ext == ".flac":
-            try:
-                audio = FLAC(file_path)
-                title = audio.get("TITLE", [""])[0]
-                artist = (
-                    audio.get("ARTIST", [""])[0] or audio.get("ALBUMARTIST", [""])[0]
-                )
-                album = audio.get("ALBUM", [""])[0]
-            except Exception as e:
-                logger.debug(f"Falha ao ler tags do FLAC: {e}")
-        elif ext == ".mp3":
-            try:
-                audio = id3.ID3(file_path)
-                title = audio.get("TIT2").text[0] if audio.get("TIT2") else ""
-                artist = audio.get("TPE1").text[0] if audio.get("TPE1") else ""
-                album = audio.get("TALB").text[0] if audio.get("TALB") else ""
-            except Exception as e:
-                logger.debug(f"Falha ao ler tags do MP3: {e}")
+        for file_path in files_to_check:
+            file_name = os.path.basename(file_path)
+            ext = os.path.splitext(file_path)[1].lower()
 
-        if not title:
-            title = os.path.splitext(file_name)[0]
-
-    # # IDs gravados pelo downloader são confiáveis; busca textual é usada apenas como fallback.
-        track_id = extract_track_id(file_path)
-        track_id_is_trusted = bool(track_id)
-
-    # # Match textual de segurança: evita abortar quando arquivos antigos não possuem Qobuz ID.
-        if not track_id and client:
-            try:
-                search_query = f"{artist} {title}".strip()
-                res = await client.search_tracks(search_query, limit=5)
-                items = res.get("tracks", {}).get("items", [])
-
-                def norm(s):
-                    return re.sub(r"[^a-z0-9]", "", s.lower())
-
-                target_title = norm(title)
-                for item in items:
-                    item_title = norm(str(item.get("title", "")))
-                    if target_title and (
-                        target_title in item_title or item_title in target_title
-                    ):
-                        track_id = str(item.get("id"))
-                        break
-            except Exception as e:
-                logger.debug(f"Falha ao casar faixa por busca textual: {e}")
-
-    # # Estado atual: presença, idioma e se a letra já é bilíngue.
-        lyrics_state = inspect_existing_lyrics(file_path)
-        has_lyrics = lyrics_state["has_lyrics"]
-        is_bilingual = lyrics_state["is_bilingual"]
-        existing_lang = lyrics_state["language"]
-
-        display_name = f"{artist} - {title}" if artist else title
-        id_display = f"[Track ID: {track_id}]" if track_id else "[Sem Track ID]"
-        print(f"{CYAN}› Analisando:{RESET} {display_name} {id_display}")
-
-    # # Mantém original e tradução separados para decidir com segurança o tipo de atualização.
-        qobuz_orig_json = None
-        qobuz_trans_block = None
-
-        if client and track_id:
-            qobuz_orig_json = await fetch_qobuz_lyrics_raw(
-                client, track_id, language=None
-            )
-            if target_lang:
-                trans_full = await fetch_qobuz_lyrics_raw(
-                    client, track_id, language=target_lang
-                )
-                if isinstance(trans_full, dict):
-                    qobuz_trans_block = trans_full.get("translation")
-
-        if qobuz_orig_json and isinstance(qobuz_orig_json, dict):
-            orig_block = qobuz_orig_json.get("original", {})
-            orig_lang = str(orig_block.get("lang", "")).lower()
-            lines = orig_block.get("lines", [])
-            qobuz_has_sync = any(line.get("start") is not None for line in lines)
-            upgrade_to_sync = qobuz_has_sync and has_lyrics and not lyrics_state["lrc_exists"]
-
-            if target_lang and orig_lang == target_lang.lower():
-                expected_lang = target_lang.lower()
-                if not has_lyrics:
-                    engine.fetch_and_inject(
-                        file_path=file_path,
-                        artist=artist,
-                        track=title,
-                        album=album,
-                        save_lrc=save_lrc,
-                        embed_lyrics=embed_lyrics,
-                        qobuz_lyrics_response=qobuz_orig_json,
-                        qobuz_translation_response=None,
+            title, artist, album = "", "", ""
+            if ext == ".flac":
+                try:
+                    audio = FLAC(file_path)
+                    title = audio.get("TITLE", [""])[0]
+                    artist = (
+                        audio.get("ARTIST", [""])[0]
+                        or audio.get("ALBUMARTIST", [""])[0]
                     )
-                    stats["updated_new_pt"] += 1
-                    report_items.append(
-                        (
-                            display_name,
-                            "ATUALIZADO",
-                            f"Letra original inserida em {target_lang.upper()} (tradução desnecessária)",
+                    album = audio.get("ALBUM", [""])[0]
+                except Exception as e:
+                    logger.debug(f"Falha ao ler tags do FLAC: {e}")
+            elif ext == ".mp3":
+                try:
+                    audio = id3.ID3(file_path)
+                    title = audio.get("TIT2").text[0] if audio.get("TIT2") else ""
+                    artist = audio.get("TPE1").text[0] if audio.get("TPE1") else ""
+                    album = audio.get("TALB").text[0] if audio.get("TALB") else ""
+                except Exception as e:
+                    logger.debug(f"Falha ao ler tags do MP3: {e}")
+
+            if not title:
+                title = os.path.splitext(file_name)[0]
+
+            # IDs gravados pelo downloader sao confiaveis; busca textual e usada apenas como fallback.
+            track_id = extract_track_id(file_path)
+            track_id_is_trusted = bool(track_id)
+
+            # Match textual de seguranca: evita abortar quando arquivos antigos nao possuem Qobuz ID.
+            # [FIX] Agora valida tambem o artista para evitar associar faixas erradas.
+            if not track_id and client:
+                try:
+                    search_query = f"{artist} {title}".strip()
+                    res = await client.search_tracks(search_query, limit=5)
+                    items = res.get("tracks", {}).get("items", [])
+
+                    def normalize_text(value):
+                        return re.sub(r"[^a-z0-9]", "", str(value).lower())
+
+                    target_title = normalize_text(title)
+                    target_artist = normalize_text(artist)
+
+                    for item in items:
+                        item_title = normalize_text(str(item.get("title", "")))
+                        item_artist = normalize_text(
+                            str(item.get("performer", {}).get("name", ""))
                         )
-                    )
-                elif (
-                    not existing_lang or
-                    existing_lang == "unknown" or
-                    existing_lang != expected_lang or
-                    upgrade_to_sync
-                ) and track_id_is_trusted:
-                    engine.fetch_and_inject(
-                        file_path=file_path,
-                        artist=artist,
-                        track=title,
-                        album=album,
-                        save_lrc=save_lrc,
-                        embed_lyrics=embed_lyrics,
-                        qobuz_lyrics_response=qobuz_orig_json,
-                        qobuz_translation_response=None,
-                    )
 
-                    if upgrade_to_sync:
-                        stats["updated_new_pt"] += 1
-                        report_items.append(
-                            (
-                                display_name,
-                                "UPGRADE -> SYNC",
-                                "Letra￼ ￼em texto simples substituída por versão sincronizada do Qobuz",
+                        title_matches = (
+                            target_title in item_title or item_title in target_title
+                        )
+                        artist_matches = (
+                            not target_artist
+                            or target_artist in item_artist
+                            or item_artist in target_artist
+                        )
+
+                        if title_matches and artist_matches:
+                            track_id = str(item.get("id"))
+                            break
+                except Exception as e:
+                    logger.debug(f"Falha ao casar faixa por busca textual: {e}")
+
+            # Estado atual: presenca, idioma e se a letra ja e bilingue.
+            lyrics_state = inspect_existing_lyrics(file_path)
+            has_lyrics = lyrics_state["has_lyrics"]
+            is_bilingual = lyrics_state["is_bilingual"]
+            existing_lang = lyrics_state["language"]
+
+            display_name = f"{artist} - {title}" if artist else title
+            id_display = f"[Track ID: {track_id}]" if track_id else "[Sem Track ID]"
+            ui.emit(f"{CYAN}› Analisando:{RESET} {display_name} {id_display}")
+
+            # Mantem original e traducao separados para decidir com seguranca o tipo de atualizacao.
+            qobuz_orig_json = None
+            qobuz_trans_block = None
+
+            if client and track_id:
+                qobuz_orig_json = await fetch_qobuz_lyrics_raw(
+                    client, track_id, language=None
+                )
+
+                if target_lang:
+                    trans_full = await fetch_qobuz_lyrics_raw(
+                        client, track_id, language=target_lang
+                    )
+                    if isinstance(trans_full, dict):
+                        qobuz_trans_block = trans_full.get("translation")
+
+            if qobuz_orig_json and isinstance(qobuz_orig_json, dict):
+                orig_block = qobuz_orig_json.get("original", {})
+                orig_lang = str(orig_block.get("lang", "")).lower()
+                lines = orig_block.get("lines", [])
+                qobuz_has_sync = any(line.get("start") is not None for line in lines)
+                upgrade_to_sync = (
+                    qobuz_has_sync and has_lyrics and not lyrics_state["lrc_exists"]
+                )
+
+                if target_lang and orig_lang == target_lang.lower():
+                    expected_lang = target_lang.lower()
+                    if not has_lyrics:
+                        result = engine.fetch_and_inject(
+                            file_path=file_path,
+                            artist=artist,
+                            track=title,
+                            album=album,
+                            save_lrc=save_lrc,
+                            embed_lyrics=embed_lyrics,
+                            qobuz_lyrics_response=qobuz_orig_json,
+                            qobuz_translation_response=None,
+                        )
+                        if result["success"]:
+                            stats["updated_new_pt"] += 1
+                            report_items.append(
+                                (
+                                    display_name,
+                                    "ATUALIZADO",
+                                    f"Letra original inserida em {target_lang.upper()} (traducao desnecessaria)",
+                                )
                             )
+                        else:
+                            stats["not_found"] += 1
+                            report_items.append(
+                                (
+                                    display_name,
+                                    "FALHA",
+                                    "Falha ao inserir letra (Qobuz)",
+                                )
+                            )
+
+                    elif (
+                        not existing_lang
+                        or existing_lang == "unknown"
+                        or existing_lang != expected_lang
+                        or upgrade_to_sync
+                    ) and track_id_is_trusted:
+                        result = engine.fetch_and_inject(
+                            file_path=file_path,
+                            artist=artist,
+                            track=title,
+                            album=album,
+                            save_lrc=save_lrc,
+                            embed_lyrics=embed_lyrics,
+                            qobuz_lyrics_response=qobuz_orig_json,
+                            qobuz_translation_response=None,
                         )
+                        if result["success"]:
+                            stats["updated_new_pt"] += 1
+                            stats["corrected_wrong_language"] += 1
+                            if upgrade_to_sync:
+                                report_items.append(
+                                    (
+                                        display_name,
+                                        "UPGRADE -> SYNC",
+                                        "Letra em texto simples substituida por versao sincronizada do Qobuz",
+                                    )
+                                )
+                            else:
+                                report_items.append(
+                                    (
+                                        display_name,
+                                        "CORRIGIDO",
+                                        "Letra nativa do Qobuz sobrescreveu a existente (Fallback/Idioma diferente)",
+                                    )
+                                )
+                        else:
+                            stats["not_found"] += 1
+                            report_items.append(
+                                (
+                                    display_name,
+                                    "FALHA",
+                                    "Falha ao corrigir letra (Qobuz)",
+                                )
+                            )
                     else:
-                        stats["updated_new_pt"] += 1
-                        stats["corrected_wrong_language"] += 1
+                        stats["unchanged_already_pt"] += 1
                         report_items.append(
                             (
                                 display_name,
-                                "CORRIGIDO",
-                                "Letra nativa do Qobuz sobrescreveu a existente (Fallback/Idioma diferente)",
+                                "SEM ALTERAÇÃO",
+                                f"Letra ja presente e em {target_lang.upper()}",
                             )
                         )
+
+                elif not qobuz_trans_block:
+                    expected_lang = orig_lang
+                    if not has_lyrics:
+                        result = engine.fetch_and_inject(
+                            file_path=file_path,
+                            artist=artist,
+                            track=title,
+                            album=album,
+                            save_lrc=save_lrc,
+                            embed_lyrics=embed_lyrics,
+                            qobuz_lyrics_response=qobuz_orig_json,
+                            qobuz_translation_response=None,
+                        )
+                        if result["success"]:
+                            stats["updated_new_original"] += 1
+                            report_items.append(
+                                (
+                                    display_name,
+                                    "ATUALIZADO",
+                                    f"Letra original ({orig_lang.upper()}) inserida (sem traducao no Qobuz)",
+                                )
+                            )
+                        else:
+                            stats["not_found"] += 1
+                            report_items.append(
+                                (
+                                    display_name,
+                                    "FALHA",
+                                    "Falha ao inserir letra original (Qobuz)",
+                                )
+                            )
+
+                    elif (
+                        not existing_lang
+                        or existing_lang == "unknown"
+                        or existing_lang != expected_lang
+                        or upgrade_to_sync
+                    ) and track_id_is_trusted:
+                        result = engine.fetch_and_inject(
+                            file_path=file_path,
+                            artist=artist,
+                            track=title,
+                            album=album,
+                            save_lrc=save_lrc,
+                            embed_lyrics=embed_lyrics,
+                            qobuz_lyrics_response=qobuz_orig_json,
+                            qobuz_translation_response=None,
+                        )
+                        if result["success"]:
+                            stats["updated_new_original"] += 1
+                            stats["corrected_wrong_language"] += 1
+                            if upgrade_to_sync:
+                                report_items.append(
+                                    (
+                                        display_name,
+                                        "UPGRADE -> SYNC",
+                                        "Letra em texto simples substituida por versao sincronizada original do Qobuz",
+                                    )
+                                )
+                            else:
+                                report_items.append(
+                                    (
+                                        display_name,
+                                        "CORRIGIDO",
+                                        "Letra original do Qobuz sobrescreveu a existente (Fallback/Idioma diferente)",
+                                    )
+                                )
+                        else:
+                            stats["not_found"] += 1
+                            report_items.append(
+                                (
+                                    display_name,
+                                    "FALHA",
+                                    "Falha ao corrigir letra original (Qobuz)",
+                                )
+                            )
+                    else:
+                        stats["unchanged_no_trans_yet"] += 1
+                        report_items.append(
+                            (
+                                display_name,
+                                "SEM ALTERAÇÃO",
+                                "Letra original ja presente; sem traducao no Qobuz no momento",
+                            )
+                        )
+
                 else:
-                    stats["unchanged_already_pt"] += 1
-                    report_items.append(
-                        (display_name, "SEM ALTERAÇÃO",
-                         f"Letra já presente e em {target_lang.upper()}")
-                    )
-
-            elif not qobuz_trans_block:
-                expected_lang = orig_lang
-                if not has_lyrics:
-                    engine.fetch_and_inject(
-                        file_path=file_path,
-                        artist=artist,
-                        track=title,
-                        album=album,
-                        save_lrc=save_lrc,
-                        embed_lyrics=embed_lyrics,
-                        qobuz_lyrics_response=qobuz_orig_json,
-                        qobuz_translation_response=None,
-                    )
-                    stats["updated_new_original"] += 1
-                    report_items.append(
-                        (
-                            display_name,
-                            "ATUALIZADO",
-                            f"Letra original ({orig_lang.upper()}) inserida (sem tradução no Qobuz)",
+                    expected_lang = f"{orig_lang}+{target_lang.lower()}"
+                    if not has_lyrics:
+                        result = engine.fetch_and_inject(
+                            file_path=file_path,
+                            artist=artist,
+                            track=title,
+                            album=album,
+                            save_lrc=save_lrc,
+                            embed_lyrics=embed_lyrics,
+                            qobuz_lyrics_response=qobuz_orig_json,
+                            qobuz_translation_response=qobuz_trans_block,
                         )
-                    )
-                elif (
-                    not existing_lang or
-                    existing_lang == "unknown" or
-                    existing_lang != expected_lang or
-                    upgrade_to_sync
-                ) and track_id_is_trusted:
-                    engine.fetch_and_inject(
-                        file_path=file_path,
-                        artist=artist,
-                        track=title,
-                        album=album,
-                        save_lrc=save_lrc,
-                        embed_lyrics=embed_lyrics,
-                        qobuz_lyrics_response=qobuz_orig_json,
-                        qobuz_translation_response=None,
-                    )
+                        if result["success"]:
+                            stats["updated_bilingual_direct"] += 1
+                            report_items.append(
+                                (
+                                    display_name,
+                                    "ATUALIZADO",
+                                    f"Letra original e traducao {target_lang.upper()} inseridas diretamente (Bilingue)",
+                                )
+                            )
+                        else:
+                            stats["not_found"] += 1
+                            report_items.append(
+                                (
+                                    display_name,
+                                    "FALHA",
+                                    "Falha ao inserir letra bilingue (Qobuz)",
+                                )
+                            )
 
-                    if upgrade_to_sync:
-                        stats["updated_new_original"] += 1
+                    elif (
+                        not existing_lang
+                        or existing_lang == "unknown"
+                        or existing_lang != expected_lang
+                        or upgrade_to_sync
+                    ) and track_id_is_trusted:
+                        result = engine.fetch_and_inject(
+                            file_path=file_path,
+                            artist=artist,
+                            track=title,
+                            album=album,
+                            save_lrc=save_lrc,
+                            embed_lyrics=embed_lyrics,
+                            qobuz_lyrics_response=qobuz_orig_json,
+                            qobuz_translation_response=qobuz_trans_block,
+                        )
+                        if result["success"]:
+                            stats["updated_to_bilingual"] += 1
+                            stats["corrected_wrong_language"] += 1
+                            if upgrade_to_sync:
+                                report_items.append(
+                                    (
+                                        display_name,
+                                        "UPGRADE -> SYNC BILINGUE",
+                                        "Letra em texto substituida por versão sincronizada (Original + Traducao)",
+                                    )
+                                )
+                            else:
+                                report_items.append(
+                                    (
+                                        display_name,
+                                        "CORRIGIDO -> BILINGUE",
+                                        "Letra do Qobuz sobrescreveu a existente (Fallback/Idioma diferente)",
+                                    )
+                                )
+                        else:
+                            stats["not_found"] += 1
+                            report_items.append(
+                                (
+                                    display_name,
+                                    "FALHA",
+                                    "Falha ao corrigir para bilingue (Qobuz)",
+                                )
+                            )
+
+                    elif not is_bilingual and track_id_is_trusted:
+                        result = engine.fetch_and_inject(
+                            file_path=file_path,
+                            artist=artist,
+                            track=title,
+                            album=album,
+                            save_lrc=save_lrc,
+                            embed_lyrics=embed_lyrics,
+                            qobuz_lyrics_response=qobuz_orig_json,
+                            qobuz_translation_response=qobuz_trans_block,
+                        )
+                        if result["success"]:
+                            stats["updated_to_bilingual"] += 1
+                            report_items.append(
+                                (
+                                    display_name,
+                                    "ATUALIZADO -> BILINGUE",
+                                    f"Letra existente atualizada com a nova traducao {target_lang.upper()} do Qobuz",
+                                )
+                            )
+                        else:
+                            stats["not_found"] += 1
+                            report_items.append(
+                                (
+                                    display_name,
+                                    "FALHA",
+                                    "Falha ao atualizar para bilingue (Qobuz)",
+                                )
+                            )
+
+                    elif not is_bilingual and not track_id_is_trusted:
+                        stats["unchanged_no_trans_yet"] += 1
                         report_items.append(
                             (
                                 display_name,
-                                "UPGRADE -> SYNC",
-                                "Letra em texto simples substituída por versão sincronizada original do Qobuz",
+                                "SEM ALTERAÇÃO",
+                                "Ja possui letra; Track ID nao confiavel (match por busca) -- pulado por seguranca",
+                            )
+                        )
+
+                    else:
+                        stats["unchanged_already_bilingual"] += 1
+                        report_items.append(
+                            (
+                                display_name,
+                                "SEM ALTERAÇÃO",
+                                "Arquivo ja possui letra bilingue completa",
+                            )
+                        )
+
+            else:
+                if not has_lyrics:
+                    result = engine.fetch_and_inject(
+                        file_path=file_path,
+                        artist=artist,
+                        track=title,
+                        album=album,
+                        save_lrc=save_lrc,
+                        embed_lyrics=embed_lyrics,
+                        qobuz_lyrics_response=None,
+                        qobuz_translation_response=None,
+                    )
+                    check_again = inspect_existing_lyrics(file_path)
+                    if check_again["has_lyrics"] and result["success"]:
+                        stats["updated_fallback"] += 1
+                        report_items.append(
+                            (
+                                display_name,
+                                "ATUALIZADO (FALLBACK)",
+                                "Letra inserida via LRCLIB/Genius (não disponível no Qobuz)",
                             )
                         )
                     else:
-                        stats["updated_new_original"] += 1
-                        stats["corrected_wrong_language"] += 1
+                        stats["not_found"] += 1
                         report_items.append(
                             (
                                 display_name,
-                                "CORRIGIDO",
-                                "Letra original do Qobuz sobrescreveu a existente (Fallback/Idioma diferente)",
+                                "NÃO ENCONTRADO",
+                                "Nenhuma letra ou traducao encontrada no Qobuz nem nos fallbacks",
                             )
                         )
                 else:
@@ -426,212 +671,81 @@ async def process_retroactive_lyrics_async(
                         (
                             display_name,
                             "SEM ALTERAÇÃO",
-                            "Letra original já presente; sem tradução no Qobuz no momento",
+                            "Ja possui letra; Qobuz nao possui registros de traducao",
                         )
                     )
 
-            else:
-                expected_lang = f"{orig_lang}+{target_lang.lower()}"
-                if not has_lyrics:
-                    engine.fetch_and_inject(
-                        file_path=file_path,
-                        artist=artist,
-                        track=title,
-                        album=album,
-                        save_lrc=save_lrc,
-                        embed_lyrics=embed_lyrics,
-                        qobuz_lyrics_response=qobuz_orig_json,
-                        qobuz_translation_response=qobuz_trans_block,
-                    )
-                    stats["updated_bilingual_direct"] += 1
-                    report_items.append(
-                        (
-                            display_name,
-                            "ATUALIZADO",
-                            f"Letra original e tradução {target_lang.upper()} inseridas diretamente (Bilíngue)",
-                        )
-                    )
-
-                elif (
-                    not existing_lang or
-                    existing_lang == "unknown" or
-                    existing_lang != expected_lang or
-                    upgrade_to_sync
-                ) and track_id_is_trusted:
-                    engine.fetch_and_inject(
-                        file_path=file_path,
-                        artist=artist,
-                        track=title,
-                        album=album,
-                        save_lrc=save_lrc,
-                        embed_lyrics=embed_lyrics,
-                        qobuz_lyrics_response=qobuz_orig_json,
-                        qobuz_translation_response=qobuz_trans_block,
-                    )
-
-                    if upgrade_to_sync:
-                        stats["updated_to_bilingual"] += 1
-                        report_items.append(
-                            (
-                                display_name,
-                                "UPGRADE -> SYNC BILÍNGUE",
-                                "Letra em texto substituída por versão sincronizada (Original + Tradução)",
-                            )
-                        )
-                    else:
-                        stats["updated_to_bilingual"] += 1
-                        stats["corrected_wrong_language"] += 1
-                        report_items.append(
-                            (
-                                display_name,
-                                "CORRIGIDO -> BILÍNGUE",
-                                "Letra do Qobuz sobrescreveu a existente (Fallback/Idioma diferente)",
-                            )
-                        )
-
-                elif not is_bilingual and track_id_is_trusted:
-                    engine.fetch_and_inject(
-                        file_path=file_path,
-                        artist=artist,
-                        track=title,
-                        album=album,
-                        save_lrc=save_lrc,
-                        embed_lyrics=embed_lyrics,
-                        qobuz_lyrics_response=qobuz_orig_json,
-                        qobuz_translation_response=qobuz_trans_block,
-                    )
-                    stats["updated_to_bilingual"] += 1
-                    report_items.append(
-                        (
-                            display_name,
-                            "ATUALIZADO -> BILÍNGUE",
-                            f"Letra existente atualizada com a nova tradução {target_lang.upper()} do Qobuz",
-                        )
-                    )
-
-                elif not is_bilingual and not track_id_is_trusted:
-                    stats["unchanged_no_trans_yet"] += 1
-                    report_items.append(
-                        (
-                            display_name,
-                            "SEM ALTERAÇÃO",
-                            "Já possui letra; Track ID não confiável (match por busca) -- pulado por segurança",
-                        )
-                    )
-
-                else:
-                    stats["unchanged_already_bilingual"] += 1
-                    report_items.append(
-                        (
-                            display_name,
-                            "SEM ALTERAÇÃO",
-                            "Arquivo já possui letra bilíngue completa",
-                        )
-                    )
-
-        else:
-            if not has_lyrics:
-                engine.fetch_and_inject(
-                    file_path=file_path,
-                    artist=artist,
-                    track=title,
-                    album=album,
-                    save_lrc=save_lrc,
-                    embed_lyrics=embed_lyrics,
-                    qobuz_lyrics_response=None,
-                    qobuz_translation_response=None,
-                )
-                check_again = inspect_existing_lyrics(file_path)
-                if check_again["has_lyrics"]:
-                    stats["updated_fallback"] += 1
-                    report_items.append(
-                        (
-                            display_name,
-                            "ATUALIZADO (FALLBACK)",
-                            "Letra inserida via LRCLIB/Genius (não disponível no Qobuz)",
-                        )
-                    )
-                else:
-                    stats["not_found"] += 1
-                    report_items.append(
-                        (
-                            display_name,
-                            "NÃO ENCONTRADO",
-                            "Nenhuma letra ou tradução encontrada no Qobuz nem nos fallbacks",
-                        )
-                    )
-            else:
-                stats["unchanged_no_trans_yet"] += 1
-                report_items.append(
-                    (
-                        display_name,
-                        "SEM ALTERAÇÃO",
-                        "Já possui letra; Qobuz não possui registros de tradução",
-                    )
-                )
-
-    _w = min(_shutil.get_terminal_size((80, 24)).columns, 100)
-    _bar = "━" * _w
-    print(f"\n{CYAN}{_bar}{RESET}")
-    print(f"{BG}{CYAN}{'RELATÓRIO DE ATUALIZAÇÃO DE LETRAS (QOBUZ)':^{_w}}{RESET}")
-    print(f"{CYAN}{_bar}{RESET}\n")
-
-    for name, status, desc in report_items:
-        if "ATUALIZADO" in status:
-            color = GREEN
-            prefix = "[✓]"
-        elif "SEM ALTERAÇÃO" in status:
-            color = CYAN
-            prefix = "[-]"
-        else:
-            color = YELLOW
-            prefix = "[!]"
-        print(f" {color}{prefix} {name}{OFF}")
-        print(f"     Status: {color}{status}{RESET} ➔ {desc}\n")
-
-    # # Soma somente operações que alteraram ou inseriram letras.
-    total_updates = (
-        stats["updated_new_original"] +
-        stats["updated_new_pt"] +
-        stats["updated_to_bilingual"] +
-        stats["updated_bilingual_direct"] +
-        stats["updated_fallback"]
-    )
-
-    print(f"{CYAN}{'─' * _w}{RESET}")
-    print(f"{BG}{CYAN}RESUMO GERAL:{RESET}")
-    print(f"  • Total de arquivos analisados: {stats['total']}")
-    print(f"  • Total de arquivos {GREEN}atualizados{OFF}: {total_updates}")
-    print(
-        f"      - Convertidos para Bilíngue (adição de tradução PT): {stats['updated_to_bilingual']}"
-    )
-    print(
-        f"      - Novas letras Bilíngues completas inseridas: {stats['updated_bilingual_direct']}"
-    )
-    print(
-        f"      - Novas letras no idioma alvo inseridas: {stats['updated_new_pt']}"
-    )
-    print(
-        f"      - Novas letras originais inseridas (sem tradução no Qobuz): {stats['updated_new_original']}"
-    )
-    print(
-        f"      - Inseridas via fallback (LRCLIB/Genius): {stats['updated_fallback']}"
-    )
-    if stats["corrected_wrong_language"] > 0:
-        print(
-            f"  • Total {YELLOW}corrigidas por idioma incorreto{OFF}: {stats['corrected_wrong_language']}"
+        _w = min(_shutil.get_terminal_size((80, 24)).columns, 100)
+        _bar = "━" * _w
+        ui.emit(f"\n{CYAN}{_bar}{RESET}")
+        ui.emit(
+            f"{BG}{CYAN} {'RELATORIO DE ATUALIZACAO DE LETRAS (QOBUZ)':^{_w}}{RESET}"
         )
-    print(
-        f"  • Total {CYAN}sem alterações necessárias{OFF}: {stats['unchanged_already_bilingual'] + stats['unchanged_already_pt'] + stats['unchanged_no_trans_yet']}"
-    )
-    print(f"  • Total {YELLOW}sem letra/tradução encontrada{OFF}: {stats['not_found']}")
-    print(f"{'=' * 75}\n")
+        ui.emit(f"{CYAN}{_bar}{RESET}\n")
+
+        for name, status, desc in report_items:
+            if "ATUALIZADO" in status or "UPGRADE" in status or "CORRIGIDO" in status:
+                color = GREEN
+                prefix = "[✓]"
+            elif "SEM ALTERACAO" in status:
+                color = CYAN
+                prefix = "[-]"
+            else:
+                color = YELLOW
+                prefix = "[!]"
+            ui.emit(f" {color}{prefix} {name}{OFF}")
+            ui.emit(f" Status: {color}{status}{RESET} -> {desc}\n")
+
+        # Soma somente operacoes que alteraram ou inseriram letras.
+        total_updates = (
+            stats["updated_new_original"]
+            + stats["updated_new_pt"]
+            + stats["updated_to_bilingual"]
+            + stats["updated_bilingual_direct"]
+            + stats["updated_fallback"]
+        )
+
+        ui.emit(f"{CYAN}{'─' * _w}{RESET}")
+        ui.emit(f"{BG}{CYAN} RESUMO GERAL:{RESET}")
+        ui.emit(f" • Total de arquivos analisados: {stats['total']}")
+        ui.emit(f" • Total de arquivos {GREEN}atualizados{OFF}: {total_updates}")
+        ui.emit(
+            f" - Convertidos para Bilingue (adicao de traducao PT): {stats['updated_to_bilingual']}"
+        )
+        ui.emit(
+            f" - Novas letras Bilingues completas inseridas: {stats['updated_bilingual_direct']}"
+        )
+        ui.emit(f" - Novas letras no idioma alvo inseridas: {stats['updated_new_pt']}")
+        ui.emit(
+            f" - Novas letras originais inseridas (sem traducao no Qobuz): {stats['updated_new_original']}"
+        )
+        ui.emit(
+            f" - Inseridas via fallback (LRCLIB/Genius): {stats['updated_fallback']}"
+        )
+        if stats["corrected_wrong_language"] > 0:
+            ui.emit(
+                f" • Total {YELLOW}corrigidas por idioma incorreto{OFF}: {stats['corrected_wrong_language']}"
+            )
+        ui.emit(
+            f" • Total {CYAN}sem alteracoes necessarias{OFF}: {stats['unchanged_already_bilingual'] + stats['unchanged_already_pt'] + stats['unchanged_no_trans_yet']}"
+        )
+        ui.emit(
+            f" • Total {YELLOW}sem letra/traducao encontrada{OFF}: {stats['not_found']}"
+        )
+        ui.emit(f"{'=' * 75}\n")
+
+    finally:
+        # [FIX] Fecha a engine no finally para liberar a sessao HTTP.
+        engine.close()
 
 
-# # Entrada pública: resolve a pasta configurada e inicia o processamento retroativo.
 async def inject_lyrics_retroactively(
     directory_path=None, client=None, genius_token=None, settings=None
 ):
+    """
+    Entrada publica: resolve a pasta configurada e inicia o processamento retroativo.
+    [FIX] Arquivo agora esta completo, com fechamento correto e tratamento de erros.
+    """
     if settings is None:
         settings = QobuzDLSettings()
 
@@ -644,25 +758,34 @@ async def inject_lyrics_retroactively(
                 )
             except Exception as e:
                 logger.debug(
-                    f"Nao foi possivel ler 'directory' do config.ini, usando padrao: {e}"
+                    f"Não foi possível ler 'directory' do config.ini, usando padrao: {e}"
                 )
-                directory_path = "QobuzDownloads"
+            directory_path = "QobuzDownloads"
 
     directory_path = os.path.expanduser(directory_path)
 
-    # # Não cria uma biblioteca vazia automaticamente: informa o usuário e encerra.
+    # Nao cria uma biblioteca vazia automaticamente: informa o usuario e encerra.
     if not os.path.isdir(directory_path):
-        print(
+        ui.emit(
             f"{RED}[!] Erro: O diretório de downloads configurado não existe: '{directory_path}'{OFF}"
         )
-        print(
+        ui.emit(
             f"{YELLOW}[*] Dica: Baixe algum álbum primeiro ou configure a pasta com 'qobuz-dl -r'.{OFF}"
         )
         return
 
-    await process_retroactive_lyrics_async(
-        directory_path=directory_path,
-        client=client,
-        genius_token=genius_token,
-        settings=settings,
-    )
+    try:
+        await process_retroactive_lyrics_async(
+            directory_path=directory_path,
+            client=client,
+            genius_token=genius_token,
+            settings=settings,
+        )
+    except Exception as e:
+        logger.error(
+            "Erro no processamento retroativo de letras: %s",
+            e,
+            exc_info=True,
+        )
+        ui.emit(f"{RED}[!] O processamento retroativo falhou: {e}{OFF}")
+        raise

@@ -47,9 +47,9 @@ def _scan_local_tracks(directory):
                 else:
                     audio = ID3(fpath)
                     track_txxx = (
-                        audio.get("TXXX:QDL_TRACK_ID") or
-                        audio.get("TXXX:qdl_track_id") or
-                        audio.get("TXXX:QOBUZTRACKID")
+                        audio.get("TXXX:QDL_TRACK_ID")
+                        or audio.get("TXXX:qdl_track_id")
+                        or audio.get("TXXX:QOBUZTRACKID")
                     )
                     if track_txxx:
                         track_id = track_txxx.text[0]
@@ -182,7 +182,8 @@ async def sync_playlist(qobuz_dl, url, folder, auto_confirm=False):
 
     if not remote_ids:
         logger.info(
-            f"{YELLOW}A playlist do Qobuz está vazia. Nada para sincronizar.{OFF}")
+            f"{YELLOW}A playlist do Qobuz está vazia. Nada para sincronizar.{OFF}"
+        )
         return
 
     safe_playlist_name = _sanitize_dirname(playlist_name)
@@ -199,7 +200,8 @@ async def sync_playlist(qobuz_dl, url, folder, auto_confirm=False):
     logger.info(f"{CYAN}[2/4] Escaneando pasta local...{OFF}")
     local_tracks, untagged = _scan_local_tracks(target_folder)
     logger.info(
-        f"{CYAN}      Encontradas {len(local_tracks)} faixas taggeadas localmente.{OFF}")
+        f"{CYAN}      Encontradas {len(local_tracks)} faixas taggeadas localmente.{OFF}"
+    )
     if untagged:
         logger.info(
             f"{YELLOW}      {len(untagged)} arquivos não possuem tag QOBUZTRACKID "
@@ -251,8 +253,11 @@ async def sync_playlist(qobuz_dl, url, folder, auto_confirm=False):
     # # Exclusões são destrutivas; sem auto_confirm, exige confirmação explícita do usuário.
     if not auto_confirm:
         try:
-            answer = input(
-                f"\n{YELLOW}Prosseguir com a sincronização? [y/N]: {OFF}").strip().lower()
+            answer = (
+                input(f"\n{YELLOW}Prosseguir com a sincronização? [y/N]: {OFF}")
+                .strip()
+                .lower()
+            )
             if answer != "y":
                 logger.info(f"{YELLOW}Sincronização cancelada pelo usuário.{OFF}")
                 return

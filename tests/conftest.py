@@ -21,6 +21,7 @@ reais, mas qualquer tentativa de login falha em `AuthenticationError` -- ou
 seja, nenhum teste consegue tocar a API do Qobuz por acidente.
 """
 
+from unittest.mock import MagicMock
 import os
 import sys
 import tempfile
@@ -82,6 +83,18 @@ def ambiente_isolado():
         NO_COLOR="1",
         COLUMNS="80",
     )
+
+
+# Mock do cryptography para testes no a-Shell
+if sys.platform == "ios":
+    cryptography_mock = MagicMock()
+    sys.modules["cryptography"] = cryptography_mock
+    sys.modules["cryptography.hazmat"] = MagicMock()
+    sys.modules["cryptography.hazmat.primitives"] = MagicMock()
+    sys.modules["cryptography.hazmat.primitives.hashes"] = MagicMock()
+    sys.modules["cryptography.hazmat.primitives.padding"] = MagicMock()
+    sys.modules["cryptography.hazmat.bindings"] = MagicMock()
+    sys.modules["cryptography.hazmat.bindings._padding"] = MagicMock()
 
 
 @pytest.fixture
