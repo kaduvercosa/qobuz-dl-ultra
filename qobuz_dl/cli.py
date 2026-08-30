@@ -806,7 +806,6 @@ async def _garantir_assinatura_ativa(qobuz: QobuzDL) -> bool:
                 "is_canceled": False,
             }
 
-    print(f"\n{GREEN}[✓] Assinatura ativa confirmada. Prosseguindo...{OFF}\n")
     return True
 
 

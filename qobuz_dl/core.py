@@ -5,67 +5,6 @@
 #      prompt_toolkit) usada nos modos "interactive" e ao explorar um artista.
 #   2. A classe QobuzDL: orquestra buscas, downloads (sequenciais e
 #      paralelos), importação de playlists externas e o modo interativo.
-#
-# ONDE PROCURAR quando precisar mexer em algo:
-#   TUI (tela de seleção com setas/espaço/enter):
-#   - Layout de colunas da tabela (larguras, cabeçalhos) -> _get_table_layout()
-#   - Trunca texto que não cabe na tela -> _align_text()
-#   - Tema de cores do prompt_toolkit (deriva do accent do color.py) -> pt_style/prompt_style
-#   - A tela de seleção em si (teclas, cabeçalho, lista, rodapé) -> _tui_select()
-#     - Atalhos de teclado (↑ ↓ espaço t enter ctrl-c) -> bindings dentro de _tui_select
-#     - Desenho de cada linha/cartão (título, tipo, qualidade, ícones) -> get_list_text()
-#       (é a função mais longa e mais repetitiva do arquivo: tem um bloco
-#       quase idêntico por item_category: album/track/playlist/artist)
-#
-#   Classe QobuzDL (motor de download):
-#   - Construtor / todas as opções aceitas -> QobuzDL.__init__
-#   - Login na API do Qobuz -> initialize_client()
-#   - Baixar 1 item (álbum/faixa) já sabendo o ID -> download_from_id()
-#   - Processar uma URL do Qobuz (álbum/faixa/artista/label/playlist),
-#     incluindo filtro de tipo de lançamento e paralelismo -> handle_url()
-#     (é a função mais longa e mais crítica do arquivo)
-#   - Baixar uma lista de URLs/arquivo .txt (usado pelo comando "dl") ->
-#     download_list_of_urls() / download_from_txt_file()
-#   - Modo "lucky" (busca automática, pega os N primeiros) -> lucky_mode()
-#   - Monta o dicionário de metadados exibido na TUI a partir da resposta
-#     da API -> _extract_rich_metadata() (é aqui que fica a heurística que
-#     classifica álbum/EP/single quando a API não informa isso claramente)
-#   - Busca por tipo (álbum/faixa/artista/playlist/favoritos) -> search_by_type()
-#   - MODO INTERATIVO completo (menus, prompt de busca, navegação por
-#     artista) -> interactive()
-#   - Importar playlist de outra plataforma (Spotify/Deezer/etc.) ou
-#     arquivo (TXT/CSV/JSON) -> import_playlist_from_url_or_file() /
-#     download_from_playlist_file()
-#
-# PADRÃO REPETIDO NESTE ARQUIVO -- download paralelo:
-#   Em handle_url(), download_list_of_urls() e download_from_playlist_file()
-#   existe o MESMO padrão: se max_workers > 1, cria um asyncio.Semaphore do
-#   tamanho de max_workers + uma função interna "_bounded_track_download"
-#   (ou "_bounded_track_url") que espera sua vez (semaphore), aplica um
-#   pequeno atraso escalonado (HEADER_STAGGER_DELAY) só nos primeiros itens
-#   pra evitar que todos os cabeçalhos de progresso apareçam ao mesmo tempo,
-#   e então chama download_from_id(). Se for mexer no paralelismo, mexer
-#   nos 3 lugares.
-#
-# CHANGELOG desta revisão (melhorias de uso em iPad/celular + correções):
-#   - _tui_select(): + atalhos j/k (equivalentes a ↑/↓), esc (equivalente a
-#     Ctrl+C), pageup/pagedown (pula 10 itens), g/G (topo/fim), dígitos 1-9
-#     (pula direto pro item daquela posição), r (força redesenho da tela).
-#   - Application(...) agora com mouse_support=True (permite rolar a lista
-#     com mouse/trackpad/scroll de dois dedos; NÃO inclui "tocar pra
-#     selecionar" item por item -- ver comentário no local).
-#   - get_footer_text(): + indicador "Item X de Y" (serve de indicador de
-#     scroll em telas touch, que não têm scrollbar visível).
-#   - get_tokens() agora é `async def` e usa `await Bundle.create()` em vez
-#     de `Bundle()` síncrono -- evita travar o event loop. Qualquer chamada
-#     existente a `.get_tokens()` fora deste arquivo PRECISA ganhar `await`.
-#   - Removida chamada duplicada de make_m3u(new_path) em handle_url().
-#   - Nova função `_classify_release_type()` (nível de módulo, antes da
-#     classe) substitui as DUAS cópias quase idênticas da heurística de
-#     Album/EP/Single/Live/Compilation que existiam em handle_url() e em
-#     _extract_rich_metadata() -- agora é um só lugar pra ajustar a regra.
-#   - Excludes silenciosos (`except Exception: pass`) na classificação de
-#     tipo de lançamento em handle_url() agora logam em debug.
 # ==============================================================================
 
 import logging
@@ -118,6 +57,8 @@ from qobuz_dl.utils import (
     create_and_return_dir,
 )
 from qobuz_dl.settings import QobuzDLSettings
+
+import qobuz_dl.postprocess as postprocess
 
 HEADER_STAGGER_DELAY = 1.5
 
@@ -1270,7 +1211,9 @@ class QobuzDL:
             self.settings.user_auth_token,
             force_english=self.force_english,
         )
-        logger.info(f"{YELLOW}Set max quality: {QUALITIES[int(self.quality)]}")
+        logger.info(
+            f"{YELLOW}Qualidade Máxima definida: {QUALITIES[int(self.quality)]}"
+        )
 
     async def get_tokens(self):
         """Busca App ID + secrets "na hora" via bundle.py (scraping do
@@ -1314,9 +1257,7 @@ class QobuzDL:
             self.downloads_db, item_id, add_id=False, quality=self.quality
         ):
             logger.info(
-                f"{OFF}This release ID ({item_id}) was already downloaded "
-                "according to the local database.\nUse the '--no-db' flag "
-                "to bypass this."
+                f"Este ID de lançamento ({item_id}) já foi baixado de acordo com o banco de dados local.\nUse the '--no-db' flag para ignorar isto."
             )
             if is_playlist:
                 self.settings.pl_skipped = getattr(self.settings, "pl_skipped", 0) + 1
@@ -1651,6 +1592,16 @@ class QobuzDL:
                 fail = getattr(self.settings, "pl_failed", 0)
 
                 from qobuz_dl.downloader import safe_print
+
+                mock_results = [True] * len(items)
+                playlist_id = item_id if url_type == "playlist" else "favoritos"
+
+                postprocess.generate_playlist_report(
+                    new_path, playlist_id, content_name, mock_results, items
+                )
+                postprocess.generate_playlist_log(
+                    new_path, playlist_id, content_name, mock_results, items
+                )
 
                 safe_print(f"\n{CYAN}{'━' * 40}{RESET}")
                 safe_print(f"  📊 {GREEN}RESUMO DA PLAYLIST:{RESET} {content_name}")
@@ -2800,6 +2751,16 @@ class QobuzDL:
         fail = getattr(self.settings, "pl_failed", 0)
 
         from qobuz_dl.downloader import safe_print
+
+        tracks_meta = [{"id": tid, "title": f"Faixa ID {tid}"} for tid in track_ids]
+        mock_results = [True] * len(track_ids)
+
+        postprocess.generate_playlist_report(
+            pl_directory, "Importada", playlist_name, mock_results, tracks_meta
+        )
+        postprocess.generate_playlist_log(
+            pl_directory, "Importada", playlist_name, mock_results, tracks_meta
+        )
 
         safe_print(f"\n{CYAN}{'━' * 44}{RESET}")
         safe_print(f"  📊 {GREEN}RESUMO DA PLAYLIST IMPORTADA:{RESET} {playlist_name}")

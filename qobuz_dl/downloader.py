@@ -14,6 +14,7 @@ from qobuz_dl.constants import (
 from qobuz_dl.db import handle_download_id
 from qobuz_dl.utils import get_album_artist, clean_filename, verify_audio_integrity
 from .lyrics_engine import LyricsEngine
+import qobuz_dl.postprocess as postprocess
 import logging
 import os
 import shutil
@@ -709,6 +710,40 @@ class Download:
                     album=db_album,
                 )
 
+                # safe_print(f"{CYAN}[*] Gerando relatórios de pós-processamento do álbum...{OFF}")
+
+                postprocess.generate_album_log(
+                    final_dirn,
+                    album_title,
+                    artist_name,
+                    self.item_id,
+                    self.quality,
+                    mode_label,
+                    results,
+                    album_meta,
+                )
+                postprocess.generate_credits(
+                    final_dirn,
+                    album_meta,
+                    album_title,
+                    file_format,
+                    bit_depth,
+                    sampling_rate,
+                )
+                if self.download_db:
+                    postprocess.generate_index_entry(
+                        self.download_db,
+                        self.item_id,
+                        album_title,
+                        artist_name,
+                        final_dirn,
+                        file_format,
+                        bit_depth,
+                        sampling_rate,
+                        release_date,
+                        url,
+                    )
+
             skipped_count = sum(1 for r in results if r == "skipped")
             real_failed = sum(1 for r in results if r is False)
             downloaded_count = sum(1 for r in results if r is True)
@@ -909,6 +944,20 @@ class Download:
                 album=db_album,
             )
 
+            reason_msg = "Download concluído" if success else "Falha ou Pulada"
+            postprocess.generate_track_report(
+                dirn,
+                self.item_id,
+                track_title,
+                artist,
+                album_name,
+                file_format,
+                bit_depth,
+                sampling_rate,
+                success,
+                reason=reason_msg,
+            )
+
         is_batch_or_playlist = (
             getattr(self, "is_playlist", False)
             or getattr(self.settings, "pl_success", None) is not None
@@ -917,9 +966,9 @@ class Download:
         if not is_batch_or_playlist:
             try:
                 safe_print(f"\n{CYAN}{'-' * 44}{RESET}")
-                safe_print(f" RESUMO DA FAIXA: {GREEN}{RESET} {track_title}")
+                safe_print(f"  📊 RESUMO DA FAIXA: {GREEN}{RESET} {track_title}")
                 if success:
-                    safe_print(f" - Status : {GREEN}Concluida com Sucesso{RESET}")
+                    safe_print(f" - Status : {GREEN}Concluída com Sucesso{RESET}")
                 else:
                     safe_print(f" - Status : {RED}Falhou ou foi pulada{RESET}")
                 safe_print(f"{CYAN}{'-' * 44}{RESET}\n")
@@ -1814,7 +1863,7 @@ async def tqdm_download(
 
     if not is_parallel:
         safe_print(f"{C}[+] Em Progresso: {track_name}{R}")
-        tqdm_desc = f" {R}⬇️:{R}"
+        tqdm_desc = f"  {R}⬇️{R}"
         b_format = "{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]"
         ncols = None
         dynamic_ncols = True
@@ -2188,7 +2237,7 @@ async def tqdm_download_segments(
         dynamic_ncols = False
     else:
         safe_print(f"{C}[+] Em Progresso: {track_name}{R}")
-        tqdm_desc = f" {R}↪️:{R}"
+        tqdm_desc = f"  {R}↪️{R}"
         b_format = "{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]"
         ncols = None
         dynamic_ncols = True
