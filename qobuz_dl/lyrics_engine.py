@@ -31,6 +31,7 @@ class LyricsEngine:
         self.genius_token = genius_token
         self.genius = None
         self.settings = settings or QobuzDLSettings()
+        self._mxm_token = None
 
         if self.genius_token and lyricsgenius:
             self.genius = lyricsgenius.Genius(
@@ -88,9 +89,12 @@ class LyricsEngine:
                 else:
                     if start == 0:
                         lrc_rows.append("[00:00.000]   » » » ")
-                        intro_added = True
                     else:
                         lrc_rows.append(f"{self._ms_to_lrc_timestamp(start)} {text}")
+
+                # A trava precisa ficar aqui fora para garantir que a introdução
+                # seja injetada apenas uma única vez no arquivo.
+                intro_added = True
             else:
                 if text:
                     lrc_rows.append(f"{self._ms_to_lrc_timestamp(start)} {text}")
@@ -195,6 +199,69 @@ class LyricsEngine:
                 final_lrc.append(f"{tag} {text}")
 
         return "\n".join(final_lrc)
+
+    def _fetch_musixmatch_lyrics(self, artist, title):
+        """Busca letras sincronizadas no Musixmatch (síncrono)."""
+        headers = {
+            "x-mxm-app-version": "10.1.1",
+            "User-Agent": "Musixmatch/2025120901 CFNetwork/1404.0.5 Darwin/22.3.0",
+        }
+        try:
+            if not self._mxm_token:
+                resp_token = self.session.get(
+                    "https://apic-appmobile.musixmatch.com/ws/1.1/token.get?app_id=mac-ios-v2.0",
+                    headers=headers,
+                    timeout=8,
+                )
+                if resp_token.status_code == 200:
+                    data_token = resp_token.json()
+                    if (
+                        data_token.get("message", {})
+                        .get("header", {})
+                        .get("status_code")
+                        == 200
+                    ):
+                        self._mxm_token = data_token["message"]["body"]["user_token"]
+
+            if self._mxm_token:
+                params = {
+                    "q_artist": artist,
+                    "q_track": title,
+                    "format": "json",
+                    "namespace": "lyrics_richsynched",
+                    "usertoken": self._mxm_token,
+                    "app_id": "mac-ios-v2.0",
+                }
+                resp_lyric = self.session.get(
+                    "https://apic-appmobile.musixmatch.com/ws/1.1/macro.subtitles.get",
+                    params=params,
+                    headers=headers,
+                    timeout=8,
+                )
+                if resp_lyric.status_code == 200:
+                    data = resp_lyric.json()
+                    if (
+                        data.get("message", {}).get("header", {}).get("status_code")
+                        == 200
+                    ):
+                        body = data["message"]["body"]
+                        if (
+                            "macro_calls" in body
+                            and "track.subtitles.get" in body["macro_calls"]
+                        ):
+                            sub_msg = body["macro_calls"]["track.subtitles.get"][
+                                "message"
+                            ]
+                            if (
+                                sub_msg["header"]["status_code"] == 200
+                                and "subtitle_list" in sub_msg["body"]
+                            ):
+                                subtitle_list = sub_msg["body"]["subtitle_list"]
+                                if subtitle_list:
+                                    return subtitle_list[0]["subtitle"]["subtitle_body"]
+        except Exception as e:
+            logger.debug(f"Erro ao buscar no Musixmatch: {e}")
+        return None
 
     def fetch_and_inject(
         self,
@@ -379,6 +446,61 @@ class LyricsEngine:
                                 f" {RED}❌ Falha ao gravar letras padrao (Qobuz){RESET}"
                             )
                         return result
+
+            # Fallback Musicmatch
+            mxm_lyrics = self._fetch_musixmatch_lyrics(artist, track)
+            if mxm_lyrics:
+                is_synced = bool(re.search(r"\[\d{2,}:\d{2}(?:\.\d+)?\]", mxm_lyrics))
+
+                if only_synced and not is_synced:
+                    pass  # Pula para o LRCLIB se a restrição de sincronia estiver ativa
+                else:
+                    result["synchronized"] = is_synced
+                    result["source"] = "Musixmatch"
+                    result["language"] = "unknown"
+
+                    if embed_lyrics:
+                        saved = self._inject_metadata(
+                            file_path,
+                            mxm_lyrics,
+                            source="Musixmatch",
+                            language="unknown",
+                        )
+                        result["embedded"] = saved
+
+                    if save_lrc:
+                        saved = self._save_lrc_file(
+                            file_path,
+                            mxm_lyrics,
+                            source="Musixmatch",
+                            language="unknown",
+                        )
+                        result["saved_external"] = saved
+
+                    if result["embedded"] or result["saved_external"]:
+                        result["success"] = True
+
+                    sync_str = "sincronizadas" if is_synced else "padrão"
+                    ext_str = ".lrc" if is_synced else ".txt"
+
+                    if embed_lyrics and save_lrc:
+                        tqdm.write(
+                            f"    ✅ Letras {sync_str} injetadas e salvas em {ext_str} (via Musixmatch)!"
+                        )
+                    elif save_lrc:
+                        tqdm.write(
+                            f"    ✅ Letras {sync_str} salvas em {ext_str} (via Musixmatch)!"
+                        )
+                    elif embed_lyrics:
+                        tqdm.write(
+                            f"    ✅ Letras {sync_str} injetadas no metadata (via Musixmatch)!"
+                        )
+                    else:
+                        tqdm.write(
+                            f" {RED}❌ Falha ao gravar letras (Musixmatch){RESET}"
+                        )
+
+                    return result
 
             # Fallback LRCLIB
             lrclib_url = "https://lrclib.net/api/get"

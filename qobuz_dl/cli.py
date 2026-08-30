@@ -529,9 +529,13 @@ async def _auth_command(
                 return False
         else:
             token = new_token
-            print(f"\n{CYAN}[*] Validando nova sessão com a API do Qobuz...{OFF}")
+            print(
+                f"\n\r{CYAN}[*] Validando nova sessão com a API do Qobuz...{OFF}\033[K"
+            )
     else:
-        print(f"\n{CYAN}[*] Consultando dados da conta e assinatura no Qobuz...{OFF}")
+        print(
+            f"\n\r{CYAN}[*] Consultando dados da conta e assinatura no Qobuz...{OFF}\033[K"
+        )
 
     # 2. Conecta na API
     try:
@@ -599,10 +603,23 @@ async def _auth_command(
         print(
             f"   • Loja / Idioma:     {user_info.get('store', 'N/A')} ({user_info.get('language_code', 'N/A')})"
         )
+
+        def format_date_br(d_str):
+            if not d_str:
+                return "N/A"
+            try:
+                return datetime.strptime(str(d_str)[:10], "%Y-%m-%d").strftime(
+                    "%d/%m/%Y"
+                )
+            except Exception:
+                return str(d_str)
+
         print(
-            f"   • Nascimento / Idade:{user_info.get('birthdate', 'N/A')} ({user_info.get('age', 'N/A')} anos, {user_info.get('genre', 'N/A')})"
+            f"   • Nascimento / Idade:{format_date_br(user_info.get('birthdate'))} ({user_info.get('age', 'N/A')} anos, {user_info.get('genre', 'N/A')})"
         )
-        print(f"   • Conta Criada em:   {user_info.get('creation_date', 'N/A')}")
+        print(
+            f"   • Conta Criada em:   {format_date_br(user_info.get('creation_date'))}"
+        )
 
         print(f"\n {CYAN}[💳 STATUS DA SUBSCRIÇÃO (ASSINATURA)]{OFF}")
         print(
@@ -654,81 +671,6 @@ async def _auth_command(
             print(
                 f"   • Compras na Loja:   {_format_timestamp(last_update.get('purchase'))}"
             )
-
-        # --------------------------------------------------------------------
-        # Campos completos: garante que NENHUM dado de user_info/sub_info
-        # fique de fora do relatório, mesmo os que não têm uma linha "bonita"
-        # dedicada acima (ex.: avatar, moeda, direitos, país completo, etc.).
-        # --------------------------------------------------------------------
-        _imprimir_campos_extras(
-            user_info,
-            "📦 DEMAIS CAMPOS DA CONTA (user_info completo)",
-            ja_mostrados={
-                "firstname",
-                "lastname",
-                "display_name",
-                "email",
-                "login",
-                "id",
-                "publicId",
-                "country",
-                "zone",
-                "store",
-                "language_code",
-                "birthdate",
-                "age",
-                "genre",
-                "creation_date",
-                "store_features",
-                "credential",
-                "last_update",
-            },
-        )
-        if cred:
-            _imprimir_campos_extras(
-                cred,
-                "🎛️ DEMAIS CAMPOS DA CREDENCIAL",
-                ja_mostrados={"description"},
-            )
-        if sf:
-            _imprimir_campos_extras(
-                sf,
-                "📶 DEMAIS RECURSOS DA LOJA (store_features)",
-                ja_mostrados={
-                    "streaming",
-                    "download",
-                    "lyrics",
-                    "music_import",
-                    "radio",
-                    "club",
-                },
-            )
-        if last_update:
-            _imprimir_campos_extras(
-                last_update,
-                "📊 DEMAIS ATUALIZAÇÕES (last_update)",
-                ja_mostrados={
-                    "playlist",
-                    "favorite_album",
-                    "favorite_track",
-                    "favorite_artist",
-                    "purchase",
-                },
-            )
-        _imprimir_campos_extras(
-            sub_info,
-            "💳 DEMAIS CAMPOS DA ASSINATURA",
-            ja_mostrados={
-                "is_active",
-                "status",
-                "offer",
-                "periodicity",
-                "start_date",
-                "end_date",
-                "is_canceled",
-                "household_size_max",
-            },
-        )
 
         # Se a assinatura estiver inativa e não acabamos de atualizar:
         if not sub_info.get("is_active"):
@@ -788,7 +730,7 @@ async def _garantir_assinatura_ativa(qobuz: QobuzDL) -> bool:
         print(f"\n{RED}[✗] CONTA SEM ASSINATURA ATIVA NO QOBUZ{OFF}")
         print(f" {CYAN}•{OFF} Status Atual:       {RED}{sub_info.get('status')}{OFF}")
         print(
-            f" {CYAN}•{OFF} Plano:              {sub_info.get('offer', 'N/A')} ({str(sub_info('periodicity', 'N/A')).capitalize()})"
+            f" {CYAN}•{OFF} Plano:              {sub_info.get('offer', 'N/A')} ({str(sub_info.get('periodicity', 'N/A')).capitalize()})"
         )
         print(f" {CYAN}•{OFF} Validade / Término: {sub_info.get('end_date') or 'N/A'}")
         print(

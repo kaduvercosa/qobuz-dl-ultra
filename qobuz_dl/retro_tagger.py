@@ -653,7 +653,7 @@ async def process_retroactive_lyrics_async(
                             (
                                 display_name,
                                 "ATUALIZADO (FALLBACK)",
-                                "Letra inserida via LRCLIB/Genius (não disponível no Qobuz)",
+                                "Letra inserida via Musicmatch/LRCLIB/Genius (não disponível no Qobuz)",
                             )
                         )
                     else:
@@ -720,7 +720,7 @@ async def process_retroactive_lyrics_async(
             f" - Novas letras originais inseridas (sem traducao no Qobuz): {stats['updated_new_original']}"
         )
         ui.emit(
-            f" - Inseridas via fallback (LRCLIB/Genius): {stats['updated_fallback']}"
+            f" - Inseridas via fallback (Musicmatch/LRCLIB/Genius): {stats['updated_fallback']}"
         )
         if stats["corrected_wrong_language"] > 0:
             ui.emit(

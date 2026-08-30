@@ -64,7 +64,7 @@ class Client:
         Fábrica assíncrona. Inicializa o cliente API e configura a sessão resiliente.
         """
         self = cls()
-        logger.info(f"{YELLOW}Logando...{OFF}")
+        print(f"{YELLOW}Logando...{OFF}", end="", flush=True)
         self.secrets = secrets
         self.id = str(app_id)
         self.force_english = force_english
@@ -78,13 +78,16 @@ class Client:
                         self.id = fresh_id
                         self.secrets = list(b.get_secrets().values())
                         logger.info(
-                            f"{GREEN}[+] ID do aplicativo atualizado dinamicamente: {self.id}{OFF}"
+                            f"\r{GREEN}[+] ID do aplicativo atualizado dinamicamente: {self.id}{OFF}\033[K"
                         )
                 except Exception:
+                    print(
+                        f"\r{YELLOW} [!] ID do aplicativo não atualizado (usando padrão).{OFF}\033[K"
+                    )
                     pass
         else:
             logger.info(
-                f"{GREEN}[+] Usando ID de aplicativo legado personalizado: {self.id}{OFF}"
+                f"\r{GREEN}[+] Usando ID de aplicativo legado personalizado: {self.id}{OFF}\033[K"
             )
 
         headers = {}
@@ -184,12 +187,10 @@ class Client:
 
             sub = self.check_subscription()
             if sub["is_active"]:
-                logger.info(
-                    f"{GREEN}Logado: OK (Associação: {self.label} | {sub['status']}){OFF}"
-                )
+                logger.info(f"{GREEN}Logado: OK (Assinatura: {self.label}){OFF}")
             else:
                 logger.warning(
-                    f"{YELLOW}[!] Logado: OK, mas a assinatura está INATIVA ({sub['status']}){OFF}"
+                    f"{YELLOW}[!] Logado: OK, mas a assinatura está {RED}INATIVA{RESET} ({sub['status']}){OFF}"
                 )
         except Exception:
             logger.info(f"{YELLOW}[!] Validação do perfil ignorada.{OFF}")
@@ -205,14 +206,14 @@ class Client:
 
         if not sub or not isinstance(sub, dict):
             return {
-                "Está Ativo": False,
+                "is_active": False,
                 "status": "Inativa / Sem Assinatura",
-                "Oferta": "Nenhuma / Gratuita",
-                "Data de Início": None,
-                "Data de término": None,
-                "Está cancelado": False,
-                "Periodicidade": "N/A",
-                "Tamanho máximo do agregado familiar": 1,
+                "offer": "Nenhuma / Gratuita",
+                "start_date": None,
+                "end_date": None,
+                "is_canceled": False,
+                "periodicity": "N/A",
+                "household_size_max": 1,
                 "raw": {},
             }
 
@@ -226,36 +227,49 @@ class Client:
         is_active = False
         status = "Inativa"
 
+        start_date_br = start_date
+        if start_date:
+            try:
+                start_date_br = datetime.strptime(
+                    str(start_date)[:10], "%Y-%m-%d"
+                ).strftime("%d/%m/%Y")
+            except Exception:
+                pass
+
+        end_date_br = end_date
         if end_date:
             try:
                 end_dt = datetime.strptime(str(end_date)[:10], "%Y-%m-%d").date()
+                end_date_br = end_dt.strftime("%d/%m/%Y")
                 today = date.today()
+
                 if end_dt >= today:
                     is_active = True
                     status = (
-                        f"Cancelada (Ativa até {end_date})"
+                        f"Cancelada (Ativa até {end_date_br})"
                         if is_canceled
-                        else f"Ativa (Renovação em {end_date})"
+                        else f"Ativa (Renovação em {end_date_br})"
                     )
                 else:
                     is_active = False
-                    status = f"Expirada em {end_date}"
+                    status = f"Expirada em {end_date_br}"
             except Exception:
                 is_active = not is_canceled
                 status = "Cancelada" if is_canceled else "Ativa"
         else:
             is_active = bool(offer and offer.lower() != "free" and not is_canceled)
             status = "Ativa" if is_active else "Inativa"
+            end_date_br = None
 
         return {
-            "Está ativo": is_active,
+            "is_active": is_active,
             "status": status,
-            "Oferta": offer,
-            "start_date": start_date,
-            "Data de início": end_date,
-            "Está cancelado": is_canceled,
-            "Periodicidade": periodicity,
-            "Tamanho máximo do agregado familiar": household_size_max,
+            "offer": offer,
+            "start_date": start_date_br,
+            "end_date": end_date_br,
+            "is_canceled": is_canceled,
+            "periodicity": periodicity,
+            "household_size_max": household_size_max,
             "raw": sub,
         }
 

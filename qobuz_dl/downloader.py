@@ -313,6 +313,9 @@ class Download:
             },
         )
 
+        self.settings = settings or QobuzDLSettings()
+        self.download_db = download_db
+
         self.fetch_lyrics = fetch_lyrics
         self.no_lrc_files = no_lrc_files
         if self.fetch_lyrics:
@@ -1681,7 +1684,7 @@ class Download:
                             f.write(textwrap.fill(p.strip(), width=70) + "\n\n")
 
             safe_print(
-                f"{GREEN} > Concluído: Digital Booklet.txt (Credits & Review){OFF}"
+                f"{GREEN} └─ Concluído: Digital Booklet.txt (Credits & Review){OFF}"
             )
         except Exception as e:
             safe_print(f"{RED}[!] Erro criando booklet: {e}{OFF}")
@@ -1811,7 +1814,7 @@ async def tqdm_download(
 
     if not is_parallel:
         safe_print(f"{C}[+] Em Progresso: {track_name}{R}")
-        tqdm_desc = f" {R}v{R}"
+        tqdm_desc = f" {R}⬇️:{R}"
         b_format = "{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]"
         ncols = None
         dynamic_ncols = True
@@ -1923,7 +1926,7 @@ async def tqdm_download(
                                         bar.update(size)
 
                         if downloaded_size >= total_size:
-                            safe_print(f"{G} > Concluído: {track_name}{R}")
+                            safe_print(f"{G} └─ Concluído: {track_name}{R}")
                             return
 
         except _PermanentDownloadError as e:
@@ -2185,7 +2188,7 @@ async def tqdm_download_segments(
         dynamic_ncols = False
     else:
         safe_print(f"{C}[+] Em Progresso: {track_name}{R}")
-        tqdm_desc = f" {R}Download Segmentado{R}"
+        tqdm_desc = f" {R}↪️:{R}"
         b_format = "{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]"
         ncols = None
         dynamic_ncols = True
@@ -2273,7 +2276,7 @@ async def tqdm_download_segments(
         if abort_event.is_set():
             return
         if not is_parallel:
-            safe_print(f" {G} > Montando o arquivo FLAC final...{R}")
+            safe_print(f" {G} └─ Montando o arquivo FLAC final...{R}")
 
         remux = await asyncio.create_subprocess_exec(
             "ffmpeg",
@@ -2298,7 +2301,7 @@ async def tqdm_download_segments(
                 f"Falha no remux do FFmpeg para {fname}: {stderr.decode()}"
             )
 
-        safe_print(f"{G} > Concluído: {track_name}{R}")
+        safe_print(f"{G} └─ Concluído: {track_name}{R}")
 
     except (KeyboardInterrupt, SystemExit):
         abort_event.set()
