@@ -570,12 +570,12 @@ async def _auth_command(
 
         if show_json:
             print(json.dumps(user_info, indent=2, ensure_ascii=False))
-            return sub_info["is_active"]
+            return sub_info.get("is_active", False)
 
         sf = user_info.get("store_features") or {}
         cred = user_info.get("credential") or {}
         last_update = user_info.get("last_update") or {}
-        status_color = GREEN if sub_info["is_active"] else RED
+        status_color = GREEN if sub_info.get("is_active") else RED
 
         print("\n" + "=" * 68)
         print(f"  {CYAN}{BG}🎵 QOBUZ // INFORMAÇÕES DA CONTA E ASSINATURA{OFF}")
@@ -606,16 +606,18 @@ async def _auth_command(
 
         print(f"\n {CYAN}[💳 STATUS DA SUBSCRIÇÃO (ASSINATURA)]{OFF}")
         print(
-            f"   • Status Atual:      {status_color}● {sub_info['status'].upper()}{OFF}"
+            f"   • Status Atual:      {status_color}● {str(sub_info.get('status')).upper()}{OFF}"
         )
-        print(f"   • Plano / Oferta:    {sub_info['offer']}")
-        print(f"   • Periodicidade:     {sub_info['periodicity'].capitalize()}")
-        print(f"   • Data de Início:    {sub_info['start_date'] or 'N/A'}")
-        print(f"   • Data de Término:   {sub_info['end_date'] or 'N/A'}")
+        print(f"   • Plano / Oferta:    {sub_info.get('offer', 'N/A')}")
         print(
-            f"   • Cancelamento:      {'Sim (Cancelada pelo usuário)' if sub_info['is_canceled'] else 'Não'}"
+            f"   • Periodicidade:     {str(sub_info.get('periodicity', 'N/A')).capitalize()}"
         )
-        print(f"   • Vagas Família:     {sub_info['household_size_max']} membro(s)")
+        print(f"   • Data de Início:    {sub_info.get('start_date') or 'N/A'}")
+        print(f"   • Data de Término:   {sub_info.get('end_date') or 'N/A'}")
+        print(
+            f"   • Cancelamento:      {'Sim (Cancelada pelo usuário)' if sub_info.get('is_canceled') else 'Não'}"
+        )
+        print(f"   • Vagas Família:     {sub_info.get('household_size_max')} membro(s)")
 
         print(f"\n {CYAN}[🎛️ CREDENCIAL & RECURSOS DA CONTA]{OFF}")
         print(f"   • Tipo de Membro:    {cred.get('description', 'Membro Qobuz')}")
@@ -729,10 +731,10 @@ async def _auth_command(
         )
 
         # Se a assinatura estiver inativa e não acabamos de atualizar:
-        if not sub_info["is_active"]:
+        if not sub_info.get("is_active"):
             print(f"\n{YELLOW}⚠️  AVISO DE ASSINATURA INATIVA:{OFF}")
             print(
-                f"   Sua assinatura expirou em {sub_info['end_date']}. Para baixar álbuns e faixas"
+                f"   Sua assinatura expirou em {sub_info.get('end_date')}. Para baixar álbuns e faixas"
             )
             print(
                 "   completas em alta resolução, é necessário possuir uma conta ativa."
@@ -755,7 +757,7 @@ async def _auth_command(
         else:
             print("=" * 68 + "\n")
 
-        return sub_info["is_active"]
+        return sub_info.get("is_active", False)
     finally:
         await client.close()
 
@@ -782,15 +784,15 @@ async def _garantir_assinatura_ativa(qobuz: QobuzDL) -> bool:
     """
     sub_info = qobuz.client.check_subscription()
 
-    while not sub_info["is_active"]:
+    while not sub_info.get("is_active"):
         print(f"\n{RED}[✗] CONTA SEM ASSINATURA ATIVA NO QOBUZ{OFF}")
-        print(f" {CYAN}•{OFF} Status Atual:       {RED}{sub_info['status']}{OFF}")
+        print(f" {CYAN}•{OFF} Status Atual:       {RED}{sub_info.get('status')}{OFF}")
         print(
-            f" {CYAN}•{OFF} Plano:              {sub_info['offer']} ({sub_info['periodicity']})"
+            f" {CYAN}•{OFF} Plano:              {sub_info.get('offer', 'N/A')} ({str(sub_info('periodicity', 'N/A')).capitalize()})"
         )
-        print(f" {CYAN}•{OFF} Validade / Término: {sub_info['end_date'] or 'N/A'}")
+        print(f" {CYAN}•{OFF} Validade / Término: {sub_info.get('end_date') or 'N/A'}")
         print(
-            f" {CYAN}•{OFF} Cancelamento:       {'Sim (Cancelada)' if sub_info['is_canceled'] else 'Não'}"
+            f" {CYAN}•{OFF} Cancelamento:       {'Sim (Cancelada)' if sub_info.get('is_canceled') else 'Não'}"
         )
         print(
             f"\n{YELLOW}ℹ️  Sem uma assinatura ativa, a API da Qobuz não permite o download de faixas completas.{OFF}"
