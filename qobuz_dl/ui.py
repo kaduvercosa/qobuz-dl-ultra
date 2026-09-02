@@ -227,7 +227,7 @@ def _write_locked(text, end):
     # texto, reescreve substituindo o que não encaixa em vez de derrubar o
     # processo com UnicodeEncodeError.
     try:
-        from tqdm.rich import tqdm
+        from tqdm import tqdm
 
         tqdm.write(str(text), end=end)
     except Exception:

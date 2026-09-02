@@ -17,6 +17,7 @@ from qobuz_dl.utils import (
     clean_filename,
     verify_audio_integrity,
     classify_release_type,
+    get_apple_hq_cover,
 )
 from .lyrics_engine import LyricsEngine
 import qobuz_dl.postprocess as postprocess
@@ -58,9 +59,7 @@ from tenacity import (
     retry_if_not_exception_type,
 )
 
-# Ordem de fallback de qualidade quando o tier pedido falha por motivo de
-# rede/servidor (NAO usado para faixas indisponiveis -- ver _PermanentDownloadError).
-# 27=Hi-Res >96kHz | 7=Hi-Res 96kHz | 6=CD 16bit/44.1kHz | 5=MP3 320kbps
+# Ordem de fallback de qualidade quando o tier pedido falha por motivo de rede/servidor (NAO usado para faixas indisponiveis -- ver _PermanentDownloadError). 27=Hi-Res >96kHz | 7=Hi-Res 96kHz | 6=CD 16bit/44.1kHz | 5=MP3 320kbps
 FALLBACK_TIERS = [27, 7, 6, 5]
 
 
@@ -340,6 +339,18 @@ DEFAULT_FORMATS = {
 }
 
 EMB_COVER_NAME = "embed_cover.jpg"
+
+# Limite de tamanho pra capa (bytes). Capa da Apple em 10000x10000 pode vir pesada demais em raras excecoes (albuns com arte muito detalhada); acima disso a gente reduz a resolucao em cascata em vez de usar essa versao. 16MB cobre folgado o tamanho tipico de uma APIC embutida sem deixar o arquivo de audio inchado por causa da capa.
+MAX_COVER_BYTES = 16 * 1024 * 1024
+
+# Cascata de resolucoes da Apple, da maior pra menor, usada quando a 10000x10000bb estoura MAX_COVER_BYTES. artworkUrl100 troca livremente "100x100bb" por qualquer "NxNbb" na URL.
+_APPLE_COVER_SIZES = [
+    "10000x10000bb",
+    "6000x6000bb",
+    "3000x3000bb",
+    "1200x1200bb",
+    "600x600bb",
+]
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -643,6 +654,12 @@ class Download:
                     session=self.http_session,
                     is_parallel=is_parallel,
                     position_pool=position_pool,
+                    artist=_artist_label(
+                        album_meta,
+                        fallback=album_meta.get("artist", {}).get("name", ""),
+                    ),
+                    album=album_meta.get("title", ""),
+                    upc=album_meta.get("upc", ""),
                 )
 
             if "goodies" in album_meta:
@@ -1085,6 +1102,16 @@ class Download:
                             session=self.http_session,
                             is_parallel=is_parallel,
                             position_pool=position_pool,
+                            artist=_artist_label(
+                                track_meta,
+                                fallback=track_meta.get("album", {})
+                                .get("artist", {})
+                                .get("name", ""),
+                            ),
+                            album=track_meta.get("album", {}).get("title", ""),
+                            upc=track_meta.get("album", {}).get("upc", ""),
+                            isrc=track_meta.get("isrc", ""),
+                            track_title=track_meta.get("title", ""),
                         )
 
                 is_mp3 = True if int(self.quality) == 5 else False
@@ -2312,7 +2339,7 @@ async def _get_extra(
         return
     extra_file = os.path.join(dirn, extra)
     if os.path.isfile(extra_file):
-        safe_print(f"    {YELLOW}[*] Pulando {label}: {extra} (Já baixado){OFF}")
+        safe_print(f"    {YELLOW}ℹ️ Pulando {label}: {extra} (Já baixado){OFF}")
         return
 
     item = _resolve_art_url(item, art_size, og_quality)
@@ -2328,8 +2355,112 @@ async def _get_extra(
         )
     except Exception as e:
         safe_print(
-            f"    {YELLOW}[!] Pulando {label} '{extra}': URL inacessível ({e}){OFF}"
+            f"    {YELLOW}ℹ️ Pulando {label} '{extra}': URL inacessível ({e}){OFF}"
         )
+
+
+async def _download_bytes_with_limit(url, session, max_bytes, headers=None):
+    """
+    Baixa uma URL inteira em memoria, abortando cedo se passar de
+    max_bytes (sem gastar banda/tempo baixando o resto de uma imagem
+    que a gente ja sabe que vai descartar). Devolve os bytes, ou None se
+    a resposta veio vazia, deu erro, ou estourou o limite.
+
+    Usada so' para capas (arquivos pequenos, cabe tudo em memoria) --
+    NAO usar isso pra audio, que continua no fluxo de streaming em disco
+    de tqdm_download (com retry/resume por Range).
+    """
+    owns_session = session is None
+    http = session or httpx.AsyncClient(follow_redirects=True)
+    try:
+        async with http.stream(
+            "GET", url, headers=headers, timeout=httpx.Timeout(20.0, connect=10.0)
+        ) as r:
+            if r.status_code != 200:
+                return None
+            content_length = int(r.headers.get("content-length", 0) or 0)
+            if content_length and content_length > max_bytes:
+                return None
+            chunks = []
+            total = 0
+            async for chunk in r.aiter_bytes():
+                total += len(chunk)
+                if total > max_bytes:
+                    return None
+                chunks.append(chunk)
+            if total == 0:
+                return None
+            return b"".join(chunks)
+    except Exception as e:
+        logger.debug(f"Falha ao baixar capa em memoria ({url}): {e}")
+        return None
+    finally:
+        if owns_session:
+            await http.aclose()
+
+
+_APPLE_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36"
+    )
+}
+
+
+async def _try_apple_cover_bytes(
+    session, artist=None, album=None, upc=None, isrc=None, track_title=None
+):
+    """
+    Tenta achar E baixar a capa da Apple, em cascata de resolucoes ate
+    caber em MAX_COVER_BYTES. Devolve os bytes prontos, ou None se a
+    Apple nao tiver o album/faixa com confianca suficiente, ou se
+    nenhuma resolucao coube no limite -- em ambos os casos quem chamou
+    deve cair pro Qobuz.
+
+    Uma unica capa da Apple serve tanto a versao "salva" quanto a "de
+    embed": diferente da Qobuz, a resolucao aqui nao segue
+    saved_art_size/embedded_art_size (que sao conceitos especificos da
+    Qobuz) -- e' sempre a maior que couber no limite de tamanho.
+    """
+    if not (artist and album):
+        return None
+
+    try:
+        apple_url = await get_apple_hq_cover(
+            session=session,
+            upc=upc,
+            isrc=isrc,
+            artist=artist,
+            album=album,
+            track_title=track_title,
+        )
+    except Exception as e:
+        logger.debug(f"Busca de capa na Apple falhou, indo pra Qobuz: {e}")
+        return None
+
+    if not apple_url:
+        return None
+
+    for tamanho in _APPLE_COVER_SIZES:
+        url_tentativa = re.sub(r"\d+x\d+bb", tamanho, apple_url)
+        dados = await _download_bytes_with_limit(
+            url_tentativa, session, MAX_COVER_BYTES, headers=_APPLE_HEADERS
+        )
+        if dados:
+            return dados
+
+    logger.debug(
+        "    ℹ️ Capa da Apple encontrada mas nenhuma resolucao coube em "
+        f"    {MAX_COVER_BYTES // (1024 * 1024)}MB, usando Qobuz."
+    )
+    return None
+
+
+async def _fetch_qobuz_cover_bytes(qobuz_item, art_size, session):
+    qobuz_url = _resolve_art_url(qobuz_item, art_size)
+    return await _download_bytes_with_limit(
+        qobuz_url, session, MAX_COVER_BYTES, headers=_APPLE_HEADERS
+    )
 
 
 async def _get_cover_and_embed(
@@ -2344,66 +2475,104 @@ async def _get_cover_and_embed(
     session=None,
     is_parallel=False,
     position_pool=None,
+    artist=None,
+    album=None,
+    upc=None,
+    isrc=None,
+    track_title=None,
 ):
     """
-    Baixa a capa salva (cover.jpg) e a capa de embed, evitando baixar a
-    mesma imagem duas vezes quando saved_art_size e embedded_art_size
-    resolvem para a mesma URL (caso mais comum -- por padrao ambos vem
-    "org" no template de config.ini gerado por cli.py).
+    Baixa a capa salva (cover.jpg) e a capa de embed.
 
-    Quando os tamanhos realmente diferem (usuario configurou resolucoes
-    diferentes de proposito), baixa os dois de verdade -- nao ha' como
-    reaproveitar sem redimensionar a imagem localmente, e o projeto nao
-    tem Pillow como dependencia para isso.
+    Prioridade: capa em alta resolucao da Apple (com cascata de
+    resolucoes ate caber em MAX_COVER_BYTES) -- so' cai pra Qobuz se a
+    Apple nao encontrar o album/faixa com confianca suficiente, ou se
+    nenhuma resolucao da Apple coube no limite de tamanho.
+
+    Como a origem final so' e' conhecida depois de tentar baixar (Apple
+    pode falhar em tempo real por rede, mesmo tendo achado a URL), a
+    capa "salva" e a "de embed" sao resolvidas em uma unica tentativa e
+    reaproveitadas uma pra outra sempre que possivel -- evita bater na
+    Apple/Qobuz duas vezes pra' baixar essencialmente a mesma imagem.
     """
     if abort_event.is_set():
         return
 
-    saved_url = _resolve_art_url(item, saved_art_size) if save_cover else None
-    embed_url = _resolve_art_url(item, embedded_art_size) if embed_art else None
-
-    if save_cover:
-        await _get_extra(
-            item,
-            dirn,
-            extra=saved_name,
-            art_size=saved_art_size,
-            session=session,
-            label="cover art",
-            is_parallel=is_parallel,
-            position_pool=position_pool,
-        )
-
-    if not embed_art:
+    if not save_cover and not embed_art:
         return
 
     saved_file = os.path.join(dirn, saved_name)
-    embed_file = os.path.join(dirn, embed_name)
+    embed_file = os.path.join(dirn, embed_name) if embed_name else None
 
-    if os.path.isfile(embed_file):
+    precisa_salva = save_cover and not os.path.isfile(saved_file)
+    precisa_embed = embed_art and embed_file and not os.path.isfile(embed_file)
+
+    if save_cover and not precisa_salva:
+        safe_print(f"    {YELLOW}ℹ️ Pulando cover art: {saved_name} (Já baixado){OFF}")
+    if embed_art and embed_file and not precisa_embed:
         safe_print(
-            f"    {YELLOW}[*] Ignorando arte da capa incorporada: {embed_name} (Já baixado){OFF}"
+            f"    {YELLOW}ℹ️ Ignorando arte da capa incorporada: {embed_name} (Já baixado){OFF}"
         )
+
+    if not precisa_salva and not precisa_embed:
         return
 
-    if save_cover and saved_url == embed_url and os.path.isfile(saved_file):
+    async def _gravar(caminho, dados, rotulo, rotulo_origem):
+        try:
+            async with aiofiles.open(caminho, "wb") as f:
+                await f.write(dados)
+            safe_print(
+                f"    {GREEN}[+] {rotulo} ({rotulo_origem}): {os.path.basename(caminho)}{OFF}"
+            )
+            return True
+        except OSError as e:
+            safe_print(
+                f"    {YELLOW}[!] Falha ao salvar {os.path.basename(caminho)}: {e}{OFF}"
+            )
+            return False
+
+    # 1) Tenta a Apple uma unica vez -- se achar, a mesma imagem serve
+    # tanto a versao salva quanto a de embed (nao ha' distincao de
+    # "saved_art_size" vs "embedded_art_size" pra' capa da Apple).
+    apple_bytes = await _try_apple_cover_bytes(
+        session, artist=artist, album=album, upc=upc, isrc=isrc, track_title=track_title
+    )
+    if apple_bytes:
+        if precisa_salva:
+            await _gravar(saved_file, apple_bytes, "Capa salva", "Apple (HQ)")
+        if precisa_embed:
+            await _gravar(embed_file, apple_bytes, "Capa de embed", "Apple (HQ)")
+        return
+
+    # 2) Fallback: Qobuz, respeitando saved_art_size/embedded_art_size separadamente (igual ao comportamento original), reaproveitando o arquivo salvo pro embed quando os dois tamanhos resolvem pra' mesma URL -- evita baixar a mesma imagem duas vezes no caso mais comum.
+    saved_url = _resolve_art_url(item, saved_art_size) if precisa_salva else None
+    embed_url = _resolve_art_url(item, embedded_art_size) if precisa_embed else None
+
+    if precisa_salva:
+        dados = await _fetch_qobuz_cover_bytes(item, saved_art_size, session)
+        if dados:
+            await _gravar(saved_file, dados, "Capa salva", "Qobuz")
+        else:
+            safe_print(f"    {YELLOW}ℹ️ Pulando capa: nenhuma fonte disponível{OFF}")
+
+    if not precisa_embed:
+        return
+
+    if precisa_salva and saved_url == embed_url and os.path.isfile(saved_file):
         try:
             shutil.copyfile(saved_file, embed_file)
-            safe_print(f"   {MUTED}[*] Reutilizando cover.jpg, para o embed..{OFF}")
+            safe_print(f"   {MUTED}🌁 Reutilizando cover.jpg, para o embed..{OFF}")
             return
         except OSError as e:
-            logger.debug(f"Falha ao copiar cover.jpg pra embed, baixando de novo: {e}")
+            logger.debug(f"Falha ao copiar cover.jpg pra embed: {e}")
 
-    await _get_extra(
-        item,
-        dirn,
-        extra=embed_name,
-        art_size=embedded_art_size,
-        session=session,
-        label="embedded cover art",
-        is_parallel=is_parallel,
-        position_pool=position_pool,
-    )
+    dados = await _fetch_qobuz_cover_bytes(item, embedded_art_size, session)
+    if dados:
+        await _gravar(embed_file, dados, "Capa de embed", "Qobuz")
+    else:
+        safe_print(
+            f"    {YELLOW}ℹ️ Pulando arte incorporada: nenhuma fonte disponível{OFF}"
+        )
 
 
 def _clean_format_str(folder: str, track: str, file_format: str) -> Tuple[str, str]:

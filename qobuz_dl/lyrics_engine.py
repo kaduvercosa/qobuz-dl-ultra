@@ -9,7 +9,7 @@ import logging
 import httpx
 from mutagen.id3 import ID3, USLT, TXXX, ID3NoHeaderError
 from mutagen.flac import FLAC
-from tqdm.rich import tqdm
+from tqdm import tqdm
 from qobuz_dl.color import (
     SUCCESS as GREEN,
     WARNING as YELLOW,
@@ -674,14 +674,14 @@ class LyricsEngine:
                     elif embed_lyrics:
                         _tw("    ✅ Letras injetadas via Genius (Fallback)!")
                     else:
-                        _tw(" {RED}❌ Falha ao gravar letras (Genius){RESET}")
+                        _tw("    {RED}❌ Falha ao gravar letras (Genius){RESET}")
                     return result
 
-            _tw(f" {YELLOW}⚠️ Nenhuma letra encontrada para esta faixa.{RESET}")
+            _tw(f"    {YELLOW}⚠️ Nenhuma letra encontrada para esta faixa.{RESET}")
             return result
 
         except Exception as e:
-            _tw(f" {RED}❌ Erro durante a pesquisa de letras: {e}{RESET}")
+            _tw(f"    {RED}❌ Erro durante a pesquisa de letras: {e}{RESET}")
             logger.debug(f"fetch_and_inject falhou para {track}: {e}", exc_info=True)
             result["error"] = str(e)
             return result

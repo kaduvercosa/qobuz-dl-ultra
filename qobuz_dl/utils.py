@@ -10,6 +10,8 @@ import logging
 import shutil
 import subprocess
 import time
+import urllib.parse
+import difflib
 from qobuz_dl.color import RED, WARNING as YELLOW, INFO as CYAN, OFF
 import unicodedata
 import platformdirs
@@ -715,6 +717,239 @@ def invalid_chars_to_fullwidth(filename):
     for invalid_char, fullwidth_char in invalid_to_fullwidth.items():
         filename = filename.replace(invalid_char, fullwidth_char)
     return filename
+
+
+# ------------------------------------------------------------------------
+# Capa em alta resolucao via Apple/iTunes.
+#
+# A Qobuz normalmente entrega a capa em ate 600x600 (ou "org", que varia
+# de album pra album). A API de busca do iTunes frequentemente tem a
+# mesma capa em ate 10000x10000 -- esta funcao tenta achar essa versao e
+# so' a devolve se, por similaridade de texto, tiver uma confianca alta
+# de que e' realmente a MESMA capa (mesmo artista/album/faixa), pra nunca
+# arriscar colar a capa errada num album.
+# ------------------------------------------------------------------------
+def extrair_essencia(texto: str) -> str:
+    # Limpa acentos, pontuacao e qualquer coisa entre parenteses/colchetes,
+    # pra uma comparacao "larga": acha candidatos com o mesmo
+    # artista/album base, ignorando qual edicao especifica e' essa.
+    if not texto:
+        return ""
+    texto = (
+        unicodedata.normalize("NFKD", texto)
+        .encode("ASCII", "ignore")
+        .decode("utf-8")
+        .lower()
+    )
+    texto = re.sub(r"[\(\[].*?[\)\]]", "", texto)
+    texto = re.sub(r"[^\w\s]", " ", texto)
+    return " ".join(texto.split())
+
+
+def extrair_titulo_completo(texto: str) -> str:
+    # Normaliza o texto SEM remover o conteudo de parenteses/colchetes --
+    # preserva a info de versao (Deluxe, Live, Remaster, Tour Edition
+    # etc.). Usado como trava final: comparar o titulo INTEIRO por
+    # similaridade derruba sozinho qualquer edicao diferente da que foi
+    # pedida, sem precisar manter uma lista fixa de palavras-chave.
+    if not texto:
+        return ""
+    texto = (
+        unicodedata.normalize("NFKD", texto)
+        .encode("ASCII", "ignore")
+        .decode("utf-8")
+        .lower()
+    )
+    texto = texto.replace("[", "(").replace("]", ")")
+    texto = re.sub(r"[^\w\s\(\)]", " ", texto)
+    return re.sub(r"\s+", " ", texto).strip()
+
+
+async def get_apple_hq_cover(
+    session=None,
+    upc: str = None,
+    isrc: str = None,
+    artist: str = None,
+    album: str = None,
+    track_title: str = None,
+) -> str:
+    # Busca uma capa em alta resolucao (ate 10000x10000) na API do
+    # iTunes, validando o resultado por similaridade de texto antes de
+    # devolver -- pra nunca arriscar trocar a capa certa por uma errada.
+    #
+    # Ordem de tentativa: 1) lookup direto por UPC/ISRC (mais confiavel,
+    # quando disponivel); 2) busca por texto (artista + album/faixa) como
+    # fallback. `session`, quando fornecido, reaproveita o
+    # httpx.AsyncClient existente (ex.: self.http_session do Downloader)
+    # em vez de abrir uma conexao nova so' pra isso.
+    import httpx
+
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36"
+        )
+    }
+
+    q_artist_puro = extrair_essencia(artist)
+    q_album_puro = extrair_essencia(album)
+    q_track_puro = extrair_essencia(track_title) if track_title else ""
+
+    # Titulo completo (com a edicao/versao preservada) -- usado como trava final.
+    q_album_completo = extrair_titulo_completo(album)
+    q_track_completo = extrair_titulo_completo(track_title) if track_title else ""
+
+    # Limiares de similaridade pro titulo COMPLETO (com versao). Quanto
+    # mais alto, mais rigido contra misturar edicoes diferentes.
+    LIMIAR_VERSAO_ALBUM = 0.87
+    LIMIAR_VERSAO_TRACK = 0.85
+
+    def avaliar_resultados(data):
+        melhor_capa = None
+        maior_media = 0.0
+
+        for result in data.get("results", []):
+            a_artist = result.get("artistName", "")
+            a_album = result.get("collectionName", "")
+            a_track = result.get("trackName", "")
+
+            if not a_album:
+                continue
+
+            # Filtro 1: corta lixo (karaoke, tributo, instrumental etc.
+            # que a Qobuz nao pediu).
+            palavras_lixo = [
+                "karaoke",
+                "tribute",
+                "cover",
+                "instrumental",
+                "mixed",
+                "remix",
+            ]
+            is_lixo = False
+            if album:
+                is_lixo = any(
+                    lixo in a_album.lower() and lixo not in album.lower()
+                    for lixo in palavras_lixo
+                )
+            if track_title and not is_lixo:
+                is_lixo = any(
+                    lixo in a_track.lower() and lixo not in track_title.lower()
+                    for lixo in palavras_lixo
+                )
+            if is_lixo:
+                continue
+
+            # Filtro 1.5: trava de versao completa (generica, sem
+            # whitelist) -- compara o titulo inteiro (com parenteses).
+            # Qualquer edicao diferente da pedida (Deluxe, Live, Tour
+            # Edition, seja o que for) derruba o score sozinha, mesmo sem
+            # estar numa lista fixa.
+            a_album_completo = extrair_titulo_completo(a_album)
+            score_versao_album = difflib.SequenceMatcher(
+                None, q_album_completo, a_album_completo
+            ).ratio()
+            if score_versao_album < LIMIAR_VERSAO_ALBUM:
+                continue
+
+            if track_title and a_track:
+                a_track_completo = extrair_titulo_completo(a_track)
+                score_versao_track = difflib.SequenceMatcher(
+                    None, q_track_completo, a_track_completo
+                ).ratio()
+                if score_versao_track < LIMIAR_VERSAO_TRACK:
+                    continue
+
+            # Filtro 2: avalia artista e album na essencia pura (achar o
+            # candidato certo, ignorando qual edicao e').
+            a_artist_puro = extrair_essencia(a_artist)
+            a_album_puro = extrair_essencia(a_album)
+
+            score_artista = (
+                difflib.SequenceMatcher(None, q_artist_puro, a_artist_puro).ratio()
+                if q_artist_puro
+                else 1.0
+            )
+            score_album = (
+                difflib.SequenceMatcher(None, q_album_puro, a_album_puro).ratio()
+                if q_album_puro
+                else 1.0
+            )
+
+            if score_artista < 0.85 or score_album < 0.80:
+                continue
+
+            # Filtro 3: avalia o nome da musica (essencia), quando houver.
+            score_track = 1.0
+            se_tem_faixa = 1 if track_title else 0
+
+            if track_title and a_track:
+                a_track_puro = extrair_essencia(a_track)
+                score_track = difflib.SequenceMatcher(
+                    None, q_track_puro, a_track_puro
+                ).ratio()
+                if score_track < 0.80:
+                    continue
+
+            divisor = 2.0 + se_tem_faixa
+            media = (
+                score_artista + score_album + (score_track * se_tem_faixa)
+            ) / divisor
+
+            if media > maior_media:
+                maior_media = media
+                url_arte = result.get("artworkUrl100", "")
+                if url_arte:
+                    melhor_capa = url_arte.replace("100x100bb", "10000x10000bb")
+
+        if maior_media >= 0.80 and melhor_capa:
+            return melhor_capa
+        return None
+
+    async def _buscar(client):
+        for codigo, tipo in [(upc, "upc"), (isrc, "isrc")]:
+            if codigo and codigo.lower() != "n/a":
+                try:
+                    r = await client.get(
+                        f"https://itunes.apple.com/lookup?{tipo}={codigo}",
+                        headers=headers,
+                        timeout=5,
+                    )
+                    if r.status_code == 200:
+                        data = r.json()
+                        if data.get("resultCount", 0) > 0:
+                            capa = avaliar_resultados(data)
+                            if capa:
+                                return capa
+                except Exception as e:
+                    logger.debug(f"Falha no lookup Apple por {tipo}={codigo}: {e}")
+
+        if artist and album:
+            search_entity = "song" if track_title else "album"
+            query_str = (
+                f"{artist} {track_title}" if track_title else f"{artist} {album}"
+            )
+            clean_query = urllib.parse.quote(query_str)
+            url = f"https://itunes.apple.com/search?term={clean_query}&entity={search_entity}&limit=10"
+
+            try:
+                r = await client.get(url, headers=headers, timeout=5)
+                if r.status_code == 200:
+                    data = r.json()
+                    if data.get("resultCount", 0) > 0:
+                        capa = avaliar_resultados(data)
+                        if capa:
+                            return capa
+            except Exception as e:
+                logger.debug(f"Falha na busca Apple por texto ({query_str}): {e}")
+
+        return None
+
+    if session is not None:
+        return await _buscar(session)
+
+    async with httpx.AsyncClient() as client:
+        return await _buscar(client)
 
 
 def get_config_paths():

@@ -1,4 +1,15 @@
-"""Gera relatorios JSON/TXT para downloads de albuns, faixas e playlists."""
+"""
+Gera o relatorio de downloads (album/faixa/playlist).
+
+.report.json (arquivo oculto, prefixo com ponto) e' a fonte de verdade
+-- lido e reescrito a cada faixa que termina, sob lock por pasta, pra
+suportar downloads em paralelo sem duplicar/perder entradas. Fica
+escondido de proposito: ninguem deveria abrir esse arquivo na mao,
+so' existe pra alimentar o report.html. report.html e' gerado
+automaticamente junto (ver _save_report), como a "vitrine" visivel pra
+abrir no navegador -- nunca e' lido de volta, entao uma falha ao
+gera-lo nunca derruba o download em si (so' loga e segue).
+"""
 
 import asyncio
 import json
@@ -9,7 +20,24 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-REPORT_FILENAME = "report.json"
+try:
+    from qobuz_dl.report_viewer import renderizar_html as _renderizar_report_html
+except ImportError as e:
+    # ANTES: falha silenciosa (_renderizar_report_html virava None sem
+    # nenhum log, em lugar nenhum). Se report_viewer.py nao estivesse no
+    # lugar certo dentro do pacote (qobuz_dl/report_viewer.py) ou o pacote
+    # nao tivesse sido reinstalado apos adiciona-lo, o report.html
+    # simplesmente nunca era gerado e nao havia pista nenhuma do motivo.
+    # Agora loga uma vez, na inicializacao, pra o problema ficar visivel.
+    _renderizar_report_html = None
+    logger.warning(
+        "report.html desativado: nao foi possivel importar "
+        "qobuz_dl.report_viewer (%s). Verifique se report_viewer.py esta "
+        "em qobuz_dl/report_viewer.py e se o pacote foi reinstalado.",
+        e,
+    )
+
+REPORT_FILENAME = ".report.json"
 _BRT = timezone(timedelta(hours=-3), name="BRT")
 
 _locks: Dict[str, asyncio.Lock] = {}
@@ -681,11 +709,30 @@ def _organizar_report(report: dict) -> dict:
 
 def _save_report(path: str, report: dict) -> None:
     """
-    Unico arquivo do report (report.json) -- escreve o dict reorganizado
-    numa ordem de campos fixa (ver `_organizar_report`), pra ficar legivel
-    ao abrir direto, sem depender de um segundo arquivo "bonito".
+    Escreve .report.json (fonte de verdade oculta, reorganizada numa
+    ordem de campos fixa -- ver `_organizar_report`) e, em seguida,
+    regenera o report.html correspondente na MESMA pasta -- sempre
+    juntos, nessa ordem, e sempre sob o mesmo lock por pasta que ja
+    protege o json (ver `_get_lock`/chamadores), entao os dois nunca
+    ficam dessincronizados mesmo com faixas terminando em paralelo.
+
+    O html e' visivel de proposito (e' a "vitrine"); o json fica oculto
+    e nunca e' lido de volta -- se a geracao do html falhar por
+    qualquer motivo, so' loga e segue, nunca derruba o download por
+    causa disso.
     """
-    _atomic_write_json(path, _organizar_report(report))
+    organizado = _organizar_report(report)
+    _atomic_write_json(path, organizado)
+
+    if _renderizar_report_html is not None:
+        try:
+            html_path = os.path.join(os.path.dirname(path), "report.html")
+            tmp_path = f"{html_path}.tmp"
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                f.write(_renderizar_report_html(organizado))
+            os.replace(tmp_path, html_path)
+        except Exception as e:
+            logger.warning("Falha ao gerar report.html em %s (%s)", path, e)
 
 
 # ============================================================================
