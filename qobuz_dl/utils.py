@@ -538,6 +538,88 @@ def get_album_artist(qobuz_album: dict) -> list:
         return [single_artist] if single_artist else []
 
 
+# ------------------------------------------------------------------------
+# Classificação unificada de tipo de release (Single/EP/Album, alem de
+# Live/Compilation). Mora aqui (utils.py) -- e nao em core.py ou
+# downloader.py -- justamente pra poder ser importada pelos dois sem criar
+# import circular (core.py importa downloader.py; se isso morasse num dos
+# dois, o outro nao conseguiria importar).
+#
+# Usada em TODOS os lugares que decidem "que tipo de release e esse":
+#   - a busca/TUI (pra exibir Album/EP/Single/Live/Compilation)
+#   - o filtro de tipo ao explorar um artista por URL
+#   - o nome da pasta de download (downloader.py, placeholder
+#     {release_type} em DEFAULT_FOLDER) -- ANTES esse caminho usava uma
+#     logica separada, mais simples, que so confiava cegamente na tag
+#     "release_type" da API da Qobuz. Isso causava divergencia: a busca
+#     podia classificar certo (ex.: "EP" pra um release de 5 faixas
+#     marcado erroneamente como "Single" pela gravadora/distribuidora),
+#     mas o download ia pra pasta "Single/" mesmo assim, porque usava
+#     outra funcao. Unificar aqui garante que os dois caminhos SEMPRE
+#     concordam.
+#
+# Regra oficial do projeto pra contagem de faixas (usada quando nao ha
+# sinal mais forte -- ver prioridade abaixo):
+#   <=3 faixas  -> Single
+#   4-7 faixas  -> EP
+#   >7 faixas   -> Album
+# ------------------------------------------------------------------------
+def classify_release_type(
+    title=None,
+    version=None,
+    track_count=0,
+    duration_seconds=0,
+    api_release_type=None,
+    item_type="album",
+) -> str:
+    """
+    Classifica o tipo de release. Prioridade (do mais confiavel pro menos):
+
+      1) Palavras-chave explicitas no titulo/versao ("live", "best of",
+         "greatest hits", "... EP" etc.) -- sinal de intencao humana
+         (artista/gravadora rotulou explicitamente), tem prioridade sobre
+         qualquer contagem ou tag da API.
+      2) Contagem real de faixas, pela regra oficial do projeto (<=3
+         single, 4-7 EP, >7 album) -- vale MESMO que a API tenha marcado
+         como outra coisa dentro do proprio trio single/ep/album, porque a
+         tag da API vem errada com frequencia.
+      3) Se a contagem de faixas for desconhecida/zero: cai pra duracao
+         total (album se for longo) ou, na falta disso, pra tag da propria
+         API / tipo do item.
+    """
+    base_title = (title or "").lower()
+    version_tag = (version or "").lower()
+    r_type = (api_release_type or "unknown").lower()
+    track_count = int(track_count or 0)
+    duration_seconds = int(duration_seconds or 0)
+
+    if "live" in version_tag or "(live" in base_title or "- live" in base_title:
+        return "live"
+
+    if any(
+        kw in base_title or kw in version_tag
+        for kw in ["best of", "greatest hits", "anthology", "collection", "compilation"]
+    ):
+        return "compilation"
+
+    if " ep" in base_title or version_tag == "ep":
+        return "ep"
+
+    if track_count > 0:
+        if track_count <= 3:
+            return "single"
+        if track_count <= 7:
+            return "ep"
+        return "album"
+
+    # Contagem de faixas desconhecida: ultimo recurso.
+    if duration_seconds >= 1740:
+        return "album"
+    if r_type != "unknown":
+        return r_type
+    return item_type
+
+
 def apply_legacy_charmap(filename: str) -> str:
     # Aplica regras de substituição de caracteres "legado" para
     # compatibilidade com caminhos do Windows, usando ASCII simples em vez

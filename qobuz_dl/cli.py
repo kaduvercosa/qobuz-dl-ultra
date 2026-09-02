@@ -37,6 +37,7 @@ from qobuz_dl.color import (
     RESET,
     WARNING as YELLOW,
     accent_preview,
+    MUTED,
 )
 from qobuz_dl.commands import qobuz_dl_args
 from qobuz_dl.core import QobuzDL
@@ -642,9 +643,6 @@ async def _auth_command(
             f"   • Streaming:         {'Disponível' if sf.get('streaming') else 'Indisponível'}"
         )
         print(
-            f"   • Download Direto:   {'Disponível' if sf.get('download') else 'Indisponível'}"
-        )
-        print(
             f"   • Letras (Lyrics):   {'Disponível' if sf.get('lyrics') else 'Indisponível'}"
         )
         print(
@@ -760,16 +758,10 @@ async def _garantir_assinatura_ativa(qobuz: QobuzDL) -> bool:
             )
             return False
 
-        # _auth_command já pede o novo e-mail/token, valida na API e salva
-        # (no Keyring ou no config.ini, conforme a configuração do usuário).
+        # _auth_command já pede o novo e-mail/token, valida na API e salva (no Keyring ou no config.ini, conforme a configuração do usuário).
         await _auth_command(CONFIG_FILE, update_credentials=True)
 
-        # Recarrega as credenciais recém-salvas do disco e reinicializa o
-        # cliente principal (`qobuz.client`) com elas -- não importa se a
-        # conta ficou ativa ou não: o laço reavalia a assinatura logo
-        # abaixo e, se ainda estiver inativa, volta ao topo e pede a
-        # atualização de novo, mostrando o status da conta que acabou de
-        # ser testada.
+        # Recarrega as credenciais recém-salvas do disco e reinicializa o cliente principal (`qobuz.client`) com elas -- não importa se a conta ficou ativa ou não: o laço reavalia a assinatura logo abaixo e, se ainda estiver inativa, volta ao topo e pede a atualização de novo, mostrando o status da conta que acabou de ser testada.
         config = configparser.ConfigParser(interpolation=None)
         config.read(CONFIG_FILE, encoding="utf-8")
         section = "qobuz" if config.has_section("qobuz") else "DEFAULT"
@@ -995,16 +987,16 @@ def _print_welcome_screen():
     print(f"{RESET}{pad_version}{version_line}\n")
 
     ui.rule("=")
-    print(f"{BG}Uso: qobuz-dl <comando> [opções]{OFF}")
+    print(f"{ACCENT}{BG}Uso: qobuz-dl ou qdl + <comando>, Ex: qdl i{OFF}")
     ui.wrapped(
-        f"qobuz-dl <comando> --help {OFF}(lista todas as opções daquele comando){OFF}",
-        indent=5,
+        f"{ACCENT}Ajuda:{RESET} qobuz-dl <comando> --help {MUTED}(lista todas as opções daquele comando){OFF}",
+        indent=4,
     )
     print()
 
     parser = qobuz_dl_args()
 
-    print(f"{BG}Comandos:{OFF}\n")
+    print(f"{ACCENT}{BG}COMANDOS:{OFF}\n")
     for name, aliases, help_text in _extract_subcommands(parser):
         label = name if not aliases else f"{name} ({aliases})"
         desc = _COMMAND_DESCRIPTIONS_PT.get(name, help_text or "")
@@ -1014,10 +1006,10 @@ def _print_welcome_screen():
 
     if cols >= 62:
         print(
-            f"{BG}Flags globais:{RESET} {OFF}(não pertencem a nenhum comando específico){OFF}\n"
+            f"{ACCENT}{BG}FLAGS GLOBAIS:{RESET} {MUTED}(não pertencem a nenhum comando específico){OFF}\n"
         )
     else:
-        print(f"{BG}Flags globais:{RESET}\n")
+        print(f"{BG}FLAGS GLOBAIS:{RESET}\n")
 
     for flag_str, dest, help_text in _extract_global_flags(parser):
         desc = _FLAG_DESCRIPTIONS_PT.get(dest, help_text or "")

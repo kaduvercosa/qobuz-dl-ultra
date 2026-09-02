@@ -12,7 +12,12 @@ from qobuz_dl.constants import (
     DEFAULT_MULTIPLE_DISC_TRACK,
 )
 from qobuz_dl.db import handle_download_id
-from qobuz_dl.utils import get_album_artist, clean_filename, verify_audio_integrity
+from qobuz_dl.utils import (
+    get_album_artist,
+    clean_filename,
+    verify_audio_integrity,
+    classify_release_type,
+)
 from .lyrics_engine import LyricsEngine
 import qobuz_dl.postprocess as postprocess
 import logging
@@ -24,7 +29,7 @@ import re
 import threading
 import signal
 import textwrap
-from typing import Tuple
+from typing import Optional, Tuple
 import asyncio
 
 import httpx
@@ -34,7 +39,15 @@ from tqdm import tqdm
 
 import qobuz_dl.metadata as metadata
 from qobuz_dl import ui
-from qobuz_dl.color import OFF, GREEN, RED, WARNING as YELLOW, INFO as CYAN, RESET
+from qobuz_dl.color import (
+    OFF,
+    GREEN,
+    RED,
+    WARNING as YELLOW,
+    INFO as CYAN,
+    RESET,
+    MUTED,
+)
 from qobuz_dl.exceptions import NonStreamable
 
 import aiofiles
@@ -187,15 +200,87 @@ def emit_progress_json(settings, event, **fields):
         print(_json.dumps(payload, ensure_ascii=False), flush=True)
 
 
-def format_release_type(release_type: str) -> str:
-    if not release_type:
+def _build_letras_report(
+    resultado: Optional[dict],
+    translation_lang: Optional[str],
+    qobuz_translation_response,
+) -> dict:
+    """
+    Traduz o dict de retorno de LyricsEngine.fetch_and_inject() pro
+    schema "letras" do report.json (situacao/sincronizada/bilingue/
+    idioma_original/traducao_disponivel/fonte/destino/observacao).
+
+    `qobuz_translation_response` decide "traducao_disponivel" -- e o
+    resultado da consulta de traducao feita ANTES de chamar fetch_and_inject
+    (ver _download_and_tag), mais confiavel que tentar deduzir isso do
+    "language" combinado (ex.: "en+pt") que fetch_and_inject devolve,
+    porque continua valendo mesmo quando a faixa acabou saindo por outra
+    fonte (Musixmatch/LRCLIB/Genius, que nao sabem de traducao).
+    """
+    if not resultado:
+        return {}
+
+    if resultado.get("success"):
+        situacao = "sucesso"
+    elif resultado.get("error"):
+        situacao = "falha"
+    else:
+        situacao = "nao_encontrada"
+
+    idioma_original = ""
+    lang = resultado.get("language")
+    if lang and lang != "unknown":
+        idioma_original = lang.split("+")[0]
+
+    destino_partes = []
+    if resultado.get("embedded"):
+        destino_partes.append("metadata")
+    if resultado.get("saved_external"):
+        destino_partes.append(".lrc/.txt")
+
+    return {
+        "situacao": situacao,
+        "sincronizada": bool(resultado.get("synchronized")),
+        "bilingue": bool(resultado.get("bilingual")),
+        "idioma_original": idioma_original,
+        "traducao_disponivel": (
+            bool(qobuz_translation_response) if translation_lang else None
+        ),
+        "fonte": resultado.get("source") or "",
+        "destino": " + ".join(destino_partes),
+        "observacao": resultado.get("error") or "",
+    }
+
+
+def format_release_type(
+    api_release_type: str,
+    track_count=0,
+    title=None,
+    version=None,
+    duration_seconds=0,
+) -> str:
+    """
+    Decide o texto final de {release_type} usado no nome da pasta
+    (DEFAULT_FOLDER). Usa a MESMA classificacao unificada usada na busca/TUI
+    (`classify_release_type`, em utils.py) -- antes esta funcao so confiava
+    cegamente na tag "release_type" da API da Qobuz, que vem errada com
+    frequencia (ex.: um lancamento de 5 faixas marcado "Single" pela
+    gravadora ia pra pasta "Single/" em vez de "EP/"). Agora a contagem real
+    de faixas manda (regra: <=3 Single, 4-7 EP, >7 Album), com prioridade
+    pra palavras-chave explicitas no titulo/versao (live, compilation etc.).
+    """
+    tipo = classify_release_type(
+        title=title,
+        version=version,
+        track_count=track_count,
+        duration_seconds=duration_seconds,
+        api_release_type=api_release_type,
+    )
+    if not tipo or tipo == "unknown":
         return "Desconhecido"
-
-    release_type = release_type.lower()
-    if release_type == "ep":
+    if tipo == "ep":
         return "EP"
-
-    return release_type.title()
+    return tipo.title()
 
 
 legacy_flag = False
@@ -290,6 +375,8 @@ class Download:
         playlist_track_number: int = None,
         booklet_only: bool = False,
         playlist_as_albums: bool = False,
+        playlist_title: str = None,
+        playlist_id: str = None,
     ):
         self.client = client
         self.item_id = item_id
@@ -331,6 +418,8 @@ class Download:
         self.is_playlist = is_playlist
         self.playlist_track_number = playlist_track_number
         self.playlist_as_albums = playlist_as_albums
+        self.playlist_title = playlist_title
+        self.playlist_id = playlist_id
 
         self._original_folder_format = folder_format or DEFAULT_FOLDER
         self._original_track_format = track_format or DEFAULT_TRACK
@@ -398,12 +487,28 @@ class Download:
 
         if not self.downgrade_quality and not quality_met:
             safe_print(
-                f"{OFF}Pulando {album_title} pois não atende ao requisito de qualidade{OFF}"
+                f"{OFF}[-] Pulando {album_title} pois não atende ao requisito de qualidade{OFF}"
             )
             return
 
         track_count = len(album_meta.get("tracks", {}).get("items", []))
         artist_name = _safe_get(album_meta, "artist", "name", default="")
+        # Usado so pro report.json (cabecalho + campo por faixa) -- mais
+        # preciso que `artist_name` pra releases com mais de um main-artist
+        # oficial, mas nao mexe em nomeacao de pasta/arquivo/tags, que
+        # continuam usando `artist_name` como sempre usaram.
+        report_artist_name = _artist_label(album_meta, fallback=artist_name)
+        # Classificacao Single/EP/Album do release (regra por contagem real
+        # de faixas -- ver `classify_release_type` em utils.py). Como e o
+        # MESMO release pra toda faixa deste download, calcula uma vez so
+        # e usa tanto no cabecalho quanto (repetido) em cada faixa.
+        report_tipo_lancamento = format_release_type(
+            album_meta.get("release_type"),
+            track_count=album_meta.get("track_count", track_count),
+            title=album_title,
+            version=album_meta.get("version"),
+            duration_seconds=album_meta.get("duration"),
+        )
         release_year = str(album_meta.get("release_date_original", ""))[:4]
 
         album_attr = self._get_album_attr(
@@ -551,18 +656,39 @@ class Download:
 
             if getattr(self, "booklet_only", False):
                 safe_print(
-                    f"{YELLOW}[*] Flag --booklet-only ativa. Pulando faixas de audio.{OFF}"
+                    f"    {YELLOW}[*] Flag --booklet-only ativa. Pulando faixas de audio.{OFF}"
                 )
                 if is_standard_album and working_dirn == inprogress_dirn:
                     try:
                         os.rename(working_dirn, incomplete_dirn)
                     except OSError as e:
                         logger.warning(
-                            f"{YELLOW}[!] Não foi possível renomear a pasta para [INCOMPLETE]. ({e}){OFF}"
+                            f"    {YELLOW}[!] Não foi possível renomear a pasta para [INCOMPLETE]. ({e}){OFF}"
                         )
                 return
 
             semaphore = asyncio.Semaphore(active_workers)
+
+            async def _report_track(i, t_num, status, motivo="", letras=None):
+                await postprocess.update_track_status(
+                    dirn,
+                    numero=t_num,
+                    item_id=i.get("id"),
+                    titulo=i.get("title", "Faixa Desconhecida"),
+                    status=status,
+                    artista=_artist_label(
+                        i,
+                        fallback=_safe_get(
+                            i, "performer", "name", default=report_artist_name
+                        ),
+                    ),
+                    artista_album=report_artist_name,
+                    tipo_lancamento=report_tipo_lancamento,
+                    motivo=motivo,
+                    isrc=i.get("isrc", ""),
+                    compositor=_safe_get(i, "composer", "name", default=""),
+                    letras=letras,
+                )
 
             async def process_track(idx, i):
                 if abort_event.is_set():
@@ -574,9 +700,10 @@ class Download:
                     streamable, reason = is_track_streamable(i)
                     if not streamable:
                         safe_print(
-                            f"{CYAN}[PULADA]{RESET} Faixa {t_num} - {t_title} ({YELLOW}{reason}{RESET})"
+                            f"    {CYAN}[PULADA]{RESET} Faixa {t_num} - {t_title} ({YELLOW}{reason}{RESET})"
                         )
                         create_missing_placeholder(i, dirn, reason)
+                        await _report_track(i, t_num, "pulada", reason)
                         return "skipped"
 
                     try:
@@ -588,10 +715,12 @@ class Download:
                             f"{RED}[!] Erro de API na faixa {t_num} (ID: {i['id']}): {e}{OFF}"
                         )
                         create_missing_placeholder(i, dirn, f"Erro de API: {e}")
+                        await _report_track(i, t_num, "falha", f"Erro de API: {e}")
                         return False
 
                     if "sample" not in parse and parse.get("sampling_rate"):
                         is_mp3 = True if int(self.quality) == 5 else False
+                        letras_info = {}
                         res = await self._download_and_tag(
                             dirn,
                             idx,
@@ -603,6 +732,16 @@ class Download:
                             i.get("media_number") if is_multiple else None,
                             is_parallel=is_parallel,
                             position_pool=position_pool,
+                            letras_out=letras_info,
+                        )
+                        status = "ok" if res is True else "falha"
+                        motivo = (
+                            ""
+                            if res is True
+                            else (str(res) if isinstance(res, Exception) else "erro")
+                        )
+                        await _report_track(
+                            i, t_num, status, motivo, letras=letras_info
                         )
                         return res
                     else:
@@ -611,7 +750,50 @@ class Download:
                             f"({YELLOW}Apenas amostra/demo{RESET})"
                         )
                         create_missing_placeholder(i, dirn, "Apenas amostra/demo (30s)")
+                        await _report_track(
+                            i, t_num, "pulada", "Apenas amostra/demo (30s)"
+                        )
                         return "skipped"
+
+            faixas_previstas = []
+            for idx, i in enumerate(album_meta["tracks"]["items"]):
+                faixas_previstas.append(
+                    {
+                        "numero": str(i.get("track_number", idx + 1)).zfill(2),
+                        "id": i.get("id"),
+                        "titulo": i.get("title", "Faixa"),
+                        "artista": _artist_label(
+                            i,
+                            fallback=_safe_get(
+                                i, "performer", "name", default=report_artist_name
+                            ),
+                        ),
+                        "artista_album": report_artist_name,
+                        "tipo_lancamento": report_tipo_lancamento,
+                        "isrc": i.get("isrc", ""),
+                        "compositor": _safe_get(i, "composer", "name", default=""),
+                    }
+                )
+            await postprocess.init_report(
+                dirn,
+                tipo="album",
+                titulo=album_title,
+                artista=report_artist_name,
+                tipo_lancamento=report_tipo_lancamento,
+                item_id=self.item_id,
+                extra={
+                    "rotulo": _safe_get(album_meta, "label", "name", default=""),
+                    "genero": _safe_get(album_meta, "genre", "name", default=""),
+                    "upc": album_meta.get("upc", ""),
+                    "url": url,
+                },
+                qualidade={
+                    "formato": file_format,
+                    "bit_depth": bit_depth,
+                    "sampling_rate": sampling_rate,
+                },
+                faixas_previstas=faixas_previstas,
+            )
 
             task_objs = [
                 asyncio.create_task(process_track(idx, i))
@@ -710,25 +892,10 @@ class Download:
                     album=db_album,
                 )
 
-                # safe_print(f"{CYAN}[*] Gerando relatórios de pós-processamento do álbum...{OFF}")
-
-                postprocess.generate_album_log(
+                await postprocess.finalize_report(
                     final_dirn,
-                    album_title,
-                    artist_name,
-                    self.item_id,
-                    self.quality,
-                    mode_label,
-                    results,
-                    album_meta,
-                )
-                postprocess.generate_credits(
-                    final_dirn,
-                    album_meta,
-                    album_title,
-                    file_format,
-                    bit_depth,
-                    sampling_rate,
+                    completo=(failed_tracks == 0 and not aborted_by_user),
+                    qualidade_atingida=quality_met,
                 )
                 if self.download_db:
                     postprocess.generate_index_entry(
@@ -787,10 +954,29 @@ class Download:
             ):
                 track_meta["track_number"] = self.playlist_track_number
 
-            artist = _safe_get(track_meta, "performer", "name")
-            album_name = track_meta.get("album", {}).get("title", "--")
+            track_album = track_meta.get("album", {})
+            artist = _artist_label(
+                track_meta, fallback=_safe_get(track_meta, "performer", "name") or ""
+            )
+            album_name = track_album.get("title", "--")
+            # Artista "oficial" do release desta faixa (nao o performer da
+            # faixa isolada) -- usado so pro cabecalho do report.json, pra
+            # nao confundir "essa faixa tem um feat." com "esse release e
+            # de mais de um artista de verdade". Ver `_artist_label`.
+            report_track_artist = _artist_label(track_album, fallback=artist)
+            # Classificacao Single/EP/Album do release ao qual ESTA FAIXA
+            # pertence (nao de quantas faixas estao sendo baixadas nesta
+            # sessao -- uma faixa avulsa de um album de 15 faixas continua
+            # sendo, de fato, uma faixa de um Album, mesmo baixando so ela).
+            report_track_tipo_lancamento = format_release_type(
+                track_album.get("release_type"),
+                track_count=track_album.get("track_count"),
+                title=_get_title(track_album) if track_album.get("title") else None,
+                version=track_album.get("version"),
+                duration_seconds=track_album.get("duration"),
+            )
 
-            url = track_meta.get("album", {}).get("url", "")
+            url = track_album.get("url", "")
             release_date = track_meta.get("release_date_original", "")
             format_info = await self._get_format(
                 track_meta, is_track_id=True, track_url_dict=parse
@@ -869,17 +1055,17 @@ class Download:
                 if skip_saved_cover:
                     if getattr(self, "playlist_track_number", 1) == 1:
                         safe_print(
-                            f"{OFF}[*] Pulando salvamento padrao de capa para manter a pasta da playlist limpa{OFF}"
+                            f"    {MUTED}[*] Pulando salvamento padrao de capa para manter a pasta da playlist limpa{OFF}"
                         )
                 elif self.settings.no_cover:
-                    safe_print(f"{OFF}[*] Pulando capa{OFF}")
+                    safe_print(f"    {MUTED}[*] Pulando capa{OFF}")
 
                 embed_cover_path = None
                 if self.settings.embed_art:
                     unique_embed_name = f".embed_{self.item_id}.jpg"
                     embed_cover_path = os.path.join(dirn, unique_embed_name)
                 else:
-                    safe_print(f"{OFF}[*] Pulando arte incorporada{OFF}")
+                    safe_print(f"    {MUTED}[*] Pulando arte incorporada{OFF}")
 
                 save_cover_now = not skip_saved_cover and not self.settings.no_cover
                 if save_cover_now or self.settings.embed_art:
@@ -903,6 +1089,7 @@ class Download:
 
                 is_mp3 = True if int(self.quality) == 5 else False
 
+                letras_info = {}
                 success = await self._download_and_tag(
                     dirn,
                     self.item_id,
@@ -915,6 +1102,7 @@ class Download:
                     is_parallel=is_parallel,
                     position_pool=position_pool,
                     embed_cover_path=embed_cover_path,
+                    letras_out=letras_info,
                 )
 
                 if embed_cover_path and os.path.isfile(embed_cover_path):
@@ -922,6 +1110,52 @@ class Download:
                         os.remove(embed_cover_path)
                     except OSError:
                         pass
+
+                # Vale pra faixa avulsa, lote de faixas E faixa de playlist:
+                # a pasta (`dirn`) so existe a partir daqui, entao e aqui que
+                # o report.json compartilhado da pasta e atualizado. Faz
+                # upsert por id e reordena por numero -- se `dirn` for a
+                # pasta de uma playlist (varias chamadas de download_track,
+                # uma por faixa) o arquivo vai se completando na ordem certa
+                # nao importa a ordem de conclusao entre elas.
+                numero_report = (
+                    self.playlist_track_number
+                    if getattr(self, "is_playlist", False)
+                    and getattr(self, "playlist_track_number", None)
+                    else track_meta.get("track_number", 1)
+                )
+                tipo_report = (
+                    "playlist" if getattr(self, "is_playlist", False) else "faixa"
+                )
+                await postprocess.update_track_status(
+                    dirn,
+                    numero=numero_report,
+                    item_id=self.item_id,
+                    titulo=track_title,
+                    status="ok" if success else "falha",
+                    artista=artist,
+                    artista_album=report_track_artist,
+                    tipo_lancamento=report_track_tipo_lancamento,
+                    motivo="" if success else "Falha ou Pulada",
+                    isrc=track_meta.get("isrc", ""),
+                    compositor=_safe_get(track_meta, "composer", "name", default=""),
+                    letras=letras_info,
+                    tipo_default=tipo_report,
+                    # titulo do CABECALHO da pasta (nao da faixa em si): usa
+                    # o nome do album mesmo pra faixa avulsa/lote, porque a
+                    # pasta e a pasta do album (pode receber outras faixas
+                    # depois, inclusive o album completo) -- ver init_report
+                    # em postprocess.py pra como isso e promovido quando o
+                    # album completo chega depois.
+                    titulo_default=(
+                        (self.playlist_title or album_name)
+                        if tipo_report == "playlist"
+                        else album_name
+                    ),
+                    id_default=(
+                        (self.playlist_id or "") if tipo_report == "playlist" else ""
+                    ),
+                )
 
         if success:
             db_artist = track_attr.get("artist", "Unknown")
@@ -944,26 +1178,16 @@ class Download:
                 album=db_album,
             )
 
-            reason_msg = "Download concluído" if success else "Falha ou Pulada"
-            postprocess.generate_track_report(
-                dirn,
-                self.item_id,
-                track_title,
-                artist,
-                album_name,
-                file_format,
-                bit_depth,
-                sampling_rate,
-                success,
-                reason=reason_msg,
-            )
-
         is_batch_or_playlist = (
             getattr(self, "is_playlist", False)
             or getattr(self.settings, "pl_success", None) is not None
         )
 
         if not is_batch_or_playlist:
+            # Faixa avulsa de verdade (nao playlist, nao lote): esta e a
+            # unica faixa daquela pasta, entao ja da pra fechar o report.
+            if "dirn" in locals():
+                await postprocess.finalize_report(dirn, completo=bool(success))
             try:
                 safe_print(f"\n{CYAN}{'-' * 44}{RESET}")
                 safe_print(f"  📊 RESUMO DA FAIXA: {GREEN}{RESET} {track_title}")
@@ -977,6 +1201,13 @@ class Download:
                     f"\n{RED}[!] Erro ao gerar painel de resumo da Faixa: {e}{RESET}\n"
                 )
         else:
+            # Lote/playlist: quem sabe quando a ULTIMA faixa terminou e o
+            # orquestrador externo que chama download_track() em loop (fora
+            # deste arquivo). Ele deve chamar
+            # `await postprocess.finalize_report(dirn_da_pasta, completo=True)`
+            # depois do loop terminar, senao o report fica "em_andamento" para
+            # sempre. Para lote de faixas em pastas separadas isso e inofensivo
+            # (so nao fecha o estado); para playlist convem fazer essa chamada.
             if success:
                 self.settings.pl_success = getattr(self.settings, "pl_success", 0) + 1
             else:
@@ -995,6 +1226,7 @@ class Download:
         is_parallel=False,
         position_pool=None,
         embed_cover_path=None,
+        letras_out: Optional[dict] = None,
     ) -> bool:
         extension = ".mp3" if is_mp3 else ".flac"
         loop = asyncio.get_running_loop()
@@ -1299,18 +1531,18 @@ class Download:
                 if original_lang:
                     if original_lang.lower() == translation_lang.lower():
                         translation_note = (
-                            f" Letras ja em {translation_lang.upper()} "
-                            f"-- sem necessidade de traducao."
+                            f"    ℹ️ Letras já em {GREEN}{translation_lang.upper()}{RESET} "
+                            f"-- sem necessidade de tradução."
                         )
                     else:
                         translation_note = (
-                            f" Nenhuma traducao em {translation_lang.upper()} "
+                            f"    ℹ️ Nenhuma tradução em {RED}{translation_lang.upper()}{RESET} "
                             f"disponivel no Qobuz ainda para esta faixa."
                         )
 
             def _inject_lyrics_and_print():
                 with print_lock:
-                    self.lyrics_engine.fetch_and_inject(
+                    resultado_letras = self.lyrics_engine.fetch_and_inject(
                         file_path=final_file,
                         artist=search_artist,
                         track=track_title,
@@ -1319,11 +1551,23 @@ class Download:
                         embed_lyrics=getattr(self.settings, "embed_lyrics", True),
                         qobuz_lyrics_response=qobuz_lyrics_response,
                         qobuz_translation_response=qobuz_translation_response,
+                        track_number=track_no,
                     )
                     if translation_note:
-                        tqdm.write(f"{OFF}{translation_note}{OFF}")
+                        tqdm.write(
+                            f"{OFF}{MUTED}[{track_no}]{OFF} {translation_note}{OFF}"
+                        )
+                    return resultado_letras
 
-            await loop.run_in_executor(None, _inject_lyrics_and_print)
+            resultado_letras = await loop.run_in_executor(
+                None, _inject_lyrics_and_print
+            )
+            if letras_out is not None:
+                letras_out.update(
+                    _build_letras_report(
+                        resultado_letras, translation_lang, qobuz_translation_response
+                    )
+                )
 
         emit_progress_json(
             self.settings,
@@ -1454,7 +1698,13 @@ class Download:
             "track_count": meta.get("track_count", ""),
             "ExplicitFlag": "[E]" if album_meta.get("parental_warning") else "",
             "explicit": "[E]" if album_meta.get("parental_warning") else "",
-            "release_type": format_release_type(album_meta.get("release_type")),
+            "release_type": format_release_type(
+                album_meta.get("release_type"),
+                track_count=meta.get("track_count", ""),
+                title=_get_title(album_meta),
+                version=album_meta.get("version"),
+                duration_seconds=album_meta.get("duration"),
+            ),
         }
 
     @staticmethod
@@ -1502,7 +1752,13 @@ class Download:
             "track_count": meta.get("track_count", 1),
             "ExplicitFlag": "[E]" if meta.get("parental_warning") else "",
             "explicit": "[E]" if meta.get("parental_warning") else "",
-            "release_type": format_release_type(meta.get("release_type")),
+            "release_type": format_release_type(
+                meta.get("release_type"),
+                track_count=meta.get("track_count"),
+                title=album_title,
+                version=meta.get("version"),
+                duration_seconds=meta.get("duration"),
+            ),
         }
 
     async def _get_format(self, item_dict, is_track_id=False, track_url_dict=None):
@@ -1510,7 +1766,7 @@ class Download:
             if "tracks" not in item_dict or not item_dict["tracks"].get("items"):
                 raise NonStreamable(
                     "Este lancamento nao tem faixas disponiveis (possivelmente "
-                    "bloqueado por regiao ou removido)"
+                    "bloqueado por região ou removido)"
                 )
 
         track_dict = item_dict if is_track_id else item_dict["tracks"]["items"][0]
@@ -1675,11 +1931,11 @@ class Download:
                 if composer != "N/A":
                     f.write(f"COMPOSITOR : {composer}\n")
                 f.write(f"MAIN ART. : {artist_name}\n")
-                f.write(f"ROTULO : {label}\n")
-                f.write(f"GENERO : {genre}\n")
+                f.write(f"RÓTULO : {label}\n")
+                f.write(f"GÊNERO : {genre}\n")
                 f.write(f"DATA DE LANÇAMENTO : {release_date}\n")
                 f.write(
-                    f"QUALITY : {file_format} ({bit_depth}-Bit / {sampling_rate} kHz)\n"
+                    f"QUALIDADE : {file_format} ({bit_depth}-Bit / {sampling_rate} kHz)\n"
                 )
                 f.write("=" * 70 + "\n\n")
 
@@ -2056,7 +2312,7 @@ async def _get_extra(
         return
     extra_file = os.path.join(dirn, extra)
     if os.path.isfile(extra_file):
-        safe_print(f"{CYAN}[*] Pulando {label}: {extra} (Já baixado){OFF}")
+        safe_print(f"    {YELLOW}[*] Pulando {label}: {extra} (Já baixado){OFF}")
         return
 
     item = _resolve_art_url(item, art_size, og_quality)
@@ -2072,7 +2328,7 @@ async def _get_extra(
         )
     except Exception as e:
         safe_print(
-            f" {YELLOW}[!] Pulando {label} '{extra}': URL inacessível ({e}){OFF}"
+            f"    {YELLOW}[!] Pulando {label} '{extra}': URL inacessível ({e}){OFF}"
         )
 
 
@@ -2126,14 +2382,14 @@ async def _get_cover_and_embed(
 
     if os.path.isfile(embed_file):
         safe_print(
-            f"{YELLOW}[*] Ignorando arte da capa incorporada: {embed_name} (Já baixado){OFF}"
+            f"    {YELLOW}[*] Ignorando arte da capa incorporada: {embed_name} (Já baixado){OFF}"
         )
         return
 
     if save_cover and saved_url == embed_url and os.path.isfile(saved_file):
         try:
             shutil.copyfile(saved_file, embed_file)
-            safe_print(f" {OFF}[*] Reutilizando cover.jpg, para o embed..{OFF}")
+            safe_print(f"   {MUTED}[*] Reutilizando cover.jpg, para o embed..{OFF}")
             return
         except OSError as e:
             logger.debug(f"Falha ao copiar cover.jpg pra embed, baixando de novo: {e}")
@@ -2172,6 +2428,34 @@ def _safe_get(d: dict, *keys, default=None):
         else:
             curr = res
     return res
+
+
+def _artist_label(item_dict: dict, fallback: str = "") -> str:
+    """
+    Nome(s) de artista "oficial(is)" de um item da Qobuz -- faixa OU album
+    -- baseado nos artistas marcados como main-artist na propria metadata
+    (`get_album_artist`, ja usado pra tag de arquivo). Quando ha mais de um
+    main-artist creditado na MESMA faixa/release (ex.: uma colaboracao ou
+    duo genuino), junta os nomes por virgula ("Artista A, Artista B") em
+    vez de usar so o performer daquela faixa isolada, que pode capturar
+    so um nome mesmo quando ha colaboracao.
+
+    Usado apenas para popular o report.json (artista por faixa e do
+    cabecalho/"artista_album") -- NAO substitui `artist_name`/`artist`
+    usados em nomeacao de pasta/arquivo e tags, que continuam como estavam.
+
+    Importante: isso e diferente de "Vários Artistas", que so aparece no
+    CABECALHO da pasta quando FAIXAS DE RELEASES DIFERENTES acabam juntas
+    numa playlist/lote (ver `_recalc_artista` em postprocess.py) -- aqui
+    estamos sempre falando dos artistas de UM release/faixa so.
+    """
+    try:
+        nomes = [n for n in (get_album_artist(item_dict or {}) or []) if n]
+    except Exception:
+        nomes = []
+    if nomes:
+        return ", ".join(nomes)
+    return fallback
 
 
 async def tqdm_download_segments(

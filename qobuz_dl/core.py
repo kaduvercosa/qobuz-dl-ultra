@@ -55,6 +55,7 @@ from qobuz_dl.utils import (
     smart_discography_filter,
     format_duration,
     create_and_return_dir,
+    classify_release_type as _classify_release_type,
 )
 from qobuz_dl.settings import QobuzDLSettings
 
@@ -1065,64 +1066,14 @@ QUALITIES = {
 logger = logging.getLogger(__name__)
 
 
-# ------------------------------------------------------------------------
-# Heurística ÚNICA de classificação de tipo de lançamento (Album/EP/Single/
-# Live/Compilation), usada em dois lugares que antes tinham cada um sua
-# própria cópia quase idêntica desta lógica: _extract_rich_metadata() (pra
-# exibir na TUI de busca) e handle_url() (pro filtro de tipo ao explorar
-# um artista por URL). Antes, se alguém ajustasse a regra num lugar e
-# esquecesse do outro, os dois caminhos podiam divergir silenciosamente.
-#
-# A API do Qobuz nem sempre informa release_type/product_type de forma
-# confiável, então isso combina: (1) o valor da API quando disponível,
-# (2) palavras-chave no título/versão ("live", "best of", " ep"), e
-# (3) contagem de faixas / duração total como último recurso.
-# ------------------------------------------------------------------------
-def _classify_release_type(
-    title,
-    version,
-    track_count,
-    duration_seconds=0,
-    api_release_type=None,
-    item_type="album",
-):
-    base_title = (title or "").lower()
-    version_tag = (version or "").lower()
-    r_type = (api_release_type or "unknown").lower()
-    track_count = int(track_count or 0)
-    duration_seconds = int(duration_seconds or 0)
-
-    if "live" in version_tag or "(live" in base_title or "- live" in base_title:
-        return "live"
-
-    if any(
-        kw in base_title or kw in version_tag
-        for kw in ["best of", "greatest hits", "anthology", "collection", "compilation"]
-    ):
-        return "compilation"
-
-    if " ep" in base_title or version_tag == "ep":
-        return "ep"
-    elif r_type == "single" and track_count >= 4:
-        return "ep"
-    elif r_type == "ep" and 1 <= track_count <= 3:
-        return "single"
-    elif r_type == "album" and 1 <= track_count <= 3:
-        return "single"
-    elif r_type == "unknown":
-        if item_type == "album":
-            if duration_seconds >= 1740 or track_count >= 7:
-                return "album"
-            elif 1 <= track_count <= 3:
-                return "single"
-            elif 4 <= track_count <= 6:
-                return "ep"
-            else:
-                return "album"
-        else:
-            return item_type
-
-    return r_type
+# `_classify_release_type` agora mora em utils.py como `classify_release_type`
+# (importado acima) -- movido pra la pra poder ser usado tambem por
+# downloader.py na hora de nomear a pasta de download, sem criar import
+# circular (core.py importa downloader.py). Antes, a busca/TUI classificava
+# certo mas o download real usava uma logica separada e mais simples que so
+# confiava na tag "release_type" da API, o que podia divergir (ex.: release
+# de 5 faixas marcado "Single" pela gravadora baixava pra pasta "Single/" em
+# vez de "EP/"). Ver utils.py para a implementacao e a regra de contagem.
 
 
 # ==============================================================================
@@ -1257,7 +1208,8 @@ class QobuzDL:
             self.downloads_db, item_id, add_id=False, quality=self.quality
         ):
             logger.info(
-                f"Este ID de lançamento ({item_id}) já foi baixado de acordo com o banco de dados local.\nUse the '--no-db' flag para ignorar isto."
+                f"    {YELLOW}ℹ️ Este ID de lançamento ({item_id}) já foi baixado de acordo com o banco de dados local.\n"
+                f"    Use the '--no-db' flag para ignorar isto.{OFF}"
             )
             if is_playlist:
                 self.settings.pl_skipped = getattr(self.settings, "pl_skipped", 0) + 1
@@ -1593,15 +1545,15 @@ class QobuzDL:
 
                 from qobuz_dl.downloader import safe_print
 
-                mock_results = [True] * len(items)
-                playlist_id = item_id if url_type == "playlist" else "favoritos"
-
-                postprocess.generate_playlist_report(
-                    new_path, playlist_id, content_name, mock_results, items
-                )
-                postprocess.generate_playlist_log(
-                    new_path, playlist_id, content_name, mock_results, items
-                )
+                # report.json da playlist ja foi sendo montado faixa a faixa
+                # (postprocess.update_track_status, chamado de dentro de
+                # downloader.download_track()). Aqui so falta fechar o
+                # estado -- e so da pra fechar num arquivo unico quando a
+                # playlist usa a pasta flat (playlist_as_albums=False); no
+                # modo "como albuns" cada faixa cai na pasta do proprio
+                # album e nao ha um report.json unico de playlist pra fechar.
+                if not getattr(self, "playlist_as_albums", False):
+                    await postprocess.finalize_report(new_path, completo=(fail == 0))
 
                 safe_print(f"\n{CYAN}{'━' * 40}{RESET}")
                 safe_print(f"  📊 {GREEN}RESUMO DA PLAYLIST:{RESET} {content_name}")
@@ -2752,15 +2704,12 @@ class QobuzDL:
 
         from qobuz_dl.downloader import safe_print
 
-        tracks_meta = [{"id": tid, "title": f"Faixa ID {tid}"} for tid in track_ids]
-        mock_results = [True] * len(track_ids)
-
-        postprocess.generate_playlist_report(
-            pl_directory, "Importada", playlist_name, mock_results, tracks_meta
-        )
-        postprocess.generate_playlist_log(
-            pl_directory, "Importada", playlist_name, mock_results, tracks_meta
-        )
+        # Mesmo raciocinio do outro fluxo de playlist (handle_url): o
+        # report.json ja foi montado faixa a faixa dentro de
+        # downloader.download_track(); aqui so fecha o estado, e so quando
+        # existe uma pasta unica pra playlist (nao playlist_as_albums).
+        if not getattr(self, "playlist_as_albums", False):
+            await postprocess.finalize_report(pl_directory, completo=(fail == 0))
 
         safe_print(f"\n{CYAN}{'━' * 44}{RESET}")
         safe_print(f"  📊 {GREEN}RESUMO DA PLAYLIST IMPORTADA:{RESET} {playlist_name}")

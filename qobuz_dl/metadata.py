@@ -554,9 +554,12 @@ def _get_tags_to_add(
             title=qobuz_album.get("title", ""), version=qobuz_album.get("version", "")
         )
     if not settings.no_track_title_tag:
-        tags["TITLE"] = _get_title_with_version(
+        track_title = _get_title_with_version(
             title=qobuz_item.get("title", ""), version=qobuz_item.get("version", "")
         )
+        if qobuz_item.get("parental_warning", False):
+            track_title += " 🅴"
+        tags["TITLE"] = track_title
 
     if not settings.no_album_artist_tag:
         _albumartist_val = get_album_artist(qobuz_album)

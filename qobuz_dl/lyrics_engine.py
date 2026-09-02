@@ -10,7 +10,13 @@ import httpx
 from mutagen.id3 import ID3, USLT, TXXX, ID3NoHeaderError
 from mutagen.flac import FLAC
 from tqdm.rich import tqdm
-from qobuz_dl.color import SUCCESS as GREEN, WARNING as YELLOW, ERROR as RED, RESET
+from qobuz_dl.color import (
+    SUCCESS as GREEN,
+    WARNING as YELLOW,
+    ERROR as RED,
+    RESET,
+    MUTED,
+)
 from qobuz_dl.settings import QobuzDLSettings
 
 logger = logging.getLogger(__name__)
@@ -157,8 +163,27 @@ class LyricsEngine:
 
     def _build_bilingual_lrc(self, original_lrc, translated_lrc):
         """
-        Combina letra original e traducao ordenando os versos pelo timestamp.
-        Linhas traduzidas recebem o prefixo » para ficarem distinguiveis.
+        Combina letra original e traducao: DUAS linhas com o MESMO
+        timestamp [MM:SS.mmm] -- original primeiro, traducao logo depois
+        (prefixo "  » ").
+
+        Ja tentei duas alternativas pra fugir da colisao de timestamp
+        (deslocar a traducao em 1ms; e uma linha de continuacao sem tag
+        propria), mas na pratica (testado no Flacbox real) nenhuma das
+        duas produz quebra de linha visual de verdade -- o player junta o
+        texto todo associado ao timestamp corrente num bloco continuo,
+        respeitando ou nao uma tag [tempo] separada. O que o Flacbox
+        realmente reconhece pra empilhar original/traducao como duas
+        linhas distintas e exatamente ESSE formato: duas entradas com o
+        MESMO timestamp exato.
+
+        Tradeoff que isso reintroduz: players "ingenuos" que guardam as
+        linhas num dicionario indexado pelo timestamp (ex.:
+        lyricsByTime["00:12.340"] = texto) tem a traducao sobrescrevendo a
+        original nessa chave, e so ela fica destacada. Sem um exemplo
+        concreto desse comportamento (o unico caso real observado ate
+        agora, o Flacbox, funciona certo com timestamps identicos), fica
+        certo priorizar o formato que comprovadamente funciona.
         """
         if not original_lrc or not translated_lrc:
             return original_lrc or translated_lrc
@@ -194,9 +219,9 @@ class LyricsEngine:
         for item in combined:
             tag, text, is_trans = item[1], item[2], item[3]
             if is_trans:
-                final_lrc.append(f"{tag}  » {text}")
+                final_lrc.append(f"{tag}   » {text}")
             else:
-                final_lrc.append(f"{tag} {text}")
+                final_lrc.append(f"{tag}  {text}")
 
         return "\n".join(final_lrc)
 
@@ -273,19 +298,35 @@ class LyricsEngine:
         embed_lyrics=True,
         qobuz_lyrics_response=None,
         qobuz_translation_response=None,
+        track_number=None,
     ):
         """
         Orquestra Qobuz -> LRCLIB -> Genius, respeitando as opcoes de saida.
         A traducao em portugues e priorizada quando estiver disponivel.
         Retorna dict com status da operacao para o chamador conferir.
+
+        `track_number`, quando informado, prefixa toda linha impressa aqui
+        com "[NN]" -- em modo paralelo, varias faixas buscam letra ao mesmo
+        tempo, e sem essa marca nao da pra saber, so pelo texto, a qual
+        faixa uma linha de resultado ("injetado!"/"sem traducao") pertence
+        quando ela aparece longe da linha "Procurando letras para: <titulo>"
+        que a precedeu (misturada com outras linhas de progresso de
+        download no meio). Mesma numeracao usada em "Em Progresso: NN. ...".
         """
+        _label = f"{MUTED}[{track_number}]{RESET} " if track_number else ""
+
+        def _tw(msg):
+            tqdm.write(f"{_label}{msg}")
+
         result = {
             "success": False,
             "source": None,
             "language": None,
             "synchronized": False,
+            "bilingual": False,
             "embedded": False,
             "saved_external": False,
+            "error": None,
         }
 
         if not save_lrc and not embed_lyrics:
@@ -294,7 +335,7 @@ class LyricsEngine:
         only_synced = getattr(self.settings, "only_synced_lyrics", False)
 
         try:
-            tqdm.write(f"    🔍 Procurando letras para: {track}...")
+            _tw(f"    🔍 Procurando letras para: {track}...")
 
             qobuz_lyrics = self.extract_qobuz_lyrics(
                 qobuz_lyrics_response, qobuz_translation_response
@@ -350,6 +391,7 @@ class LyricsEngine:
                     if final_sync:
                         is_bilingual = bool(best_trans and best_trans.get("synced"))
                         result["synchronized"] = True
+                        result["bilingual"] = is_bilingual
                         result["language"] = lang_tag
 
                         if embed_lyrics:
@@ -377,22 +419,22 @@ class LyricsEngine:
 
                         is_bilingual_str = "BILINGUAL " if is_bilingual else ""
                         if embed_lyrics and save_lrc:
-                            tqdm.write(
+                            _tw(
                                 f"    ✅ Letras {GREEN}{is_bilingual_str}{RESET}sincronizadas "
                                 f"injetadas e salvas em .lrc (via Qobuz)!"
                             )
                         elif save_lrc:
-                            tqdm.write(
+                            _tw(
                                 f"    ✅ Letras {GREEN}{is_bilingual_str}{RESET}sincronizadas "
                                 f"salvas em .lrc (via Qobuz)!"
                             )
                         elif embed_lyrics:
-                            tqdm.write(
+                            _tw(
                                 f"    ✅ Letras {GREEN}{is_bilingual_str}{RESET}sincronizadas "
                                 f"injetadas no metadata (via Qobuz)!"
                             )
                         else:
-                            tqdm.write(
+                            _tw(
                                 f" {RED}❌ Falha ao gravar letras sincronizadas (Qobuz){RESET}"
                             )
                         return result
@@ -400,6 +442,7 @@ class LyricsEngine:
                     elif final_plain:
                         is_bilingual = bool(best_trans and best_trans.get("plain"))
                         result["synchronized"] = False
+                        result["bilingual"] = is_bilingual
                         result["language"] = lang_tag
 
                         if embed_lyrics:
@@ -427,22 +470,22 @@ class LyricsEngine:
 
                         is_bilingual_str = "BILINGUAL " if is_bilingual else ""
                         if embed_lyrics and save_lrc:
-                            tqdm.write(
+                            _tw(
                                 f"    ✅ Letras {GREEN}{is_bilingual_str}{RESET}padrao "
                                 f"injetadas e salvas em .txt (via Qobuz)!"
                             )
                         elif save_lrc:
-                            tqdm.write(
+                            _tw(
                                 f"    ✅ Letras {GREEN}{is_bilingual_str}{RESET}padrao "
                                 f"salvas em .txt (via Qobuz)!"
                             )
                         elif embed_lyrics:
-                            tqdm.write(
+                            _tw(
                                 f"    ✅ Letras {GREEN}{is_bilingual_str}{RESET}padrao "
                                 f"injetadas no metadata (via Qobuz)!"
                             )
                         else:
-                            tqdm.write(
+                            _tw(
                                 f" {RED}❌ Falha ao gravar letras padrao (Qobuz){RESET}"
                             )
                         return result
@@ -484,21 +527,19 @@ class LyricsEngine:
                     ext_str = ".lrc" if is_synced else ".txt"
 
                     if embed_lyrics and save_lrc:
-                        tqdm.write(
+                        _tw(
                             f"    ✅ Letras {sync_str} injetadas e salvas em {ext_str} (via Musixmatch)!"
                         )
                     elif save_lrc:
-                        tqdm.write(
+                        _tw(
                             f"    ✅ Letras {sync_str} salvas em {ext_str} (via Musixmatch)!"
                         )
                     elif embed_lyrics:
-                        tqdm.write(
+                        _tw(
                             f"    ✅ Letras {sync_str} injetadas no metadata (via Musixmatch)!"
                         )
                     else:
-                        tqdm.write(
-                            f" {RED}❌ Falha ao gravar letras (Musixmatch){RESET}"
-                        )
+                        _tw(f" {RED}❌ Falha ao gravar letras (Musixmatch){RESET}")
 
                     return result
 
@@ -554,19 +595,19 @@ class LyricsEngine:
                         result["success"] = True
 
                     if embed_lyrics and save_lrc:
-                        tqdm.write(
+                        _tw(
                             "    ✅ Letras sincronizadas injetadas e salvas como .lrc (via LRCLIB)!"
                         )
                     elif save_lrc:
-                        tqdm.write(
+                        _tw(
                             "    ✅ Letras sincronizadas salvas como .lrc (via LRCLIB)!"
                         )
                     elif embed_lyrics:
-                        tqdm.write(
+                        _tw(
                             "    ✅ Letras sincronizadas injetadas no metadata (via LRCLIB)!"
                         )
                     else:
-                        tqdm.write(
+                        _tw(
                             " {RED}❌ Falha ao gravar letras sincronizadas (LRCLIB){RESET}"
                         )
                     return result
@@ -592,21 +633,15 @@ class LyricsEngine:
                         result["success"] = True
 
                     if embed_lyrics and save_lrc:
-                        tqdm.write(
+                        _tw(
                             "    ✅ Letras padrao injetadas e salvas como .txt (via LRCLIB)!"
                         )
                     elif save_lrc:
-                        tqdm.write(
-                            "    ✅ Letras padrao salvas como .txt (via LRCLIB)!"
-                        )
+                        _tw("    ✅ Letras padrao salvas como .txt (via LRCLIB)!")
                     elif embed_lyrics:
-                        tqdm.write(
-                            "    ✅ Letras padrao salvas no metadata (via LRCLIB)!"
-                        )
+                        _tw("    ✅ Letras padrao salvas no metadata (via LRCLIB)!")
                     else:
-                        tqdm.write(
-                            " {RED}❌ Falha ao gravar letras padrao (LRCLIB){RESET}"
-                        )
+                        _tw(" {RED}❌ Falha ao gravar letras padrao (LRCLIB){RESET}")
                     return result
 
             # Fallback Genius
@@ -633,23 +668,22 @@ class LyricsEngine:
                         result["success"] = True
 
                     if embed_lyrics and save_lrc:
-                        tqdm.write("    ✅ Letras injetadas e salvas via Genius!")
+                        _tw("    ✅ Letras injetadas e salvas via Genius!")
                     elif save_lrc:
-                        tqdm.write(
-                            "    ✅ Letras salvas via Genius (embed desativado)!"
-                        )
+                        _tw("    ✅ Letras salvas via Genius (embed desativado)!")
                     elif embed_lyrics:
-                        tqdm.write("    ✅ Letras injetadas via Genius (Fallback)!")
+                        _tw("    ✅ Letras injetadas via Genius (Fallback)!")
                     else:
-                        tqdm.write(" {RED}❌ Falha ao gravar letras (Genius){RESET}")
+                        _tw(" {RED}❌ Falha ao gravar letras (Genius){RESET}")
                     return result
 
-            tqdm.write(f" {YELLOW}⚠️ Nenhuma letra encontrada para esta faixa.{RESET}")
+            _tw(f" {YELLOW}⚠️ Nenhuma letra encontrada para esta faixa.{RESET}")
             return result
 
         except Exception as e:
-            tqdm.write(f" {RED}❌ Erro durante a pesquisa de letras: {e}{RESET}")
+            _tw(f" {RED}❌ Erro durante a pesquisa de letras: {e}{RESET}")
             logger.debug(f"fetch_and_inject falhou para {track}: {e}", exc_info=True)
+            result["error"] = str(e)
             return result
 
     def _save_lrc_file(
