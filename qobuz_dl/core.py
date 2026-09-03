@@ -1244,17 +1244,31 @@ class QobuzDL:
                 position_pool=position_pool,
                 suppress_header=suppress_header,
             )
-        except (httpx.RequestError, NonStreamable) as e:
-            logger.error(f"{RED}Erro na liberação: {e}. Pulando...")
+        except httpx.HTTPStatusError as e:
+            status = e.response.status_code if e.response is not None else None
+            if status == 404:
+                tipo = "album" if album else "track"
+                provavel_url = f"{WEB_URL}/{tipo}/{item_id}"
+                logger.warning(
+                    f"{YELLOW}! Item {item_id} não encontrado (404). Verifique a URL: {provavel_url}{OFF}"
+                )
+            else:
+                logger.error(
+                    f"{RED}Erro HTTP {status} no item {item_id}. Pulando...{OFF}"
+                )
             if is_playlist:
-                self.settings.pl_failed = getattr(self.settings, "pl_failed", 0) + 1
+                self.settings.plfailed = getattr(self.settings, "plfailed", 0) + 1
+        except (httpx.RequestError, NonStreamable) as e:
+            logger.error(f"{RED}Erro na liberação: {e}. Pulando...{OFF}")
+            if is_playlist:
+                self.settings.plfailed = getattr(self.settings, "plfailed", 0) + 1
         except Exception as e:
             logger.error(
-                f"{RED}Erro inesperado baixando item {item_id}: {e} (Pulando...){OFF}"
+                f"{RED}Erro inesperado baixando item {item_id}: {e}. Pulando...{OFF}"
             )
-            logger.debug("Detalhes do erro inesperado:", exc_info=True)
+            logger.debug("Detalhes do erro inesperado", exc_info=True)
             if is_playlist:
-                self.settings.pl_failed = getattr(self.settings, "pl_failed", 0) + 1
+                self.settings.plfailed = getattr(self.settings, "plfailed", 0) + 1
 
         if getattr(self, "delay", 0) > 0:
             logger.info(

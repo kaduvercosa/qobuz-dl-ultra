@@ -263,6 +263,11 @@ def _tagged(color, tag, message):
     # terminal, e devolve a lista de linhas prontas para emit().
     # A quebra é necessária porque mensagens longas (ex.: avisos com
     # instruções de instalação) estourariam a largura do terminal sem isso.
+    # A linha inteira (tag + texto) fica na cor semantica, nao so' a tag --
+    # antes so' o "[!]"/"[+]" saia colorido e o resto ficava na cor padrao
+    # do terminal, o que era uma regressao visual em relacao aos prints
+    # antigos (ex.: `f"{YELLOW}[!] mensagem inteira{OFF}"`) que a migracao
+    # pra ui.warn()/ui.error()/etc. tinha introduzido sem querer.
     # RESET é emitido em CADA linha de propósito, já que emit() escreve uma
     # linha por chamada e sem fechar a cor em cada uma ela vazaria para o
     # texto seguinte.
@@ -270,8 +275,8 @@ def _tagged(color, tag, message):
     partes = _wrap_lines(message, limite)
     pad = " " * _LARGURA_TAG
 
-    linhas = [f"{c(color)}[{tag}]{c(RESET)} {partes[0]}"]
-    linhas += [f"{c(RESET)}{pad}{parte}" for parte in partes[1:]]
+    linhas = [f"{c(color)}[{tag}] {partes[0]}{c(RESET)}"]
+    linhas += [f"{c(color)}{pad}{parte}{c(RESET)}" for parte in partes[1:]]
     return linhas
 
 
@@ -285,12 +290,12 @@ def _emit_tagged(color, tag, message, sempre=False):
 
 def ok(message):
     # Mensagem de sucesso -- prefixo "[+]" verde.
-    _emit_tagged(SUCCESS, "➕", message)
+    _emit_tagged(SUCCESS, "+", message)
 
 
 def step(message):
     # Mensagem de etapa em andamento -- prefixo "[*]" na cor de destaque.
-    _emit_tagged(HIGHLIGHT, "*️⃣", message)
+    _emit_tagged(HIGHLIGHT, "*", message)
 
 
 def info(message):
@@ -315,7 +320,7 @@ def error(message):
 
 def skip(message):
     # Item ignorado/pulado -- prefixo "[-]" na cor apagada.
-    _emit_tagged(MUTED, "➖", message)
+    _emit_tagged(MUTED, "-", message)
 
 
 def detail(message, indent=4):

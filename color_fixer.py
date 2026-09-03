@@ -1,5 +1,3 @@
-import re
-
 file_path = "qobuz_dl/downloader.py"  # Ajuste se estiver em subpasta
 
 with open(file_path, "r", encoding="utf-8") as f:
