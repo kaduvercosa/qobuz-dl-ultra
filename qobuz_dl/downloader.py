@@ -486,7 +486,8 @@ class Download:
             album_meta.get("release_type") != "album"
             or album_meta.get("artist").get("name") == "Various Artists"
         ):
-            ui.skip(f"{YELLOW}f'Ignorando Single/EP/VA: {album_meta.get("title", "n/a")}'{OFF})            return
+            ui.skip(f"{YELLOW}Ignorando Single/EP/VA: {album_meta.get("title", "n/a")}{OFF}")            
+            return
 
         album_title = _get_title(album_meta)
         url = album_meta.get("url", "")
