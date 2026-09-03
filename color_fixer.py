@@ -1,4 +1,5 @@
-import re
+ear
+mport re
 
 file_path = "qobuz_dl/downloader.py"  # Ajuste se estiver em subpasta
 
