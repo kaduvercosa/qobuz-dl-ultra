@@ -285,12 +285,12 @@ def _emit_tagged(color, tag, message, sempre=False):
 
 def ok(message):
     # Mensagem de sucesso -- prefixo "[+]" verde.
-    _emit_tagged(SUCCESS, "+", message)
+    _emit_tagged(SUCCESS, "➕", message)
 
 
 def step(message):
     # Mensagem de etapa em andamento -- prefixo "[*]" na cor de destaque.
-    _emit_tagged(HIGHLIGHT, "*", message)
+    _emit_tagged(HIGHLIGHT, "*️⃣", message)
 
 
 def info(message):
@@ -299,19 +299,23 @@ def info(message):
 
 
 def warn(message):
-    # Mensagem de aviso -- prefixo "[!]" amarelo.
-    _emit_tagged(WARNING, "!", message)
+    # Mensagem de aviso -- prefixo "[!]" amarelo. Ignora --quiet (usa
+    # emit_always): a própria ajuda da flag promete "mostra apenas avisos
+    # e erros", então um aviso suprimido por --quiet contradiz a promessa
+    # da flag. BUGFIX: antes chamava emit() puro e um --quiet escondia
+    # avisos que o usuário tinha sido informado que continuariam visíveis.
+    _emit_tagged(WARNING, "ℹ️", message, sempre=True)
 
 
 def error(message):
     # Mensagem de erro -- prefixo "[!]" vermelho. Ignora --quiet (usa
     # emit_always) porque erro é informação que o usuário sempre precisa ver.
-    _emit_tagged(ERROR, "!", message, sempre=True)
+    _emit_tagged(ERROR, "ℹ️", message, sempre=True)
 
 
 def skip(message):
     # Item ignorado/pulado -- prefixo "[-]" na cor apagada.
-    _emit_tagged(MUTED, "-", message)
+    _emit_tagged(MUTED, "➖", message)
 
 
 def detail(message, indent=4):
@@ -470,13 +474,28 @@ class TqdmLoggingHandler(logging.Handler):
     # mesmo tqdm.write que as barras de progresso do downloader, em vez de
     # escrever direto no stdout por cima delas.
 
+    def __init__(self, bypass_quiet=False):
+        super().__init__()
+        # bypass_quiet=True quando --log-level foi passado explicitamente:
+        # nesse caso o filtro de nivel do proprio `logging` (setLevel) ja'
+        # decide o que chega aqui, entao aplicar o gate de --quiet DE NOVO
+        # em cima seria a pessoa pedir --log-level DEBUG e continuar sem
+        # ver debug nenhum. Sem --log-level explicito, mantem o gate: e'
+        # o comportamento padrao (quiet/verbose) descrito em --help.
+        self.bypass_quiet = bypass_quiet
+
     def emit(self, record):
         try:
             msg = self.format(record)
         except Exception:
             self.handleError(record)
             return
-        if record.levelno >= logging.ERROR:
+        # BUGFIX: antes so' logging.ERROR+ escapava de --quiet. Mas --quiet
+        # promete no --help "mostra apenas avisos e erros" -- um
+        # logger.warning(...) real tambem precisa sobreviver, do contrario
+        # a promessa da flag vale pra ui.warn() mas nao pra logging.warning(),
+        # que e' o mesmo tipo de mensagem vindo de outro caminho de codigo.
+        if record.levelno >= logging.WARNING or self.bypass_quiet:
             emit_always(msg)
         else:
             emit(msg)
@@ -485,6 +504,7 @@ class TqdmLoggingHandler(logging.Handler):
 def install_logging(level=None):
     # Substitui os handlers do logger raiz pelo TqdmLoggingHandler. Deve
     # ser chamado uma vez, no início da CLI, depois de configure().
+    explicit_level = level is not None
     if level is None:
         if _quiet:
             level = logging.WARNING
@@ -497,7 +517,7 @@ def install_logging(level=None):
     for handler in list(root.handlers):
         root.removeHandler(handler)
 
-    handler = TqdmLoggingHandler()
+    handler = TqdmLoggingHandler(bypass_quiet=explicit_level)
     handler.setFormatter(logging.Formatter("%(message)s"))
     root.addHandler(handler)
     root.setLevel(level)

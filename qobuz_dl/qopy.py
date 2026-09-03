@@ -11,6 +11,12 @@ import unicodedata
 from datetime import datetime, date
 from typing import Any, Dict
 import httpx
+from tenacity import (
+    AsyncRetrying,
+    stop_after_attempt,
+    wait_exponential,
+    retry_if_exception_type,
+)
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.primitives import hashes, padding
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
@@ -448,20 +454,27 @@ class Client:
         else:
             method, req_kwargs = "get", {"params": params}
 
-        _retry_delays = (1, 3, 6)
-        last_network_error = None
+        # Antes: loop de retry escrito na mao (_retry_delays = (1, 3, 6)),
+        # duplicando o que downloader.py ja resolve com tenacity (dependencia
+        # ja declarada no projeto). Agora usa AsyncRetrying no mesmo estilo
+        # das outras retentativas do projeto (ver downloader.py). Só
+        # httpx.RequestError/asyncio.TimeoutError acionam nova tentativa --
+        # AuthenticationError e InvalidAppSecretError (levantados abaixo a
+        # partir do status code da resposta) continuam propagando na hora,
+        # sem retry, exatamente como no loop manual original. reraise=True
+        # faz o tenacity relancar a ultima excecao de rede quando as
+        # tentativas se esgotam, sem precisar de try/except extra aqui.
+        async for attempt in AsyncRetrying(
+            stop=stop_after_attempt(4),
+            wait=wait_exponential(multiplier=1, min=1, max=6),
+            retry=retry_if_exception_type((httpx.RequestError, asyncio.TimeoutError)),
+            reraise=True,
+        ):
+            with attempt:
+                n = attempt.retry_state.attempt_number
+                if n > 1:
+                    logger.debug(f"Retentativa de rede em '{epoint}' ({n}/4)...")
 
-        for attempt in range(len(_retry_delays) + 1):
-            if attempt > 0:
-                wait = _retry_delays[attempt - 1]
-                logger.debug(
-                    f"{YELLOW}[*] Falha de rede em '{epoint}' (tentativa "
-                    f"{attempt}/{len(_retry_delays)}): {last_network_error}. "
-                    f"Tentando de novo em {wait}s...{OFF}"
-                )
-                await asyncio.sleep(wait)
-
-            try:
                 resp = await self.session.request(
                     method, self.base + epoint, **req_kwargs
                 )
@@ -494,11 +507,6 @@ class Client:
                 data = resp.json()
 
                 return self._normalize_json_strings(data)
-
-            except (httpx.RequestError, asyncio.TimeoutError) as e:
-                last_network_error = e
-                if attempt == len(_retry_delays):
-                    raise
 
     async def multi_meta(self, epoint, key, id, type):
         offset = 0

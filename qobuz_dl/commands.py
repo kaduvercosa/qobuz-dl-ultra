@@ -344,6 +344,15 @@ def add_output_args(parser, suppress=False):
         help="desliga as cores ANSI (respeita também a variável NO_COLOR)",
         **kwargs,
     )
+    group.add_argument(
+        "--log-level",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+        help=(
+            "controle fino do logger (sobrepõe -v/--quiet). Útil pra "
+            "isolar ruído de rede/retry sem ligar todo o DEBUG do programa"
+        ),
+        **kwargs,
+    )
     return parser
 
 

@@ -130,7 +130,6 @@ def validate_config_formats(formats_to_check: dict):
     }
 
     has_errors = False
-    C_RED, C_YEL, C_GRE, C_OFF = RED, YELLOW, GREEN, RESET
 
     for config_name, format_string in formats_to_check.items():
         if not format_string:
@@ -147,42 +146,48 @@ def validate_config_formats(formats_to_check: dict):
                 base_var = var.split(":")[0].split("!")[0]
 
                 if base_var not in VALID_KEYS:
-                    print(
-                        f"{C_YEL}[!] Aviso de Configuração: Variável desconhecida '{{{base_var}}}' em '{config_name}'.{C_OFF}"
+                    # ui.warn (não print cru): garante que --quiet não
+                    # engula um aviso que vai causar sys.exit(1) logo abaixo.
+                    ui.warn(
+                        f"Aviso de Configuração: Variável desconhecida "
+                        f"'{{{base_var}}}' em '{config_name}'."
                     )
                     best = fuzzy.melhor_match(base_var, VALID_KEYS, corte=0.6)
                     if best:
-                        print(f"    {C_GRE}-> Você quis dizer '{{{best}}}'?{C_OFF}")
+                        ui.detail(f"-> Você quis dizer '{{{best}}}'?")
 
-                    print(
-                        f"    {C_RED}-> Isso fará com que o padrão seja descartado durante o download.{C_OFF}"
+                    ui.detail(
+                        "-> Isso fará com que o padrão seja descartado "
+                        "durante o download."
                     )
                     has_errors = True
 
         except ValueError as e:
-            print(f"{C_RED}[!] Erro de Sintaxe em '{config_name}': {e}{C_OFF}")
+            ui.error(f"Erro de Sintaxe em '{config_name}': {e}")
             has_errors = True
 
     if has_errors:
-        print(
-            f"\n{C_YEL}[*] Dica: Revise seu arquivo config.ini ou parâmetros de linha de comando antes de iniciar.{C_OFF}\n"
+        ui.blank()
+        ui.error(
+            "Dica: Revise seu arquivo config.ini ou parâmetros de linha "
+            "de comando antes de iniciar."
         )
         sys.exit(1)
 
 
 def _pick_accent_color() -> str:
-    print(f"\n{BG}[?] Cor de destaque do programa:{OFF}")
+    ui.emit(f"\n{BG}[?] Cor de destaque do programa:{OFF}")
     ui.wrapped("Aparece em nomes de faixas, cabeçalhos, barras e progresso.", indent=4)
-    print()
+    ui.blank()
 
     for idx, (name, _rgb, escape) in enumerate(ACCENT_PRESETS, 1):
         if escape:
             preview = accent_preview(escape, "━━ [FAIXA]  ARTISTA  The Weeknd")
-            print(f"  {idx:2}. {name:<22} {preview}")
+            ui.emit(f"  {idx:2}. {name:<22} {preview}")
         else:
-            print(f"  {idx:2}. {name}")
+            ui.emit(f"  {idx:2}. {name}")
 
-    print()
+    ui.blank()
     while True:
         _n = len(ACCENT_PRESETS)
         prompt = f"Escolha (1-{_n}) [Enter = 1 padrão]: "
@@ -198,11 +203,11 @@ def _pick_accent_color() -> str:
                 break
         except ValueError:
             pass
-        print(f"  Por favor escolha entre 1 e {len(ACCENT_PRESETS)}.")
+        ui.emit(f"  Por favor escolha entre 1 e {len(ACCENT_PRESETS)}.")
 
     if rgb is None:
-        print("\n  Digite os valores RGB separados por ponto e vírgula.")
-        print("  Exemplo: 255;100;50 (vermelho), 0;200;150 (teal)\n")
+        ui.emit("\n  Digite os valores RGB separados por ponto e vírgula.")
+        ui.emit("  Exemplo: 255;100;50 (vermelho), 0;200;150 (teal)\n")
         while True:
             raw = input("  Código RGB (R;G;B): ").strip()
             raw = raw.replace(",", ";").replace(" ", ";")
@@ -211,14 +216,18 @@ def _pick_accent_color() -> str:
                 parts = [int(x) for x in parts_str]
                 if len(parts) == 3 and all(0 <= p <= 255 for p in parts):
                     rgb = ";".join(str(p) for p in parts)
-                    escape = f"\033[38;2;{parts[0]};{parts[1]};{parts[2]}m"
+                    # ui.c() aqui: sem isto, --no-color/NO_COLOR ficava sem
+                    # efeito neste preview específico, porque o escape é
+                    # montado na hora a partir do RGB digitado (não vem de
+                    # ACCENT_PRESETS, que já nasce zerado com a cor desligada).
+                    escape = ui.c(f"\033[38;2;{parts[0]};{parts[1]};{parts[2]}m")
                     break
             except ValueError:
                 pass
-            print("  Formato inválido. Use três números de 0 a 255, ex: 150;80;220")
+            ui.emit("  Formato inválido. Use três números de 0 a 255, ex: 150;80;220")
 
-        print("\n  Preview da sua cor:")
-        print(accent_preview(escape, "━━ [FAIXA]  ARTISTA  The Weeknd\n"))
+        ui.emit("\n  Preview da sua cor:")
+        ui.emit(accent_preview(escape, "━━ [FAIXA]  ARTISTA  The Weeknd\n"))
         confirm = (
             input("  Confirmar esta cor? (Enter = sim, n = escolher outra): ")
             .strip()
@@ -227,7 +236,7 @@ def _pick_accent_color() -> str:
         if confirm in ("n", "nao", "no"):
             return _pick_accent_color()
 
-    print(f"\n  {GREEN}Cor salva: {escape}━━ {name.strip()}{OFF}\n")
+    ui.emit(f"\n  {GREEN}Cor salva: {escape}━━ {name.strip()}{OFF}\n")
     return rgb
 
 
@@ -242,26 +251,29 @@ def _reset_config(config_file: str):
 
     accent_rgb = _pick_accent_color()
     config["qobuz"]["accent_color"] = accent_rgb
-    C_ACCENT = f"\033[38;2;{accent_rgb}m" if accent_rgb else YELLOW
+    # BUGFIX: antes montava o escape direto do RGB sem passar por ui.c(),
+    # entao --no-color/NO_COLOR nao tinha efeito nestes prompts do wizard
+    # (mesmo problema do preview de RGB customizado em _pick_accent_color).
+    C_ACCENT = ui.c(f"\033[38;2;{accent_rgb}m") if accent_rgb else ui.c(YELLOW)
 
     email = input("Digite seu e-mail do Qobuz:\n- ").strip()
     config["qobuz"]["email"] = email
 
-    print(
+    ui.emit(
         f"\n{C_ACCENT}[!] ATENÇÃO: A API Qobuz bloqueou login direto por senha para apps de terceiros.{OFF}"
     )
-    print(
+    ui.emit(
         f"{C_ACCENT}[!] Obtenha seu Token no navegador (F12 > Application/Storage > Local Storage > token).{OFF}"
     )
 
     auth_token = input("Cole o token do seu navegador aqui:\n- ").strip()
     config["qobuz"]["password"] = ""
 
-    print(f"\n{C_ACCENT}[?] Armazenamento de Senhas (OS Keyring):{OFF}")
-    print(
+    ui.emit(f"\n{C_ACCENT}[?] Armazenamento de Senhas (OS Keyring):{OFF}")
+    ui.emit(
         "    Por padrão, os tokens são guardados criptografados no cofre do sistema operacional."
     )
-    print(
+    ui.emit(
         "    Em ambientes sem interface gráfica (Linux headless, Docker, NAS), isso pode falhar."
     )
     disable_kr = (
@@ -293,7 +305,7 @@ def _reset_config(config_file: str):
 
     genius_token = ""
     if config["qobuz"]["fetch_lyrics"] == "true":
-        print(
+        ui.emit(
             f"\n{C_ACCENT}[!] Para usar o Genius como fallback, insira seu API Token (Enter para pular e usar apenas LRCLIB):{OFF}"
         )
         genius_token = input("Genius API Token:\n- ").strip()
@@ -332,8 +344,8 @@ def _reset_config(config_file: str):
     config["qobuz"]["legacy_charmap"] = "false"
     config["qobuz"]["blacklist"] = "blacklist.txt"
 
-    print(f"\n{C_ACCENT}[?] Idioma de Tradução de Letras:{OFF}")
-    print(
+    ui.emit(f"\n{C_ACCENT}[?] Idioma de Tradução de Letras:{OFF}")
+    ui.emit(
         "    Opções: pt (Português), en (Inglês), es (Espanhol), fr (Francês), original (Manter nativo)"
     )
     lang_choice = input("    Idioma [Padrão: pt]:\n- ").strip().lower()
@@ -395,9 +407,9 @@ def _reset_config(config_file: str):
         ACCENT = nova_cor
         CYAN = nova_cor
 
-    print(f"{ACCENT}\n [*] Atualizando interface...{OFF}", end="", flush=True)
+    ui.emit(f"{ACCENT}\n [*] Atualizando interface...{OFF}", end="")
     time.sleep(2.0)
-    print("\r\033[K", end="")
+    ui.emit("\r\033[K", end="")
     _print_welcome_screen()
 
 
@@ -448,30 +460,30 @@ def _imprimir_campos_extras(
     if not extras:
         return
 
-    print(f"\n {CYAN}[{titulo}]{OFF}")
+    ui.emit(f"\n {CYAN}[{titulo}]{OFF}")
     for chave, valor in extras.items():
         if isinstance(valor, dict):
             if not valor:
-                print(f"{indent}• {chave}: (vazio)")
+                ui.emit(f"{indent}• {chave}: (vazio)")
                 continue
-            print(f"{indent}• {chave}:")
+            ui.emit(f"{indent}• {chave}:")
             for sub_chave, sub_valor in valor.items():
-                print(f"{indent}    - {sub_chave}: {_formatar_valor(sub_valor)}")
+                ui.emit(f"{indent}    - {sub_chave}: {_formatar_valor(sub_valor)}")
         elif isinstance(valor, list):
             if not valor:
-                print(f"{indent}• {chave}: (vazio)")
+                ui.emit(f"{indent}• {chave}: (vazio)")
                 continue
-            print(f"{indent}• {chave}:")
+            ui.emit(f"{indent}• {chave}:")
             for i, item in enumerate(valor):
                 if isinstance(item, dict):
                     resumo = ", ".join(
                         f"{k}={_formatar_valor(v)}" for k, v in item.items()
                     )
-                    print(f"{indent}    [{i}] {resumo}")
+                    ui.emit(f"{indent}    [{i}] {resumo}")
                 else:
-                    print(f"{indent}    - {_formatar_valor(item)}")
+                    ui.emit(f"{indent}    - {_formatar_valor(item)}")
         else:
-            print(f"{indent}• {chave}: {_formatar_valor(valor)}")
+            ui.emit(f"{indent}• {chave}: {_formatar_valor(valor)}")
 
 
 # ==============================================================================
@@ -489,8 +501,8 @@ async def _auth_command(
     from qobuz_dl.qopy import Client
 
     if not os.path.isfile(config_file):
-        print(
-            f"{RED}[!] Arquivo de configuração não encontrado. Execute 'qobuz-dl -r' primeiro.{OFF}"
+        ui.error(
+            "Arquivo de configuração não encontrado. Execute 'qobuz-dl -r' primeiro."
         )
         return False
 
@@ -515,26 +527,26 @@ async def _auth_command(
 
     # 1. Se foi chamado explicitamente para atualizar credenciais (ou não tem token)
     if update_credentials or not token:
-        print(f"\n{CYAN}{BG}[ QOBUZ-DL - ATUALIZAÇÃO DE CREDENCIAIS ]{OFF}\n")
+        ui.emit(f"\n{CYAN}{BG}[ QOBUZ-DL - ATUALIZAÇÃO DE CREDENCIAIS ]{OFF}\n")
         new_email = input(f"E-mail atual [{email}]:\n- ").strip()
         if new_email:
             email = new_email
             config.set(section, "email", email)
 
-        print(f"\n{CYAN}[!] Cole o novo Token de autenticação do seu navegador:{OFF}")
+        ui.emit(f"\n{CYAN}[!] Cole o novo Token de autenticação do seu navegador:{OFF}")
         new_token = input("- ").strip()
 
         if not new_token:
-            print(f"{YELLOW}[!] Token vazio. Operação cancelada.{OFF}")
+            ui.warn("Token vazio. Operação cancelada.")
             if not token:
                 return False
         else:
             token = new_token
-            print(
+            ui.emit(
                 f"\n\r{CYAN}[*] Validando nova sessão com a API do Qobuz...{OFF}\033[K"
             )
     else:
-        print(
+        ui.emit(
             f"\n\r{CYAN}[*] Consultando dados da conta e assinatura no Qobuz...{OFF}\033[K"
         )
 
@@ -549,9 +561,9 @@ async def _auth_command(
             force_english=force_english,
         )
     except Exception as e:
-        print(f"\n{RED}[✗] Falha ao autenticar com a API: {e}{OFF}")
+        ui.error(f"Falha ao autenticar com a API: {e}")
         if update_credentials:
-            print(f"{RED}[!] As alterações NÃO foram salvas.{OFF}\n")
+            ui.error("As alterações NÃO foram salvas.")
         return False
 
     try:
@@ -562,19 +574,20 @@ async def _auth_command(
         if update_credentials and token:
             if not disable_keyring and _keyring_save("auth_token", token):
                 config.set(section, "auth_token", "")
-                print(
-                    f"{GREEN}[+] Token salvo com segurança no Keyring do sistema!{OFF}"
-                )
+                ui.ok("Token salvo com segurança no Keyring do sistema!")
             else:
                 config.set(section, "auth_token", token)
                 config.set(section, "password", "")
-                print(f"{GREEN}[+] Token salvo no config.ini!{OFF}")
+                ui.ok("Token salvo no config.ini!")
 
             with open(config_file, "w", encoding="utf-8") as f:
                 config.write(f)
 
         if show_json:
-            print(json.dumps(user_info, indent=2, ensure_ascii=False))
+            # ui.emit_always: saída de --json é o entregável do comando (pensada
+            # para ser lida por script/pipe), então precisa sobreviver a
+            # --quiet -- ao contrário das mensagens de progresso acima.
+            ui.emit_always(json.dumps(user_info, indent=2, ensure_ascii=False))
             return sub_info.get("is_active", False)
 
         sf = user_info.get("store_features") or {}
@@ -582,26 +595,26 @@ async def _auth_command(
         last_update = user_info.get("last_update") or {}
         status_color = GREEN if sub_info.get("is_active") else RED
 
-        print("\n" + "=" * 68)
-        print(f"  {CYAN}{BG}🎵 QOBUZ // INFORMAÇÕES DA CONTA E ASSINATURA{OFF}")
-        print("=" * 68)
+        ui.emit("\n" + "=" * 68)
+        ui.emit(f"  {CYAN}{BG}🎵 QOBUZ // INFORMAÇÕES DA CONTA E ASSINATURA{OFF}")
+        ui.emit("=" * 68)
 
-        print(f"\n {CYAN}[👤 PERFIL DO USUÁRIO]{OFF}")
+        ui.emit(f"\n {CYAN}[👤 PERFIL DO USUÁRIO]{OFF}")
         nome_completo = (
             f"{user_info.get('firstname', '')} {user_info.get('lastname', '')}".strip()
             or "N/A"
         )
-        print(f"   • Nome Completo:     {nome_completo}")
-        print(f"   • Display Name:      {user_info.get('display_name', 'N/A')}")
-        print(f"   • E-mail:            {user_info.get('email', 'N/A')}")
-        print(f"   • Login:             {user_info.get('login', 'N/A')}")
-        print(
+        ui.emit(f"   • Nome Completo:     {nome_completo}")
+        ui.emit(f"   • Display Name:      {user_info.get('display_name', 'N/A')}")
+        ui.emit(f"   • E-mail:            {user_info.get('email', 'N/A')}")
+        ui.emit(f"   • Login:             {user_info.get('login', 'N/A')}")
+        ui.emit(
             f"   • ID do Usuário:     {user_info.get('id', 'N/A')} [Public ID: {user_info.get('publicId', 'N/A')}]"
         )
-        print(
+        ui.emit(
             f"   • País / Zona:       {user_info.get('country', 'N/A')} / {user_info.get('zone', 'N/A')}"
         )
-        print(
+        ui.emit(
             f"   • Loja / Idioma:     {user_info.get('store', 'N/A')} ({user_info.get('language_code', 'N/A')})"
         )
 
@@ -615,71 +628,71 @@ async def _auth_command(
             except Exception:
                 return str(d_str)
 
-        print(
+        ui.emit(
             f"   • Nascimento / Idade:{format_date_br(user_info.get('birthdate'))} ({user_info.get('age', 'N/A')} anos, {user_info.get('genre', 'N/A')})"
         )
-        print(
+        ui.emit(
             f"   • Conta Criada em:   {format_date_br(user_info.get('creation_date'))}"
         )
 
-        print(f"\n {CYAN}[💳 STATUS DA SUBSCRIÇÃO (ASSINATURA)]{OFF}")
-        print(
+        ui.emit(f"\n {CYAN}[💳 STATUS DA SUBSCRIÇÃO (ASSINATURA)]{OFF}")
+        ui.emit(
             f"   • Status Atual:      {status_color}● {str(sub_info.get('status')).upper()}{OFF}"
         )
-        print(f"   • Plano / Oferta:    {sub_info.get('offer', 'N/A')}")
-        print(
+        ui.emit(f"   • Plano / Oferta:    {sub_info.get('offer', 'N/A')}")
+        ui.emit(
             f"   • Periodicidade:     {str(sub_info.get('periodicity', 'N/A')).capitalize()}"
         )
-        print(f"   • Data de Início:    {sub_info.get('start_date') or 'N/A'}")
-        print(f"   • Data de Término:   {sub_info.get('end_date') or 'N/A'}")
-        print(
+        ui.emit(f"   • Data de Início:    {sub_info.get('start_date') or 'N/A'}")
+        ui.emit(f"   • Data de Término:   {sub_info.get('end_date') or 'N/A'}")
+        ui.emit(
             f"   • Cancelamento:      {'Sim (Cancelada pelo usuário)' if sub_info.get('is_canceled') else 'Não'}"
         )
-        print(f"   • Vagas Família:     {sub_info.get('household_size_max')} membro(s)")
+        ui.emit(
+            f"   • Vagas Família:     {sub_info.get('household_size_max')} membro(s)"
+        )
 
-        print(f"\n {CYAN}[🎛️ CREDENCIAL & RECURSOS DA CONTA]{OFF}")
-        print(f"   • Tipo de Membro:    {cred.get('description', 'Membro Qobuz')}")
-        print(
+        ui.emit(f"\n {CYAN}[🎛️ CREDENCIAL & RECURSOS DA CONTA]{OFF}")
+        ui.emit(f"   • Tipo de Membro:    {cred.get('description', 'Membro Qobuz')}")
+        ui.emit(
             f"   • Streaming:         {'Disponível' if sf.get('streaming') else 'Indisponível'}"
         )
-        print(
+        ui.emit(
             f"   • Letras (Lyrics):   {'Disponível' if sf.get('lyrics') else 'Indisponível'}"
         )
-        print(
+        ui.emit(
             f"   • Importação Músicas:{'Disponível' if sf.get('music_import') else 'Indisponível'}"
         )
-        print(
+        ui.emit(
             f"   • Rádio / Club / Q:  {'Disponível' if sf.get('radio') or sf.get('club') else 'Indisponível'}"
         )
 
         if last_update:
-            print(f"\n {CYAN}[📊 ATIVIDADES & ÚLTIMAS ATUALIZAÇÕES]{OFF}")
-            print(
+            ui.emit(f"\n {CYAN}[📊 ATIVIDADES & ÚLTIMAS ATUALIZAÇÕES]{OFF}")
+            ui.emit(
                 f"   • Playlists:         {_format_timestamp(last_update.get('playlist'))}"
             )
-            print(
+            ui.emit(
                 f"   • Álbuns Favoritos:  {_format_timestamp(last_update.get('favorite_album'))}"
             )
-            print(
+            ui.emit(
                 f"   • Faixas Favoritas:  {_format_timestamp(last_update.get('favorite_track'))}"
             )
-            print(
+            ui.emit(
                 f"   • Artistas Favoritos:{_format_timestamp(last_update.get('favorite_artist'))}"
             )
-            print(
+            ui.emit(
                 f"   • Compras na Loja:   {_format_timestamp(last_update.get('purchase'))}"
             )
 
         # Se a assinatura estiver inativa e não acabamos de atualizar:
         if not sub_info.get("is_active"):
-            print(f"\n{YELLOW}⚠️  AVISO DE ASSINATURA INATIVA:{OFF}")
-            print(
-                f"   Sua assinatura expirou em {sub_info.get('end_date')}. Para baixar álbuns e faixas"
+            ui.warn("⚠️  AVISO DE ASSINATURA INATIVA:")
+            ui.detail(
+                f"Sua assinatura expirou em {sub_info.get('end_date')}. Para baixar álbuns e faixas "
+                "completas em alta resolução, é necessário possuir uma conta ativa."
             )
-            print(
-                "   completas em alta resolução, é necessário possuir uma conta ativa."
-            )
-            print("=" * 68)
+            ui.emit("=" * 68)
 
             if not update_credentials:
                 trocar = (
@@ -695,7 +708,7 @@ async def _auth_command(
                         config_file, update_credentials=True, show_json=show_json
                     )
         else:
-            print("=" * 68 + "\n")
+            ui.emit("=" * 68 + "\n")
 
         return sub_info.get("is_active", False)
     finally:
@@ -725,20 +738,21 @@ async def _garantir_assinatura_ativa(qobuz: QobuzDL) -> bool:
     sub_info = qobuz.client.check_subscription()
 
     while not sub_info.get("is_active"):
-        print(f"\n{RED}[✗] CONTA SEM ASSINATURA ATIVA NO QOBUZ{OFF}")
-        print(f" {CYAN}•{OFF} Status Atual:       {RED}{sub_info.get('status')}{OFF}")
-        print(
+        ui.error("CONTA SEM ASSINATURA ATIVA NO QOBUZ")
+        ui.emit(f" {CYAN}•{OFF} Status Atual:       {RED}{sub_info.get('status')}{OFF}")
+        ui.emit(
             f" {CYAN}•{OFF} Plano:              {sub_info.get('offer', 'N/A')} ({str(sub_info.get('periodicity', 'N/A')).capitalize()})"
         )
-        print(f" {CYAN}•{OFF} Validade / Término: {sub_info.get('end_date') or 'N/A'}")
-        print(
+        ui.emit(
+            f" {CYAN}•{OFF} Validade / Término: {sub_info.get('end_date') or 'N/A'}"
+        )
+        ui.emit(
             f" {CYAN}•{OFF} Cancelamento:       {'Sim (Cancelada)' if sub_info.get('is_canceled') else 'Não'}"
         )
-        print(
-            f"\n{YELLOW}ℹ️  Sem uma assinatura ativa, a API da Qobuz não permite o download de faixas completas.{OFF}"
-        )
-        print(
-            f"{YELLOW}   É obrigatório informar o e-mail e o user_token de uma conta com assinatura ativa para continuar.{OFF}"
+        ui.warn(
+            "ℹ️  Sem uma assinatura ativa, a API da Qobuz não permite o download "
+            "de faixas completas. É obrigatório informar o e-mail e o user_token "
+            "de uma conta com assinatura ativa para continuar."
         )
 
         resp = (
@@ -750,12 +764,10 @@ async def _garantir_assinatura_ativa(qobuz: QobuzDL) -> bool:
         )
 
         if resp in ("cancelar", "cancel", "sair", "n", "nao", "não"):
-            print(
-                f"\n{RED}[!] Operação cancelada. Nenhum comando de download roda sem assinatura ativa.{OFF}"
+            ui.error(
+                "Operação cancelada. Nenhum comando de download roda sem assinatura ativa."
             )
-            print(
-                f"{YELLOW}    Para ver os detalhes da conta, use: {GREEN}qobuz-dl auth{OFF}\n"
-            )
+            ui.detail(f"Para ver os detalhes da conta, use: {GREEN}qobuz-dl auth{OFF}")
             return False
 
         # _auth_command já pede o novo e-mail/token, valida na API e salva (no Keyring ou no config.ini, conforme a configuração do usuário).
@@ -788,7 +800,7 @@ async def _garantir_assinatura_ativa(qobuz: QobuzDL) -> bool:
             # Credenciais inválidas ou falha de rede: trata como "ainda sem
             # assinatura ativa" e deixa o laço pedir a atualização de novo,
             # em vez de deixar a exceção derrubar o programa.
-            print(f"\n{RED}[✗] Falha ao validar a nova conta: {e}{OFF}")
+            ui.error(f"Falha ao validar a nova conta: {e}")
             sub_info = {
                 "is_active": False,
                 "status": "erro de autenticação",
@@ -806,8 +818,8 @@ async def _garantir_assinatura_ativa(qobuz: QobuzDL) -> bool:
 # ==============================================================================
 async def _handle_commands(qobuz: QobuzDL, arguments):
     def sigint_handler(sig, frame):
-        print(f"\n\n{RED}[!] Download interrompido manualmente pelo usuário.{RESET}")
-        print(f"{YELLOW}Arquivos parciais foram enviados para a lixeira.{RESET}")
+        ui.error("Download interrompido manualmente pelo usuário.")
+        ui.warn("Arquivos parciais foram enviados para a lixeira.")
         try:
             _remove_leftovers(qobuz.directory)
         except Exception:
@@ -907,14 +919,14 @@ def _print_logo(cols: int):
         pad1 = " " * max((cols - art_width) // 2, 0)
         pad2 = " " * max((cols - len(line2[0])) // 2, 0)
         for row in line1:
-            print(f"{CYAN}{pad1}{row}{OFF}")
+            ui.emit(f"{CYAN}{pad1}{row}{OFF}")
         for row in line2:
-            print(f"{CYAN}{pad2}{row}{OFF}")
+            ui.emit(f"{CYAN}{pad2}{row}{OFF}")
     else:
         line_short = _render_logo_word("QDL")
         pad_short = " " * max((cols - len(line_short[0])) // 2, 0)
         for row in line_short:
-            print(f"{CYAN}{pad_short}{row}{OFF}")
+            ui.emit(f"{CYAN}{pad_short}{row}{OFF}")
 
 
 def _extract_subcommands(parser: argparse.ArgumentParser):
@@ -980,42 +992,42 @@ def _print_welcome_screen():
     from qobuz_dl import __version__
 
     cols = ui.width()
-    print()
+    ui.blank()
     _print_logo(cols)
     version_line = f"v{__version__}"
     pad_version = " " * max((cols - len(version_line)) // 2, 0)
-    print(f"{RESET}{pad_version}{version_line}\n")
+    ui.emit(f"{RESET}{pad_version}{version_line}\n")
 
     ui.rule("=")
-    print(f"{ACCENT}{BG}Uso: qobuz-dl ou qdl + <comando>, Ex: qdl i{OFF}")
+    ui.emit(f"{ACCENT}{BG}Uso: qobuz-dl ou qdl + <comando>, Ex: qdl i{OFF}")
     ui.wrapped(
         f"{ACCENT}Ajuda:{RESET} qobuz-dl <comando> --help {MUTED}(lista todas as opções daquele comando){OFF}",
         indent=4,
     )
-    print()
+    ui.blank()
 
     parser = qobuz_dl_args()
 
-    print(f"{ACCENT}{BG}COMANDOS:{OFF}\n")
+    ui.emit(f"{ACCENT}{BG}COMANDOS:{OFF}\n")
     for name, aliases, help_text in _extract_subcommands(parser):
         label = name if not aliases else f"{name} ({aliases})"
         desc = _COMMAND_DESCRIPTIONS_PT.get(name, help_text or "")
-        print(f"  {ACCENT}{label}{OFF}")
+        ui.emit(f"  {ACCENT}{label}{OFF}")
         ui.wrapped(desc, indent=4)
-    print()
+    ui.blank()
 
     if cols >= 62:
-        print(
+        ui.emit(
             f"{ACCENT}{BG}FLAGS GLOBAIS:{RESET} {MUTED}(não pertencem a nenhum comando específico){OFF}\n"
         )
     else:
-        print(f"{BG}FLAGS GLOBAIS:{RESET}\n")
+        ui.emit(f"{BG}FLAGS GLOBAIS:{RESET}\n")
 
     for flag_str, dest, help_text in _extract_global_flags(parser):
         desc = _FLAG_DESCRIPTIONS_PT.get(dest, help_text or "")
-        print(f"  {ACCENT}{flag_str}{OFF}")
+        ui.emit(f"  {ACCENT}{flag_str}{OFF}")
         ui.wrapped(desc, indent=4)
-    print()
+    ui.blank()
 
     ui.rule("=")
 
@@ -1046,13 +1058,11 @@ def check_for_updates():
         versao_local = Version(current_version_str)
 
         if versao_remota > versao_local:
-            print(
-                f"\n{YELLOW}[*] ATUALIZAÇÃO DISPONÍVEL: Ultra Edition v{latest_version_str} está disponível!{OFF}"
+            ui.warn(
+                f"ATUALIZAÇÃO DISPONÍVEL: Ultra Edition v{latest_version_str} está disponível!"
             )
-            print(
-                f"{YELLOW}    - PyPI: rode 'pip install --upgrade qobuz-dl-ultra'{OFF}"
-            )
-            print(f"{YELLOW}    - Docker: puxe a imagem mais recente{OFF}")
+            ui.detail("- PyPI: rode 'pip install --upgrade qobuz-dl-ultra'")
+            ui.detail("- Docker: puxe a imagem mais recente")
 
     except Exception as e:
         logger.debug("Checagem de atualização falhou: %s: %s", type(e).__name__, e)
@@ -1139,8 +1149,8 @@ async def async_main():
         else:
             legacy_val = config.get(section, "default_folder", fallback=None)
             if legacy_val is not None:
-                print(
-                    f"{YELLOW}[!] Aviso: 'default_folder' está obsoleto. Renomeie para 'directory' no config.ini.{RESET}"
+                ui.warn(
+                    "Aviso: 'default_folder' está obsoleto. Renomeie para 'directory' no config.ini."
                 )
                 default_folder = legacy_val
             else:
@@ -1196,14 +1206,38 @@ async def async_main():
                 f"{YELLOW}Execute 'python -m qobuz_dl -r' para consertar isto.{RESET}"
             )
 
+    # BUGFIX (--quiet ignorado): _bootstrap_ui() configura a ui ANTES do
+    # argparse rodar, lendo sys.argv na unha só pra ter algo utilizável nos
+    # prints que acontecem durante o parse (ex.: o aviso de config obsoleta
+    # acima). Isso cobre o caso comum, mas diverge de casos reais do
+    # argparse: abreviação de flag (--qui), configuração vinda só de
+    # subparser, etc. Agora que `arguments` é o resultado final e
+    # autoritativo do parse, re-sincronizamos a ui com ele -- daqui pra
+    # frente (inclusive dentro das threads de download) o --quiet golpeia
+    # de verdade, e não só nos casos que a heurística acertou por sorte.
+    ui.configure(
+        quiet=getattr(arguments, "quiet", False),
+        verbose=getattr(arguments, "verbose", False),
+        color=False if getattr(arguments, "no_color", False) else None,
+    )
+    # --log-level e' opcional e sobrepoe o nivel implicito de -v/--quiet
+    # (WARNING/INFO/DEBUG). Serve pra separar duas coisas que hoje viviam
+    # coladas: "quero ver menos coisa na TELA" (--quiet, afeta ui.warn/ok/
+    # step/skip/emit) de "quero mais detalhe no LOG" (--log-level DEBUG,
+    # afeta so' o que passa por logger.debug/info/... de verdade).
+    _log_level_arg = getattr(arguments, "log_level", None)
+    ui.install_logging(
+        level=getattr(logging, _log_level_arg) if _log_level_arg else None
+    )
+
     if arguments.reset:
         _reset_config(CONFIG_FILE)
         sys.exit(0)
 
     if arguments.show_config:
-        print(f"Configuração: {CONFIG_FILE}\nDatabase: {QOBUZ_DB}\n---")
+        ui.emit_always(f"Configuração: {CONFIG_FILE}\nDatabase: {QOBUZ_DB}\n---")
         with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-            print(f.read())
+            ui.emit_always(f.read())
         sys.exit(0)
 
     if arguments.purge:
@@ -1336,9 +1370,7 @@ async def async_main():
                 settings=watch_settings,
             )
         except KeyboardInterrupt:
-            print(
-                f"\n\n{RED}[!] Monitoramento interrompido pelo usuário (CTRL+C).{RESET}"
-            )
+            ui.error("Monitoramento interrompido pelo usuário (CTRL+C).")
         finally:
             if watch_client:
                 await watch_client.close()
@@ -1394,10 +1426,8 @@ async def async_main():
                 settings=local_settings,
             )
         except KeyboardInterrupt:
-            print(
-                f"\n\n{RED}[!] Operação interrompida manualmente pelo usuário (CTRL+C).{RESET}"
-            )
-            print(f"{YELLOW}Os arquivos já processados estão seguros. Saindo...{RESET}")
+            ui.error("Operação interrompida manualmente pelo usuário (CTRL+C).")
+            ui.warn("Os arquivos já processados estão seguros. Saindo...")
         finally:
             if lyrics_client:
                 await lyrics_client.close()
