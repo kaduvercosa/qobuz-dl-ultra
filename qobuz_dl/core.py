@@ -66,29 +66,45 @@ _darker_accent = "#4c86a8"
 
 # Converte o escape ANSI TrueColor (\033[38;2;R;G;Bm) de volta pra hexadecimal
 # (formato que o prompt_toolkit entende). Se _ACCENT vier vazio (cor
-# desligada / --no-color), o regex não casa e os hex fixos acima são usados.
+# desligada / --no-color / NO_COLOR=1), o regex não casa e os valores padrão
+# de _r/_g/_b (derivados do hex fixo acima) são usados no lugar.
+#
+# BUGFIX: _hex_item_title e os _hex_type_* só eram definidos DENTRO do
+# `if _match:` -- com cor desligada (ex.: qualquer teste, que roda com
+# NO_COLOR=1) o regex nunca casava, essas variáveis nunca existiam, e o
+# `Style.from_dict()` alguns parágrafos abaixo quebrava com
+# `NameError: name '_hex_item_title' is not defined` -- ou seja, o
+# programa inteiro não importava (nem para --no-color, nem em ambientes
+# sem suporte a cor) por causa da tela de seleção interativa sequer
+# tentar montar seu tema visual. Agora _r/_g/_b sempre têm um valor (do
+# match ou do hex fixo default), e _shade()/_hex_item_title/_hex_type_*
+# são calculados incondicionalmente.
 _match = re.search(r"\033\[38;2;(\d+);(\d+);(\d+)m", _ACCENT)
 if _match:
     _r, _g, _b = map(int, _match.groups())
     _hex_accent = f"#{_r:02x}{_g:02x}{_b:02x}"
     _darker_accent = f"#{int(_r * 0.8):02x}{int(_g * 0.8):02x}{int(_b * 0.8):02x}"
+else:
+    _r, _g, _b = 0x5F, 0xA8, 0xD3
 
-    def _shade(f):
-        # Clareia (f > 0, mistura com branco) ou escurece (f < 0, mistura
-        # com preto) a cor de destaque, usado pra diferenciar os "tipos"
-        # de lançamento (álbum/EP/single/etc.) na TUI sem cadastrar uma
-        # cor fixa pra cada tipo.
-        if f > 0:
-            return f"#{int(_r + (255 - _r) * f):02x}{int(_g + (255 - _g) * f):02x}{int(_b + (255 - _b) * f):02x}"
-        else:
-            return f"#{int(_r * (1 + f)):02x}{int(_g * (1 + f)):02x}{int(_b * (1 + f)):02x}"
 
-    _hex_item_title = _hex_accent
-    _hex_type_album = _hex_accent
-    _hex_type_ep = _shade(0.2)
-    _hex_type_single = _shade(-0.2)
-    _hex_type_track = _shade(0.3)
-    _hex_type_comp = _shade(-0.3)
+def _shade(f):
+    # Clareia (f > 0, mistura com branco) ou escurece (f < 0, mistura
+    # com preto) a cor de destaque, usado pra diferenciar os "tipos"
+    # de lançamento (álbum/EP/single/etc.) na TUI sem cadastrar uma
+    # cor fixa pra cada tipo.
+    if f > 0:
+        return f"#{int(_r + (255 - _r) * f):02x}{int(_g + (255 - _g) * f):02x}{int(_b + (255 - _b) * f):02x}"
+    else:
+        return f"#{int(_r * (1 + f)):02x}{int(_g * (1 + f)):02x}{int(_b * (1 + f)):02x}"
+
+
+_hex_item_title = _hex_accent
+_hex_type_album = _hex_accent
+_hex_type_ep = _shade(0.2)
+_hex_type_single = _shade(-0.2)
+_hex_type_track = _shade(0.3)
+_hex_type_comp = _shade(-0.3)
 
 pt_style = Style.from_dict(
     {
@@ -549,9 +565,9 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
             style = "class:highlight" if checked else ""
             title_style = "class:highlight"
 
-            ptr = ">" if hovered else " "
+            ptr = "➤" if hovered else " "
             if is_multi:
-                chk = "✓" if checked else "○"
+                chk = "*" if checked else "◇"
                 prefix = f" {ptr} {chk} "
             else:
                 prefix = f" {ptr} "
@@ -970,11 +986,11 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
         )
         res = []
 
-        res.append(("", "\n"))
-
         if is_table and options_dicts:
             table_prefix = " " * (5 if is_multi else 3)
             res.append(("class:meta", table_prefix + borders["bot"] + "\n"))
+
+        res.append(("", "\n"))
 
         if options_dicts:
             res.append(
@@ -2066,7 +2082,7 @@ class QobuzDL:
                     if (item_type == "favorites" and fav_subtype)
                     else item_type
                 )
-                url = "{}{}/{}".format(WEB_URL, url_category, i.get("id", ""))
+                url = f"{WEB_URL}{url_category}/{i.get('id', '')}"
 
                 item_list.append({"meta": meta_data, "url": url} if not lucky else url)
 
@@ -2378,14 +2394,14 @@ class QobuzDL:
 
                                     art_options = []
                                     for a in content:
-                                        r_type = (
-                                            a.get("release_type") or "album"
-                                        ).lower()
-                                        if r_type not in allowed_filter:
-                                            continue
                                         meta_data = self._extract_rich_metadata(
                                             a, "album", {"requires_extra": True}
                                         )
+                                        if (
+                                            meta_data["type"].lower()
+                                            not in allowed_filter
+                                        ):
+                                            continue
                                         if meta_data["artist"] == "Unknown":
                                             meta_data["artist"] = art_name
                                         url = f"{WEB_URL}album/{a.get('id')}"

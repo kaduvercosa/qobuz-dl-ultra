@@ -114,8 +114,6 @@ class _PermanentDownloadError(Exception):
     servidor.
     """
 
-    pass
-
 
 print_lock = ui.print_lock
 

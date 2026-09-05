@@ -93,7 +93,6 @@ class Client:
                     print(
                         f"\r{YELLOW} [!] ID do aplicativo não atualizado (usando padrão).{OFF}\033[K"
                     )
-                    pass
         else:
             logger.info(
                 f"\r{GREEN}[+] Usando ID de aplicativo legado personalizado: {self.id}{OFF}\033[K"

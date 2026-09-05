@@ -226,8 +226,9 @@ class LyricsEngine:
 
     def _inject_instrumental_pauses(self, lrc_text):
         """
-        Adiciona marcador de pausa instrumental '3 (• • •)' 0.5s após a última
+        - Adiciona marcador de pausa instrumental '3 (• • •)' 0.5s após a última
         linha se houver um intervalo maior que 10 segundos na sincronização.
+        - Ignora a injeção no início da música (se a linha anterior estiver em 00:00.000).
         """
         if not lrc_text:
             return lrc_text
@@ -256,11 +257,13 @@ class LyricsEngine:
 
             if last_time is not None and curr_time is not None:
                 gap = curr_time - last_time
-                # Se a diferença for maior que 10s (10000ms), insere o marcador
-                if gap > 10000:
+
+                # Se a diferença for > 10s e o tempo anterior for maior que zero
+                if gap > 10000 and last_time > 0:
                     inst_time = last_time + 1000
                     pause_line = f"{self._ms_to_lrc_timestamp(inst_time)} • • •"
-                    # Evita duplicar marcadores no mesmo instante (útil para LRCs bilíngues)
+
+                    # Evita duplicar marcadores no mesmo instante
                     if not new_lines or new_lines[-1] != pause_line:
                         new_lines.append(pause_line)
 

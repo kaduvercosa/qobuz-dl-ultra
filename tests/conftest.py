@@ -85,16 +85,42 @@ def ambiente_isolado():
     )
 
 
-# Mock do cryptography para testes no a-Shell
+# Mock do cryptography para testes no a-Shell -- SOMENTE se o pacote real
+# nao conseguir importar. ANTES este bloco mockava incondicionalmente
+# sempre que `sys.platform == "ios"`, e a lista de submodulos mockados
+# estava incompleta: faltavam exatamente `ciphers` (Cipher/algorithms/
+# modes) e `kdf.hkdf` (HKDF) -- os dois que `qopy.py` e `downloader.py`
+# realmente usam. Resultado pratico: em qualquer a-Shell onde o
+# `cryptography` de verdade funciona (confirmado que funciona em builds
+# recentes), o mock incompleto SUBSTITUIA o pacote que funcionava por um
+# stub quebrado, e todo import de `cryptography.hazmat.primitives.ciphers`
+# passava a falhar com "'cryptography.hazmat.primitives' is not a
+# package" -- um erro bem mais confuso do que a falha original que o mock
+# tentava evitar.
+#
+# Agora: tenta o import real primeiro (com os MESMOS nomes que o projeto
+# usa de verdade); só cai pro mock, já completo, se isso falhar.
 if sys.platform == "ios":
-    cryptography_mock = MagicMock()
-    sys.modules["cryptography"] = cryptography_mock
-    sys.modules["cryptography.hazmat"] = MagicMock()
-    sys.modules["cryptography.hazmat.primitives"] = MagicMock()
-    sys.modules["cryptography.hazmat.primitives.hashes"] = MagicMock()
-    sys.modules["cryptography.hazmat.primitives.padding"] = MagicMock()
-    sys.modules["cryptography.hazmat.bindings"] = MagicMock()
-    sys.modules["cryptography.hazmat.bindings._padding"] = MagicMock()
+    try:
+        from cryptography.hazmat.primitives import hashes, padding  # noqa: F401
+        from cryptography.hazmat.primitives.ciphers import (  # noqa: F401
+            Cipher,
+            algorithms,
+            modes,
+        )
+        from cryptography.hazmat.primitives.kdf.hkdf import HKDF  # noqa: F401
+    except ImportError:
+        cryptography_mock = MagicMock()
+        sys.modules["cryptography"] = cryptography_mock
+        sys.modules["cryptography.hazmat"] = MagicMock()
+        sys.modules["cryptography.hazmat.primitives"] = MagicMock()
+        sys.modules["cryptography.hazmat.primitives.hashes"] = MagicMock()
+        sys.modules["cryptography.hazmat.primitives.padding"] = MagicMock()
+        sys.modules["cryptography.hazmat.primitives.ciphers"] = MagicMock()
+        sys.modules["cryptography.hazmat.primitives.kdf"] = MagicMock()
+        sys.modules["cryptography.hazmat.primitives.kdf.hkdf"] = MagicMock()
+        sys.modules["cryptography.hazmat.bindings"] = MagicMock()
+        sys.modules["cryptography.hazmat.bindings._padding"] = MagicMock()
 
 
 @pytest.fixture

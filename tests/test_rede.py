@@ -135,5 +135,5 @@ class TestCheckForUpdates:
             check_updates()
 
         assert [
-            r for r in caplog.records if "atualizacao falhou" in r.getMessage().lower()
+            r for r in caplog.records if "atualização falhou" in r.getMessage().lower()
         ]
