@@ -9,7 +9,6 @@
   * [📁 Formatação Avançada e Armazenamento](#-formatação-avançada-e-armazenamento)
   * [❤️ Sincronização Nativa de Favoritos e Menu Interativo](#️-sincronização-nativa-de-favoritos-e-menu-interativo)
   * [🌉 Integração Inteligente com Last.fm e Modo Interativo](#-integração-inteligente-com-lastfm-e-modo-interativo)
-  * [📡 Radar RSS do MusicButler](#-radar-rss-do-musicbutler-sincronização-automatizada-de-favoritos)
   * [🛡️ Gerenciamento de Pastas À Prova de Falhas e Retomada Inteligente](#️-gerenciamento-de-pastas-à-prova-de-falhas-e-retomada-inteligente)
 
 * [📥 Instalação e Configuração](#-instalação-e-configuração)
@@ -105,12 +104,6 @@ Para evitar o download de músicas incorretas, este fork utiliza um **Algoritmo 
 * **Pulo Automático (< 60%):** Faixas completamente erradas são ignoradas automaticamente.
 * **Seleção Interativa (60% - 74%):** Para correspondências limítrofes, o mecanismo pausa e ativa um prompt interativo permitindo que você aprove ou rejeite manualmente a faixa (`[y/n]`).
 
-### 📡 Radar RSS do MusicButler (Sincronização Automatizada de Favoritos)
-Nunca perca um novo lançamento dos seus artistas monitorados. O novo comando `radar` se integra perfeitamente ao seu feed RSS privado do **MusicButler** para automatizar seu fluxo de descobertas.
-* **Análise Inteligente de Feed:** Busca e analisa automaticamente seu feed privado RSS/Atom para encontrar os lançamentos mais recentes dos artistas que você segue.
-* **Correspondência Difusa com o Qobuz:** Consulta o banco de dados do Qobuz para encontrar as correspondências exatas em alta resolução para os seus novos lançamentos diários.
-* **Interface Interativa com Caixas de Seleção:** Apresenta um menu de terminal interativo limpo onde você pode selecionar múltiplos lançamentos novos (`Barra de Espaço`) e injetá-los instantaneamente nos seus Favoritos do Qobuz (`Enter`), prontos para serem baixados posteriormente pelo modo `fun`.
-
 ### 🛡️ Gerenciamento de Pastas À Prova de Falhas e Retomada Inteligente
 Diga adeus a bibliotecas desorganizadas e downloads corrompidos. O baixador agora conta com um sistema dinâmico de 3 estágios de estado de pasta para manter sua biblioteca perfeitamente organizada:
 * **`[IN PROGRESS]`**: Pastas são marcadas enquanto o download está em andamento.
@@ -205,7 +198,7 @@ Como o Qobuz bloqueou logins diretos por senha para aplicativos de terceiros, vo
 
 ```text
 [Comandos Globais e Gerenciamento de Banco de Dados]
-usage: python -m qobuz_dl [-h] [-r] [-p] [—sync-db [PATH]] [-sc] {interactive,i,fun,dl,lucky,lyrics,radar,sync-playlist,sp,stats} ...
+usage: python -m qobuz_dl [-h] [-r] [-p] [—sync-db [PATH]] [-sc] {interactive,i,fun,dl,lucky,lyrics,sync-playlist,sp,stats} ...
 
 [Uso de Download]
 usage: python -m qobuz_dl dl [-h] [-d PATH] [-q int] [—albums-only] [—no-m3u] [—no-fallback] [—no-db] 
@@ -217,12 +210,6 @@ usage: python -m qobuz_dl dl [-h] [-d PATH] [-q int] [—albums-only] [—no-m3u
                              [—no-lyrics] [—no-lrc-files] [—native-lang] [—no-credits] [—with-credits] [—booklet-only] [—delay SECONDS] [—playlist-as-albums]
                              [—no-album-artist-tag] [—no-track-composer-tag] ... 
                              SOURCE [SOURCE ...]
-```
-
-**Modo Radar MusicButler:**
-*(Dica: Execute uma vez para salvar seu link RSS e depois execute diariamente para capturar novos lançamentos e adicioná-los com segurança aos seus favoritos do Qobuz!)*
-```bash
-python -m qobuz_dl radar
 ```
 
 **Sincronização Bidirecional de Playlist:**
