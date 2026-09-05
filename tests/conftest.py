@@ -21,11 +21,11 @@ reais, mas qualquer tentativa de login falha em `AuthenticationError` -- ou
 seja, nenhum teste consegue tocar a API do Qobuz por acidente.
 """
 
-from unittest.mock import MagicMock
 import os
 import sys
 import tempfile
 from pathlib import Path
+from unittest.mock import MagicMock
 
 # Precisa acontecer antes de importar qobuz_dl: o pacote le' estas variaveis
 # no import, nao na primeira chamada.

@@ -3,16 +3,17 @@
 # # Fluxo principal: _get_tags_to_add() cria tags; tag_flac()/tag_mp3() grava-as.
 # # Também cuida de capas embutidas, gêneros, IDs Qobuz, ReplayGain e tags clássicas.
 # # ============================================================================
-import re
-import os
 import io
 import logging
+import os
+import re
 import unicodedata
-import humanize
 
-from mutagen.flac import FLAC, Picture
+import humanize
 import mutagen.id3 as id3
+from mutagen.flac import FLAC, Picture
 from mutagen.id3 import ID3NoHeaderError
+
 from qobuz_dl.settings import QobuzDLSettings
 from qobuz_dl.utils import get_album_artist
 
@@ -345,7 +346,7 @@ def tag_flac(
     _rate = qobuz_item.get("maximum_sampling_rate", 44.1)
 
     _ch = qobuz_item.get("maximum_channel_count", 2)
-    _ch_map = {1: "Mono", 2: "Stereo", 4: "4.0", 6: "5.1", 8: "7.1"}
+    _ch_map = {1: "Mono", 2: "Estéreo", 4: "4.0", 6: "5.1", 8: "7.1"}
     _channels = _ch_map.get(_ch, f"{_ch}ch")
 
     _hires = "sim" if qobuz_item.get("hires_streamable") else "nao"
@@ -452,7 +453,7 @@ def tag_mp3(
     _rate = qobuz_item.get("maximum_sampling_rate", 44.1)
 
     _ch = qobuz_item.get("maximum_channel_count", 2)
-    _ch_map = {1: "Mono", 2: "Stereo", 4: "4.0", 6: "5.1", 8: "7.1"}
+    _ch_map = {1: "Mono", 2: "Estéreo", 4: "4.0", 6: "5.1", 8: "7.1"}
     _channels = _ch_map.get(_ch, f"{_ch}ch")
 
     _hires = "sim" if qobuz_item.get("hires_streamable") else "nao"

@@ -37,7 +37,7 @@ REPORT_FILENAME = ".report.json"
 def carregar_report(caminho: str) -> dict:
     if os.path.isdir(caminho):
         caminho = os.path.join(caminho, REPORT_FILENAME)
-    with open(caminho, "r", encoding="utf-8") as f:
+    with open(caminho, encoding="utf-8") as f:
         return json.load(f)
 
 

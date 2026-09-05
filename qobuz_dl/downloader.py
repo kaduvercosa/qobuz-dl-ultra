@@ -5,59 +5,54 @@
 # e as funcoes de apoio (capa, booklet, letras, nomes de arquivo/pasta).
 # Ponto de entrada tipico: Download(...).download_id_by_type(...).
 # ============================================================================
-from qobuz_dl.settings import QobuzDLSettings
-from qobuz_dl.constants import (
-    DEFAULT_FOLDER,
-    DEFAULT_TRACK,
-    DEFAULT_MULTIPLE_DISC_TRACK,
-)
-from qobuz_dl.db import handle_download_id
-from qobuz_dl.utils import (
-    get_album_artist,
-    clean_filename,
-    verify_audio_integrity,
-    classify_release_type,
-    get_apple_hq_cover,
-)
-from .lyrics_engine import LyricsEngine
-import qobuz_dl.postprocess as postprocess
+import asyncio
 import logging
 import os
-import shutil
-import sys
-import time
 import re
-import threading
+import shutil
 import signal
+import sys
 import textwrap
+import threading
+import time
 from typing import Optional, Tuple
-import asyncio
 
+import aiofiles
 import httpx
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from pathvalidate import sanitize_filename, sanitize_filepath
+from tenacity import (
+    AsyncRetrying,
+    retry_if_not_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
 from tqdm import tqdm
 
 import qobuz_dl.metadata as metadata
+import qobuz_dl.postprocess as postprocess
 from qobuz_dl import ui
-from qobuz_dl.color import (
-    OFF,
-    GREEN,
-    RED,
-    WARNING as YELLOW,
-    INFO as CYAN,
-    RESET,
-    MUTED,
+from qobuz_dl.color import GREEN
+from qobuz_dl.color import INFO as CYAN
+from qobuz_dl.color import MUTED, OFF, RED, RESET
+from qobuz_dl.color import WARNING as YELLOW
+from qobuz_dl.constants import (
+    DEFAULT_FOLDER,
+    DEFAULT_MULTIPLE_DISC_TRACK,
+    DEFAULT_TRACK,
 )
+from qobuz_dl.db import handle_download_id
 from qobuz_dl.exceptions import NonStreamable
-
-import aiofiles
-from tenacity import (
-    AsyncRetrying,
-    stop_after_attempt,
-    wait_exponential,
-    retry_if_not_exception_type,
+from qobuz_dl.settings import QobuzDLSettings
+from qobuz_dl.utils import (
+    classify_release_type,
+    clean_filename,
+    get_album_artist,
+    get_apple_hq_cover,
+    verify_audio_integrity,
 )
+
+from .lyrics_engine import LyricsEngine
 
 # Ordem de fallback de qualidade quando o tier pedido falha por motivo de rede/servidor (NAO usado para faixas indisponiveis -- ver _PermanentDownloadError). 27=Hi-Res >96kHz | 7=Hi-Res 96kHz | 6=CD 16bit/44.1kHz | 5=MP3 320kbps
 FALLBACK_TIERS = [27, 7, 6, 5]
@@ -83,7 +78,7 @@ def is_track_streamable(track: dict) -> tuple[bool, str]:
 
 def create_missing_placeholder(track: dict, folder_path: str, reason: str):
     """
-    [OPÇÃO C] Cria o arquivo .missing.txt na pasta do álbum
+    [OPÇÃO B] Cria o arquivo .missing.txt na pasta do álbum
     """
     try:
         track_num = str(track.get("track_number", 0)).zfill(2)
@@ -101,8 +96,12 @@ def create_missing_placeholder(track: dict, folder_path: str, reason: str):
             f.write(f"Duração: {track.get('duration', 0)}s\n")
             f.write(f"Motivo: {reason}\n")
             f.write("Status: Faixa indisponível para streaming na conta/região.\n")
-    except Exception:
-        pass
+    except Exception as e:
+        # Best-effort: o placeholder .missing.txt e' so' um marcador
+        # informativo, nao deve derrubar o download por causa dele.
+        logger.debug(
+            f"Falha ao criar {file_path if 'file_path' in locals() else '.missing.txt'}: {e}"
+        )
 
 
 class _PermanentDownloadError(Exception):
@@ -816,8 +815,13 @@ class Download:
                         t.cancel()
                 try:
                     self.http_session.close()
-                except Exception:
-                    pass
+                except Exception as e:
+                    # Encerrando por CTRL+C/cancelamento -- fechar a sessao
+                    # e' limpeza best-effort, nao pode impedir o `raise`
+                    # abaixo de propagar a interrupcao.
+                    logger.debug(
+                        f"Falha ao fechar http_session durante cancelamento: {e}"
+                    )
                 raise
 
             for res in results:
@@ -2060,7 +2064,7 @@ class Download:
             lyrics_text = ""
 
             if os.path.exists(lrc_path):
-                with open(lrc_path, "r", encoding="utf-8") as f:
+                with open(lrc_path, encoding="utf-8") as f:
                     raw_lyrics = f.read()
                 clean_lyrics = re.sub(
                     r"\[[a-zA-Z]+:.*?\]\n?|\[\d{2,}:\d{2}\.\d{2,3}\]", "", raw_lyrics
@@ -2072,7 +2076,7 @@ class Download:
                 ]
                 lyrics_text = "\n".join(clean_lines).strip()
             elif os.path.exists(txt_path) and "Tracklist" not in txt_path:
-                with open(txt_path, "r", encoding="utf-8") as f:
+                with open(txt_path, encoding="utf-8") as f:
                     lyrics_text = f.read().strip()
 
             if lyrics_text:
@@ -2084,8 +2088,11 @@ class Download:
                     f.write("\n" + "=" * 70 + "\nALBUM LYRICS\n" + "=" * 70 + "\n\n")
                     f.writelines(lyrics_to_append)
                 ui.ok("Letras formatadas e anexadas ao Digital Booklet.")
-            except Exception:
-                pass
+            except Exception as e:
+                # Anexar letras ao booklet e' um extra; o booklet em si ja'
+                # foi gravado antes disto rodar, entao uma falha aqui nao
+                # deve ser tratada como falha do download.
+                logger.debug(f"Falha ao anexar letras ao Digital Booklet: {e}")
 
 
 def _get_description(item: dict, track_title, multiple=None):
@@ -2260,8 +2267,11 @@ async def tqdm_download(
         if owns_session:
             try:
                 await http.aclose()
-            except Exception:
-                pass
+            except Exception as e:
+                # Encerramento best-effort do client HTTP que este download
+                # criou pra si mesmo -- ja' estamos no `finally`, entao nao
+                # ha' nada mais a fazer alem de registrar.
+                logger.debug(f"Falha ao fechar client HTTP no finally: {e}")
         if is_parallel and position_pool:
             position_pool.release(position)
 
@@ -2500,9 +2510,9 @@ async def _get_cover_and_embed(
     )
     if apple_bytes:
         if precisa_salva:
-            await _gravar(saved_file, apple_bytes, " Capa salva", "Apple (HQ)")
+            await _gravar(saved_file, apple_bytes, "Capa salva", "Apple (HQ)")
         if precisa_embed:
-            await _gravar(embed_file, apple_bytes, " Capa embed", "Apple (HQ)")
+            await _gravar(embed_file, apple_bytes, "Capa de embed", "Apple (HQ)")
         return
 
     # 2) Fallback: Qobuz, respeitando saved_art_size/embedded_art_size separadamente (igual ao comportamento original), reaproveitando o arquivo salvo pro embed quando os dois tamanhos resolvem pra' mesma URL -- evita baixar a mesma imagem duas vezes no caso mais comum.
@@ -2512,7 +2522,7 @@ async def _get_cover_and_embed(
     if precisa_salva:
         dados = await _fetch_qobuz_cover_bytes(item, saved_art_size, session)
         if dados:
-            await _gravar(saved_file, dados, " Capa salva", "Qobuz")
+            await _gravar(saved_file, dados, "Capa salva", "Qobuz")
         else:
             ui.skip("Pulando capa: nenhuma fonte disponível")
 

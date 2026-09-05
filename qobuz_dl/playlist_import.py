@@ -25,7 +25,7 @@ import csv
 import json
 import os
 import re
-from typing import List, Dict
+from typing import Dict, List
 
 
 def parse_playlist_file(path: str) -> List[Dict[str, str]]:
@@ -56,7 +56,7 @@ def parse_playlist_file(path: str) -> List[Dict[str, str]]:
         return _parse_txt(path)
     else:
         # Tenta detectar pelo conteúdo
-        with open(path, "r", encoding="utf-8", errors="ignore") as f:
+        with open(path, encoding="utf-8", errors="ignore") as f:
             head = f.read(512)
         if head.lstrip().startswith("{") or head.lstrip().startswith("["):
             return _parse_json(path)
@@ -80,7 +80,7 @@ def _parse_txt(path: str) -> List[Dict[str, str]]:
     Linhas em branco e comentários (#) são ignoradas.
     """
     results = []
-    with open(path, "r", encoding="utf-8", errors="ignore") as f:
+    with open(path, encoding="utf-8", errors="ignore") as f:
         for raw in f:
             line = raw.strip()
             if not line or line.startswith("#"):
@@ -104,7 +104,7 @@ def _parse_csv(path: str) -> List[Dict[str, str]]:
     Compatível com: Exportify, Soundiiz, TuneMyMusic, Last.fm export,
                     Apple Music / iTunes export, Spotify via exportify.net
     """
-    with open(path, "r", encoding="utf-8", errors="ignore") as f:
+    with open(path, encoding="utf-8", errors="ignore") as f:
         sample = f.read(4096)
 
     # Detectar separador
@@ -114,7 +114,7 @@ def _parse_csv(path: str) -> List[Dict[str, str]]:
             sep = candidate
 
     results = []
-    with open(path, "r", encoding="utf-8", errors="ignore", newline="") as f:
+    with open(path, encoding="utf-8", errors="ignore", newline="") as f:
         reader = csv.DictReader(f, delimiter=sep)
         if not reader.fieldnames:
             raise ValueError(f"CSV sem cabeçalho: {path}")
@@ -186,7 +186,7 @@ def _parse_json(path: str) -> List[Dict[str, str]]:
       4. Last.fm JSON export:
          {"track": [{"name": "...", "artist": {"name": "..."}}]}
     """
-    with open(path, "r", encoding="utf-8", errors="ignore") as f:
+    with open(path, encoding="utf-8", errors="ignore") as f:
         data = json.load(f)
 
     results = []

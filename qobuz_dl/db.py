@@ -1,5 +1,6 @@
 import logging
 import sqlite3
+
 import aiosqlite
 
 # CYAN/YELLOW importados como INFO/WARNING renomeados: mesma cor de
@@ -8,7 +9,8 @@ import aiosqlite
 # branco). Ver comentario completo em qobuz_dl/color.py. Zero mudanca
 # de codigo neste arquivo: toda f-string que ja usa {CYAN}/{YELLOW}
 # continua funcionando, so' a cor de fato renderizada muda.
-from qobuz_dl.color import WARNING as YELLOW, RED, OFF
+from qobuz_dl.color import OFF, RED
+from qobuz_dl.color import WARNING as YELLOW
 
 logger = logging.getLogger(__name__)
 

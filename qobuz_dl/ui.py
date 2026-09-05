@@ -309,13 +309,13 @@ def warn(message):
     # e erros", então um aviso suprimido por --quiet contradiz a promessa
     # da flag. BUGFIX: antes chamava emit() puro e um --quiet escondia
     # avisos que o usuário tinha sido informado que continuariam visíveis.
-    _emit_tagged(WARNING, "ℹ️", message, sempre=True)
+    _emit_tagged(WARNING, "!", message, sempre=True)
 
 
 def error(message):
     # Mensagem de erro -- prefixo "[!]" vermelho. Ignora --quiet (usa
     # emit_always) porque erro é informação que o usuário sempre precisa ver.
-    _emit_tagged(ERROR, "ℹ️", message, sempre=True)
+    _emit_tagged(ERROR, "!", message, sempre=True)
 
 
 def skip(message):

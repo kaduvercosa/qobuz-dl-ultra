@@ -7,59 +7,51 @@
 #      paralelos), importação de playlists externas e o modo interativo.
 # ==============================================================================
 
+import asyncio
 import logging
 import os
+import re
+import shutil
 import sys
 import time
-import asyncio
-import shutil
-import re
 
 import httpx
 from pathvalidate import sanitize_filename
 
 try:
+    from prompt_toolkit import PromptSession
     from prompt_toolkit.application import Application
+    from prompt_toolkit.application.current import get_app
+    from prompt_toolkit.formatted_text import FormattedText
     from prompt_toolkit.key_binding import KeyBindings
-    from prompt_toolkit.layout.containers import Window, ScrollOffsets, HSplit
+    from prompt_toolkit.layout.containers import HSplit, ScrollOffsets, Window
     from prompt_toolkit.layout.controls import FormattedTextControl
     from prompt_toolkit.layout.layout import Layout
     from prompt_toolkit.styles import Style
-    from prompt_toolkit import PromptSession
-    from prompt_toolkit.application.current import get_app
     from prompt_toolkit.utils import get_cwidth
-    from prompt_toolkit.formatted_text import FormattedText
 except ImportError:
     sys.exit(
         "Erro: Por favor, instale o prompt_toolkit executando: pip install prompt_toolkit"
     )
 
+import qobuz_dl.postprocess as postprocess
+from qobuz_dl import downloader, qopy, ui
 from qobuz_dl.bundle import Bundle
-from qobuz_dl import downloader, qopy
-from qobuz_dl import ui
-
-from qobuz_dl.color import (
-    INFO as CYAN,
-    OFF,
-    RED,
-    GREEN,
-    WARNING as YELLOW,
-    RESET,
-    _ACCENT,
-)
-from qobuz_dl.exceptions import NonStreamable
+from qobuz_dl.color import _ACCENT, GREEN
+from qobuz_dl.color import INFO as CYAN
+from qobuz_dl.color import OFF, RED, RESET
+from qobuz_dl.color import WARNING as YELLOW
 from qobuz_dl.db import create_db, handle_download_id
+from qobuz_dl.exceptions import NonStreamable
+from qobuz_dl.settings import QobuzDLSettings
+from qobuz_dl.utils import classify_release_type as _classify_release_type
 from qobuz_dl.utils import (
+    create_and_return_dir,
+    format_duration,
     get_url_info,
     make_m3u,
     smart_discography_filter,
-    format_duration,
-    create_and_return_dir,
-    classify_release_type as _classify_release_type,
 )
-from qobuz_dl.settings import QobuzDLSettings
-
-import qobuz_dl.postprocess as postprocess
 
 HEADER_STAGGER_DELAY = 1.5
 
@@ -166,7 +158,16 @@ def _get_table_layout(columns, is_multi, item_category):
         return False, [], [], {}
 
     prefix_len = 5 if is_multi else 3
-    safe_columns = columns - prefix_len - 6
+    # Overhead fixo por linha (fora do prefixo e das larguras de coluna):
+    # "│ " no início + " │" no fim = 4 caracteres. Antes este valor estava
+    # como 6, dois a mais que o real, fazendo a tabela inteira (bordas e
+    # linhas) terminar 2 colunas antes do fim do terminal. Como add_line()
+    # sempre preenche o resto da linha até `columns` com o estilo de
+    # destaque quando a linha está "hovered", essas 2 colunas sobrando
+    # ficavam pintadas com a cor de seleção *depois* do "│" direito,
+    # dando a impressão de que a borda da tabela "vazava" ou terminava
+    # no lugar errado.
+    safe_columns = columns - prefix_len - 4
 
     if item_category == "album":
         fixed_cols_w = 12 + 4 + 6 + 12
@@ -210,9 +211,9 @@ def _get_table_layout(columns, is_multi, item_category):
     else:
         return False, [], [], {}
 
-    top_border = "┌─" + "─┬─".join("─" * w for w in widths) + "─┐"
-    mid_border = "├─" + "─┼─".join("─" * w for w in widths) + "─┤"
-    bot_border = "└─" + "─┴─".join("─" * w for w in widths) + "─┘"
+    top_border = "+-" + "-+-".join("-" * w for w in widths) + "-+"
+    mid_border = "+-" + "-+-".join("-" * w for w in widths) + "-+"
+    bot_border = "+-" + "-+-".join("-" * w for w in widths) + "-+"
 
     return (
         True,
@@ -969,17 +970,12 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
         )
         res = []
 
-        if is_table:
-            prefix_len = 5 if is_multi else 3
-            hdr_pref = " " * prefix_len
-            res.append(("class:meta", hdr_pref + borders["bot"] + "\n"))
-
         res.append(("", "\n"))
 
-        # Indicador de posição "Item X de Y": em telas touch (sem mouse
-        # wheel/scrollbar visível), é a forma mais simples de o usuário
-        # perceber que a lista continua além do que está visível na tela
-        # -- se cursor_pos+1 < total, ainda tem mais itens abaixo.
+        if is_table and options_dicts:
+            table_prefix = " " * (5 if is_multi else 3)
+            res.append(("class:meta", table_prefix + borders["bot"] + "\n"))
+
         if options_dicts:
             res.append(
                 ("class:meta", f" Item {cursor_pos + 1} de {len(options_dicts)}\n")
@@ -987,7 +983,7 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
 
         if is_multi:
             res.append(
-                ("class:checkbox", f" ✓ Selecionados: {len(selected_indices)}\n")
+                ("class:checkbox", f" * Selecionados: {len(selected_indices)}\n")
             )
             footer_msg = " [↑↓/jk] Mover   [Espaço] Selecionar   [t] Todos   [1-9] Ir para   [Enter] Confirmar"
         elif item_category == "artist":
@@ -1138,7 +1134,7 @@ class QobuzDL:
         self.blacklist_patterns = []
         if blacklist and os.path.isfile(blacklist):
             try:
-                with open(blacklist, "r", encoding="utf-8") as f:
+                with open(blacklist, encoding="utf-8") as f:
                     self.blacklist_patterns = [
                         line.strip().lower()
                         for line in f
@@ -1257,18 +1253,18 @@ class QobuzDL:
                     f"{RED}Erro HTTP {status} no item {item_id}. Pulando...{OFF}"
                 )
             if is_playlist:
-                self.settings.plfailed = getattr(self.settings, "plfailed", 0) + 1
+                self.settings.pl_failed = getattr(self.settings, "pl_failed", 0) + 1
         except (httpx.RequestError, NonStreamable) as e:
             logger.error(f"{RED}Erro na liberação: {e}. Pulando...{OFF}")
             if is_playlist:
-                self.settings.plfailed = getattr(self.settings, "plfailed", 0) + 1
+                self.settings.pl_failed = getattr(self.settings, "pl_failed", 0) + 1
         except Exception as e:
             logger.error(
                 f"{RED}Erro inesperado baixando item {item_id}: {e}. Pulando...{OFF}"
             )
             logger.debug("Detalhes do erro inesperado", exc_info=True)
             if is_playlist:
-                self.settings.plfailed = getattr(self.settings, "plfailed", 0) + 1
+                self.settings.pl_failed = getattr(self.settings, "pl_failed", 0) + 1
 
         if getattr(self, "delay", 0) > 0:
             logger.info(
@@ -1593,7 +1589,7 @@ class QobuzDL:
         if not txt_file or not os.path.isfile(txt_file):
             return
         try:
-            with open(txt_file, "r", encoding="utf-8") as f:
+            with open(txt_file, encoding="utf-8") as f:
                 lines = f.readlines()
 
             with open(txt_file, "w", encoding="utf-8") as f:
@@ -1726,7 +1722,7 @@ class QobuzDL:
         repassa a lista limpa pra download_list_of_urls()."""
         try:
             valid_urls = []
-            with open(txt_file, "r", encoding="utf-8") as txt:
+            with open(txt_file, encoding="utf-8") as txt:
                 for line in txt:
                     line = line.strip()
                     if not line or line.startswith("#") or "[DONE]" in line:
@@ -2020,8 +2016,12 @@ class QobuzDL:
                                     p_data = rp.json()
                                     if "id" in p_data:
                                         iterable.append(p_data)
-                                except Exception:
-                                    pass
+                                except Exception as e:
+                                    # Uma playlist individual falhando não
+                                    # deve interromper a busca das outras.
+                                    logger.debug(
+                                        f"Falha ao buscar playlist individual: {e}"
+                                    )
                     except Exception as e:
                         logger.error(f"{RED}Erro ao buscar playlists: {e}{OFF}")
 

@@ -3,18 +3,22 @@
 # externos (ffmpeg/fpcalc), verificação de integridade de áudio, limpeza de
 # nomes de arquivo e resolução de caminhos de configuração multiplataforma.
 
-import re
-import string
-import os
+import difflib
 import logging
+import os
+import re
 import shutil
+import string
 import subprocess
 import time
-import urllib.parse
-import difflib
-from qobuz_dl.color import RED, WARNING as YELLOW, INFO as CYAN, OFF
 import unicodedata
+import urllib.parse
+
 import platformdirs
+
+from qobuz_dl.color import INFO as CYAN
+from qobuz_dl.color import OFF, RED
+from qobuz_dl.color import WARNING as YELLOW
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -34,7 +38,7 @@ class PartialFormatter(string.Formatter):
         # Campo ausente: em vez de lançar KeyError/AttributeError, devolve
         # None para que format_field() substitua pelo valor `missing`.
         try:
-            val = super(PartialFormatter, self).get_field(field_name, args, kwargs)
+            val = super().get_field(field_name, args, kwargs)
         except (KeyError, AttributeError):
             val = None, field_name
         return val
@@ -46,7 +50,7 @@ class PartialFormatter(string.Formatter):
         if not value:
             return self.missing
         try:
-            return super(PartialFormatter, self).format_field(value, spec)
+            return super().format_field(value, spec)
         except ValueError:
             if self.bad_fmt:
                 return self.bad_fmt
@@ -61,12 +65,13 @@ def make_m3u(pl_directory, remote_items=None):
     # fornecido, usa um algoritmo de 4 passes para casar cada item remoto
     # com o arquivo local correspondente e preservar a ordem exata da
     # playlist online -- ignorando completamente o nome físico do arquivo.
+    import logging
     import os
     import re
-    import logging
-    from mutagen.id3 import ID3
-    from mutagen.flac import FLAC
+
     from mutagen import File
+    from mutagen.flac import FLAC
+    from mutagen.id3 import ID3
 
     logger = logging.getLogger(__name__)
     EXTENSIONS = (".mp3", ".flac")
@@ -958,10 +963,10 @@ def get_config_paths():
     # config.ini e do banco de dados dentro dele.
     #
     # Centraliza aqui a lógica de detecção que antes só existia em cli.py
-    # -- outros pontos de entrada (ex.: radar.py) precisam da mesma
-    # resolução exata, e manter uma única fonte de verdade significa que
-    # uma mudança futura nessa lógica (ex.: suportar uma nova plataforma)
-    # só precisa acontecer em um lugar.
+    # -- outros pontos de entrada precisam da mesma resolução exata, e
+    # manter uma única fonte de verdade significa que uma mudança futura
+    # nessa lógica (ex.: suportar uma nova plataforma) só precisa
+    # acontecer em um lugar.
     ios_home = os.environ.get("QOBUZ_DL_IOS_HOME")
     config_dir = os.environ.get("CONFIG_DIR")
 

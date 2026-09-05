@@ -2,8 +2,8 @@
 import asyncio
 import configparser
 import os
-import time
 import re
+import time
 
 from qobuz_dl.qopy import Client
 from qobuz_dl.utils import get_url_info

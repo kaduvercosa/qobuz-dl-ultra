@@ -19,32 +19,26 @@ import string
 import sys
 import time
 from datetime import datetime
-from packaging.version import Version
+
 import httpx
 import keyring
 import send2trash
+from packaging.version import Version
+
+from qobuz_dl import fuzzy, ui
 
 # Módulos internos do ecossistema QOBUZ-DL
 from qobuz_dl.bundle import Bundle
-from qobuz_dl.color import (
-    ACCENT_PRESETS,
-    BG,
-    GREEN,
-    HIGHLIGHT as ACCENT,
-    INFO as CYAN,
-    OFF,
-    RED,
-    RESET,
-    WARNING as YELLOW,
-    accent_preview,
-    MUTED,
-)
+from qobuz_dl.color import ACCENT_PRESETS, BG, GREEN
+from qobuz_dl.color import HIGHLIGHT as ACCENT
+from qobuz_dl.color import INFO as CYAN
+from qobuz_dl.color import MUTED, OFF, RED, RESET
+from qobuz_dl.color import WARNING as YELLOW
+from qobuz_dl.color import accent_preview
 from qobuz_dl.commands import qobuz_dl_args
 from qobuz_dl.core import QobuzDL
 from qobuz_dl.downloader import DEFAULT_FOLDER, DEFAULT_TRACK
-from qobuz_dl import fuzzy
 from qobuz_dl.settings import QobuzDLSettings
-from qobuz_dl import ui
 from qobuz_dl.utils import checar_binarios_externos, get_config_paths
 
 logger = logging.getLogger(__name__)
@@ -822,8 +816,10 @@ async def _handle_commands(qobuz: QobuzDL, arguments):
         ui.warn("Arquivos parciais foram enviados para a lixeira.")
         try:
             _remove_leftovers(qobuz.directory)
-        except Exception:
-            pass
+        except Exception as e:
+            # Best-effort: mesmo se a limpeza falhar, o programa tem que
+            # terminar (sys.exit abaixo). So' registra pra facilitar debug.
+            logger.debug(f"Falha ao limpar arquivos parciais no CTRL+C: {e}")
         sys.exit(1)
 
     signal.signal(signal.SIGINT, sigint_handler)
@@ -972,7 +968,6 @@ _COMMAND_DESCRIPTIONS_PT = {
     "lyrics": "Varre uma pasta já baixada e injeta letras/traduções que estejam faltando.",
     "sync-playlist": "Sincroniza uma pasta local com uma playlist do Qobuz (baixa o que falta, remove o que saiu).",
     "import-playlist": "Importa um arquivo de playlist (TXT, CSV, JSON) de qualquer plataforma para download.",
-    "radar": "Monitora e intercepta links copiados para download automático.",
     "stats": "Mostra estatísticas detalhadas sobre sua biblioteca e downloads efetuados.",
     "auth": "Exibe status da conta/assinatura ou atualiza credenciais de login e token.",
     "user": "Exibe informações da conta, status da assinatura e dados do perfil.",
@@ -999,9 +994,10 @@ def _print_welcome_screen():
     ui.emit(f"{RESET}{pad_version}{version_line}\n")
 
     ui.rule("=")
-    ui.emit(f"{ACCENT}{BG}Uso: qobuz-dl ou qdl + <comando>, Ex: qdl i{OFF}")
+    ui.emit(f"{ACCENT}{BG}Uso: qobuz-dl ou qdl + <comando>{OFF}")
     ui.wrapped(
-        f"{ACCENT}Ajuda:{RESET} qobuz-dl <comando> --help {MUTED}(lista todas as opções daquele comando){OFF}",
+        f"{ACCENT}Help:{RESET} qobuz-dl <comando> --help "
+        f"{MUTED}(lista todas as opções do comando){OFF} ",
         indent=4,
     )
     ui.blank()
@@ -1078,23 +1074,16 @@ async def async_main():
         try:
             loop = asyncio.get_running_loop()
             await loop.run_in_executor(None, check_for_updates)
-        except Exception:
-            pass
+        except Exception as e:
+            # Checagem de atualização é best-effort e roda em background;
+            # uma falha aqui (rede fora, PyPI indisponível) nunca deve
+            # impactar o download em andamento -- so' fica registrado.
+            logger.debug(f"Checagem de atualização falhou: {e}")
 
     asyncio.create_task(_async_check_updates())
 
     offline_args, _unknown = qobuz_dl_args().parse_known_args()
     offline_command = getattr(offline_args, "command", None)
-
-    if offline_command == "radar":
-        from qobuz_dl.radar import run_radar
-
-        try:
-            await run_radar()
-        except KeyboardInterrupt:
-            ui.blank()
-            ui.error("Radar interrompido manualmente pelo usuário (CTRL+C).")
-        sys.exit(0)
 
     if offline_command == "stats":
         from qobuz_dl.stats_view import render_stats
@@ -1236,7 +1225,7 @@ async def async_main():
 
     if arguments.show_config:
         ui.emit_always(f"Configuração: {CONFIG_FILE}\nDatabase: {QOBUZ_DB}\n---")
-        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+        with open(CONFIG_FILE, encoding="utf-8") as f:
             ui.emit_always(f.read())
         sys.exit(0)
 
@@ -1272,9 +1261,9 @@ async def async_main():
     )
 
     if getattr(arguments, "sync_db", None):
-        from qobuz_dl.sync import sync_database
-        from qobuz_dl.qopy import Client
         from qobuz_dl.db import create_db
+        from qobuz_dl.qopy import Client
+        from qobuz_dl.sync import sync_database
 
         create_db(QOBUZ_DB)
         sync_client = await Client.create(
@@ -1377,8 +1366,8 @@ async def async_main():
         sys.exit(0)
 
     if arguments.command == "lyrics":
-        from qobuz_dl.retro_tagger import inject_lyrics_retroactively
         from qobuz_dl.qopy import Client
+        from qobuz_dl.retro_tagger import inject_lyrics_retroactively
 
         target_dir = getattr(arguments, "DIR", None) or default_folder
         target_dir = os.path.expanduser(target_dir)

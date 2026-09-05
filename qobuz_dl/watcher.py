@@ -14,10 +14,13 @@ import asyncio
 import logging
 import os
 
-from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
+from watchdog.observers import Observer
 
-from qobuz_dl.color import SUCCESS as GREEN, WARNING as YELLOW, INFO as CYAN, OFF
+from qobuz_dl.color import INFO as CYAN
+from qobuz_dl.color import OFF
+from qobuz_dl.color import SUCCESS as GREEN
+from qobuz_dl.color import WARNING as YELLOW
 from qobuz_dl.retro_tagger import inject_lyrics_retroactively
 
 logger = logging.getLogger(__name__)

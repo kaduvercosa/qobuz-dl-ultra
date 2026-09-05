@@ -20,7 +20,6 @@ import threading
 import time
 
 import pytest
-
 from tqdm.rich import tqdm
 
 from qobuz_dl import ui

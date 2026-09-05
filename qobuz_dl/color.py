@@ -16,11 +16,12 @@
 #     logo abaixo dos imports antes de mexer nisso.
 # ==============================================================================
 
-import os
-import sys
 import configparser
+import os
 import shutil
-from colorama import Style, Fore, just_fix_windows_console
+import sys
+
+from colorama import Fore, Style, just_fix_windows_console
 
 # BUGFIX: aqui rodava `init(autoreset=True)` no import do modulo. Dois
 # problemas serios:
@@ -216,7 +217,12 @@ def _load_accent_rgb() -> tuple:
         parts = [int(x.strip()) for x in rgb.split(";")]
         if len(parts) == 3 and all(0 <= p <= 255 for p in parts):
             return tuple(parts)
-    except Exception:
+    except (ValueError, configparser.Error, OSError):
+        # Config corrompido/mal formatado (ex.: accent_color com lixo) --
+        # cai pro padrão de propósito, sem barulho. Restrito a estes tipos
+        # (em vez de Exception genérico) pra não mascarar um bug de verdade
+        # aqui, e não vira log porque isto roda no import do módulo, antes
+        # de qualquer logging estar configurado (ver comentário abaixo).
         pass
 
     return _DEFAULT_ACCENT_RGB

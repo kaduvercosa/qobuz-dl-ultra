@@ -20,6 +20,7 @@ import base64
 import logging
 import re
 from collections import OrderedDict
+
 import httpx
 
 # Configuração do logger local para registrar eventos e depuração (debug)

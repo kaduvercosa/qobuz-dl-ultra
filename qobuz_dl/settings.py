@@ -3,10 +3,11 @@
 # # Reúne valores da CLI e do config.ini para serem consumidos pelo restante do projeto.
 # # ============================================================================
 import os
+
 from qobuz_dl.constants import (
     DEFAULT_FOLDER,
-    DEFAULT_TRACK,
     DEFAULT_MULTIPLE_DISC_TRACK,
+    DEFAULT_TRACK,
 )
 
 _MISSING = object()

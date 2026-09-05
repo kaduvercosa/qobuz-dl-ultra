@@ -70,7 +70,7 @@ def _load_report(path: str) -> dict:
         return {}
 
     try:
-        with open(path, "r", encoding="utf-8") as file:
+        with open(path, encoding="utf-8") as file:
             data = json.load(file)
         return data if isinstance(data, dict) else {}
     except Exception as exc:

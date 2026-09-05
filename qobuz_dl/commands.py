@@ -8,7 +8,10 @@ import argparse
 import os
 import re
 import shutil
-from qobuz_dl.color import INFO as CYAN, RESET as OFF, BG
+
+from qobuz_dl.color import BG
+from qobuz_dl.color import INFO as CYAN
+from qobuz_dl.color import RESET as OFF
 
 
 # ----------------------------------------------------------------------------
@@ -670,19 +673,6 @@ def add_common_arg(custom_parser, default_folder, default_quality):
 
 
 # ----------------------------------------------------------------------------
-# Subcomando: "radar"
-# ----------------------------------------------------------------------------
-def radar_args(subparsers):
-    radar = subparsers.add_parser(
-        "radar",
-        usage="qobuz-dl radar [opções]",
-        description="Monitora e intercepta links copiados para download automático.",
-        help="inicia o radar em segundo plano",
-    )
-    return radar
-
-
-# ----------------------------------------------------------------------------
 # Subcomando: "stats"
 # ----------------------------------------------------------------------------
 def stats_args(subparsers):
@@ -773,7 +763,6 @@ def qobuz_dl_args(default_quality=6, default_limit=20, default_folder=None):
     lucky = lucky_args(subparsers)
     lyrics_cmd = lyrics_args(subparsers, default_folder=default_folder)
     sync_pl_cmd = sync_playlist_args(subparsers)
-    radar = radar_args(subparsers)
     stats = stats_args(subparsers)
     auth_cmd = auth_args(subparsers)
     user_cmd = user_args(subparsers)
@@ -788,7 +777,6 @@ def qobuz_dl_args(default_quality=6, default_limit=20, default_folder=None):
         lucky,
         lyrics_cmd,
         sync_pl_cmd,
-        radar,
         stats,
         auth_cmd,
         user_cmd,

@@ -1,7 +1,7 @@
-import os
-import sys
-import subprocess
 import configparser
+import os
+import subprocess
+import sys
 
 try:
     from prompt_toolkit.shortcuts import radiolist_dialog

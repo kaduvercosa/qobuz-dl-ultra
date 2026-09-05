@@ -2,16 +2,20 @@
 # # sync.py -- reconstrução do banco local e detecção de faixas duplicadas.
 # # Fluxo: varrer biblioteca → extrair IDs/ISRC → gravar no banco ou comparar fingerprints.
 # # ============================================================================
-import os
-import logging
 import asyncio
-import acoustid
+import logging
+import os
 import unicodedata
+
+from mutagen import File
 from mutagen.flac import FLAC
 from mutagen.id3 import ID3
-from mutagen import File
+
+from qobuz_dl.color import GREEN
+from qobuz_dl.color import INFO as CYAN
+from qobuz_dl.color import OFF, RED
+from qobuz_dl.color import WARNING as YELLOW
 from qobuz_dl.db import handle_download_id
-from qobuz_dl.color import GREEN, RED, WARNING as YELLOW, INFO as CYAN, OFF
 
 logger = logging.getLogger(__name__)
 
@@ -220,79 +224,69 @@ async def sync_database(directory, db_path, client):
     )
 
 
-# # Prioriza Chromaprint; sem ele, cai em MD5 de áudio, depois ID/ISRC, depois metadados.
+# # Prioriza MD5 de áudio, depois ID/ISRC, depois metadados.
 def _compute_fingerprint(filepath, max_length=120):
     """
-    Tenta calcular a fingerprint via Chromaprint primeiro. Se falhar, usa um
-    sistema de 3 níveis de precisão nativo do Python:
+    Usa um sistema de 3 níveis de precisão nativo do Python:
     1. FLAC Native Audio MD5 (Perfeito para FLACs, ignora tags e analisa o áudio real)
     2. IDs Universais (QOBUZTRACKID ou ISRC)
     3. Metadados Expandidos (Artista + Álbum + Título + Duração)
     """
     try:
-        # # Caminho preferido quando o Chromaprint/fpcalc está disponível no sistema.
-        duration, fingerprint = acoustid.fingerprint_file(
-            filepath, maxlength=max_length, force_fpcalc=False
-        )
-        return duration, fingerprint
-    except Exception:
-        try:
-            duration = 0
+        duration = 0
 
-            if filepath.lower().endswith(".flac"):
-                audio_flac = FLAC(filepath)
-                duration = int(audio_flac.info.length)
+        if filepath.lower().endswith(".flac"):
+            audio_flac = FLAC(filepath)
+            duration = int(audio_flac.info.length)
 
-                # # MD5 nativo do FLAC identifica áudio idêntico mesmo com tags diferentes.
-                if getattr(audio_flac.info, "md5_signature", 0) != 0:
-                    return duration, f"flac_audio_md5:{audio_flac.info.md5_signature}"
+            # # MD5 nativo do FLAC identifica áudio idêntico mesmo com tags diferentes.
+            if getattr(audio_flac.info, "md5_signature", 0) != 0:
+                return duration, f"flac_audio_md5:{audio_flac.info.md5_signature}"
 
-                track_id = audio_flac.get("QOBUZTRACKID", [None])[0]
-                isrc = audio_flac.get("isrc", [None])[0]
+            track_id = audio_flac.get("QOBUZTRACKID", [None])[0]
+            isrc = audio_flac.get("isrc", [None])[0]
 
-                if track_id:
-                    return duration, f"qobuz_id:{track_id}"
-                if isrc:
-                    return duration, f"isrc:{isrc}"
+            if track_id:
+                return duration, f"qobuz_id:{track_id}"
+            if isrc:
+                return duration, f"isrc:{isrc}"
 
-            elif filepath.lower().endswith(".mp3"):
-                audio_id3 = ID3(filepath)
+        elif filepath.lower().endswith(".mp3"):
+            audio_id3 = ID3(filepath)
 
-                track_txxx = audio_id3.get("TXXX:QOBUZTRACKID")
-                if track_txxx:
-                    return duration, f"qobuz_id:{track_txxx.text[0]}"
+            track_txxx = audio_id3.get("TXXX:QOBUZTRACKID")
+            if track_txxx:
+                return duration, f"qobuz_id:{track_txxx.text[0]}"
 
-                tsrc = audio_id3.get("TSRC")
-                if tsrc:
-                    return duration, f"isrc:{tsrc.text[0]}"
+            tsrc = audio_id3.get("TSRC")
+            if tsrc:
+                return duration, f"isrc:{tsrc.text[0]}"
 
-            audio = File(filepath, easy=True)
-            if audio is None:
-                return None, None
-
-            duration = int(audio.info.length) if hasattr(audio, "info") else duration
-            title = audio.get("title", [""])[0] if audio.get("title") else ""
-            artist = audio.get("artist", [""])[0] if audio.get("artist") else ""
-            album = audio.get("album", [""])[0] if audio.get("album") else ""
-
-            def norm(s):
-                return (
-                    unicodedata.normalize("NFKD", str(s))
-                    .encode("ASCII", "ignore")
-                    .decode("utf-8")
-                    .lower()
-                    .strip()
-                )
-
-            # # Último recurso: assinatura baseada em artista, álbum, título e duração normalizados.
-            meta_fp = f"meta_hash:{norm(artist)}|{norm(album)}|{norm(title)}|{duration}"
-            return duration, meta_fp
-
-        except Exception as meta_err:
-            logger.debug(
-                f"Falha total ao ler arquivo para fallback '{filepath}': {meta_err}"
-            )
+        audio = File(filepath, easy=True)
+        if audio is None:
             return None, None
+
+        duration = int(audio.info.length) if hasattr(audio, "info") else duration
+        title = audio.get("title", [""])[0] if audio.get("title") else ""
+        artist = audio.get("artist", [""])[0] if audio.get("artist") else ""
+        album = audio.get("album", [""])[0] if audio.get("album") else ""
+
+        def norm(s):
+            return (
+                unicodedata.normalize("NFKD", str(s))
+                .encode("ASCII", "ignore")
+                .decode("utf-8")
+                .lower()
+                .strip()
+            )
+
+        # # Último recurso: assinatura baseada em artista, álbum, título e duração normalizados.
+        meta_fp = f"meta_hash:{norm(artist)}|{norm(album)}|{norm(title)}|{duration}"
+        return duration, meta_fp
+
+    except Exception as meta_err:
+        logger.debug(f"Falha ao ler arquivo para fallback '{filepath}': {meta_err}")
+        return None, None
 
 
 # # Agrupa arquivos pela mesma fingerprint para revelar duplicatas reais.

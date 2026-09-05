@@ -8,28 +8,31 @@ import hashlib
 import logging
 import time
 import unicodedata
-from datetime import datetime, date
+from datetime import date, datetime
 from typing import Any, Dict
+
 import httpx
-from tenacity import (
-    AsyncRetrying,
-    stop_after_attempt,
-    wait_exponential,
-    retry_if_exception_type,
-)
-from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.primitives import hashes, padding
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+from tenacity import (
+    AsyncRetrying,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
 
+from qobuz_dl import ui
+from qobuz_dl.color import GREEN
+from qobuz_dl.color import INFO as CYAN
+from qobuz_dl.color import OFF, RED, RESET
+from qobuz_dl.color import WARNING as YELLOW
 from qobuz_dl.exceptions import (
     AuthenticationError,
     InvalidAppSecretError,
     InvalidQuality,
     NoActiveSubscriptionError,
 )
-
-from qobuz_dl.color import GREEN, WARNING as YELLOW, RED, OFF, RESET, INFO as CYAN
-from qobuz_dl import ui
 
 try:
     from qobuz_dl.bundle import Bundle
@@ -239,7 +242,9 @@ class Client:
                 start_date_br = datetime.strptime(
                     str(start_date)[:10], "%Y-%m-%d"
                 ).strftime("%d/%m/%Y")
-            except Exception:
+            except ValueError:
+                # Data em formato inesperado -- mantem a string original
+                # (start_date_br ja' foi inicializado com ela acima).
                 pass
 
         end_date_br = end_date
@@ -822,8 +827,11 @@ class Client:
                 track = await self.api_call("track/getFileUrl", id=id, fmt_id=fmt_id)
                 if "url" in track:
                     return track
-            except Exception:
-                pass
+            except Exception as e:
+                # Caminho normal falhou -- cai pro download segmentado
+                # abaixo de proposito (qualquer erro aqui e' motivo valido
+                # pra fallback), so' registra pra facilitar diagnostico.
+                logger.debug(f"track/getFileUrl falhou, caindo pro segmentado: {e}")
 
         if self.session_id is None:
             async with self._session_init_lock:

@@ -3,20 +3,19 @@
 # Fluxo principal: LyricsEngine.fetch_and_inject() -> Qobuz -> LRCLIB -> Genius.
 # As rotinas de persistencia sao _save_lrc_file() e _inject_metadata().
 # ============================================================================
+import logging
 import os
 import re
-import logging
+
 import httpx
-from mutagen.id3 import ID3, USLT, TXXX, ID3NoHeaderError
 from mutagen.flac import FLAC
+from mutagen.id3 import ID3, TXXX, USLT, ID3NoHeaderError
 from tqdm import tqdm
-from qobuz_dl.color import (
-    SUCCESS as GREEN,
-    WARNING as YELLOW,
-    ERROR as RED,
-    RESET,
-    MUTED,
-)
+
+from qobuz_dl.color import ERROR as RED
+from qobuz_dl.color import MUTED, RESET
+from qobuz_dl.color import SUCCESS as GREEN
+from qobuz_dl.color import WARNING as YELLOW
 from qobuz_dl.settings import QobuzDLSettings
 
 logger = logging.getLogger(__name__)
@@ -225,6 +224,54 @@ class LyricsEngine:
 
         return "\n".join(final_lrc)
 
+    def _inject_instrumental_pauses(self, lrc_text):
+        """
+        Adiciona marcador de pausa instrumental '3 (• • •)' 0.5s após a última
+        linha se houver um intervalo maior que 10 segundos na sincronização.
+        """
+        if not lrc_text:
+            return lrc_text
+
+        lines = lrc_text.splitlines()
+        parsed_lines = []
+        time_tag_re = re.compile(r"\[(\d{2,}):(\d{2})\.(\d{2,3})\]")
+
+        # 1. Extrai o timestamp (ms) de cada linha
+        for line in lines:
+            tags = time_tag_re.findall(line)
+            if not tags:
+                parsed_lines.append({"time": None, "raw": line})
+                continue
+
+            m, s, ms = tags[0]
+            time_ms = int(m) * 60000 + int(s) * 1000 + int(ms.ljust(3, "0")[:3])
+            parsed_lines.append({"time": time_ms, "raw": line})
+
+        new_lines = []
+        last_time = None
+
+        # 2. Percorre as linhas para calcular os saltos de tempo
+        for item in parsed_lines:
+            curr_time = item["time"]
+
+            if last_time is not None and curr_time is not None:
+                gap = curr_time - last_time
+                # Se a diferença for maior que 10s (10000ms), insere o marcador
+                if gap > 10000:
+                    inst_time = last_time + 1000
+                    pause_line = f"{self._ms_to_lrc_timestamp(inst_time)} • • •"
+                    # Evita duplicar marcadores no mesmo instante (útil para LRCs bilíngues)
+                    if not new_lines or new_lines[-1] != pause_line:
+                        new_lines.append(pause_line)
+
+            new_lines.append(item["raw"])
+
+            # Atualiza o último tempo validado
+            if curr_time is not None:
+                last_time = curr_time
+
+        return "\n".join(new_lines)
+
     def _fetch_musixmatch_lyrics(self, artist, title):
         """Busca letras sincronizadas no Musixmatch (síncrono)."""
         headers = {
@@ -389,6 +436,8 @@ class LyricsEngine:
                     source_label = "Qobuz"
 
                     if final_sync:
+                        final_sync = self._inject_instrumental_pauses(final_sync)
+
                         is_bilingual = bool(best_trans and best_trans.get("synced"))
                         result["synchronized"] = True
                         result["bilingual"] = is_bilingual
@@ -495,6 +544,9 @@ class LyricsEngine:
             if mxm_lyrics:
                 is_synced = bool(re.search(r"\[\d{2,}:\d{2}(?:\.\d+)?\]", mxm_lyrics))
 
+                if is_synced:
+                    mxm_lyrics = self._inject_instrumental_pauses(mxm_lyrics)
+
                 if only_synced and not is_synced:
                     pass  # Pula para o LRCLIB se a restrição de sincronia estiver ativa
                 else:
@@ -569,6 +621,8 @@ class LyricsEngine:
                     plain_lyrics = None
 
                 if synced_lyrics:
+                    synced_lyrics = self._inject_instrumental_pauses(synced_lyrics)
+
                     result["synchronized"] = True
                     result["source"] = "LRCLIB"
                     result["language"] = "unknown"

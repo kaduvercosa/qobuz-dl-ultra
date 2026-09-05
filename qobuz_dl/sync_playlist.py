@@ -2,12 +2,16 @@
 # # sync_playlist.py -- sincronização bidirecional entre playlist Qobuz e pasta local.
 # # Compara IDs, baixa faixas ausentes, remove órfãs e atualiza o arquivo .m3u.
 # # ============================================================================
-import os
 import logging
+import os
+
 from mutagen.flac import FLAC
 from mutagen.id3 import ID3
 
-from qobuz_dl.color import INFO as CYAN, GREEN, RED, WARNING as YELLOW, OFF
+from qobuz_dl.color import GREEN
+from qobuz_dl.color import INFO as CYAN
+from qobuz_dl.color import OFF, RED
+from qobuz_dl.color import WARNING as YELLOW
 
 logger = logging.getLogger(__name__)
 

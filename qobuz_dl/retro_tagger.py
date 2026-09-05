@@ -2,18 +2,22 @@
 # retro_tagger.py -- inspecao e atualizacao retroativa de letras na biblioteca.
 # Fluxo: localizar IDs/metadados -> consultar Qobuz -> atualizar letras -> relatorio.
 # ============================================================================
+import logging
 import os
 import re
-import time
-import logging
-from mutagen.flac import FLAC
-import mutagen.id3 as id3
-
-from qobuz_dl.settings import QobuzDLSettings
-from qobuz_dl.lyrics_engine import LyricsEngine
-from qobuz_dl import ui
 import shutil as _shutil
-from qobuz_dl.color import INFO as CYAN, GREEN, WARNING as YELLOW, RED, OFF, RESET, BG
+import time
+
+import mutagen.id3 as id3
+from mutagen.flac import FLAC
+
+from qobuz_dl import ui
+from qobuz_dl.color import BG, GREEN
+from qobuz_dl.color import INFO as CYAN
+from qobuz_dl.color import OFF, RED, RESET
+from qobuz_dl.color import WARNING as YELLOW
+from qobuz_dl.lyrics_engine import LyricsEngine
+from qobuz_dl.settings import QobuzDLSettings
 
 logger = logging.getLogger(__name__)
 
@@ -100,7 +104,7 @@ def inspect_existing_lyrics(file_path: str) -> dict:
     file_lang = None
     if os.path.exists(lrc_path):
         try:
-            with open(lrc_path, "r", encoding="utf-8", errors="ignore") as f:
+            with open(lrc_path, encoding="utf-8", errors="ignore") as f:
                 file_lyrics = f.read()
             m = re.search(r"\[la:\s*([a-zA-Z+\-]+)\s*\]", file_lyrics)
             if m:
@@ -109,7 +113,7 @@ def inspect_existing_lyrics(file_path: str) -> dict:
             logger.debug(f"Falha ao ler arquivo .lrc externo: {e}")
     elif os.path.exists(txt_path) and "Tracklist" not in txt_path:
         try:
-            with open(txt_path, "r", encoding="utf-8", errors="ignore") as f:
+            with open(txt_path, encoding="utf-8", errors="ignore") as f:
                 file_lyrics = f.read()
         except Exception as e:
             logger.debug(f"Falha ao ler arquivo .txt de letra externo: {e}")
