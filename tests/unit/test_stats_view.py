@@ -105,7 +105,9 @@ class TestRenderStatsSemDados:
         assert codigo == 0
         assert any(c[0] == "warn" for c in capturado)
 
-    def test_sem_dados_nao_tenta_mostrar_secoes_de_qualidade(self, monkeypatch, capturado):
+    def test_sem_dados_nao_tenta_mostrar_secoes_de_qualidade(
+        self, monkeypatch, capturado
+    ):
         monkeypatch.setattr(stats_view, "get_stats", lambda db_path: {"total": 0})
         render_stats("qualquer.db")
         # Não deve nem tentar montar a seção de qualidade/formatos sem
@@ -131,7 +133,9 @@ class TestRenderStatsComDados:
             "TOP ARTISTAS",
         ]
 
-    def test_percentuais_de_hires_e_qualidade_calculados_certo(self, monkeypatch, capturado):
+    def test_percentuais_de_hires_e_qualidade_calculados_certo(
+        self, monkeypatch, capturado
+    ):
         # hires=4 de total=10 -> 40%; quality_met=8 de 10 -> 80%.
         monkeypatch.setattr(stats_view, "get_stats", lambda db_path: _stats_completo())
         render_stats("qualquer.db")
@@ -165,10 +169,7 @@ class TestRenderStatsComDados:
     ):
         monkeypatch.setattr(stats_view, "get_stats", lambda db_path: _stats_completo())
         render_stats("qualquer.db", show_all_artists=False)
-        assert any(
-            c[0] == "detail" and "--artistas" in str(c[1])
-            for c in capturado
-        )
+        assert any(c[0] == "detail" and "--artistas" in str(c[1]) for c in capturado)
 
     def test_show_all_artists_adiciona_secao_com_a_lista_completa(
         self, monkeypatch, capturado
@@ -180,8 +181,7 @@ class TestRenderStatsComDados:
         # E a dica de usar --artistas não deveria aparecer de novo, já
         # que o usuário já pediu a lista completa.
         assert not any(
-            c[0] == "detail" and "--artistas" in str(c[1])
-            for c in capturado
+            c[0] == "detail" and "--artistas" in str(c[1]) for c in capturado
         )
 
     def test_top_artists_modo_largo_usa_uma_linha_por_artista(

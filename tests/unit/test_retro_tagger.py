@@ -15,10 +15,10 @@ letra de nenhuma música real. O que está sendo testado é a lógica de
 parsing/deteção (existe letra? em que campo? é bilíngue?), não o conteúdo
 em si.
 """
+
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-import pytest
 
 from qobuz_dl import retro_tagger
 from qobuz_dl.retro_tagger import (
@@ -274,9 +274,7 @@ class TestInspectExistingLyricsBilingue:
         monkeypatch.setattr(
             retro_tagger,
             "FLAC",
-            lambda path: _FakeFLAC(
-                LYRICS=[_PLACEHOLDER], LYRICS_LANG=["en+pt"]
-            ),
+            lambda path: _FakeFLAC(LYRICS=[_PLACEHOLDER], LYRICS_LANG=["en+pt"]),
         )
         resultado = inspect_existing_lyrics(str(tmp_path / "faixa.flac"))
         assert resultado["is_bilingual"] is True

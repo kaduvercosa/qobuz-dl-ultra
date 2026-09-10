@@ -16,6 +16,7 @@ script usa heurísticas calibradas no histórico REAL do projeto (ver
 CATEGORIAS abaixo) e já filtra o ruído (auto-fix do Ruff, merges, commits
 de cache) que não interessa pra quem só quer saber "o que mudou".
 """
+
 import argparse
 import re
 import subprocess
@@ -47,7 +48,10 @@ CATEGORIAS = [
     ("🔥 Removido", [r"^Remove\b", r"^Delete\b", r"^Drop\b"]),
     ("♻️ Refatoração", [r"^refactor", r"^Refactor\b"]),
     ("📦 Dependências", [r"^deps", r"^chore\(deps\)", r"^ci: bump the .* group"]),
-    ("🔧 CI / Infraestrutura", [r"^ci:", r".*workflow.*", r"^Configure\b", r"^Rename\b.*\.yml"]),
+    (
+        "🔧 CI / Infraestrutura",
+        [r"^ci:", r".*workflow.*", r"^Configure\b", r"^Rename\b.*\.yml"],
+    ),
     ("📝 Documentação", [r"^docs", r".*README.*", r".*documenta"]),
     ("🔄 Alterações", [r"^update", r"^Update\b", r"^Modify\b", r"^Change\b"]),
 ]
@@ -81,9 +85,7 @@ def _categorizar(mensagem: str) -> str:
 
 
 def gerar_changelog(ref_de: str, ref_para: str) -> str:
-    log_bruto = _rodar_git(
-        "log", "--pretty=format:%s", f"{ref_de}..{ref_para}"
-    )
+    log_bruto = _rodar_git("log", "--pretty=format:%s", f"{ref_de}..{ref_para}")
     mensagens = [m for m in log_bruto.split("\n") if m.strip()]
 
     grupos: dict[str, list[str]] = {}
@@ -109,7 +111,9 @@ def gerar_changelog(ref_de: str, ref_para: str) -> str:
         linhas.append("")
 
     if not algo_impresso:
-        linhas.append("_Sem mudanças relevantes registradas (só commits de rotina/CI)._\n")
+        linhas.append(
+            "_Sem mudanças relevantes registradas (só commits de rotina/CI)._\n"
+        )
 
     linhas.append(
         f"<sub>{len(mensagens)} commit(s) no total, {ignorados} de rotina "
@@ -129,7 +133,10 @@ def main():
         help="Ref inicial. Padrão: a tag mais próxima antes de --para.",
     )
     parser.add_argument(
-        "-o", "--output", default=None, help="Salva em arquivo em vez de imprimir no stdout."
+        "-o",
+        "--output",
+        default=None,
+        help="Salva em arquivo em vez de imprimir no stdout.",
     )
     args = parser.parse_args()
 

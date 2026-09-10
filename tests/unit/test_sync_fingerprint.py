@@ -22,10 +22,9 @@ faz `duration, fp = ...` e só usa `fp` daí em diante) -- então os testes
 abaixo documentam esse `0` como comportamento atual, não como algo a
 consertar.
 """
-import unicodedata
+
 from types import SimpleNamespace
 
-import pytest
 
 from qobuz_dl import sync
 from qobuz_dl.sync import _compute_fingerprint
@@ -141,9 +140,7 @@ class TestFingerprintMp3:
         monkeypatch.setattr(
             sync,
             "ID3",
-            lambda path: _FakeID3(
-                {"TXXX:QOBUZTRACKID": _FakeID3Frame("xyz789")}
-            ),
+            lambda path: _FakeID3({"TXXX:QOBUZTRACKID": _FakeID3Frame("xyz789")}),
         )
         duration, fp = _compute_fingerprint("faixa.mp3")
         assert fp == "qobuz_id:xyz789"
@@ -163,9 +160,7 @@ class TestFingerprintMp3:
         monkeypatch.setattr(
             sync,
             "File",
-            lambda path, easy: _FakeEasyFile(
-                tags={"title": ["Faixa MP3"]}, length=90
-            ),
+            lambda path, easy: _FakeEasyFile(tags={"title": ["Faixa MP3"]}, length=90),
         )
         duration, fp = _compute_fingerprint("faixa.mp3")
         assert duration == 90
