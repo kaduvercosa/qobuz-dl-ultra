@@ -17,6 +17,25 @@ name: CI
 # propósito: exige login real no Qobuz e acesso à internet, não é
 # coletado pelo pytest (não tem prefixo "test_"), e não faz sentido em
 # CI. Ver tests/manual/README.md.
+#
+# MUDANÇAS DESTA REVISÃO:
+#   - cache: 'pip' no setup-python -- evita reinstalar tudo do zero em
+#     cada uma das 7 combinações do matrix (5 versões de Python + 2 SOs
+#     extras). A chave do cache é derivada automaticamente do
+#     pyproject.toml pelo próprio setup-python.
+#   - Matrix ganhou Windows e macOS, mas só numa versão de Python (3.13)
+#     -- não faz sentido multiplicar as 5 versões por 3 SOs (15 jobs)
+#     quando o que queremos testar é especificamente os caminhos
+#     dependentes de SO (Keyring do Windows/macOS, `_find_config_file()`
+#     em color.py), não "todo Python em todo SO".
+#   - Cobertura de testes (pytest-cov) + upload pro Codecov, mas só a
+#     partir de UM job (ubuntu + Python 3.12) -- gerar/subir cobertura
+#     nos 7 jobs seria redundante e mais lento sem ganho real.
+#     REQUISITO: precisa existir o secret CODECOV_TOKEN no repositório
+#     (Settings -> Secrets and variables -> Actions) depois de conectar
+#     o repositório em https://codecov.io. Sem o secret, este passo
+#     específico falha, mas `fail_ci_if_error: false` garante que isso
+#     não derruba o restante do CI.
 
 on:
   push:
@@ -32,11 +51,26 @@ on:
 
 jobs:
   tests:
-    name: Testes (pytest)
-    runs-on: ubuntu-latest
+    name: Testes (pytest) - ${{ matrix.os }} / py${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}
     strategy:
+      # fail-fast: false -- se o job do Windows falhar, os outros 6 (Linux
+      # e macOS) continuam rodando até o fim. Sem isso, o GitHub cancela
+      # tudo no primeiro job que falhar, e um problema isolado do Windows
+      # esconde se o restante da matrix também tinha algo errado.
+      fail-fast: false
       matrix:
+        os: [ubuntu-latest]
         python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        # `include` acrescenta combinações extras SEM multiplicar o
+        # produto cartesiano acima -- ubuntu roda nas 5 versões, Windows
+        # e macOS rodam só na 3.13 (a versão "de referência" do projeto).
+        # Total: 5 + 1 + 1 = 7 jobs, não 15.
+        include:
+          - os: windows-latest
+            python-version: "3.13"
+          - os: macos-latest
+            python-version: "3.13"
 
     steps:
       - name: Checkout do código
@@ -46,9 +80,27 @@ jobs:
         uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
+          cache: "pip"
 
       - name: Instala o projeto com as dependências de dev
         run: python -m pip install --upgrade pip && pip install -e ".[all, dev]"
 
       - name: Roda a suíte de testes (pula os marcados "slow")
+        # Só gera relatório de cobertura no job de referência (ubuntu +
+        # 3.12) -- nos outros 6 jobs roda exatamente como antes.
+        if: matrix.os != 'ubuntu-latest' || matrix.python-version != '3.12'
         run: pytest -m "not slow" -q
+
+      - name: Roda a suíte de testes com cobertura (job de referência)
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
+        run: >
+          pytest -m "not slow" -q
+          --cov=qobuz_dl --cov-report=xml --cov-report=term-missing
+
+      - name: Envia cobertura para o Codecov
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage.xml
+          fail_ci_if_error: false
