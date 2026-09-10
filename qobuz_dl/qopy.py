@@ -198,9 +198,7 @@ class Client:
                 logger.info(f"{GREEN}Logado: OK (Assinatura: {self.label}){OFF}")
             else:
                 logger.warning(
-                    f"{YELLOW}[!] Logado: OK, mas a assinatura está {RED}INATIVA{
-                        RESET
-                    } ({sub['status']}){OFF}"
+                    f"{YELLOW}[!] Logado: OK, mas a assinatura está {RED}INATIVA{                         RESET                     } ({sub['status']}){OFF}"
                 )
         except Exception:
             logger.info(f"{YELLOW}[!] Validação do perfil ignorada.{OFF}")
@@ -820,9 +818,7 @@ class Client:
         sub_info = self.check_subscription()
         if not sub_info["is_active"]:
             raise NoActiveSubscriptionError(
-                f"Assinatura inativa ou expirada ({
-                    sub_info['status']
-                }). Download bloqueado."
+                f"Assinatura inativa ou expirada ({                     sub_info['status']                 }). Download bloqueado."
             )
 
         if int(fmt_id) == 5:

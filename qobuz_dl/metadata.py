@@ -275,9 +275,7 @@ def _embed_flac_img(root_dir, audio: FLAC, cover_override=None):
         # # O arquivo salvo continua original; somente os bytes enviados ao embed são reduzidos.
         if original_size > FLAC_MAX_BLOCKSIZE:
             logger.info(
-                f"Capa ({
-                    humanize.naturalsize(original_size, binary=True)
-                }) excede o limite de "
+                f"Capa ({                     humanize.naturalsize(original_size, binary=True)                 }) excede o limite de "
                 f"16MB de embed do FLAC -- recompactando so' o suficiente pra caber "
                 f"(o arquivo salvo em disco continua em qualidade original)."
             )
@@ -400,9 +398,7 @@ def tag_flac(
             img_size_bytes = os.path.getsize(cover_path)
             req_size = getattr(settings, "embedded_art_size", "unknown")
             is_org = "YES" if req_size == "org" else "NO"
-            base_comment += f" | Cover: {
-                humanize.naturalsize(img_size_bytes, binary=True)
-            } (Req: {req_size}, Org: {is_org})"
+            base_comment += f" | Cover: {                 humanize.naturalsize(img_size_bytes, binary=True)             } (Req: {req_size}, Org: {is_org})"
 
     tags["COMMENT"] = base_comment
 
@@ -520,9 +516,7 @@ def tag_mp3(
             img_size_bytes = os.path.getsize(cover_path)
             req_size = getattr(settings, "embedded_art_size", "unknown")
             is_org = "YES" if req_size == "org" else "NO"
-            base_comment += f" | Cover: {
-                humanize.naturalsize(img_size_bytes, binary=True)
-            } (Req: {req_size}, Org: {is_org})"
+            base_comment += f" | Cover: {                 humanize.naturalsize(img_size_bytes, binary=True)             } (Req: {req_size}, Org: {is_org})"
 
     tags["COMMENT"] = base_comment
 

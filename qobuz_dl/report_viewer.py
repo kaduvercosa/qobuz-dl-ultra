@@ -215,22 +215,16 @@ def renderizar_html(report: dict) -> str:
     linha_extra = []
     if extra.get("rotulo"):
         linha_extra.append(
-            f'<div class="meta-row"><span class="meta-glyph">▪</span>{
-                esc(extra["rotulo"])
-            }</div>'
+            f'<div class="meta-row"><span class="meta-glyph">▪</span>{                 esc(extra["rotulo"])             }</div>'
         )
     if extra.get("genero"):
         linha_extra.append(
-            f'<div class="meta-row"><span class="meta-glyph">▪</span>{
-                esc(extra["genero"])
-            }</div>'
+            f'<div class="meta-row"><span class="meta-glyph">▪</span>{                 esc(extra["genero"])             }</div>'
         )
     if extra.get("url") or ident.get("url"):
         url = extra.get("url") or ident.get("url")
         linha_extra.append(
-            f'<div class="meta-row"><span class="meta-glyph">▪</span><a href="{
-                esc(url)
-            }">{esc(url)}</a></div>'
+            f'<div class="meta-row"><span class="meta-glyph">▪</span><a href="{                 esc(url)             }">{esc(url)}</a></div>'
         )
 
     artistas_distintos = {
