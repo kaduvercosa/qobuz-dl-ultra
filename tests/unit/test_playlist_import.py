@@ -29,13 +29,13 @@ class TestArquivoInexistenteOuVazio:
 
     def test_txt_vazio_levanta_valueerror(self, tmp_path):
         arquivo = tmp_path / "vazia.txt"
-        arquivo.write_text("")
+        arquivo.write_text("", encoding="utf-8")
         with pytest.raises(ValueError):
             parse_playlist_file(str(arquivo))
 
     def test_txt_so_com_comentarios_levanta_valueerror(self, tmp_path):
         arquivo = tmp_path / "so_comentarios.txt"
-        arquivo.write_text("# playlist exportada em 2024\n# 12 faixas\n")
+        arquivo.write_text("# playlist exportada em 2024\n# 12 faixas\n", encoding="utf-8")
         with pytest.raises(ValueError):
             parse_playlist_file(str(arquivo))
 
@@ -46,28 +46,28 @@ class TestArquivoInexistenteOuVazio:
 class TestParseTxt:
     def test_separador_hifen(self, tmp_path):
         arquivo = tmp_path / "p.txt"
-        arquivo.write_text("Radiohead - Creep\n")
+        arquivo.write_text("Radiohead - Creep\n", encoding="utf-8")
         assert parse_playlist_file(str(arquivo)) == [
             {"artist": "Radiohead", "title": "Creep"}
         ]
 
     def test_separador_dois_pontos(self, tmp_path):
         arquivo = tmp_path / "p.txt"
-        arquivo.write_text("Radiohead: Creep\n")
+        arquivo.write_text("Radiohead: Creep\n", encoding="utf-8")
         assert parse_playlist_file(str(arquivo)) == [
             {"artist": "Radiohead", "title": "Creep"}
         ]
 
     def test_separador_pipe(self, tmp_path):
         arquivo = tmp_path / "p.txt"
-        arquivo.write_text("Radiohead | Creep\n")
+        arquivo.write_text("Radiohead | Creep\n", encoding="utf-8")
         assert parse_playlist_file(str(arquivo)) == [
             {"artist": "Radiohead", "title": "Creep"}
         ]
 
     def test_separador_en_dash(self, tmp_path):
         arquivo = tmp_path / "p.txt"
-        arquivo.write_text("Radiohead \u2013 Creep\n")
+        arquivo.write_text("Radiohead \u2013 Creep\n", encoding="utf-8")
         assert parse_playlist_file(str(arquivo)) == [
             {"artist": "Radiohead", "title": "Creep"}
         ]
@@ -77,14 +77,14 @@ class TestParseTxt:
         regex de separador -- vira tudo título, sem artista. Comportamento
         real do `_SEP_RE`, travado aqui de propósito."""
         arquivo = tmp_path / "p.txt"
-        arquivo.write_text("Radiohead:Creep\n")
+        arquivo.write_text("Radiohead:Creep\n", encoding="utf-8")
         assert parse_playlist_file(str(arquivo)) == [
             {"artist": "", "title": "Radiohead:Creep"}
         ]
 
     def test_linha_sem_separador_vira_so_titulo(self, tmp_path):
         arquivo = tmp_path / "p.txt"
-        arquivo.write_text("Bohemian Rhapsody\n")
+        arquivo.write_text("Bohemian Rhapsody\n", encoding="utf-8")
         assert parse_playlist_file(str(arquivo)) == [
             {"artist": "", "title": "Bohemian Rhapsody"}
         ]
@@ -94,7 +94,7 @@ class TestParseTxt:
         faixas tipo "Álbum - Faixa - Remix") não deve ser cortado ao
         meio."""
         arquivo = tmp_path / "p.txt"
-        arquivo.write_text("Sigur Rós - Untitled - Vaka\n")
+        arquivo.write_text("Sigur Rós - Untitled - Vaka\n", encoding="utf-8")
         assert parse_playlist_file(str(arquivo)) == [
             {"artist": "Sigur Rós", "title": "Untitled - Vaka"}
         ]
@@ -108,7 +108,7 @@ class TestParseTxt:
             "   \n"
             "# fim\n"
             "Pixies - Where Is My Mind?\n"
-        )
+        , encoding="utf-8")
         assert parse_playlist_file(str(arquivo)) == [
             {"artist": "Radiohead", "title": "Creep"},
             {"artist": "Pixies", "title": "Where Is My Mind?"},
@@ -116,14 +116,14 @@ class TestParseTxt:
 
     def test_extensao_text_tambem_e_aceita_como_txt(self, tmp_path):
         arquivo = tmp_path / "p.text"
-        arquivo.write_text("Radiohead - Creep\n")
+        arquivo.write_text("Radiohead - Creep\n", encoding="utf-8")
         assert parse_playlist_file(str(arquivo)) == [
             {"artist": "Radiohead", "title": "Creep"}
         ]
 
     def test_sem_extensao_com_conteudo_de_texto_puro_cai_no_parser_txt(self, tmp_path):
         arquivo = tmp_path / "playlist_sem_extensao"
-        arquivo.write_text("Radiohead - Creep\n")
+        arquivo.write_text("Radiohead - Creep\n", encoding="utf-8")
         assert parse_playlist_file(str(arquivo)) == [
             {"artist": "Radiohead", "title": "Creep"}
         ]
@@ -135,7 +135,7 @@ class TestParseTxt:
 class TestParseCsv:
     def test_colunas_artist_e_title_basicas(self, tmp_path):
         arquivo = tmp_path / "p.csv"
-        arquivo.write_text("artist,title\nRadiohead,Creep\nPixies,Debaser\n")
+        arquivo.write_text("artist,title\nRadiohead,Creep\nPixies,Debaser\n", encoding="utf-8")
         assert parse_playlist_file(str(arquivo)) == [
             {"artist": "Radiohead", "title": "Creep"},
             {"artist": "Pixies", "title": "Debaser"},
@@ -145,35 +145,35 @@ class TestParseCsv:
         """Exportify usa "Artist Name(s)"/"Track Name"; outros exports
         usam "Track"/"Song"/"Performer" etc. -- tudo tem que mapear."""
         arquivo = tmp_path / "p.csv"
-        arquivo.write_text("Performer,Song Name\nRadiohead,Creep\n")
+        arquivo.write_text("Performer,Song Name\nRadiohead,Creep\n", encoding="utf-8")
         assert parse_playlist_file(str(arquivo)) == [
             {"artist": "Radiohead", "title": "Creep"}
         ]
 
     def test_separador_ponto_e_virgula_detectado_automaticamente(self, tmp_path):
         arquivo = tmp_path / "p.csv"
-        arquivo.write_text("artist;title\nRadiohead;Creep\n")
+        arquivo.write_text("artist;title\nRadiohead;Creep\n", encoding="utf-8")
         assert parse_playlist_file(str(arquivo)) == [
             {"artist": "Radiohead", "title": "Creep"}
         ]
 
     def test_separador_tab_detectado_automaticamente(self, tmp_path):
         arquivo = tmp_path / "p.csv"
-        arquivo.write_text("artist\ttitle\nRadiohead\tCreep\n")
+        arquivo.write_text("artist\ttitle\nRadiohead\tCreep\n", encoding="utf-8")
         assert parse_playlist_file(str(arquivo)) == [
             {"artist": "Radiohead", "title": "Creep"}
         ]
 
     def test_multiplos_artistas_pega_so_o_primeiro(self, tmp_path):
         arquivo = tmp_path / "p.csv"
-        arquivo.write_text('artist,title\n"Artista A, Artista B",Faixa\n')
+        arquivo.write_text('artist,title\n"Artista A, Artista B",Faixa\n', encoding="utf-8")
         assert parse_playlist_file(str(arquivo)) == [
             {"artist": "Artista A", "title": "Faixa"}
         ]
 
     def test_linha_sem_titulo_e_descartada_silenciosamente(self, tmp_path):
         arquivo = tmp_path / "p.csv"
-        arquivo.write_text("artist,title\nRadiohead,Creep\nSem Titulo,\n")
+        arquivo.write_text("artist,title\nRadiohead,Creep\nSem Titulo,\n", encoding="utf-8")
         assert parse_playlist_file(str(arquivo)) == [
             {"artist": "Radiohead", "title": "Creep"}
         ]
@@ -182,13 +182,13 @@ class TestParseCsv:
         self, tmp_path
     ):
         arquivo = tmp_path / "p.csv"
-        arquivo.write_text("coluna_a,coluna_b\nx,y\n")
+        arquivo.write_text("coluna_a,coluna_b\nx,y\n", encoding="utf-8")
         with pytest.raises(ValueError, match="coluna_a"):
             parse_playlist_file(str(arquivo))
 
     def test_sem_coluna_de_artista_ainda_funciona_so_com_titulo(self, tmp_path):
         arquivo = tmp_path / "p.csv"
-        arquivo.write_text("title\nCreep\n")
+        arquivo.write_text("title\nCreep\n", encoding="utf-8")
         assert parse_playlist_file(str(arquivo)) == [{"artist": "", "title": "Creep"}]
 
 
@@ -198,14 +198,14 @@ class TestParseCsv:
 class TestParseJson:
     def test_formato_generico_flat(self, tmp_path):
         arquivo = tmp_path / "p.json"
-        arquivo.write_text(json.dumps([{"artist": "Radiohead", "title": "Creep"}]))
+        arquivo.write_text(json.dumps([{"artist": "Radiohead", "title": "Creep"}]), encoding="utf-8")
         assert parse_playlist_file(str(arquivo)) == [
             {"artist": "Radiohead", "title": "Creep"}
         ]
 
     def test_formato_generico_com_name_em_vez_de_title(self, tmp_path):
         arquivo = tmp_path / "p.json"
-        arquivo.write_text(json.dumps([{"artist": "Radiohead", "name": "Creep"}]))
+        arquivo.write_text(json.dumps([{"artist": "Radiohead", "name": "Creep"}]), encoding="utf-8")
         assert parse_playlist_file(str(arquivo)) == [
             {"artist": "Radiohead", "title": "Creep"}
         ]
@@ -214,7 +214,7 @@ class TestParseJson:
         arquivo = tmp_path / "p.json"
         arquivo.write_text(
             json.dumps([{"artists": ["Radiohead", "Outro"], "title": "Creep"}])
-        )
+        , encoding="utf-8")
         assert parse_playlist_file(str(arquivo)) == [
             {"artist": "Radiohead", "title": "Creep"}
         ]
@@ -223,7 +223,7 @@ class TestParseJson:
         arquivo = tmp_path / "p.json"
         arquivo.write_text(
             json.dumps([{"Track Name": "Creep", "Artist Name(s)": "Radiohead, Outro"}])
-        )
+        , encoding="utf-8")
         assert parse_playlist_file(str(arquivo)) == [
             {"artist": "Radiohead", "title": "Creep"}
         ]
@@ -243,7 +243,7 @@ class TestParseJson:
                     ]
                 }
             )
-        )
+        , encoding="utf-8")
         assert parse_playlist_file(str(arquivo)) == [
             {"artist": "Radiohead", "title": "Creep"}
         ]
@@ -252,7 +252,7 @@ class TestParseJson:
         arquivo = tmp_path / "p.json"
         arquivo.write_text(
             json.dumps({"track": [{"name": "Creep", "artist": {"name": "Radiohead"}}]})
-        )
+        , encoding="utf-8")
         assert parse_playlist_file(str(arquivo)) == [
             {"artist": "Radiohead", "title": "Creep"}
         ]
@@ -261,7 +261,7 @@ class TestParseJson:
         """Alguns exports do Last.fm mandam "artist" como string em vez
         de {"name": ...} -- o código trata os dois casos."""
         arquivo = tmp_path / "p.json"
-        arquivo.write_text(json.dumps([{"name": "Creep", "artist": "Radiohead"}]))
+        arquivo.write_text(json.dumps([{"name": "Creep", "artist": "Radiohead"}]), encoding="utf-8")
         assert parse_playlist_file(str(arquivo)) == [
             {"artist": "Radiohead", "title": "Creep"}
         ]
@@ -270,7 +270,7 @@ class TestParseJson:
         """Um JSON de nível superior que é um único dict (não uma lista,
         nem tem "items"/"track") é tratado como uma playlist de 1 faixa."""
         arquivo = tmp_path / "p.json"
-        arquivo.write_text(json.dumps({"artist": "Radiohead", "title": "Creep"}))
+        arquivo.write_text(json.dumps({"artist": "Radiohead", "title": "Creep"}), encoding="utf-8")
         assert parse_playlist_file(str(arquivo)) == [
             {"artist": "Radiohead", "title": "Creep"}
         ]
@@ -284,7 +284,7 @@ class TestParseJson:
                     {"artist": "Sem Titulo"},
                 ]
             )
-        )
+        , encoding="utf-8")
         assert parse_playlist_file(str(arquivo)) == [
             {"artist": "Radiohead", "title": "Creep"}
         ]
@@ -295,20 +295,20 @@ class TestParseJson:
             json.dumps(
                 ["isso não é uma faixa", {"artist": "Radiohead", "title": "Creep"}]
             )
-        )
+        , encoding="utf-8")
         assert parse_playlist_file(str(arquivo)) == [
             {"artist": "Radiohead", "title": "Creep"}
         ]
 
     def test_json_de_nivel_superior_que_nao_e_lista_nem_dict_de_faixa(self, tmp_path):
         arquivo = tmp_path / "p.json"
-        arquivo.write_text(json.dumps(42))
+        arquivo.write_text(json.dumps(42), encoding="utf-8")
         with pytest.raises(ValueError, match="lista de faixas"):
             parse_playlist_file(str(arquivo))
 
     def test_lista_vazia_levanta_valueerror(self, tmp_path):
         arquivo = tmp_path / "p.json"
-        arquivo.write_text("[]")
+        arquivo.write_text("[]", encoding="utf-8")
         with pytest.raises(ValueError):
             parse_playlist_file(str(arquivo))
 
@@ -319,14 +319,14 @@ class TestParseJson:
 class TestDeteccaoPorConteudo:
     def test_conteudo_json_sem_extensao_json(self, tmp_path):
         arquivo = tmp_path / "playlist.dat"
-        arquivo.write_text(json.dumps([{"artist": "Radiohead", "title": "Creep"}]))
+        arquivo.write_text(json.dumps([{"artist": "Radiohead", "title": "Creep"}]), encoding="utf-8")
         assert parse_playlist_file(str(arquivo)) == [
             {"artist": "Radiohead", "title": "Creep"}
         ]
 
     def test_conteudo_csv_sem_extensao_csv(self, tmp_path):
         arquivo = tmp_path / "playlist.dat"
-        arquivo.write_text("artist,title\nRadiohead,Creep\n")
+        arquivo.write_text("artist,title\nRadiohead,Creep\n", encoding="utf-8")
         assert parse_playlist_file(str(arquivo)) == [
             {"artist": "Radiohead", "title": "Creep"}
         ]

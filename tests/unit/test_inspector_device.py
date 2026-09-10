@@ -67,9 +67,18 @@ class TestDeteccaoPorDispositivo:
     def test_ios_a_shell_usa_pasta_documents(self, ambiente_limpo, monkeypatch):
         home = "/private/var/mobile/Containers/Data/Application/ABC-123"
         monkeypatch.setenv("HOME", home)
-        _apenas_estas_pastas_existem(monkeypatch, f"{home}/Documents")
+        # IMPORTANTE: a função monta o candidato com os.path.join(home,
+        # "Documents") -- no Windows isso produz separador "\\", não "/".
+        # Construir aqui com f"{home}/Documents" (string literal fixa)
+        # funciona por acaso no Linux/macOS mas quebra no Windows, porque
+        # o candidato real nunca bate com essa string. Usar os.path.join
+        # nos dois lados garante que o teste compara "a mesma forma de
+        # caminho" que o código de produção realmente constrói, em
+        # qualquer SO.
+        esperado = os.path.join(home, "Documents")
+        _apenas_estas_pastas_existem(monkeypatch, esperado)
 
-        assert inspector._detectar_pasta_padrao() == f"{home}/Documents"
+        assert inspector._detectar_pasta_padrao() == esperado
 
     def test_ios_sem_documents_nao_trava_e_cai_pro_home(
         self, ambiente_limpo, monkeypatch
@@ -98,26 +107,35 @@ class TestDeteccaoPorDispositivo:
         assert inspector._detectar_pasta_padrao() == "/sdcard/Music"
 
     def test_desktop_usa_pasta_music(self, ambiente_limpo, monkeypatch):
-        monkeypatch.setenv("HOME", "/home/usuario")
-        _apenas_estas_pastas_existem(monkeypatch, "/home/usuario/Music")
+        home = "/home/usuario"
+        monkeypatch.setenv("HOME", home)
+        # Mesmo motivo do teste de iOS acima: o candidato real é
+        # os.path.join(home, "Music"), que no Windows vem com "\\" em vez
+        # de "/". Construir o esperado do mesmo jeito evita que o teste
+        # dependa do separador de caminho do SO que roda a suíte.
+        esperado = os.path.join(home, "Music")
+        _apenas_estas_pastas_existem(monkeypatch, esperado)
 
-        assert inspector._detectar_pasta_padrao() == "/home/usuario/Music"
+        assert inspector._detectar_pasta_padrao() == esperado
 
     def test_desktop_aceita_musica_em_portugues(self, ambiente_limpo, monkeypatch):
-        monkeypatch.setenv("HOME", "/home/usuario")
-        _apenas_estas_pastas_existem(monkeypatch, "/home/usuario/Música")
+        home = "/home/usuario"
+        monkeypatch.setenv("HOME", home)
+        esperado = os.path.join(home, "Música")
+        _apenas_estas_pastas_existem(monkeypatch, esperado)
 
-        assert inspector._detectar_pasta_padrao() == "/home/usuario/Música"
+        assert inspector._detectar_pasta_padrao() == esperado
 
     def test_prioriza_music_em_ingles_quando_as_duas_existem(
         self, ambiente_limpo, monkeypatch
     ):
-        monkeypatch.setenv("HOME", "/home/usuario")
-        _apenas_estas_pastas_existem(
-            monkeypatch, "/home/usuario/Music", "/home/usuario/Música"
-        )
+        home = "/home/usuario"
+        monkeypatch.setenv("HOME", home)
+        pasta_music = os.path.join(home, "Music")
+        pasta_musica = os.path.join(home, "Música")
+        _apenas_estas_pastas_existem(monkeypatch, pasta_music, pasta_musica)
 
-        assert inspector._detectar_pasta_padrao() == "/home/usuario/Music"
+        assert inspector._detectar_pasta_padrao() == pasta_music
 
 
 class TestFallbackFinal:
