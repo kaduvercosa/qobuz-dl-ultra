@@ -220,7 +220,7 @@ async def sync_database(directory, db_path, client):
         )
 
     logger.info(
-        f"{GREEN}[+] Sincronização concluída! Restauradas {added_tracks} faixas e {             len(added_albums)         } álbuns no banco de dados local com metadados completos.{OFF}"
+        f"{GREEN}[+] Sincronização concluída! Restauradas {added_tracks} faixas e {len(added_albums)} álbuns no banco de dados local com metadados completos.{OFF}"
     )
 
 
