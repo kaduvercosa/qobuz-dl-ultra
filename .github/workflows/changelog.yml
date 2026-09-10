@@ -38,7 +38,7 @@ jobs:
       - name: Gerar changelog desde a tag anterior
         id: changelog
         run: |
-          python tools/gerar_changelog.py --para "${{ github.ref_name }}" --lang pt -o /tmp/changelog.md
+          python tools/gerar_changelog.py --para "${{ github.ref_name }}" -o /tmp/changelog.md
           cat /tmp/changelog.md
 
       - name: Criar Release rascunho com o changelog gerado
