@@ -261,22 +261,50 @@ def cliente_qobuz_falso(monkeypatch):
     return _instala
 
 
+@pytest.fixture
+def config_com_token(tmp_path):
+    """config.ini próprio deste grupo de testes, com `auth_token` já
+    preenchido e `disable_keyring = true` (evita qualquer tentativa real de
+    Keyring, que seria não-determinística em CI).
+
+    O config.ini padrão do conftest.py (usado pelos outros testes) NÃO tem
+    `auth_token` -- de propósito, pra simular "primeira execução". Só que
+    isso faz `_auth_command()` entrar no branch de "sem token, precisa
+    pedir credencial" (`if update_credentials or not token:`) mesmo quando
+    o teste passa `update_credentials=False`. Sem este fixture, o teste
+    acaba testando o formulário de credenciais por acidente, não o
+    relatório de conta que é o alvo real aqui."""
+    cfg = tmp_path / "config.ini"
+    cfg.write_text(
+        "[qobuz]\n"
+        "email = usuario@example.com\n"
+        "app_id = 1\n"
+        "secrets = a\n"
+        "auth_token = token-falso-para-teste\n"
+        "disable_keyring = true\n",
+        encoding="utf-8",
+    )
+    return str(cfg)
+
+
 class TestAuthCommandExibicao:
     async def test_assinatura_ativa_com_campos_ausentes_nao_quebra(
-        self, capturar_ui, sem_input_permitido, cliente_qobuz_falso
+        self, capturar_ui, sem_input_permitido, cliente_qobuz_falso, config_com_token
     ):
         """Reproduz o relatório que o usuário viu na prática: `is_active`
         True, mas `offer`/`periodicity` ausentes no dict retornado por
         `check_subscription()` (problema de parsing em qopy.py, fora do
         escopo deste teste) -- `cli.py` precisa exibir 'N/A' graciosamente
         em vez de quebrar, e NÃO deve pedir troca de credenciais (conta já
-        está ativa)."""
+        está ativa) nem o formulário de credenciais (já existe um token
+        configurado).
+        """
         cliente_qobuz_falso(
             _user_info(),
             {"is_active": True, "status": "active", "end_date": "2026-09-29"},
         )
 
-        resultado = await cli._auth_command(cli.CONFIG_FILE, update_credentials=False)
+        resultado = await cli._auth_command(config_com_token, update_credentials=False)
 
         assert resultado is True
         linha_plano = next(l for l in capturar_ui if "Plano / Oferta:" in l)
@@ -284,15 +312,22 @@ class TestAuthCommandExibicao:
         assert not any("AVISO DE ASSINATURA INATIVA" in l for l in capturar_ui)
 
     async def test_assinatura_inativa_pergunta_e_usuario_recusa_trocar(
-        self, capturar_ui, monkeypatch, cliente_qobuz_falso
+        self, capturar_ui, monkeypatch, cliente_qobuz_falso, config_com_token
     ):
         cliente_qobuz_falso(
             _user_info(),
             _sub_info(is_active=False, status="inactive"),
         )
-        monkeypatch.setattr("builtins.input", lambda *_a, **_k: "n")
+        # Só UMA pergunta é esperada aqui ("Deseja alterar e-mail/token
+        # agora?"), já que o token já existe e a função não deveria pedir
+        # o formulário de credenciais de novo. Um segundo input() (o que
+        # aconteceria por engano, se `_auth_command` caísse no branch de
+        # "sem token") faz o teste falhar explicitamente, em vez de
+        # mascarar o motivo com uma resposta genérica reaproveitada.
+        respostas = iter(["n"])
+        monkeypatch.setattr("builtins.input", lambda *_a, **_k: next(respostas))
 
-        resultado = await cli._auth_command(cli.CONFIG_FILE, update_credentials=False)
+        resultado = await cli._auth_command(config_com_token, update_credentials=False)
 
         assert resultado is False
         assert any("AVISO DE ASSINATURA INATIVA" in l for l in capturar_ui)
