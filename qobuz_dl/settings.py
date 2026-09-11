@@ -11,6 +11,19 @@ from qobuz_dl.constants import (
 )
 
 _MISSING = object()
+MAX_DOWNLOAD_WORKERS = 16
+MAX_SEGMENT_WORKERS = 16
+
+
+def _bounded_workers(value, default, maximum):
+    """Normaliza concorrência para impedir zero, negativos e explosão de tarefas."""
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = default
+    if parsed <= 0:
+        parsed = default
+    return min(parsed, maximum)
 
 
 # # Resolve uma opção em que o valor da CLI, quando fornecido, substitui o config.ini.
@@ -116,16 +129,17 @@ class QobuzDLSettings:
             "multiple_disc_track_format", DEFAULT_MULTIPLE_DISC_TRACK
         )
 
-        self.max_workers = int(kwargs.get("max_workers", 1))
+        self.max_workers = _bounded_workers(
+            kwargs.get("max_workers", 1), 1, MAX_DOWNLOAD_WORKERS
+        )
 
         # # Define workers de segmentos; sem valor explícito usa até 2x os CPUs, limitado a 2–8.
-        segment_workers_raw = int(kwargs.get("segment_workers", 0) or 0)
-        # # Define workers de segmentos; sem valor explícito usa até 2x os CPUs, limitado a 2–8.
-        if segment_workers_raw > 0:
-            # # Define workers de segmentos; sem valor explícito usa até 2x os CPUs, limitado a 2–8.
-            self.segment_workers = segment_workers_raw
-        else:
-            self.segment_workers = min(8, max(2, (os.cpu_count() or 4) * 2))
+        default_segment_workers = min(8, max(2, (os.cpu_count() or 4) * 2))
+        self.segment_workers = _bounded_workers(
+            kwargs.get("segment_workers", 0),
+            default_segment_workers,
+            MAX_SEGMENT_WORKERS,
+        )
 
         self.user_auth_token = kwargs.get("user_auth_token", "")
 

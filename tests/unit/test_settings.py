@@ -69,6 +69,11 @@ class TestDefaults:
         assert s.max_workers == 4
         assert isinstance(s.max_workers, int)
 
+    def test_workers_sao_limitados_a_valores_seguros(self):
+        assert QobuzDLSettings(max_workers=999).max_workers == 16
+        assert QobuzDLSettings(max_workers=-2).max_workers == 1
+        assert QobuzDLSettings(segment_workers=999).segment_workers == 16
+
 
 class TestSinceBeforeDate:
     def test_ano_isolado_no_since_vira_primeiro_dia_do_ano(self):

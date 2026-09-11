@@ -23,7 +23,13 @@ requisição.
 
 import unicodedata
 from datetime import date, timedelta
+from unittest.mock import AsyncMock
 
+import httpx
+import pytest
+from tenacity import wait_none
+
+from qobuz_dl import qopy
 from qobuz_dl.qopy import Client
 
 
@@ -31,6 +37,66 @@ def _cliente_com(user_info):
     c = Client()
     c.user_info = user_info
     return c
+
+
+async def test_api_call_repete_get_apos_erro_transitorio(monkeypatch):
+    client = Client()
+    client.id = "123"
+    client.base = "https://api.invalid/"
+    client.uat = "token"
+    responses = [
+        httpx.Response(503, request=httpx.Request("GET", "https://api.invalid/")),
+        httpx.Response(
+            200,
+            json={"ok": True},
+            request=httpx.Request("GET", "https://api.invalid/"),
+        ),
+    ]
+    client.session = type(
+        "Session",
+        (),
+        {"request": AsyncMock(side_effect=responses)},
+    )()
+    monkeypatch.setattr(qopy, "wait_exponential", lambda **kwargs: wait_none())
+
+    assert await client.api_call("track/get", id="10") == {"ok": True}
+    assert client.session.request.await_count == 2
+
+
+async def test_api_call_nao_repete_post_mutavel_apos_erro_de_leitura(monkeypatch):
+    client = Client()
+    client.id = "123"
+    client.base = "https://api.invalid/"
+    client.uat = "token"
+    request = httpx.Request("POST", "https://api.invalid/playlist/create")
+    client.session = type(
+        "Session",
+        (),
+        {"request": AsyncMock(side_effect=httpx.ReadError("falhou", request=request))},
+    )()
+    monkeypatch.setattr(qopy, "wait_exponential", lambda **kwargs: wait_none())
+
+    with pytest.raises(httpx.ReadError):
+        await client.api_call(
+            "playlist/create", name="Teste", description="", is_public=False
+        )
+
+    assert client.session.request.await_count == 1
+
+
+async def test_create_fecha_sessao_quando_autenticacao_falha(monkeypatch):
+    session = type("Session", (), {"aclose": AsyncMock(), "headers": {}})()
+    monkeypatch.setattr(qopy.httpx, "AsyncClient", lambda **kwargs: session)
+
+    async def fail_auth(self, *args, **kwargs):
+        raise RuntimeError("auth falhou")
+
+    monkeypatch.setattr(Client, "auth", fail_auth)
+
+    with pytest.raises(RuntimeError, match="auth falhou"):
+        await Client.create("mail", "pwd", "123", ["secret"])
+
+    session.aclose.assert_awaited_once()
 
 
 # --------------------------------------------------------------------

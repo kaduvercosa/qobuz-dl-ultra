@@ -9,11 +9,14 @@ RUN apt-get update && \
     apt-get install -y ffmpeg && \
     rm -rf /var/lib/apt/lists/*
 
-# Define a pasta de trabalho dentro do container
-WORKDIR /app
+# Usuário sem privilégios para execução. O HOME gravável também mantém
+# config.ini, banco e downloads fora da instalação do pacote.
+RUN useradd --create-home --shell /usr/sbin/nologin qobuz
 
-# Copia todos os arquivos do projeto pro container
-COPY . .
+# Copia somente os arquivos necessários para construir o pacote.
+WORKDIR /tmp/source
+COPY pyproject.toml README.md MANIFEST.in setup.py ./
+COPY qobuz_dl ./qobuz_dl
 
 # Instala o projeto direto do pyproject.toml -- ele é a ÚNICA fonte de
 # verdade das dependências (ver tests/regression/test_dependencias.py).
@@ -26,6 +29,9 @@ COPY . .
 # fallback e a possibilidade de build "com sucesso" a partir de
 # dependências erradas/desatualizadas.
 RUN pip install --no-cache-dir .
+
+USER qobuz
+WORKDIR /home/qobuz
 
 # Declara o comando base (o usuário só passa os argumentos, tipo 'dl' ou '--sync-db')
 ENTRYPOINT ["python", "-m", "qobuz_dl"]

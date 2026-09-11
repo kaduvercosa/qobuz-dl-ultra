@@ -17,7 +17,7 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from tenacity import (
     AsyncRetrying,
-    retry_if_exception_type,
+    retry_if_exception,
     stop_after_attempt,
     wait_exponential,
 )
@@ -138,8 +138,12 @@ class Client:
         self.session_key = None
         self.uat = None
 
-        await self.auth(email, pwd, user_auth_token)
-        await self.cfg_setup()
+        try:
+            await self.auth(email, pwd, user_auth_token)
+            await self.cfg_setup()
+        except BaseException:
+            await self.close()
+            raise
         return self
 
     async def close(self):
@@ -465,16 +469,34 @@ class Client:
         # duplicando o que downloader.py ja resolve com tenacity (dependencia
         # ja declarada no projeto). Agora usa AsyncRetrying no mesmo estilo
         # das outras retentativas do projeto (ver downloader.py). Só
-        # httpx.RequestError/asyncio.TimeoutError acionam nova tentativa --
-        # AuthenticationError e InvalidAppSecretError (levantados abaixo a
-        # partir do status code da resposta) continuam propagando na hora,
-        # sem retry, exatamente como no loop manual original. reraise=True
-        # faz o tenacity relancar a ultima excecao de rede quando as
-        # tentativas se esgotam, sem precisar de try/except extra aqui.
+        # Erros de transporte sempre acionam nova tentativa. GETs e o início
+        # idempotente de sessão também repetem em 429/5xx; POSTs mutáveis não,
+        # para evitar duplicar favoritos ou playlists após resposta incerta.
+        mutable_endpoints = {
+            "favorite/create",
+            "playlist/create",
+            "playlist/addTracks",
+        }
+
+        def _retryable(exc):
+            if isinstance(exc, (httpx.RequestError, asyncio.TimeoutError)):
+                if epoint not in mutable_endpoints:
+                    return True
+                return isinstance(
+                    exc, (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)
+                )
+            if isinstance(exc, httpx.HTTPStatusError) and (
+                method == "get" or epoint == "session/start"
+            ):
+                return (
+                    exc.response.status_code == 429 or exc.response.status_code >= 500
+                )
+            return False
+
         async for attempt in AsyncRetrying(
             stop=stop_after_attempt(4),
             wait=wait_exponential(multiplier=1, min=1, max=6),
-            retry=retry_if_exception_type((httpx.RequestError, asyncio.TimeoutError)),
+            retry=retry_if_exception(_retryable),
             reraise=True,
         ):
             with attempt:

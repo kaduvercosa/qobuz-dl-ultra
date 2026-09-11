@@ -117,6 +117,23 @@ class TestMigracaoV1ParaV2:
             ).fetchone()[0]
         assert existe == 0
 
+    def test_banco_legado_malformado_com_ids_repetidos_e_deduplicado(self, tmp_path):
+        caminho = str(tmp_path / "downloads.db")
+        with sqlite3.connect(caminho) as conn:
+            conn.execute('CREATE TABLE downloads ("id" text NOT NULL)')
+            conn.executemany(
+                "INSERT INTO downloads (id) VALUES (?)",
+                [("abc123",), ("abc123",), ("def456",)],
+            )
+
+        create_db(caminho)
+
+        with sqlite3.connect(caminho) as conn:
+            ids = [
+                row[0] for row in conn.execute("SELECT id FROM downloads ORDER BY id")
+            ]
+        assert ids == ["abc123", "def456"]
+
 
 class TestMigracaoV2ParaV2_1_4:
     """Banco intermediário: já tem "quality" e companhia, mas ainda não
@@ -195,6 +212,21 @@ class TestHandleDownloadId:
         create_db(caminho)
 
         assert await handle_download_id(caminho, "nunca-existiu", add_id=False) is None
+
+    async def test_lookup_remove_registro_cujo_arquivo_sumiu(self, tmp_path):
+        caminho = str(tmp_path / "downloads.db")
+        create_db(caminho)
+        await handle_download_id(
+            caminho,
+            "stale",
+            add_id=True,
+            quality=27,
+            saved_path=str(tmp_path / "ausente.flac"),
+        )
+
+        assert await handle_download_id(caminho, "stale", quality=27) is None
+        with sqlite3.connect(caminho) as conn:
+            assert conn.execute("SELECT COUNT(*) FROM downloads").fetchone()[0] == 0
 
     async def test_mesma_qualidade_duas_vezes_nao_derruba_o_programa(self, tmp_path):
         """PRIMARY KEY (id, quality) -- inserir a mesma combinação de

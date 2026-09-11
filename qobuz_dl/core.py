@@ -1003,6 +1003,7 @@ class QobuzDL:
         """Faz login na API do Qobuz (qopy.Client) usando as credenciais
         vindas do config.ini/keyring. Chamado 1x logo depois de instanciar
         QobuzDL (exceto no comando "auth", que não precisa de sessão)."""
+        old_client = getattr(self, "client", None)
         self.client = await qopy.Client.create(
             email,
             pwd,
@@ -1011,6 +1012,8 @@ class QobuzDL:
             self.settings.user_auth_token,
             force_english=self.force_english,
         )
+        if old_client is not None and old_client is not self.client:
+            await old_client.close()
         logger.info(
             f"{YELLOW}Qualidade Máxima definida: {QUALITIES[int(self.quality)]}"
         )
@@ -1062,7 +1065,8 @@ class QobuzDL:
             )
             if is_playlist:
                 self.settings.pl_skipped = getattr(self.settings, "pl_skipped", 0) + 1
-            return
+            return True
+        success = False
         try:
             dloader = downloader.Download(
                 self.client,
@@ -1087,11 +1091,13 @@ class QobuzDL:
                 booklet_only=self.booklet_only,
                 playlist_as_albums=self.playlist_as_albums,
             )
-            await dloader.download_id_by_type(
-                not album,
-                is_parallel=is_parallel,
-                position_pool=position_pool,
-                suppress_header=suppress_header,
+            success = bool(
+                await dloader.download_id_by_type(
+                    not album,
+                    is_parallel=is_parallel,
+                    position_pool=position_pool,
+                    suppress_header=suppress_header,
+                )
             )
         except httpx.HTTPStatusError as e:
             status = e.response.status_code if e.response is not None else None
@@ -1124,6 +1130,7 @@ class QobuzDL:
                 f"{YELLOW}[*] Sleeping for {self.delay} seconds to prevent rate limiting...{OFF}"
             )
             await asyncio.sleep(self.delay)
+        return success
 
     async def handle_url(self, url):
         """Processa UMA URL do Qobuz. É o coração do comando `dl`.
@@ -1170,7 +1177,7 @@ class QobuzDL:
             logger.info(
                 f'{RED}Invalid url: "{url}". Use urls from https://play.qobuz.com!'
             )
-            return
+            return False
 
         if type_dict["func"]:
             content = []
@@ -1181,7 +1188,7 @@ class QobuzDL:
                 logger.warning(
                     f"{YELLOW}[!] Skipped URL: Content empty or unavailable (Geo-blocked/Removed). URL: {url}{OFF}"
                 )
-                return
+                return False
             content_name = content[0]["name"]
             new_path = create_and_return_dir(
                 os.path.join(self.directory, sanitize_filename(content_name))
@@ -1265,6 +1272,7 @@ class QobuzDL:
             )
             semaphore = asyncio.Semaphore(batch_workers) if can_parallelize else None
             pending_tasks = []
+            outcomes = []
 
             mode_label = (
                 f"Paralelo ({batch_workers} workers)"
@@ -1367,7 +1375,7 @@ class QobuzDL:
                         if stagger_index < batch_workers:
                             await asyncio.sleep(stagger_index * HEADER_STAGGER_DELAY)
                         async with semaphore:
-                            await self.download_from_id(
+                            return await self.download_from_id(
                                 item_id,
                                 False,
                                 new_path,
@@ -1380,17 +1388,19 @@ class QobuzDL:
 
                     pending_tasks.append(_bounded_track_download())
                 else:
-                    await self.download_from_id(
-                        item["id"],
-                        True if type_dict["iterable_key"] == "albums" else False,
-                        new_path,
-                        is_playlist=is_playlist,
-                        playlist_index=idx,
-                        suppress_header=is_playlist,
+                    outcomes.append(
+                        await self.download_from_id(
+                            item["id"],
+                            True if type_dict["iterable_key"] == "albums" else False,
+                            new_path,
+                            is_playlist=is_playlist,
+                            playlist_index=idx,
+                            suppress_header=is_playlist,
+                        )
                     )
 
             if pending_tasks:
-                await asyncio.gather(*pending_tasks)
+                outcomes.extend(await asyncio.gather(*pending_tasks))
 
             if is_playlist and not getattr(self, "playlist_as_albums", False):
                 self.folder_format = original_folder_format
@@ -1429,16 +1439,17 @@ class QobuzDL:
                     safe_print(f"   • Falhas  : {RED}{fail}{RESET}")
                 safe_print(f"{CYAN}{'━' * 40}{RESET}\n")
 
+            return bool(outcomes) and all(outcome is True for outcome in outcomes)
+
         else:
-            await self.download_from_id(item_id, type_dict["album"])
+            return await self.download_from_id(item_id, type_dict["album"])
 
     def mark_url_done_in_file(self, txt_file, url_to_mark):
         """Quando o download veio de um arquivo .txt de URLs (qobuz-dl dl
         lista.txt), marca a linha correspondente com "[DONE]" depois que
         aquela URL termina de baixar -- assim, se o processo for
-        interrompido e rodado de novo, dá pra saber (visualmente) o que já
-        foi processado. Não impede reprocessar; quem evita reprocessar é o
-        banco de dados de downloads (--no-db desativa isso)."""
+        interrompido e rodado de novo, as linhas concluídas são ignoradas
+        por download_from_txt_file()."""
         if not txt_file or not os.path.isfile(txt_file):
             return
         try:
@@ -1523,7 +1534,7 @@ class QobuzDL:
                 if stagger_index < batch_workers:
                     await asyncio.sleep(stagger_index * HEADER_STAGGER_DELAY)
                 async with semaphore:
-                    await self.download_from_id(
+                    success = await self.download_from_id(
                         item_id,
                         False,
                         is_parallel=True,
@@ -1531,7 +1542,9 @@ class QobuzDL:
                         suppress_header=(total_track_urls > 1),
                         is_playlist=(total_track_urls > 1),
                     )
-                self.mark_url_done_in_file(txt_file, original_url)
+                if success:
+                    self.mark_url_done_in_file(txt_file, original_url)
+                return success
 
             await asyncio.gather(
                 *[
@@ -1565,8 +1578,9 @@ class QobuzDL:
             if os.path.isfile(url):
                 await self.download_from_txt_file(url)
             else:
-                await self.handle_url(url)
-                self.mark_url_done_in_file(txt_file, original_url)
+                success = await self.handle_url(url)
+                if success:
+                    self.mark_url_done_in_file(txt_file, original_url)
 
     async def download_from_txt_file(self, txt_file):
         """Lê um arquivo .txt de URLs (uma por linha), ignora linhas vazias,
@@ -2460,6 +2474,7 @@ class QobuzDL:
 
         if _preloaded_track_ids is not None:
             track_ids = _preloaded_track_ids
+            source_count = len(track_ids)
             playlist_name = name or "Playlist"
             pl_directory = os.path.join(
                 self.directory, sanitize_filename(playlist_name)
@@ -2483,13 +2498,14 @@ class QobuzDL:
                 self.directory, sanitize_filename(playlist_name)
             )
             track_ids = await self.client.get_track_ids_from_list(tracks_list)
+            source_count = len(tracks_list)
 
         if not track_ids:
             logger.info(f"{RED}[!] Nenhuma faixa encontrada no Qobuz. Encerrando.{OFF}")
             return
 
         logger.info(
-            f"{GREEN}[+] {len(track_ids)} de {len(tracks_list)} faixas "
+            f"{GREEN}[+] {len(track_ids)} de {source_count} faixas "
             f"encontradas no Qobuz.{OFF}"
         )
 
@@ -2509,6 +2525,7 @@ class QobuzDL:
         )
         semaphore = asyncio.Semaphore(batch_workers) if can_parallelize else None
         pending_tasks = []
+        outcomes = []
 
         from qobuz_dl.downloader import print_download_header
 
@@ -2524,7 +2541,7 @@ class QobuzDL:
             ],
         )
 
-        for idx, track_id in enumerate(track_ids):
+        for idx, track_id in enumerate(track_ids, start=1):
             if can_parallelize:
                 track_id_captured = track_id
                 idx_captured = idx
@@ -2532,10 +2549,11 @@ class QobuzDL:
                 async def _bounded_track_download(
                     t_id=track_id_captured, t_idx=idx_captured
                 ):
-                    if t_idx < batch_workers:
-                        await asyncio.sleep(t_idx * HEADER_STAGGER_DELAY)
+                    stagger_index = t_idx - 1
+                    if stagger_index < batch_workers:
+                        await asyncio.sleep(stagger_index * HEADER_STAGGER_DELAY)
                     async with semaphore:
-                        await self.download_from_id(
+                        return await self.download_from_id(
                             t_id,
                             album=False,
                             alt_path=pl_directory,
@@ -2548,19 +2566,21 @@ class QobuzDL:
 
                 pending_tasks.append(_bounded_track_download())
             else:
-                await self.download_from_id(
-                    track_id,
-                    album=False,
-                    alt_path=pl_directory,
-                    is_playlist=True,
-                    playlist_index=idx,
-                    is_parallel=False,
-                    position_pool=None,
-                    suppress_header=True,
+                outcomes.append(
+                    await self.download_from_id(
+                        track_id,
+                        album=False,
+                        alt_path=pl_directory,
+                        is_playlist=True,
+                        playlist_index=idx,
+                        is_parallel=False,
+                        position_pool=None,
+                        suppress_header=True,
+                    )
                 )
 
         if pending_tasks:
-            await asyncio.gather(*pending_tasks)
+            outcomes.extend(await asyncio.gather(*pending_tasks))
 
         self.folder_format = original_folder_format
         self.settings.multiple_disc_one_dir = original_multi_disc_setting
@@ -2586,3 +2606,4 @@ class QobuzDL:
         if fail > 0:
             safe_print(f"   • Falhas  : {RED}{fail}{RESET}")
         safe_print(f"{CYAN}{'━' * 44}{RESET}\n")
+        return bool(outcomes) and all(outcome is True for outcome in outcomes)

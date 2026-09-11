@@ -329,9 +329,9 @@ class Download:
 
         try:
             if not track:
-                await self.download_release(suppress_header=suppress_header)
+                return await self.download_release(suppress_header=suppress_header)
             else:
-                await self.download_track(
+                return await self.download_track(
                     is_parallel=is_parallel,
                     position_pool=position_pool,
                     suppress_header=suppress_header,
@@ -492,6 +492,7 @@ class Download:
 
         failed_tracks = 0
         aborted_by_user = False
+        results = []
         abort_event.clear()
 
         original_sigint = None
@@ -555,7 +556,7 @@ class Download:
                         logger.warning(
                             f"    {YELLOW}[!] Não foi possível renomear a pasta para [INCOMPLETE]. ({e}){OFF}"
                         )
-                return
+                return True
 
             semaphore = asyncio.Semaphore(active_workers)
 
@@ -692,7 +693,7 @@ class Download:
                     if not t.done():
                         t.cancel()
                 try:
-                    self.http_session.close()
+                    await self.http_session.aclose()
                 except Exception as e:
                     # Encerrando por CTRL+C/cancelamento -- fechar a sessao
                     # e' limpeza best-effort, nao pode impedir o `raise`
@@ -702,9 +703,7 @@ class Download:
                     )
                 raise
 
-            for res in results:
-                if res is False or isinstance(res, Exception):
-                    failed_tracks += 1
+            failed_tracks = sum(res is not True for res in results)
 
             if not abort_event.is_set():
                 _clean_embed_art(dirn, self.settings)
@@ -731,7 +730,7 @@ class Download:
             if is_standard_album and working_dirn == inprogress_dirn:
                 final_dirn = (
                     target_dirn
-                    if (failed_tracks == 0 and not aborted_by_user)
+                    if (results and failed_tracks == 0 and not aborted_by_user)
                     else incomplete_dirn
                 )
                 try:
@@ -757,7 +756,7 @@ class Download:
                 os._exit(1)
 
             # [FIX] handle_download_id() agora vive DENTRO deste 'if', junto com db_artist/db_album -- antes havia risco (sinalizado em revisao) de essas variaveis nao existirem quando failed_tracks>0/aborted_by_user e o handle_download_id ainda assim tentar rodar.
-            if failed_tracks == 0 and not aborted_by_user:
+            if results and failed_tracks == 0 and not aborted_by_user:
                 db_artist = album_attr.get("album_artist", "Unknown")
                 db_album = album_attr.get("album_title", "Unknown")
 
@@ -814,6 +813,8 @@ class Download:
             if real_failed > 0:
                 ui.emit(f" - Falhas de rede/download : {RED}{real_failed}{RESET}")
             ui.emit(f"{CYAN}{'-' * 44}{RESET}\n")
+
+        return bool(results) and failed_tracks == 0 and not aborted_by_user
 
     async def download_track(
         self, is_parallel=False, position_pool=None, suppress_header=False
@@ -1064,7 +1065,7 @@ class Download:
                 quality_met=quality_met,
                 bit_depth=bit_depth,
                 sampling_rate=sampling_rate,
-                saved_path=dirn,
+                saved_path=getattr(self, "last_downloaded_file", dirn),
                 url=url,
                 release_date=release_date,
                 artist=db_artist,
@@ -1103,6 +1104,8 @@ class Download:
                 self.settings.pl_success = getattr(self.settings, "pl_success", 0) + 1
             else:
                 self.settings.pl_skipped = getattr(self.settings, "pl_skipped", 0) + 1
+
+        return bool(success)
 
     async def _download_and_tag(
         self,
@@ -1186,8 +1189,33 @@ class Download:
         final_file = os.path.join(root_dir, formatted_path) + extension
 
         if os.path.exists(final_file):
-            ui.skip(f"Pulando: {os.path.basename(final_file)} (Ja existe)")
-            return True
+            if getattr(self.settings, "verify_after_download", False):
+                ok, message = await loop.run_in_executor(
+                    None, lambda: verify_audio_integrity(final_file)
+                )
+                if not ok:
+                    try:
+                        os.replace(final_file, f"{final_file}.corrupt")
+                    except OSError as e:
+                        logger.error(
+                            "Arquivo existente falhou na integridade e não pôde ser "
+                            "isolado (%s): %s",
+                            final_file,
+                            e,
+                        )
+                        return False
+                    ui.warn(
+                        f"Arquivo existente inválido isolado ({message}); "
+                        "baixando novamente."
+                    )
+                else:
+                    ui.skip(f"Pulando: {os.path.basename(final_file)} (Ja existe)")
+                    self.last_downloaded_file = final_file
+                    return True
+            else:
+                ui.skip(f"Pulando: {os.path.basename(final_file)} (Ja existe)")
+                self.last_downloaded_file = final_file
+                return True
 
         if abort_event.is_set():
             return False
@@ -1374,6 +1402,8 @@ class Download:
             )
         except Exception as e:
             ui.error(f"Erro ao aplicar tags: {e}")
+            logger.debug("Falha ao aplicar tags", exc_info=True)
+            return False
 
         if (
             getattr(self, "fetch_lyrics", False)
@@ -1457,13 +1487,6 @@ class Download:
                     )
                 )
 
-        emit_progress_json(
-            self.settings,
-            "track_done",
-            track_id=self.item_id,
-            path=final_file,
-        )
-
         if (
             getattr(self.settings, "verify_after_download", False)
             and not abort_event.is_set()
@@ -1480,6 +1503,46 @@ class Download:
                         f"{os.path.basename(final_file)}: {verify_message}{OFF}"
                     )
                 logger.debug(f"Falha de integridade em {final_file}: {verify_message}")
+                corrupt_path = f"{final_file}.corrupt"
+                remaining_path = corrupt_path
+                try:
+                    os.replace(final_file, corrupt_path)
+                    ui.warn(
+                        f"Arquivo inválido preservado para diagnóstico como "
+                        f"{os.path.basename(corrupt_path)}"
+                    )
+                except OSError as e:
+                    logger.debug(
+                        "Não foi possível isolar o arquivo corrompido %s: %s. "
+                        "Tentando removê-lo.",
+                        final_file,
+                        e,
+                    )
+                    try:
+                        os.remove(final_file)
+                        remaining_path = ""
+                    except OSError as remove_error:
+                        remaining_path = final_file
+                        logger.error(
+                            "Arquivo inválido ainda permanece em %s: %s",
+                            final_file,
+                            remove_error,
+                        )
+                emit_progress_json(
+                    self.settings,
+                    "track_failed",
+                    track_id=self.item_id,
+                    path=remaining_path,
+                    reason=verify_message,
+                )
+                return False
+
+        emit_progress_json(
+            self.settings,
+            "track_done",
+            track_id=self.item_id,
+            path=final_file,
+        )
 
         delay_time = getattr(self.settings, "delay", 0)
         if delay_time == 0 and "--delay" in sys.argv:
@@ -1492,6 +1555,7 @@ class Download:
             ui.step(f"Aguardando {delay_time} segundos para evitar rate limiting...")
             await asyncio.sleep(delay_time)
 
+        self.last_downloaded_file = final_file
         return True
 
     @staticmethod
@@ -2080,7 +2144,18 @@ async def tqdm_download(
                         "GET", url, headers=headers, timeout=timeout_cfg
                     ) as r:
                         if r.status_code == 416:
-                            return
+                            total_remoto = None
+                            content_range = r.headers.get("content-range", "")
+                            match_total = re.fullmatch(r"bytes \*/(\d+)", content_range)
+                            if match_total:
+                                total_remoto = int(match_total.group(1))
+                            elif total_size:
+                                total_remoto = total_size
+                            if downloaded_size > 0 and downloaded_size == total_remoto:
+                                return
+                            raise Exception(
+                                "HTTP 416 recebido antes de o arquivo local estar completo"
+                            )
                         if r.status_code == 404:
                             raise _PermanentDownloadError(
                                 "HTTP 404: arquivo não encontrado no servidor."
@@ -2092,6 +2167,26 @@ async def tqdm_download(
                             )
                         if r.status_code not in [200, 206]:
                             raise Exception(f"Status do servidor: {r.status_code}")
+
+                        # Alguns CDNs ignoram Range e devolvem 200 com o arquivo
+                        # inteiro. Anexar essa resposta ao parcial duplicaria os
+                        # primeiros bytes e produziria um áudio corrompido.
+                        if downloaded_size > 0 and r.status_code == 200:
+                            downloaded_size = 0
+                            mode = "wb"
+                            total_size = int(r.headers.get("content-length", 0))
+                        elif downloaded_size > 0 and r.status_code == 206:
+                            content_range = r.headers.get("content-range", "")
+                            match_range = re.match(
+                                r"bytes (\d+)-\d+/(?:\d+|\*)", content_range
+                            )
+                            if (
+                                not match_range
+                                or int(match_range.group(1)) != downloaded_size
+                            ):
+                                raise Exception(
+                                    "Resposta parcial com Content-Range incompatível"
+                                )
 
                         if total_size == 0:
                             total_size = downloaded_size + int(
@@ -2482,8 +2577,12 @@ async def tqdm_download_segments(
             logger.debug(f"HEAD falhou para segmento (assumindo tamanho 0): {e}")
             return 0
 
-    tasks_size = [get_seg_size(i) for i in range(n_segments + 1)]
-    sizes = await asyncio.gather(*tasks_size)
+    # Consulta tamanhos em janelas limitadas. Criar uma task por segmento de
+    # uma faixa longa causava uma rajada de conexões antes mesmo do download.
+    sizes = []
+    for inicio in range(0, n_segments + 1, workers):
+        lote = range(inicio, min(inicio + workers, n_segments + 1))
+        sizes.extend(await asyncio.gather(*(get_seg_size(i) for i in lote)))
     total_size = sum(sizes)
 
     position = position_pool.acquire() if (is_parallel and position_pool) else 0
@@ -2523,6 +2622,8 @@ async def tqdm_download_segments(
                     return bytearray()
 
                 if attempt.retry_state.attempt_number > 1:
+                    if seg_data:
+                        bar.update(-len(seg_data))
                     _n = attempt.retry_state.attempt_number
                     ui.warn(
                         f"Reconectando segmento {seg_num}. "
@@ -2570,22 +2671,30 @@ async def tqdm_download_segments(
                             seg_data, raw_key, segment_uuid
                         )
 
+                    else:
+                        # O segmento 0 contém a inicialização do contêiner e
+                        # precisa preceder todos os segmentos de mídia.
+                        decrypted_data = _decrypt_qobuz_segment(
+                            seg_data, raw_key, segment_uuid
+                        )
+                    await file.write(decrypted_data)
+
                 if n_segments >= 2:
-                    semaphore = asyncio.Semaphore(workers)
+                    # Mantém no máximo ``workers`` segmentos em memória e
+                    # grava cada janela em ordem. O gather anterior acumulava
+                    # a faixa inteira antes de escrever o primeiro byte.
+                    for inicio in range(2, n_segments + 1, workers):
+                        lote = range(inicio, min(inicio + workers, n_segments + 1))
+                        results = await asyncio.gather(
+                            *(fetch_segment_fluid(i) for i in lote)
+                        )
 
-                    async def bounded_fetch(i):
-                        async with semaphore:
-                            return await fetch_segment_fluid(i)
-
-                    tasks_seg = [bounded_fetch(i) for i in range(2, n_segments + 1)]
-                    results = await asyncio.gather(*tasks_seg)
-
-                    for seg_data in results:
-                        if not abort_event.is_set():
-                            decrypted_data = _decrypt_qobuz_segment(
-                                seg_data, raw_key, segment_uuid
-                            )
-                            await file.write(decrypted_data)
+                        for seg_data in results:
+                            if not abort_event.is_set():
+                                decrypted_data = _decrypt_qobuz_segment(
+                                    seg_data, raw_key, segment_uuid
+                                )
+                                await file.write(decrypted_data)
 
         if abort_event.is_set():
             return
