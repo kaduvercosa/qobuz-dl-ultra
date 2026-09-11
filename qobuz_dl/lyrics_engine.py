@@ -553,9 +553,7 @@ class LyricsEngine:
                             f"injetadas no metadata (via Qobuz)!"
                         )
                     else:
-                        _tw(
-                            f" {RED}❌ Falha ao gravar letras padrao (Qobuz){RESET}"
-                        )
+                        _tw(f" {RED}❌ Falha ao gravar letras padrao (Qobuz){RESET}")
 
                     return result
 
@@ -681,9 +679,7 @@ class LyricsEngine:
                             " ✅ Letras sincronizadas injetadas e salvas como .lrc (via LRCLIB)!"
                         )
                     elif save_lrc:
-                        _tw(
-                            " ✅ Letras sincronizadas salvas como .lrc (via LRCLIB)!"
-                        )
+                        _tw(" ✅ Letras sincronizadas salvas como .lrc (via LRCLIB)!")
                     elif embed_lyrics:
                         _tw(
                             " ✅ Letras sincronizadas injetadas no metadata (via LRCLIB)!"

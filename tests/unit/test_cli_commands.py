@@ -22,11 +22,13 @@ class TestCLIBasicCommands:
     def test_cli_help(self, mock_initialchecks, mock_client_create, capsys):
         """Verifica se a ajuda e exibida corretamente via --help."""
         mock_client = AsyncMock()
-        mock_client.check_subscription = MagicMock(return_value={
-            "is_active": True,
-            "status": "Ativa",
-            "offer": "Hi-Fi",
-        })
+        mock_client.check_subscription = MagicMock(
+            return_value={
+                "is_active": True,
+                "status": "Ativa",
+                "offer": "Hi-Fi",
+            }
+        )
         mock_client_create.return_value = mock_client
 
         mock_initialchecks.return_value = None
@@ -48,10 +50,12 @@ class TestCLIBasicCommands:
     def test_cli_version(self, mock_initialchecks, mock_client_create, capsys):
         """Testa comportamento com --version (que nao existe no argparse atual)."""
         mock_client = AsyncMock()
-        mock_client.check_subscription = MagicMock(return_value={
-            "is_active": True,
-            "status": "Ativa",
-        })
+        mock_client.check_subscription = MagicMock(
+            return_value={
+                "is_active": True,
+                "status": "Ativa",
+            }
+        )
         mock_client_create.return_value = mock_client
         mock_initialchecks.return_value = None
 
@@ -69,10 +73,12 @@ class TestCLIBasicCommands:
     def test_invalid_command(self, mock_initialchecks, mock_client_create, capsys):
         """Testa comportamento com comando invalido."""
         mock_client = AsyncMock()
-        mock_client.check_subscription = MagicMock(return_value={
-            "is_active": True,
-            "status": "Ativa",
-        })
+        mock_client.check_subscription = MagicMock(
+            return_value={
+                "is_active": True,
+                "status": "Ativa",
+            }
+        )
         mock_client_create.return_value = mock_client
         mock_initialchecks.return_value = None
 
@@ -86,7 +92,9 @@ class TestCLIBasicCommands:
             sys.argv = original_argv
 
         captured = capsys.readouterr()
-        assert "invalid choice" in captured.err.lower() or "erro" in captured.err.lower()
+        assert (
+            "invalid choice" in captured.err.lower() or "erro" in captured.err.lower()
+        )
 
 
 class TestCLIArgumentValidation:
@@ -94,7 +102,9 @@ class TestCLIArgumentValidation:
 
     @patch("qobuz_dl.cli.async_main", new_callable=AsyncMock)
     @patch("qobuz_dl.cli._initial_checks")
-    def test_missing_required_arguments(self, mock_initialchecks, mock_async_main, capsys):
+    def test_missing_required_arguments(
+        self, mock_initialchecks, mock_async_main, capsys
+    ):
         """Verifica comportamento quando nenhum argumento e fornecido."""
         mock_initialchecks.return_value = None
         mock_async_main.side_effect = SystemExit(0)
@@ -152,17 +162,19 @@ class TestCLIErrorHandling:
     ):
         """Testa com caminho de saida invalido (PermissionError em mkdir)."""
         mock_client = AsyncMock()
-        mock_client.check_subscription = MagicMock(return_value={
-            "is_active": True,
-            "status": "Ativa",
-        })
+        mock_client.check_subscription = MagicMock(
+            return_value={
+                "is_active": True,
+                "status": "Ativa",
+            }
+        )
         mock_client_create.return_value = mock_client
 
         mock_makedirs.side_effect = PermissionError("Permission denied")
 
         original_argv = sys.argv.copy()
         try:
-            sys.argv = ["qobuz-dl", "-r"] 
+            sys.argv = ["qobuz-dl", "-r"]
             with pytest.raises(PermissionError):
                 cli.main()
         finally:
@@ -181,10 +193,12 @@ class TestCLIConfigHandling:
     ):
         """Verifica se o diretorio de config e criado quando necessario."""
         mock_client = AsyncMock()
-        mock_client.check_subscription = MagicMock(return_value={
-            "is_active": True,
-            "status": "Ativa",
-        })
+        mock_client.check_subscription = MagicMock(
+            return_value={
+                "is_active": True,
+                "status": "Ativa",
+            }
+        )
         mock_client_create.return_value = mock_client
 
         original_argv = sys.argv.copy()
@@ -204,10 +218,12 @@ class TestCLIConfigHandling:
     ):
         """Testa carregamento de arquivo de configuracao."""
         mock_client = AsyncMock()
-        mock_client.check_subscription = MagicMock(return_value={
-            "is_active": True,
-            "status": "Ativa",
-        })
+        mock_client.check_subscription = MagicMock(
+            return_value={
+                "is_active": True,
+                "status": "Ativa",
+            }
+        )
         mock_client_create.return_value = mock_client
 
         original_argv = sys.argv.copy()

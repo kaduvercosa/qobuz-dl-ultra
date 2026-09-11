@@ -73,7 +73,9 @@ class TestCustomHelpFormatter:
 # --------------------------------------------------------------------
 @pytest.fixture
 def parser():
-    return qobuz_dl_args(default_quality=6, default_limit=20, default_folder="MinhaMusica")
+    return qobuz_dl_args(
+        default_quality=6, default_limit=20, default_folder="MinhaMusica"
+    )
 
 
 class TestParserPrincipal:
@@ -204,22 +206,30 @@ class TestDistribuicaoDeFlagsComuns:
     editada por engano removendo um desses, ou que um subcomando que NÃO
     devia ganhar essas flags não ganhou."""
 
-    @pytest.mark.parametrize("comando,args_extra", [
-        ("interactive", []),
-        ("dl", ["URL"]),
-        ("lucky", ["termo de busca"]),
-        ("sync-playlist", ["https://play.qobuz.com/playlist/12345"]),
-    ])
-    def test_subcomandos_com_add_common_arg_tem_quality(self, parser, comando, args_extra):
+    @pytest.mark.parametrize(
+        "comando,args_extra",
+        [
+            ("interactive", []),
+            ("dl", ["URL"]),
+            ("lucky", ["termo de busca"]),
+            ("sync-playlist", ["https://play.qobuz.com/playlist/12345"]),
+        ],
+    )
+    def test_subcomandos_com_add_common_arg_tem_quality(
+        self, parser, comando, args_extra
+    ):
         args = parser.parse_args([comando, *args_extra])
         assert hasattr(args, "quality")
 
-    @pytest.mark.parametrize("comando,args_extra", [
-        ("auth", []),
-        ("user", []),
-        ("stats", []),
-        ("inspect", []),
-    ])
+    @pytest.mark.parametrize(
+        "comando,args_extra",
+        [
+            ("auth", []),
+            ("user", []),
+            ("stats", []),
+            ("inspect", []),
+        ],
+    )
     def test_subcomandos_sem_add_common_arg_nao_tem_quality(
         self, parser, comando, args_extra
     ):
