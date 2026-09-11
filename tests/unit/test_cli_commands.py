@@ -22,7 +22,6 @@ class TestCLIBasicCommands:
     def test_cli_help(self, mock_initialchecks, mock_client_create, capsys):
         """Verifica se a ajuda e exibida corretamente via --help."""
         mock_client = AsyncMock()
-        # Força o método síncrono a retornar um dicionário real
         mock_client.check_subscription = MagicMock(return_value={
             "is_active": True,
             "status": "Ativa",
@@ -93,9 +92,10 @@ class TestCLIBasicCommands:
 class TestCLIArgumentValidation:
     """Testa validacao de argumentos na CLI."""
 
+    @patch("builtins.input", return_value="n")
     @patch("qobuz_dl.qopy.Client.create", new_callable=AsyncMock)
     @patch("qobuz_dl.cli._initial_checks")
-    def test_missing_required_arguments(self, mock_initialchecks, mock_client_create, capsys):
+    def test_missing_required_arguments(self, mock_initialchecks, mock_client_create, mock_input, capsys):
         """Verifica comportamento quando nenhum argumento e fornecido."""
         mock_client = AsyncMock()
         mock_client.check_subscription = MagicMock(return_value={
@@ -114,17 +114,12 @@ class TestCLIArgumentValidation:
         finally:
             sys.argv = original_argv
 
-    @patch("qobuz_dl.qopy.Client.create", new_callable=AsyncMock)
+    @patch("qobuz_dl.cli.async_main", new_callable=AsyncMock)
     @patch("qobuz_dl.cli._initial_checks")
-    def test_url_argument_parsing(self, mock_initialchecks, mock_client_create, capsys):
+    def test_url_argument_parsing(self, mock_initialchecks, mock_async_main, capsys):
         """Testa parsing de URLs como argumentos."""
-        mock_client = AsyncMock()
-        mock_client.check_subscription = MagicMock(return_value={
-            "is_active": True,
-            "status": "Ativa",
-        })
-        mock_client_create.return_value = mock_client
         mock_initialchecks.return_value = None
+        mock_async_main.side_effect = SystemExit(0)
 
         original_argv = sys.argv.copy()
         try:
@@ -139,17 +134,12 @@ class TestCLIArgumentValidation:
 class TestCLIErrorHandling:
     """Testa tratamento de erros na CLI."""
 
-    @patch("qobuz_dl.qopy.Client.create", new_callable=AsyncMock)
+    @patch("qobuz_dl.cli.async_main", new_callable=AsyncMock)
     @patch("qobuz_dl.cli._initial_checks")
-    def test_config_file_not_found(self, mock_initialchecks, mock_client_create, capsys):
+    def test_config_file_not_found(self, mock_initialchecks, mock_async_main, capsys):
         """Testa comportamento quando arquivo de config nao existe."""
-        mock_client = AsyncMock()
-        mock_client.check_subscription = MagicMock(return_value={
-            "is_active": True,
-            "status": "Ativa",
-        })
-        mock_client_create.return_value = mock_client
         mock_initialchecks.return_value = None
+        mock_async_main.side_effect = SystemExit(1)
 
         original_argv = sys.argv.copy()
         try:
