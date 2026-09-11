@@ -198,6 +198,7 @@ async def _navegar_arquivos(diretorio_inicial):
     }
 
     def _recarregar():
+        """Reload the file list in the file browser."""
         estado["entradas"] = _listar_diretorio(estado["dir"])
         estado["cursor"] = min(estado["cursor"], max(0, len(estado["entradas"]) - 1))
 
@@ -206,6 +207,7 @@ async def _navegar_arquivos(diretorio_inicial):
     bindings = KeyBindings()
 
     def _mover(delta):
+        """Move cursor in the file browser."""
         def _fn(event):
             if estado["entradas"]:
                 estado["cursor"] = max(
@@ -254,6 +256,7 @@ async def _navegar_arquivos(diretorio_inicial):
         bindings.add(str(_digito))(_make_digit_jump(_digito))
 
     def _entrar_ou_escolher(event):
+        """Enter directory or select file."""
         if not estado["entradas"]:
             return
         item = estado["entradas"][estado["cursor"]]
@@ -270,6 +273,7 @@ async def _navegar_arquivos(diretorio_inicial):
     bindings.add("l")(_entrar_ou_escolher)
 
     def _voltar(event):
+        """Go back to parent directory."""
         pai = os.path.dirname(estado["dir"].rstrip(os.sep))
         # Já está na raiz do sistema de arquivos (dirname("/") == "/",
         # dirname("C:\\") == "C:\\") -- não tem pra onde voltar.
@@ -299,6 +303,7 @@ async def _navegar_arquivos(diretorio_inicial):
         event.app.exit(result=None)
 
     def get_header_text():
+        """Generate header text for file browser UI."""
         return [
             ("class:title", "\n === Escolha um arquivo de áudio ===\n\n"),
             ("class:footer", f" 📂 {estado['dir']}\n"),
@@ -306,6 +311,7 @@ async def _navegar_arquivos(diretorio_inicial):
         ]
 
     def get_list_text():
+        """Generate list text for file browser UI."""
         res = []
         if not estado["entradas"]:
             res.append(
@@ -326,6 +332,7 @@ async def _navegar_arquivos(diretorio_inicial):
         return res
 
     def get_footer_text():
+        """Generate footer text for file browser UI."""
         msg = (
             " [↑↓/jk] Mover   [→/l/Enter] Entrar/Escolher   [←/h] Voltar   "
             "[1-9] Ir para   [Esc] Cancelar"
@@ -357,6 +364,7 @@ async def _navegar_arquivos(diretorio_inicial):
 
 
 def _formatar_tamanho(num_bytes):
+    """Format file size in human-readable format."""
     for unidade in ("B", "KB", "MB", "GB"):
         if num_bytes < 1024:
             return f"{num_bytes:.1f} {unidade}" if unidade != "B" else f"{num_bytes} B"
@@ -677,6 +685,7 @@ def _suavizar(valores, janela=11):
     # quem não é engenheiro de áudio enxergar o que importa (o formato
     # geral e onde o corte acontece). Suavizar deixa só o essencial
     # visível, sem mudar a conclusão (o corte continua no mesmo lugar).
+    """Smooth pixel array for cover art display."""
     n = len(valores)
     if janela <= 1 or n == 0:
         return list(valores)
@@ -691,6 +700,7 @@ def _suavizar(valores, janela=11):
 def _esc(txt):
     # Escapa texto antes de embutir em HTML/SVG -- o nome da faixa vem
     # do nome do arquivo do usuário, que pode ter "&", "<", ">" etc.
+    """Escape HTML special characters."""
     import html
 
     return html.escape(str(txt), quote=True)
@@ -751,9 +761,11 @@ def _gerar_grafico_html(caminho_audio, genuinidade):
     db_max = pico_db + 5
 
     def _x_px(hz):
+        """Calculate X position for cover art pixels."""
         return x0 + (hz / nyquist_hz) * (x1 - x0) if nyquist_hz else x0
 
     def _y_px(db):
+        """Calculate Y position for cover art pixels."""
         db_clamp = max(db_min, min(db_max, db))
         return y1 - (db_clamp - db_min) / (db_max - db_min) * (y1 - y0)
 
@@ -923,6 +935,7 @@ def _gerar_grafico_html(caminho_audio, genuinidade):
     )
 
     def _css(d):
+        """Generate CSS for cover art pixel display."""
         return ";".join(f"{k}:{v}" for k, v in d.items())
 
     html_doc = f"""<!DOCTYPE html>
@@ -1041,6 +1054,7 @@ def _gerar_grafico_html(caminho_audio, genuinidade):
 
 
 def _mostrar_relatorio(caminho, dados, genuinidade):
+    """Display full tag report for audio file."""
     ui.banner("🔍 INSPETOR DE ÁUDIO")
     ui.section("📄 ARQUIVO")
     for chave, valor in dados["tecnico"].items():

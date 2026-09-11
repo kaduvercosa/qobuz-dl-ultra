@@ -592,6 +592,7 @@ async def finalize_report(
 
 
 def _atualizar_progresso_item(report: dict) -> None:
+    """Update progress for a postprocessing item."""
     _garantir_estrutura_item(report)
     report["progresso"]["estado"]["atualizado_em"] = _now_iso()
 
@@ -601,6 +602,7 @@ def _recalc_resumo(report: dict) -> None:
     _garantir_estrutura_item(report)
 
     def tem_status(faixa: dict, status: str) -> bool:
+        """Check if an item has a specific status."""
         return faixa.get("download", {}).get("situacao") == status
 
     faixas = report.get("faixas", [])

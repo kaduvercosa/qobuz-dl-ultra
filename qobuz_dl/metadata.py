@@ -136,6 +136,7 @@ def _make_sort_name(name) -> str:
 
 # # Acrescenta a versão sem duplicá-la quando ela já faz parte do título.
 def _get_title_with_version(title: str = "", version: str = "") -> str:
+    """Get track title with version suffix if present."""
     item_title = title
     if version:
         item_title = (
@@ -146,6 +147,7 @@ def _get_title_with_version(title: str = "", version: str = "") -> str:
 
 # # Monta o título de uma faixa, incluindo versão e obra clássica quando existir.
 def _get_title(track_dict):
+    """Get base track title without version."""
     title = track_dict["title"]
     version = track_dict.get("version")
     if version:
@@ -158,6 +160,7 @@ def _get_title(track_dict):
 
 # # Converte marcadores (P)/(C) nos símbolos Unicode usados nas tags.
 def _format_copyright(s: str) -> str:
+    """Format copyright string for tags."""
     if s:
         s = s.replace("(P)", PHON_COPYRIGHT)
         s = s.replace("(C)", COPYRIGHT)
@@ -166,6 +169,7 @@ def _format_copyright(s: str) -> str:
 
 # # Remove caminhos/setas de gênero e elimina gêneros repetidos.
 def _format_genres(genres: list) -> str:
+    """Format genre list for tags."""
     genres = re.findall(r"([^\u2192\/]+)", "/".join(genres))
     no_repeats = []
     [no_repeats.append(g) for g in genres if g not in no_repeats]
@@ -262,6 +266,7 @@ def _shrink_image_to_fit(image_path, max_bytes):
 
 # # Embute a capa no FLAC; se necessário, usa uma cópia recompactada sem alterar cover.jpg.
 def _embed_flac_img(root_dir, audio: FLAC, cover_override=None):
+    """Embed cover art in FLAC file."""
     cover_image = _get_cover_path(root_dir, override=cover_override)
 
     if not cover_image or not os.path.isfile(cover_image):
@@ -302,6 +307,7 @@ def _embed_flac_img(root_dir, audio: FLAC, cover_override=None):
 
 # # Adiciona a capa como frame APIC no ID3 do MP3.
 def _embed_id3_img(root_dir, audio: id3.ID3, cover_override=None):
+    """Embed cover art in MP3 file."""
     cover_image = _get_cover_path(root_dir, override=cover_override)
 
     if not cover_image or not os.path.isfile(cover_image):
@@ -325,6 +331,7 @@ def tag_flac(
     embed_cover_path=None,
     musicbrainz_ids=None,
 ):
+    """Apply tags to FLAC file."""
     audio = FLAC(filename)
 
     if istrack:
@@ -449,6 +456,7 @@ def tag_mp3(
     embed_cover_path=None,
     musicbrainz_ids=None,
 ):
+    """Apply tags to MP3 file."""
     try:
         audio = id3.ID3(filename)
     except ID3NoHeaderError:
@@ -574,6 +582,7 @@ def _get_tags_to_add(
     settings: QobuzDLSettings = None,
     musicbrainz_ids=None,
 ):
+    """Build dictionary of tags to add based on settings."""
     tags = dict()
     if not qobuz_album or not qobuz_item:
         return tags
@@ -605,6 +614,7 @@ def _get_tags_to_add(
         seen_artists = set()
 
         def add_unique_artist(name):
+            """Add artist to a list, avoiding duplicates."""
             if not name:
                 return
             norm_name = _normalize_name(name)

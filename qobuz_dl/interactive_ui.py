@@ -62,6 +62,7 @@ else:
 
 
 def _shade(f):
+    """Lighten (f>0) or darken (f<0) the accent color by mixing with white or black."""
     # Clareia (f > 0, mistura com branco) ou escurece (f < 0, mistura
     # com preto) a cor de destaque, usado pra diferenciar os "tipos"
     # de lançamento (álbum/EP/single/etc.) na TUI sem cadastrar uma

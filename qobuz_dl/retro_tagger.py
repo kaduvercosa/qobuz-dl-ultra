@@ -281,6 +281,7 @@ async def process_retroactive_lyrics_async(
                     items = res.get("tracks", {}).get("items", [])
 
                     def normalize_text(value):
+                        """Normalize text for comparison (remove accents, lowercase, etc.)."""
                         return re.sub(r"[^a-z0-9]", "", str(value).lower())
 
                     target_title = normalize_text(title)

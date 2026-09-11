@@ -235,6 +235,7 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
         # da tabela com as bordas superiores ┌─┬─┐. Recalculado a cada
         # redesenho da tela (redimensionar terminal, mover cursor, etc.),
         # por isso mede a largura do terminal toda vez.
+        """Generate header text for file browser UI."""
         try:
             columns = get_app().output.get_size().columns
         except Exception:
@@ -283,6 +284,7 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
         # categoria de item na TUI, é aqui (e em _get_table_layout) que
         # entra o novo bloco, seguindo o padrão dos existentes.
         # ------------------------------------------------------------
+        """Generate list text for file browser UI."""
         try:
             columns = get_app().output.get_size().columns
         except Exception:
@@ -814,6 +816,7 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
     def get_footer_text():
         # Rodapé: borda inferior da tabela (se aplicável), contador de
         # selecionados (modo multi) e a dica de atalhos de teclado.
+        """Generate footer text for file browser UI."""
         try:
             columns = get_app().output.get_size().columns
         except Exception:
@@ -960,6 +963,7 @@ class QobuzDL:
         blacklist=None,
         playlist_as_albums: bool = False,
     ):
+        """Initialize QobuzDL with download directory, quality settings, format patterns, and feature flags."""
         self.directory = create_and_return_dir(directory)
         self.quality = quality
         self.embed_art = embed_art

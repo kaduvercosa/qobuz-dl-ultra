@@ -63,6 +63,7 @@ just_fix_windows_console()
 # qualquer parsing de argumentos, entao esperar pelo argparse deixaria a
 # tela inicial (impressa muito cedo) sem protecao.
 def _detect_color_capability() -> bool:
+    """Detect whether color output should be enabled based on environment and TTY."""
     if os.environ.get("NO_COLOR") is not None:  # https://no-color.org/
         return False
     if "--no-color" in sys.argv:
@@ -180,6 +181,7 @@ def _find_config_file():
 
 
 def _rgb_escape(r, g, b) -> str:
+    """Generate 24-bit RGB ANSI escape sequence, respecting COLOR_ON setting."""
     # Passa pela mesma porta: e' daqui que saem ACCENT/HIGHLIGHT/INFO/PROGRESS,
     # as cores mais usadas do programa.
     return _e(f"\033[38;2;{r};{g};{b}m")

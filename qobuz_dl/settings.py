@@ -28,6 +28,7 @@ def _bounded_workers(value, default, maximum):
 
 # # Resolve uma opção em que o valor da CLI, quando fornecido, substitui o config.ini.
 def _merge_bool_opt_out(arguments, dest, config_value):
+    """Merge boolean option where CLI true overrides config true (opt-out pattern)."""
     cli_value = getattr(arguments, dest, _MISSING)
     if cli_value is _MISSING or cli_value is None:
         return bool(config_value)
@@ -36,6 +37,7 @@ def _merge_bool_opt_out(arguments, dest, config_value):
 
 # # Resolve opção opt-in: no_<opção> tem prioridade para desligar, depois a CLI para ligar.
 def _merge_bool_opt_in(arguments, dest, config_value):
+    """Merge boolean option where CLI true overrides config false (opt-in pattern)."""
     if getattr(arguments, f"no_{dest}", False):
         return False
     if getattr(arguments, dest, False):
@@ -147,6 +149,7 @@ class QobuzDLSettings:
     @staticmethod
     def from_arguments_configparser(arguments, config):
         # # Prefere a seção [qobuz], mas permite configparser sem essa seção usando DEFAULT.
+        """Create QobuzDLSettings from argparse Namespace and ConfigParser."""
         section = "qobuz" if config.has_section("qobuz") else "DEFAULT"
 
         kwargs = {

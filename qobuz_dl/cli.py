@@ -114,6 +114,7 @@ def _redacted_config(config):
 
 
 def _bootstrap_ui():
+    """Configure UI system early based on command-line flags before argparse runs."""
     argv = sys.argv[1:]
     ui.configure(
         quiet="--quiet" in argv,
@@ -127,6 +128,7 @@ _bootstrap_ui()
 
 
 def _keyring_save(key: str, value: str) -> bool:
+    """Store a credential in the OS keyring. Returns True on success."""
     if not value:
         return False
     try:
@@ -137,6 +139,7 @@ def _keyring_save(key: str, value: str) -> bool:
 
 
 def _keyring_load(key: str):
+    """Retrieve a credential from the OS keyring. Returns None if not found or on error."""
     try:
         return keyring.get_password(KEYRING_SERVICE, key)
     except Exception:
@@ -144,6 +147,7 @@ def _keyring_load(key: str):
 
 
 def validate_config_formats(formats_to_check: dict):
+    """Validate folder_format and track_format patterns for typos and unknown placeholders."""
     VALID_KEYS = {
         "artist",
         "album",
@@ -230,6 +234,7 @@ def validate_config_formats(formats_to_check: dict):
 
 
 def _pick_accent_color() -> str:
+    """Interactive accent color picker for the config wizard. Returns RGB string."""
     ui.emit(f"\n{BG}[?] Cor de destaque do programa:{OFF}")
     ui.wrapped("Aparece em nomes de faixas, cabeçalhos, barras e progresso.", indent=4)
     ui.blank()
@@ -295,6 +300,7 @@ def _pick_accent_color() -> str:
 
 
 def _reset_config(config_file: str):
+    """Run the interactive configuration wizard and save the result to config_file."""
     if ui.width() >= 41:
         logging.info(f"\n{BG}[ QOBUZ-DL-ULTRA - CONFIGURAÇÃO INICIAL ]{OFF}")
     else:
@@ -471,6 +477,7 @@ def _reset_config(config_file: str):
 
 
 def _remove_leftovers(directory: str):
+    """Remove temporary download files from the specified directory."""
     for pattern in [".*.tmp", "~tmp_*.tmp"]:
         search_dir = os.path.join(directory, "**", pattern)
         for i in glob.glob(search_dir, recursive=True):
@@ -483,6 +490,7 @@ def _remove_leftovers(directory: str):
 
 
 def _format_timestamp(ts: int) -> str:
+    """Convert Unix timestamp to Brazilian date format (DD/MM/YYYY HH:MM:SS)."""
     if not ts:
         return "N/A"
     try:
@@ -675,6 +683,7 @@ async def _auth_command(
         )
 
         def format_date_br(d_str):
+            """Convert ISO date string to Brazilian date format (DD/MM/YYYY)."""
             if not d_str:
                 return "N/A"
             try:
@@ -878,7 +887,9 @@ async def _garantir_assinatura_ativa(qobuz: QobuzDL) -> bool:
 # ROTEADOR DE SUBCOMANDOS E BLOQUEIO/RECUPERAÇÃO DE ASSINATURA
 # ==============================================================================
 async def _handle_commands(qobuz: QobuzDL, arguments):
+    """Route parsed arguments to the appropriate download/interactive command."""
     def sigint_handler(sig, frame):
+        """Handle Ctrl+C during downloads: clean up partial files and exit gracefully."""
         ui.error("Download interrompido manualmente pelo usuário.")
         ui.warn("Arquivos parciais foram enviados para a lixeira.")
         try:
@@ -962,6 +973,7 @@ _LOGO_BLOCK = "\u2588"
 
 
 def _render_logo_word(word: str):
+    """Render an ASCII-art word using the built-in _LOGO_FONT bitmap."""
     letters = list(word)
     rows = ["" for _ in range(5)]
     for i, ch in enumerate(letters):
@@ -974,6 +986,7 @@ def _render_logo_word(word: str):
 
 
 def _print_logo(cols: int):
+    """Print the QOBUZ-DL ULTRA logo, adapting size to terminal width."""
     line1 = _render_logo_word("QOBUZ-DL")
     line2 = _render_logo_word("ULTRA")
     art_width = len(line1[0])
@@ -993,6 +1006,7 @@ def _print_logo(cols: int):
 
 
 def _extract_subcommands(parser: argparse.ArgumentParser):
+    """Extract all registered subcommands from an ArgumentParser for display in welcome screen."""
     subparsers_action = None
     for action in parser._actions:
         if isinstance(action, argparse._SubParsersAction):
@@ -1017,6 +1031,7 @@ def _extract_subcommands(parser: argparse.ArgumentParser):
 
 
 def _extract_global_flags(parser: argparse.ArgumentParser):
+    """Extract all global flags (non-subcommand arguments) from an ArgumentParser for display."""
     result = []
     for action in parser._actions:
         if isinstance(action, (argparse._HelpAction, argparse._SubParsersAction)):
@@ -1052,6 +1067,7 @@ _FLAG_DESCRIPTIONS_PT = {
 
 
 def _print_welcome_screen():
+    """Display the welcome screen with logo, version, and command help when no arguments are provided."""
     from qobuz_dl import __version__
 
     cols = ui.width()
@@ -1097,6 +1113,7 @@ def _print_welcome_screen():
 
 
 def _initial_checks():
+    """Check if config exists, run wizard if needed, and display welcome screen if no args given."""
     if not os.path.isdir(CONFIG_PATH) or not os.path.isfile(CONFIG_FILE):
         os.makedirs(CONFIG_PATH, exist_ok=True)
         if "-r" not in sys.argv and "--reset" not in sys.argv:
@@ -1161,9 +1178,11 @@ def check_for_updates():
 # MOTOR PRINCIPAL ASSÍNCRONO (ASYNC_MAIN)
 # ==============================================================================
 async def async_main():
+    """Main async entry point: initialize, parse arguments, route to commands, and manage client lifecycle."""
     _initial_checks()
 
     async def _async_check_updates():
+        """Background task to check for updates on GitHub without blocking the main flow."""
         try:
             loop = asyncio.get_running_loop()
             await loop.run_in_executor(None, check_for_updates)
@@ -1611,6 +1630,7 @@ async def async_main():
 
 
 def main():
+    """Synchronous entry point for qobuz-dl command. Runs async_main and handles Ctrl+C."""
     try:
         asyncio.run(async_main())
     except KeyboardInterrupt:

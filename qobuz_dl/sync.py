@@ -272,6 +272,7 @@ def _compute_fingerprint(filepath, max_length=120):
         album = audio.get("album", [""])[0] if audio.get("album") else ""
 
         def norm(s):
+            """Normalize track title for comparison."""
             return (
                 unicodedata.normalize("NFKD", str(s))
                 .encode("ASCII", "ignore")

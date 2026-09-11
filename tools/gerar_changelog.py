@@ -58,6 +58,7 @@ CATEGORIAS = [
 
 
 def _rodar_git(*args):
+    """Run a git command and return output."""
     resultado = subprocess.run(
         ["git", *args], capture_output=True, text=True, check=True
     )
@@ -74,10 +75,12 @@ def _tag_anterior(ref):
 
 
 def _e_ruido(mensagem: str) -> bool:
+    """Check if commit message is noise (merge/bump)."""
     return any(re.search(p, mensagem, re.IGNORECASE) for p in RUIDO)
 
 
 def _categorizar(mensagem: str) -> str:
+    """Categorize a commit message."""
     for rotulo, padroes in CATEGORIAS:
         if any(re.search(p, mensagem, re.IGNORECASE) for p in padroes):
             return rotulo
@@ -85,6 +88,7 @@ def _categorizar(mensagem: str) -> str:
 
 
 def gerar_changelog(ref_de: str, ref_para: str) -> str:
+    """Generate changelog from git history."""
     log_bruto = _rodar_git("log", "--pretty=format:%s", f"{ref_de}..{ref_para}")
     mensagens = [m for m in log_bruto.split("\n") if m.strip()]
 
@@ -123,6 +127,7 @@ def gerar_changelog(ref_de: str, ref_para: str) -> str:
 
 
 def main():
+    """Main entry point for report viewer."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--para", default="HEAD", help="Ref final (tag, branch, HEAD). Padrão: HEAD."

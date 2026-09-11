@@ -35,6 +35,7 @@ REPORT_FILENAME = ".report.json"
 
 
 def carregar_report(caminho: str) -> dict:
+    """Load report JSON from file."""
     if os.path.isdir(caminho):
         caminho = os.path.join(caminho, REPORT_FILENAME)
     with open(caminho, encoding="utf-8") as f:
@@ -42,6 +43,7 @@ def carregar_report(caminho: str) -> dict:
 
 
 def esc(valor) -> str:
+    """Escape HTML special characters."""
     return html.escape(str(valor if valor is not None else ""))
 
 
@@ -78,10 +80,12 @@ def _fmt_dt(iso_str):
 
 
 def _badge(texto, cor="chip"):
+    """Generate HTML badge element."""
     return f'<span class="badge {cor}">{esc(texto)}</span>'
 
 
 def _renderizar_faixa(faixa, mostrar_artista_col):
+    """Render HTML for a single track."""
     ident = faixa.get("identificacao", {}) or {}
     download = faixa.get("download", {}) or {}
     letras = faixa.get("letras", {}) or {}
@@ -169,6 +173,7 @@ def _renderizar_faixa(faixa, mostrar_artista_col):
 
 
 def renderizar_html(report: dict) -> str:
+    """Render complete HTML report."""
     tipo = report.get("tipo", "faixa")
     ident = report.get("identificacao", {}) or {}
     qualidade = report.get("qualidade", {}) or {}
@@ -435,6 +440,7 @@ def renderizar_html(report: dict) -> str:
 
 
 def main():
+    """Main entry point for report viewer."""
     parser = argparse.ArgumentParser(
         description="Gera uma pagina HTML a partir de um .report.json."
     )
