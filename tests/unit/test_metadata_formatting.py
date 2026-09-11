@@ -210,3 +210,19 @@ class TestGetCoverPath:
 
     def test_nenhuma_capa_encontrada_devolve_none(self, tmp_path):
         assert _get_cover_path(str(tmp_path)) is None
+
+
+# --------------------------------------------------------------------
+# Novas validações de resiliência e tratamento de bordas
+# --------------------------------------------------------------------
+class TestMetadataBordasETratamento:
+    def test_format_genres_com_strings_e_espacos(self):
+        resultado = _format_genres(["  Pop  ", "Rock → Alternative  "])
+        assert "Pop" in resultado
+        assert "Rock" in resultado
+        assert "Alternative" in resultado
+
+    def test_get_title_with_version_formatacao_padrao(self):
+        assert (
+            _get_title_with_version("Track Title", "Deluxe") == "Track Title (Deluxe)"
+        )
