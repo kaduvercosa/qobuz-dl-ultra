@@ -7,7 +7,7 @@ Versao corrigida para a arquitetura argparse real do cli.py:
 """
 
 import pytest
-from unittest.mock import patch, AsyncMock
+from unittest.mock import patch, AsyncMock, MagicMock
 import sys
 
 # Importa o modulo real que contem async_main()
@@ -21,31 +21,27 @@ class TestCLIBasicCommands:
     @patch("qobuz_dl.cli._initial_checks")
     def test_cli_help(self, mock_initialchecks, mock_client_create, capsys):
         """Verifica se a ajuda e exibida corretamente via --help."""
-        # Configura o mock do client para retornar um objeto fake com check_subscription
         mock_client = AsyncMock()
-        mock_client.check_subscription.return_value = {
+        # Força o método síncrono a retornar um dicionário real
+        mock_client.check_subscription = MagicMock(return_value={
             "is_active": True,
             "status": "Ativa",
             "offer": "Hi-Fi",
-        }
+        })
         mock_client_create.return_value = mock_client
 
-        # _initial_checks() chama sys.exit(0) quando nao ha argumentos; mockamos para nao sair
         mock_initialchecks.return_value = None
 
-        # Simula chamada com --help no sys.argv
         original_argv = sys.argv.copy()
         try:
             sys.argv = ["qobuz-dl", "--help"]
             with pytest.raises(SystemExit) as exc_info:
                 cli.main()
-            # --help causa sys.exit(0)
             assert exc_info.value.code == 0
         finally:
             sys.argv = original_argv
 
         captured = capsys.readouterr()
-        # O help do argparse contem "usage:" e lista de comandos
         assert "usage:" in captured.out.lower() or "uso:" in captured.out.lower()
 
     @patch("qobuz_dl.qopy.Client.create", new_callable=AsyncMock)
@@ -53,20 +49,19 @@ class TestCLIBasicCommands:
     def test_cli_version(self, mock_initialchecks, mock_client_create, capsys):
         """Testa comportamento com --version (que nao existe no argparse atual)."""
         mock_client = AsyncMock()
-        mock_client.check_subscription.return_value = {
+        mock_client.check_subscription = MagicMock(return_value={
             "is_active": True,
             "status": "Ativa",
-        }
+        })
         mock_client_create.return_value = mock_client
         mock_initialchecks.return_value = None
 
         original_argv = sys.argv.copy()
         try:
             sys.argv = ["qobuz-dl", "--version"]
-            # No argparse atual, --version e argumento invalido -> exit code 2
             with pytest.raises(SystemExit) as exc_info:
                 cli.main()
-            assert exc_info.value.code != 0  # argparse retorna != 0 para argumentos invalidos
+            assert exc_info.value.code != 0
         finally:
             sys.argv = original_argv
 
@@ -75,10 +70,10 @@ class TestCLIBasicCommands:
     def test_invalid_command(self, mock_initialchecks, mock_client_create, capsys):
         """Testa comportamento com comando invalido."""
         mock_client = AsyncMock()
-        mock_client.check_subscription.return_value = {
+        mock_client.check_subscription = MagicMock(return_value={
             "is_active": True,
             "status": "Ativa",
-        }
+        })
         mock_client_create.return_value = mock_client
         mock_initialchecks.return_value = None
 
@@ -87,13 +82,11 @@ class TestCLIBasicCommands:
             sys.argv = ["qobuz-dl", "invalid-command"]
             with pytest.raises(SystemExit) as exc_info:
                 cli.main()
-            # Comando invalido deve causar exit code != 0
             assert exc_info.value.code != 0
         finally:
             sys.argv = original_argv
 
         captured = capsys.readouterr()
-        # Mensagem de erro do argparse menciona "invalid choice" ou "erro"
         assert "invalid choice" in captured.err.lower() or "erro" in captured.err.lower()
 
 
@@ -105,10 +98,10 @@ class TestCLIArgumentValidation:
     def test_missing_required_arguments(self, mock_initialchecks, mock_client_create, capsys):
         """Verifica comportamento quando nenhum argumento e fornecido."""
         mock_client = AsyncMock()
-        mock_client.check_subscription.return_value = {
+        mock_client.check_subscription = MagicMock(return_value={
             "is_active": True,
             "status": "Ativa",
-        }
+        })
         mock_client_create.return_value = mock_client
         mock_initialchecks.return_value = None
 
@@ -126,10 +119,10 @@ class TestCLIArgumentValidation:
     def test_url_argument_parsing(self, mock_initialchecks, mock_client_create, capsys):
         """Testa parsing de URLs como argumentos."""
         mock_client = AsyncMock()
-        mock_client.check_subscription.return_value = {
+        mock_client.check_subscription = MagicMock(return_value={
             "is_active": True,
             "status": "Ativa",
-        }
+        })
         mock_client_create.return_value = mock_client
         mock_initialchecks.return_value = None
 
@@ -137,8 +130,6 @@ class TestCLIArgumentValidation:
         try:
             test_url = "https://www.qobuz.com/en-us/album/test-album/123456"
             sys.argv = ["qobuz-dl", "dl", test_url]
-            # Deve falhar graciosamente (exit != 0) por falta de config/credenciais reais,
-            # mas nao deve levantar excecao nao capturada
             with pytest.raises(SystemExit):
                 cli.main()
         finally:
@@ -153,16 +144,15 @@ class TestCLIErrorHandling:
     def test_config_file_not_found(self, mock_initialchecks, mock_client_create, capsys):
         """Testa comportamento quando arquivo de config nao existe."""
         mock_client = AsyncMock()
-        mock_client.check_subscription.return_value = {
+        mock_client.check_subscription = MagicMock(return_value={
             "is_active": True,
             "status": "Ativa",
-        }
+        })
         mock_client_create.return_value = mock_client
         mock_initialchecks.return_value = None
 
         original_argv = sys.argv.copy()
         try:
-            # Comando que forca leitura de config (ex: dl) sem config valido
             sys.argv = ["qobuz-dl", "dl", "https://www.qobuz.com/album/123"]
             with pytest.raises(SystemExit):
                 cli.main()
@@ -178,19 +168,17 @@ class TestCLIErrorHandling:
     ):
         """Testa com caminho de saida invalido (PermissionError em mkdir)."""
         mock_client = AsyncMock()
-        mock_client.check_subscription.return_value = {
+        mock_client.check_subscription = MagicMock(return_value={
             "is_active": True,
             "status": "Ativa",
-        }
+        })
         mock_client_create.return_value = mock_client
 
-        # Simula PermissionError ao tentar criar diretorio de config
         mock_makedirs.side_effect = PermissionError("Permission denied")
 
         original_argv = sys.argv.copy()
         try:
-            sys.argv = ["qobuz-dl", "-r"]  # Forca criacao/reset de config
-            # Deve falhar graciosamente com PermissionError
+            sys.argv = ["qobuz-dl", "-r"] 
             with pytest.raises(PermissionError):
                 cli.main()
         finally:
@@ -209,10 +197,10 @@ class TestCLIConfigHandling:
     ):
         """Verifica se o diretorio de config e criado quando necessario."""
         mock_client = AsyncMock()
-        mock_client.check_subscription.return_value = {
+        mock_client.check_subscription = MagicMock(return_value={
             "is_active": True,
             "status": "Ativa",
-        }
+        })
         mock_client_create.return_value = mock_client
 
         original_argv = sys.argv.copy()
@@ -232,17 +220,16 @@ class TestCLIConfigHandling:
     ):
         """Testa carregamento de arquivo de configuracao."""
         mock_client = AsyncMock()
-        mock_client.check_subscription.return_value = {
+        mock_client.check_subscription = MagicMock(return_value={
             "is_active": True,
             "status": "Ativa",
-        }
+        })
         mock_client_create.return_value = mock_client
 
         original_argv = sys.argv.copy()
         try:
             sys.argv = ["qobuz-dl", "-r"]
             cli._initial_checks()
-            # Se chegou aqui sem excecao, o mock de config esta OK
             assert True
         finally:
             sys.argv = original_argv
