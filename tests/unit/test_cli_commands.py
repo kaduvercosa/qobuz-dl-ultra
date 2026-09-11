@@ -20,7 +20,7 @@ class TestCLIBasicCommands:
     """Testa comandos basicos da CLI (argparse)."""
 
     @patch("qobuz_dl.cli.qopy.Client.create", new_callable=AsyncMock)
-    @patch("qobuz_dl.cli.initialchecks")
+    @patch("qobuz_dl.cli._initial_checks")
     def test_cli_help(self, mock_initialchecks, mock_client_create, capsys):
         """Verifica se a ajuda e exibida corretamente via --help."""
         # Configura o mock do client para retornar um objeto fake com checksubscription
@@ -50,8 +50,8 @@ class TestCLIBasicCommands:
         # O help do argparse contem "usage:" e lista de comandos
         assert "usage:" in captured.out.lower() or "uso:" in captured.out.lower()
 
-    @patch("qobuz_dl.cli.qopy.Client.create", new_callable=AsyncMock)
-    @patch("qobuz_dl.cli.initialchecks")
+    @patch("qobuz_dl.qopy.Client.create", new_callable=AsyncMock)
+    @patch("qobuz_dl.cli_.initial_checks")
     def test_cli_version(self, mock_initialchecks, mock_client_create, capsys):
         """Testa comportamento com --version (que nao existe no argparse atual)."""
         mock_client = AsyncMock()
@@ -72,8 +72,8 @@ class TestCLIBasicCommands:
         finally:
             sys.argv = original_argv
 
-    @patch("qobuz_dl.cli.qopy.Client.create", new_callable=AsyncMock)
-    @patch("qobuz_dl.cli.initialchecks")
+    @patch("qobuz_dl.qopy.Client.create", new_callable=AsyncMock)
+    @patch("qobuz_dl.cli._initial_checks")
     def test_invalid_command(self, mock_initialchecks, mock_client_create, capsys):
         """Testa comportamento com comando invalido."""
         mock_client = AsyncMock()
@@ -102,8 +102,8 @@ class TestCLIBasicCommands:
 class TestCLIArgumentValidation:
     """Testa validacao de argumentos na CLI."""
 
-    @patch("qobuz_dl.cli.qopy.Client.create", new_callable=AsyncMock)
-    @patch("qobuz_dl.cli.initialchecks")
+    @patch("qobuz_dl.qopy.Client.create", new_callable=AsyncMock)
+    @patch("qobuz_dl.cli._initial_checks")
     def test_missing_required_arguments(self, mock_initialchecks, mock_client_create, capsys):
         """Verifica comportamento quando nenhum argumento e fornecido."""
         mock_client = AsyncMock()
@@ -125,8 +125,8 @@ class TestCLIArgumentValidation:
         finally:
             sys.argv = original_argv
 
-    @patch("qobuz_dl.cli.qopy.Client.create", new_callable=AsyncMock)
-    @patch("qobuz_dl.cli.initialchecks")
+    @patch("qobuz_dl.qopy.Client.create", new_callable=AsyncMock)
+    @patch("qobuz_dl.cli._initial_checks")
     def test_url_argument_parsing(self, mock_initialchecks, mock_client_create, capsys):
         """Testa parsing de URLs como argumentos."""
         mock_client = AsyncMock()
@@ -152,8 +152,8 @@ class TestCLIArgumentValidation:
 class TestCLIErrorHandling:
     """Testa tratamento de erros na CLI."""
 
-    @patch("qobuz_dl.cli.qopy.Client.create", new_callable=AsyncMock)
-    @patch("qobuz_dl.cli.initialchecks")
+    @patch("qobuz_dl.qopy.Client.create", new_callable=AsyncMock)
+    @patch("qobuz_dl.cli._initial_checks")
     def test_config_file_not_found(self, mock_initialchecks, mock_client_create, capsys):
         """Testa comportamento quando arquivo de config nao existe."""
         mock_client = AsyncMock()
@@ -180,7 +180,7 @@ class TestCLIErrorHandling:
     @patch("qobuz_dl.cli.os.makedirs")
     @patch("qobuz_dl.cli.os.path.isdir", return_value=False)
     @patch("qobuz_dl.cli.os.path.isfile", return_value=False)
-    @patch("qobuz_dl.cli.qopy.Client.create", new_callable=AsyncMock)
+    @patch("qobuz_dl.qopy.Client.create", new_callable=AsyncMock)
     def test_invalid_output_path(
         self, mock_client_create, mock_isfile, mock_isdir, mock_makedirs
     ):
@@ -211,7 +211,7 @@ class TestCLIConfigHandling:
     @patch("qobuz_dl.cli.os.makedirs")
     @patch("qobuz_dl.cli.os.path.isdir", return_value=False)
     @patch("qobuz_dl.cli.os.path.isfile", return_value=False)
-    @patch("qobuz_dl.cli.qopy.Client.create", new_callable=AsyncMock)
+    @patch("qobuz_dl.qopy.Client.create", new_callable=AsyncMock)
     def test_config_directory_creation(
         self, mock_client_create, mock_isfile, mock_isdir, mock_makedirs
     ):
@@ -229,7 +229,7 @@ class TestCLIConfigHandling:
             sys.argv = ["qobuz-dl", "-r"]
             # O wizard de config interativo seria iniciado aqui;
             # como mockamos initialchecks, vamos so validar que makedirs foi chamado
-            cli.initialchecks()
+            cli._initial_checks()
             mock_makedirs.assert_called()
         finally:
             sys.argv = original_argv
@@ -237,7 +237,7 @@ class TestCLIConfigHandling:
     @patch("qobuz_dl.cli.os.makedirs")
     @patch("qobuz_dl.cli.os.path.isdir", return_value=False)
     @patch("qobuz_dl.cli.os.path.isfile", return_value=False)
-    @patch("qobuz_dl.cli.qopy.Client.create", new_callable=AsyncMock)
+    @patch("qobuz_dl.qopy.Client.create", new_callable=AsyncMock)
     def test_config_file_loading(
         self, mock_client_create, mock_isfile, mock_isdir, mock_makedirs
     ):
@@ -254,7 +254,7 @@ class TestCLIConfigHandling:
         original_argv = sys.argv.copy()
         try:
             sys.argv = ["qobuz-dl", "-r"]
-            cli.initialchecks()
+            cli._initial_checks()
             # Se chegou aqui sem excecao, o mock de config esta OK
             assert True
         finally:
