@@ -1,0 +1,17 @@
+.git
+.github
+.pytest_cache
+.ruff_cache
+.venv
+__pycache__
+*.py[cod]
+*.db
+*.log
+.coverage
+htmlcov
+build
+dist
+downloads
+QobuzDownloads
+config.ini
+tests

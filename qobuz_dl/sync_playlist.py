@@ -7,6 +7,7 @@ import os
 
 from mutagen.flac import FLAC
 from mutagen.id3 import ID3
+from send2trash import send2trash
 
 from qobuz_dl.color import GREEN
 from qobuz_dl.color import INFO as CYAN
@@ -162,14 +163,14 @@ async def sync_playlist(qobuz_dl, url, folder, auto_confirm=False):
         url_type, playlist_id = get_url_info(url)
     except (AttributeError, IndexError):
         logger.error(f"{RED}URL inválida: {url}{OFF}")
-        return
+        return False
 
     if url_type != "playlist":
         logger.error(
             f"{RED}A URL não é uma playlist (tipo detectado: '{url_type}'). "
             f"Use uma URL de playlist como https://play.qobuz.com/playlist/12345{OFF}"
         )
-        return
+        return False
 
     logger.info(f"\n{YELLOW}━━━ SINCRONIZAÇÃO DE PLAYLIST ━━━{OFF}")
     logger.info(f"{YELLOW}URL : {url}{OFF}")
@@ -188,7 +189,7 @@ async def sync_playlist(qobuz_dl, url, folder, auto_confirm=False):
         logger.info(
             f"{YELLOW}A playlist do Qobuz está vazia. Nada para sincronizar.{OFF}"
         )
-        return
+        return False
 
     safe_playlist_name = _sanitize_dirname(playlist_name)
     base_name = os.path.basename(os.path.normpath(folder))
@@ -233,7 +234,7 @@ async def sync_playlist(qobuz_dl, url, folder, auto_confirm=False):
             logger.info(
                 f"{CYAN}✓ Arquivo .m3u da playlist atualizado com a ordem mais recente das faixas.{OFF}"
             )
-        return
+        return True
 
     if to_delete_ids:
         logger.info(f"\n{RED}Arquivos a EXCLUIR:{OFF}")
@@ -264,30 +265,12 @@ async def sync_playlist(qobuz_dl, url, folder, auto_confirm=False):
             )
             if answer != "y":
                 logger.info(f"{YELLOW}Sincronização cancelada pelo usuário.{OFF}")
-                return
+                return False
         except (KeyboardInterrupt, EOFError):
             logger.info(f"\n{YELLOW}Sincronização cancelada.{OFF}")
-            return
+            return False
 
     logger.info(f"\n{CYAN}[4/4] Executando sincronização...{OFF}")
-
-    deleted_count = 0
-    # # Remove áudio órfão e seu .lrc associado, depois limpa diretórios vazios.
-    for tid in to_delete_ids:
-        fpath = local_tracks[tid]
-        try:
-            os.remove(fpath)
-            deleted_count += 1
-            logger.info(f"  {RED}[-] Excluído: {os.path.basename(fpath)}{OFF}")
-
-            lrc_path = os.path.splitext(fpath)[0] + ".lrc"
-            if os.path.isfile(lrc_path):
-                os.remove(lrc_path)
-                logger.info(f"  {RED}[-] Excluído: {os.path.basename(lrc_path)}{OFF}")
-        except OSError as e:
-            logger.error(f"  {RED}[!] Falha ao excluir {fpath}: {e}{OFF}")
-
-    _clean_empty_dirs(target_folder, exclude_dirs={"_Playlists"})
 
     # # Temporariamente força pasta plana para que faixas de playlist não sejam organizadas como álbuns.
     original_folder_format = qobuz_dl.folder_format
@@ -301,24 +284,77 @@ async def sync_playlist(qobuz_dl, url, folder, auto_confirm=False):
         position_map[str(item["id"])] = idx
 
     downloaded_count = 0
-    for tid in to_download_ids:
-        playlist_idx = position_map.get(tid, 0)
-        try:
-            # # A chamada é assíncrona: await garante que a faixa terminou antes de contar sucesso.
-            await qobuz_dl.download_from_id(
-                tid,
-                album=False,
-                alt_path=target_folder,
-                is_playlist=True,
-                playlist_index=playlist_idx,
-            )
-            downloaded_count += 1
-        except Exception as e:
-            logger.error(f"  {RED}[!] Falha ao baixar faixa {tid}: {e}{OFF}")
+    all_downloads_ok = True
+    try:
+        for tid in to_download_ids:
+            playlist_idx = position_map.get(tid, 0)
+            try:
+                success = await qobuz_dl.download_from_id(
+                    tid,
+                    album=False,
+                    alt_path=target_folder,
+                    is_playlist=True,
+                    playlist_index=playlist_idx,
+                )
+                if success:
+                    downloaded_count += 1
+                else:
+                    all_downloads_ok = False
+                    logger.error(f"  {RED}[!] Falha ao baixar faixa {tid}{OFF}")
+            except Exception as e:
+                all_downloads_ok = False
+                logger.error(f"  {RED}[!] Falha ao baixar faixa {tid}: {e}{OFF}")
+    finally:
+        qobuz_dl.folder_format = original_folder_format
+        qobuz_dl.settings.multiple_disc_one_dir = original_multi_disc
 
-    # # Restaura as configurações originais mesmo após o bloco de downloads.
-    qobuz_dl.folder_format = original_folder_format
-    qobuz_dl.settings.multiple_disc_one_dir = original_multi_disc
+    deleted_count = 0
+    deletions_ok = True
+    if not all_downloads_ok:
+        logger.warning(
+            f"{YELLOW}[!] Exclusões canceladas porque nem todas as faixas novas "
+            f"foram baixadas com sucesso.{OFF}"
+        )
+    else:
+        # Só remove órfãos depois que as novas faixas estão seguras. A lixeira
+        # mantém a operação recuperável caso a seleção tenha sido incorreta.
+        def _remove_orphan(path):
+            try:
+                send2trash(path)
+                logger.info(
+                    f"  {RED}[-] Enviado à lixeira: {os.path.basename(path)}{OFF}"
+                )
+                return True
+            except OSError as trash_error:
+                logger.warning(
+                    f"  {YELLOW}[!] Lixeira indisponível para "
+                    f"{os.path.basename(path)} ({trash_error}); removendo diretamente.{OFF}"
+                )
+                try:
+                    os.remove(path)
+                    logger.info(
+                        f"  {RED}[-] Removido diretamente: {os.path.basename(path)}{OFF}"
+                    )
+                    return True
+                except OSError as remove_error:
+                    logger.error(
+                        f"  {RED}[!] Falha ao remover {path}: {remove_error}{OFF}"
+                    )
+                    return False
+
+        for tid in to_delete_ids:
+            fpath = local_tracks[tid]
+            audio_removed = _remove_orphan(fpath)
+            if audio_removed:
+                deleted_count += 1
+            else:
+                deletions_ok = False
+
+            lrc_path = os.path.splitext(fpath)[0] + ".lrc"
+            if os.path.isfile(lrc_path) and not _remove_orphan(lrc_path):
+                deletions_ok = False
+
+        _clean_empty_dirs(target_folder, exclude_dirs={"_Playlists"})
 
     if not getattr(qobuz_dl, "no_m3u_for_playlists", False):
         make_m3u(target_folder, remote_items)
@@ -327,3 +363,4 @@ async def sync_playlist(qobuz_dl, url, folder, auto_confirm=False):
     logger.info(f"  {GREEN}↓ Baixadas  : {downloaded_count} faixas{OFF}")
     logger.info(f"  {RED}✕ Excluídas : {deleted_count} arquivos{OFF}")
     logger.info(f"  {GREEN}✓ Total agora: {len(remote_ids)} faixas{OFF}\n")
+    return all_downloads_ok and deletions_ok

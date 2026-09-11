@@ -10,13 +10,16 @@
 import argparse
 import asyncio
 import configparser
+import getpass
 import glob
+import io
 import json
 import logging
 import os
 import signal
 import string
 import sys
+import tempfile
 import time
 from datetime import datetime
 
@@ -51,6 +54,63 @@ QOBUZ_DB = _config_paths["qobuz_db"]
 IOS_HOME = os.environ.get("QOBUZ_DL_IOS_HOME")
 
 KEYRING_SERVICE = "qobuz-dl"
+_SENSITIVE_CONFIG_KEYS = {
+    "auth_token",
+    "email",
+    "genius_token",
+    "password",
+    "secrets",
+    "user_auth_token",
+}
+
+
+def _write_config_secure(config, config_file):
+    """Grava o INI atomicamente e limita sua leitura ao usuário atual."""
+    parent = os.path.dirname(os.path.abspath(config_file))
+    os.makedirs(parent, mode=0o700, exist_ok=True)
+    fd, temporary_path = tempfile.mkstemp(prefix=".config.", dir=parent, text=True)
+    try:
+        if os.name == "posix":
+            os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as config_handle:
+            config.write(config_handle)
+            config_handle.flush()
+            os.fsync(config_handle.fileno())
+        os.replace(temporary_path, config_file)
+        if os.name == "posix":
+            os.chmod(config_file, 0o600)
+    except BaseException:
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+        try:
+            os.unlink(temporary_path)
+        except FileNotFoundError:
+            pass
+        raise
+
+
+def _redacted_config(config):
+    """Serializa uma cópia do INI sem revelar credenciais no terminal."""
+    safe = configparser.ConfigParser(interpolation=None)
+    for key, value in config.defaults().items():
+        safe["DEFAULT"][key] = (
+            "<redacted>" if key.lower() in _SENSITIVE_CONFIG_KEYS and value else value
+        )
+    for section in config.sections():
+        safe.add_section(section)
+        for key, value in config.items(section):
+            safe.set(
+                section,
+                key,
+                "<redacted>"
+                if key.lower() in _SENSITIVE_CONFIG_KEYS and value
+                else value,
+            )
+    output = io.StringIO()
+    safe.write(output)
+    return output.getvalue()
 
 
 def _bootstrap_ui():
@@ -260,7 +320,7 @@ def _reset_config(config_file: str):
         f"{C_ACCENT}[!] Obtenha seu Token no navegador (F12 > Application/Storage > Local Storage > token).{OFF}"
     )
 
-    auth_token = input("Cole o token do seu navegador aqui:\n- ").strip()
+    auth_token = getpass.getpass("Cole o token do seu navegador aqui:\n- ").strip()
     config["qobuz"]["password"] = ""
 
     ui.emit(f"\n{C_ACCENT}[?] Armazenamento de Senhas (OS Keyring):{OFF}")
@@ -316,7 +376,7 @@ def _reset_config(config_file: str):
         ui.emit(
             f"\n{C_ACCENT}[!] Para usar o Genius como fallback, insira seu API Token (Enter para pular e usar apenas LRCLIB):{OFF}"
         )
-        genius_token = input("Genius API Token:\n- ").strip()
+        genius_token = getpass.getpass("Genius API Token:\n- ").strip()
     else:
         config["qobuz"]["lyrics_translation_lang"] = "pt"
 
@@ -394,8 +454,7 @@ def _reset_config(config_file: str):
     config["qobuz"]["max_workers"] = "1"
     config["qobuz"]["user_auth_token"] = ""
 
-    with open(config_file, "w", encoding="utf-8") as configfile:
-        config.write(configfile)
+    _write_config_secure(config, config_file)
 
     logging.info(f"\n{GREEN}[+] Configuração salva com sucesso em {config_file}!{OFF}")
 
@@ -532,7 +591,7 @@ async def _auth_command(
             config.set(section, "email", email)
 
         ui.emit(f"\n{CYAN}[!] Cole o novo Token de autenticação do seu navegador:{OFF}")
-        new_token = input("- ").strip()
+        new_token = getpass.getpass("- ").strip()
 
         if not new_token:
             ui.warn("Token vazio. Operação cancelada.")
@@ -578,8 +637,7 @@ async def _auth_command(
                 config.set(section, "password", "")
                 ui.ok("Token salvo no config.ini!")
 
-            with open(config_file, "w", encoding="utf-8") as f:
-                config.write(f)
+            _write_config_secure(config, config_file)
 
         if show_json:
             # ui.emit_always: saída de --json é o entregável do comando (pensada
@@ -1170,8 +1228,7 @@ async def async_main():
                     migrated = True
             if migrated:
                 try:
-                    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-                        config.write(f)
+                    _write_config_secure(config, CONFIG_FILE)
                 except OSError:
                     pass
 
@@ -1270,8 +1327,7 @@ async def async_main():
 
     if arguments.show_config:
         ui.emit_always(f"Configuração: {CONFIG_FILE}\nDatabase: {QOBUZ_DB}\n---")
-        with open(CONFIG_FILE, encoding="utf-8") as f:
-            ui.emit_always(f.read())
+        ui.emit_always(_redacted_config(config))
         sys.exit(0)
 
     if arguments.purge:
@@ -1328,7 +1384,10 @@ async def async_main():
             if not sync_dir.startswith("\\\\?\\"):
                 sync_dir = "\\\\?\\" + sync_dir
 
-        await sync_database(sync_dir, QOBUZ_DB, sync_client)
+        try:
+            await sync_database(sync_dir, QOBUZ_DB, sync_client)
+        finally:
+            await sync_client.close()
         sys.exit(
             f"\n{GREEN}Sincronização do banco de dados concluída com sucesso.{OFF}"
         )

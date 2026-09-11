@@ -1,4 +1,5 @@
 import logging
+import os
 import sqlite3
 
 import aiosqlite
@@ -49,57 +50,69 @@ def create_db(db_path):
             if "quality" not in columns:
                 logger.info(f"{YELLOW}Migrating old database to the new format...{OFF}")
 
-                # Renomeia a tabela antiga pra nao perder os dados
-                conn.execute("ALTER TABLE downloads RENAME TO downloads_old")
-
-                # Cria a tabela nova ja no schema atual (com artist/album inclusos)
-                conn.execute("""
-                CREATE TABLE downloads (
-                  "id" text NOT NULL,
-                  "media_type" text NOT NULL DEFAULT 'album',
-                  "quality" integer NOT NULL DEFAULT 27,
-                  "file_format" text NOT NULL DEFAULT 'FLAC',
-                  "quality_met" integer NOT NULL DEFAULT 0,
-                  "bit_depth" text,
-                  "sampling_rate" text,
-                  "saved_path" text NOT NULL DEFAULT '',
-                  "status" text NOT NULL DEFAULT 'downloaded',
-                  "url" text NOT NULL DEFAULT '',
-                  "release_date" text NOT NULL DEFAULT '',
-                  "artist" text NOT NULL DEFAULT '',
-                  "album" text NOT NULL DEFAULT '',
-                  PRIMARY KEY ("id", "quality")
-                );
-                """)
-
-                # Copia so os IDs antigos (unico dado confiavel que a tabela v1 tinha);
-                # o resto das colunas fica com os valores DEFAULT definidos acima
+                conn.execute("SAVEPOINT migrate_v1")
                 try:
+                    conn.execute("ALTER TABLE downloads RENAME TO downloads_old")
+                    conn.execute("""
+                    CREATE TABLE downloads (
+                      "id" text NOT NULL,
+                      "media_type" text NOT NULL DEFAULT 'album',
+                      "quality" integer NOT NULL DEFAULT 27,
+                      "file_format" text NOT NULL DEFAULT 'FLAC',
+                      "quality_met" integer NOT NULL DEFAULT 0,
+                      "bit_depth" text,
+                      "sampling_rate" text,
+                      "saved_path" text NOT NULL DEFAULT '',
+                      "status" text NOT NULL DEFAULT 'downloaded',
+                      "url" text NOT NULL DEFAULT '',
+                      "release_date" text NOT NULL DEFAULT '',
+                      "artist" text NOT NULL DEFAULT '',
+                      "album" text NOT NULL DEFAULT '',
+                      PRIMARY KEY ("id", "quality")
+                    );
+                    """)
                     conn.execute(
-                        "INSERT INTO downloads (id) SELECT id FROM downloads_old"
+                        "INSERT INTO downloads (id) "
+                        "SELECT DISTINCT id FROM downloads_old WHERE id IS NOT NULL"
                     )
+                    old_count = conn.execute(
+                        "SELECT COUNT(DISTINCT id) FROM downloads_old "
+                        "WHERE id IS NOT NULL"
+                    ).fetchone()[0]
+                    new_count = conn.execute(
+                        "SELECT COUNT(*) FROM downloads"
+                    ).fetchone()[0]
+                    if old_count != new_count:
+                        raise sqlite3.DatabaseError(
+                            "contagem divergente após copiar os IDs legados"
+                        )
+                    conn.execute("DROP TABLE downloads_old")
                 except sqlite3.Error as e:
-                    logger.error(f"{RED}Failed to migrate old data: {e}{OFF}")
-
-                # Remove a tabela temporaria depois de copiar os dados
-                conn.execute("DROP TABLE downloads_old")
+                    conn.execute("ROLLBACK TO migrate_v1")
+                    conn.execute("RELEASE migrate_v1")
+                    logger.error(f"{RED}Failed to migrate old data safely: {e}{OFF}")
+                    raise
+                else:
+                    conn.execute("RELEASE migrate_v1")
                 logger.info(f"{YELLOW}Database successfully updated!{OFF}")
 
             # MIGRACAO NOVA (v2 -> v2.1.4): banco ja tem "quality" mas ainda
             # nao tem "artist"/"album" (adicionados numa versao mais recente).
             # ALTER TABLE ADD COLUMN aqui em vez de recriar a tabela toda,
             # porque so' precisa adicionar 2 colunas, sem quebrar nada existente.
-            elif "artist" not in columns:
+            elif "artist" not in columns or "album" not in columns:
                 logger.info(
                     f"{YELLOW}Upgrading database schema: Adding artist and album columns...{OFF}"
                 )
                 try:
-                    conn.execute(
-                        "ALTER TABLE downloads ADD COLUMN artist text NOT NULL DEFAULT ''"
-                    )
-                    conn.execute(
-                        "ALTER TABLE downloads ADD COLUMN album text NOT NULL DEFAULT ''"
-                    )
+                    if "artist" not in columns:
+                        conn.execute(
+                            "ALTER TABLE downloads ADD COLUMN artist text NOT NULL DEFAULT ''"
+                        )
+                    if "album" not in columns:
+                        conn.execute(
+                            "ALTER TABLE downloads ADD COLUMN album text NOT NULL DEFAULT ''"
+                        )
                     logger.info(f"{YELLOW}Schema upgrade complete!{OFF}")
                 except sqlite3.Error as e:
                     logger.error(f"{RED}Failed to add new columns: {e}{OFF}")
@@ -224,10 +237,24 @@ async def handle_download_id(
             # MODO CONSULTA (lookup): so' checa se (id, quality) ja foi baixado antes,
             # usado pra decidir se pula o download (feature de Smart Reverse Lookup)
             cursor = await conn.execute(
-                "SELECT id FROM downloads WHERE id=? AND quality=?",
+                "SELECT id, saved_path, status FROM downloads WHERE id=? AND quality=?",
                 (item_id, quality),
             )
-            return await cursor.fetchone()
+            row = await cursor.fetchone()
+            if row and row[1] and not os.path.exists(row[1]):
+                logger.warning(
+                    "%sRegistro obsoleto removido do banco: caminho não existe (%s)%s",
+                    YELLOW,
+                    row[1],
+                    OFF,
+                )
+                await conn.execute(
+                    "DELETE FROM downloads WHERE id=? AND quality=?",
+                    (item_id, quality),
+                )
+                await conn.commit()
+                return None
+            return row
 
 
 def get_stats(db_path):

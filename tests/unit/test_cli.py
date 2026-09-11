@@ -29,6 +29,8 @@ incluindo o caso em que campos individuais vêm `None`/ausentes, que é
 justamente o cenário que expôs o bug.
 """
 
+import configparser
+import os
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -37,6 +39,49 @@ import pytest
 from qobuz_dl import cli, qopy
 
 pytestmark = pytest.mark.unit
+
+
+def test_config_e_gravado_com_permissao_restrita(tmp_path):
+    config = configparser.ConfigParser()
+    config["qobuz"] = {"auth_token": "segredo"}
+    path = tmp_path / "config.ini"
+
+    cli._write_config_secure(config, str(path))
+
+    assert path.read_text(encoding="utf-8")
+    if os.name == "posix":
+        assert path.stat().st_mode & 0o777 == 0o600
+
+
+def test_exibicao_da_configuracao_oculta_segredos():
+    config = configparser.ConfigParser()
+    config["qobuz"] = {
+        "email": "usuario@example.com",
+        "auth_token": "token-real",
+        "genius_token": "genius-real",
+        "secrets": "app-secret",
+    }
+
+    shown = cli._redacted_config(config)
+
+    assert shown.count("<redacted>") == 4
+    assert "usuario@example.com" not in shown
+    assert "token-real" not in shown
+    assert "genius-real" not in shown
+    assert "app-secret" not in shown
+
+
+def test_exibicao_preserva_e_redige_secao_default():
+    config = configparser.ConfigParser(
+        defaults={"directory": "/music", "auth_token": "token-default"}
+    )
+
+    shown = cli._redacted_config(config)
+
+    assert "[DEFAULT]" in shown
+    assert "directory = /music" in shown
+    assert "auth_token = <redacted>" in shown
+    assert "token-default" not in shown
 
 
 # ---------------------------------------------------------------------------
@@ -88,9 +133,7 @@ def sem_input_permitido(monkeypatch):
     mascarando o motivo real da falha)."""
 
     def _explode(*args, **kwargs):
-        raise AssertionError(
-            "input() foi chamado sem que o teste esperasse por isso"
-        )
+        raise AssertionError("input() foi chamado sem que o teste esperasse por isso")
 
     monkeypatch.setattr("builtins.input", _explode)
 
