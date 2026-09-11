@@ -186,3 +186,73 @@ def test_inject_metadata_mp3(engine, tmp_path, monkeypatch):
     assert ok is True
     assert len(fake_id3.added) > 0
     assert fake_id3.saved is True
+
+
+def test_inject_metadata_exception(engine, tmp_path, monkeypatch):
+    """Testa se uma falha ao salvar na tag do arquivo é devidamente tratada."""
+    flac_file = tmp_path / "song.flac"
+    flac_file.write_bytes(b"dummy")
+
+    def mock_flac(*args, **kwargs):
+        raise ValueError("Erro forçado de escrita no arquivo")
+
+    monkeypatch.setattr(le_module, "FLAC", mock_flac)
+
+    result = engine._inject_metadata(str(flac_file), "Letra", source="Qobuz")
+    assert result is False
+
+
+def test_fetch_and_inject_qobuz_plain_failure(engine, tmp_path, monkeypatch):
+    """Cobre o print de falha 'Falha ao gravar letras padrao (Qobuz)'."""
+    audio_file = tmp_path / "song.flac"
+    audio_file.write_bytes(b"dummy")
+
+    # Letra plana (sem 'start') para cair no bloco de "letras padrão"
+    qobuz_resp = {
+        "original": {
+            "lang": "en",
+            "lines": [{"line": "Plain lyric without timestamps"}]
+        }
+    }
+
+    # Força o _save_lrc_file a falhar para cair no else de erro
+    monkeypatch.setattr(engine, "_save_lrc_file", lambda *args, **kwargs: False)
+
+    result = engine.fetch_and_inject(
+        str(audio_file), "Artist", "Track", "Album",
+        save_lrc=True, embed_lyrics=False,
+        qobuz_lyrics_response=qobuz_resp
+    )
+    
+    assert result["success"] is False
+    assert result["saved_external"] is False
+
+
+def test_fetch_and_inject_lrclib_only_save_lrc(engine, tmp_path, monkeypatch):
+    """Cobre o elif save_lrc: no fallback do LRCLIB."""
+    audio_file = tmp_path / "song.flac"
+    audio_file.write_bytes(b"dummy")
+
+    # Mock do httpx.Client.get para simular resposta de sucesso do LRCLIB
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {
+        "syncedLyrics": "[00:01.000] Synced LRCLIB",
+        "plainLyrics": "Plain LRCLIB"
+    }
+    monkeypatch.setattr(engine.session, "get", lambda *args, **kwargs: mock_response)
+
+    # Impede que o Musixmatch processe o mock do LRCLIB e quebre o teste
+    monkeypatch.setattr(engine, "_fetch_musixmatch_lyrics", lambda *args, **kwargs: None)
+
+    # Executa forçando embed_lyrics=False
+    result = engine.fetch_and_inject(
+        str(audio_file), "Artist", "Track", "Album",
+        save_lrc=True, embed_lyrics=False
+    )
+
+    assert result["success"] is True
+    assert result["source"] == "LRCLIB"
+    assert result["saved_external"] is True
+    assert result["embedded"] is False
+
