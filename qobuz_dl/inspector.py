@@ -208,6 +208,7 @@ async def _navegar_arquivos(diretorio_inicial):
 
     def _mover(delta):
         """Move cursor in the file browser."""
+
         def _fn(event):
             if estado["entradas"]:
                 estado["cursor"] = max(

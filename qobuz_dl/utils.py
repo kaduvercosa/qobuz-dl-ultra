@@ -244,6 +244,7 @@ def smart_discography_filter(
     #   - (opcionalmente) edições de colecionador, deluxe e ao vivo.
 
     """Filter out likely tribute/cover albums from artist discographies."""
+
     def print_album(album: dict) -> None:
         # Auxiliar só para depuração (logger.debug).
         """Print album information in a formatted way."""

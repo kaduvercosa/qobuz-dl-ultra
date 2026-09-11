@@ -888,6 +888,7 @@ async def _garantir_assinatura_ativa(qobuz: QobuzDL) -> bool:
 # ==============================================================================
 async def _handle_commands(qobuz: QobuzDL, arguments):
     """Route parsed arguments to the appropriate download/interactive command."""
+
     def sigint_handler(sig, frame):
         """Handle Ctrl+C during downloads: clean up partial files and exit gracefully."""
         ui.error("Download interrompido manualmente pelo usuário.")

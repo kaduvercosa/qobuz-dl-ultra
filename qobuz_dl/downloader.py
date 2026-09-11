@@ -1574,6 +1574,7 @@ class Download:
     @staticmethod
     def _get_filename_attr(track_artist, track_metadata: dict, album_metadata: dict):
         """Get a filename attribute with fallback chain."""
+
         def _flatten_artists(artist_data):
             """Flatten artist list to a single string."""
             if isinstance(artist_data, list) and artist_data:
@@ -1690,6 +1691,7 @@ class Download:
     @staticmethod
     def _get_album_attr(meta, album_title, file_format, bit_depth, sampling_rate):
         """Get an album attribute with fallback chain."""
+
         def _flatten_artists(artist_data):
             """Flatten artist list to a single string."""
             if isinstance(artist_data, list) and artist_data:
