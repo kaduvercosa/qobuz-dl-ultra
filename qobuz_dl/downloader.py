@@ -1512,7 +1512,7 @@ class Download:
             if not ok:
                 with print_lock:
                     tqdm.write(
-                        f"{RED}[!] Verificacao de integridade falhou para "
+                        f"{RED}[!] Verificação de integridade falhou para "
                         f"{os.path.basename(final_file)}: {verify_message}{OFF}"
                     )
                 logger.debug(f"Falha de integridade em {final_file}: {verify_message}")

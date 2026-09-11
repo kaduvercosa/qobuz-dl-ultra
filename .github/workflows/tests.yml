@@ -95,7 +95,7 @@ jobs:
         if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
         run: >
           pytest -m "not slow" -q
-          --cov=qobuz_dl --cov-report=xml --cov-report=term-missing
+          --cov=qobuz_dl --cov-fail-under=35 --cov-report=xml --cov-report=term-missing
 
       - name: Envia cobertura para o Codecov
         if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
