@@ -56,10 +56,14 @@ class TestCustomHelpFormatter:
     def test_cai_pro_fallback_100_se_get_terminal_size_falhar(self, monkeypatch):
         import shutil
 
-        def _explode(fallback=(100, 24)):
-            raise OSError("sem terminal")
+        original = shutil.get_terminal_size
 
-        monkeypatch.setattr(shutil, "get_terminal_size", _explode)
+        def _explode_so_para_100_24(*args, **kwargs):
+            if args == ((100, 24),):
+                raise OSError("sem terminal")
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(shutil, "get_terminal_size", _explode_so_para_100_24)
         formatter = CustomHelpFormatter(prog="qobuz-dl")
         assert formatter._width == 100
 

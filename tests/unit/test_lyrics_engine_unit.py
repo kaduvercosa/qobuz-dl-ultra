@@ -1,7 +1,52 @@
-"""Testes unitários para qobuz_dl/lyrics_engine.py."""
+"""Testes unitários para qobuz_dl/lyrics_engine.py.
+
+POR QUE A FIXTURE `engine` USA UM SESSION FAKE EM VEZ DE `LyricsEngine()`
+---------------------------------------------------------------------------
+`LyricsEngine.__init__` só cria um `httpx.Client(follow_redirects=True)`
+de verdade quando `session` é `None` -- o `__init__` NÃO faz nenhum
+`isinstance` check no valor passado, então qualquer objeto serve pra
+pular a criação do client real (ver `qobuz_dl/lyrics_engine.py`, linhas
+50-55). Criar um `httpx.Client` de verdade abre um contexto SSL (vários
+file descriptors). Nenhum dos testes abaixo faz requisição de rede
+nenhuma -- testam só formatação de LRC, extração de letra, gravação de
+arquivo/tag -- então o cliente HTTP é puro overhead aqui, e nem precisa
+existir de verdade.
+
+Uma primeira tentativa de correção usou uma fixture `scope="module"` com
+`LyricsEngine()` (client real, mas UM só pro módulo inteiro, fechado no
+teardown). Isso não resolveu: quando o setup de uma fixture levanta
+exceção, o pytest NÃO cacheia a falha -- ele tenta recriar a fixture pra
+cada teste que dependa dela. Então mesmo module-scoped, a criação do
+client real era retentada em todos os 8 testes, e cada tentativa disputa
+o mesmo orçamento de file descriptors já quase esgotado pela suíte
+inteira (812 testes antes deste arquivo) num ambiente com `ulimit -n`
+bem apertado (a-Shell/iOS).
+
+A fixture abaixo passa um `session` fake (`MagicMock()`), então
+`LyricsEngine.__init__` nunca cria um `httpx.Client` real -- este arquivo
+passa a contribuir com ZERO file descriptors de sessão HTTP pro
+processo, em vez de 1 (module-scoped) ou 8 (por teste). Isso resolve o
+`OSError: Too many open files` deste arquivo independente do que estiver
+vazando fds mais cedo na suíte -- mas não é a causa raiz: algo antes
+deste módulo ainda está deixando file descriptors abertos, e vale a pena
+rastrear separadamente (ex.: `ulimit -n` antes de rodar a suíte, ou
+localizar outros `httpx.Client`/arquivos não fechados em outros módulos
+de teste).
+"""
+
+from unittest.mock import MagicMock
+
+import pytest
 
 import qobuz_dl.lyrics_engine as le_module
 from qobuz_dl.lyrics_engine import LyricsEngine
+
+
+@pytest.fixture(scope="module")
+def engine():
+    eng = LyricsEngine(session=MagicMock())
+    yield eng
+    eng.close()
 
 
 def test_ms_to_lrc_timestamp():
@@ -9,14 +54,13 @@ def test_ms_to_lrc_timestamp():
     assert LyricsEngine._ms_to_lrc_timestamp(65432) == "[01:05.432]"
 
 
-def test_qobuz_lines_to_lrc():
-    engine = LyricsEngine()
+def test_qobuz_lines_to_lrc(engine):
     lines = [
         {"start": 1000, "line": "Primeira linha"},
         {"start": 5000, "line": "Segunda linha"},
     ]
     lrc_intro = engine._qobuz_lines_to_lrc(lines, inject_intro=True)
-    assert "[00:00.000]   » » » " in lrc_intro
+    assert "[00:00.000] » » » " in lrc_intro
     assert "[00:01.000] Primeira linha" in lrc_intro
 
     lrc_no_intro = engine._qobuz_lines_to_lrc(lines, inject_intro=False)
@@ -24,8 +68,7 @@ def test_qobuz_lines_to_lrc():
     assert "[00:01.000] Primeira linha" in lrc_no_intro
 
 
-def test_qobuz_lines_to_plain():
-    engine = LyricsEngine()
+def test_qobuz_lines_to_plain(engine):
     lines = [
         {"start": 1000, "line": "Linha 1"},
         {"start": 5000, "line": "Linha 2"},
@@ -34,8 +77,7 @@ def test_qobuz_lines_to_plain():
     assert plain == "Linha 1\nLinha 2"
 
 
-def test_extract_qobuz_lyrics():
-    engine = LyricsEngine()
+def test_extract_qobuz_lyrics(engine):
     raw = {
         "original": {
             "lang": "en",
@@ -50,24 +92,21 @@ def test_extract_qobuz_lyrics():
     assert "Hello world" in extracted["plain"]
 
 
-def test_build_bilingual_lrc():
-    engine = LyricsEngine()
+def test_build_bilingual_lrc(engine):
     orig = "[00:01.000] Hello"
     trans = "[00:01.000] Olá"
     bilingual = engine._build_bilingual_lrc(orig, trans)
-    assert "[00:01.000]  Hello" in bilingual
-    assert "[00:01.000]   » Olá" in bilingual
+    assert "[00:01.000] Hello" in bilingual
+    assert "[00:01.000] » Olá" in bilingual
 
 
-def test_inject_instrumental_pauses():
-    engine = LyricsEngine()
+def test_inject_instrumental_pauses(engine):
     lrc = "[00:01.000] Linha 1\n[00:20.000] Linha 2"
     with_pauses = engine._inject_instrumental_pauses(lrc)
     assert "• • •" in with_pauses
 
 
-def test_save_lrc_file(tmp_path):
-    engine = LyricsEngine()
+def test_save_lrc_file(engine, tmp_path):
     audio_file = tmp_path / "test.flac"
     audio_file.write_bytes(b"dummy")
 
@@ -108,8 +147,7 @@ class FakeID3:
         self.saved = True
 
 
-def test_inject_metadata_flac(tmp_path, monkeypatch):
-    engine = LyricsEngine()
+def test_inject_metadata_flac(engine, tmp_path, monkeypatch):
     flac_file = tmp_path / "song.flac"
     flac_file.write_bytes(b"dummy")
 
@@ -131,8 +169,7 @@ def test_inject_metadata_flac(tmp_path, monkeypatch):
     assert fake_flac.saved is True
 
 
-def test_inject_metadata_mp3(tmp_path, monkeypatch):
-    engine = LyricsEngine()
+def test_inject_metadata_mp3(engine, tmp_path, monkeypatch):
     mp3_file = tmp_path / "song.mp3"
     mp3_file.write_bytes(b"dummy")
 
