@@ -158,6 +158,7 @@ class Client:
         await self.close()
 
     def _normalize_json_strings(self, obj):
+        """Normalize JSON string encodings."""
         if isinstance(obj, str):
             if "..." in obj and "://" not in obj:
                 obj = obj.replace("...", "…")
@@ -294,6 +295,7 @@ class Client:
         return self.user_info
 
     def _modern_sig(self, epoint, params, sec):
+        """Generate modern signature for Qobuz API requests."""
         object_, method = epoint.split("/")
         r_sig = [object_, method]
         for key in sorted(params):
@@ -307,9 +309,11 @@ class Client:
 
     @staticmethod
     def _b64url_decode(value):
+        """Decode base64url-encoded string."""
         return base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
 
     def _derive_session_key(self):
+        """Derive session key from Qobuz API response."""
         salt, info = self.session_infos.split(".")
         hkdf = HKDF(
             algorithm=hashes.SHA256(),
@@ -320,6 +324,7 @@ class Client:
         return hkdf.derive(bytes.fromhex(self.sec))
 
     def _unwrap_track_key(self, key_token):
+        """Unwrap encrypted track key."""
         _, wrapped, iv = key_token.split(".")
         decryptor = Cipher(
             algorithms.AES(self.session_key), modes.CBC(self._b64url_decode(iv))
@@ -329,6 +334,7 @@ class Client:
         return unpadder.update(padded) + unpadder.finalize()
 
     async def api_call(self, epoint, **kwargs):
+        """Make an API call to Qobuz with authentication."""
         if epoint == "user/login":
             if "user_auth_token" in kwargs and kwargs["user_auth_token"]:
                 params = {
@@ -479,6 +485,7 @@ class Client:
         }
 
         def _retryable(exc):
+            """Retry decorator for network operations."""
             if isinstance(exc, (httpx.RequestError, asyncio.TimeoutError)):
                 if epoint not in mutable_endpoints:
                     return True
@@ -538,6 +545,7 @@ class Client:
                 return self._normalize_json_strings(data)
 
     async def multi_meta(self, epoint, key, id, type):
+        """Fetch metadata for multiple items in batch."""
         offset = 0
         limit = 50
 
@@ -561,12 +569,15 @@ class Client:
                 break
 
     async def get_track_meta(self, id):
+        """Get metadata for a single track by ID."""
         return await self.api_call("track/get", id=id)
 
     async def get_track_lyrics_url(self, id):
+        """Get lyrics URL for a track."""
         return await self.api_call("track/lyricsUrl", track_id=id)
 
     async def get_track_ids_from_list(self, tracks_list: list) -> list:
+        """Extract track IDs from a playlist/favorites list."""
         from qobuz_dl import fuzzy
 
         ui.emit(
@@ -661,6 +672,7 @@ class Client:
         return valid_track_ids
 
     async def search_by_isrc(self, isrc: str):
+        """Search for track by ISRC code."""
         if not isrc:
             return None
         try:
@@ -678,6 +690,7 @@ class Client:
         return None
 
     async def search_by_upc(self, upc: str):
+        """Search for album by UPC barcode."""
         if not upc:
             return None
         try:
@@ -695,6 +708,7 @@ class Client:
         return None
 
     async def match_external_tracks(self, tracks: list, auto: bool = False) -> list:
+        """Match external track list against Qobuz catalog."""
         matched_ids = []
         fuzzy_queue = []
         isrc_hits = 0
@@ -731,6 +745,7 @@ class Client:
         return matched_ids
 
     async def search_albums(self, query, limit=20):
+        """Search for albums by query string."""
         try:
             return await self.api_call(
                 "catalog/search", query=query, type="albums", limit=limit
@@ -739,6 +754,7 @@ class Client:
             return {}
 
     async def search_tracks(self, query, limit=20):
+        """Search for tracks by query string."""
         try:
             return await self.api_call(
                 "catalog/search", query=query, type="tracks", limit=limit
@@ -749,6 +765,7 @@ class Client:
     async def create_qobuz_playlist(
         self, name: str, description: str = "", is_public: bool = False
     ):
+        """Create a new playlist on Qobuz."""
         try:
             resp = await self.api_call(
                 "playlist/create",
@@ -769,6 +786,7 @@ class Client:
     async def add_tracks_to_qobuz_playlist(
         self, playlist_id: str, track_ids: list
     ) -> bool:
+        """Add tracks to an existing Qobuz playlist."""
         BATCH = 50
         success = True
         for i in range(0, len(track_ids), BATCH):
@@ -787,6 +805,7 @@ class Client:
         return success
 
     async def search_playlists(self, query, limit=20):
+        """Search for playlists by query string."""
         try:
             return await self.api_call(
                 "catalog/search", query=query, type="playlists", limit=limit
@@ -795,6 +814,7 @@ class Client:
             return {}
 
     async def search_artists(self, query, limit=20):
+        """Search for artists by query string."""
         try:
             return await self.api_call(
                 "catalog/search", query=query, type="artists", limit=limit
@@ -803,6 +823,7 @@ class Client:
             return {}
 
     async def get_favorites(self, fav_type="albums", limit=100, offset=0):
+        """Get user's favorite albums, tracks, or artists."""
         try:
             return await self.api_call(
                 "favorite/getUserFavorites",
@@ -815,16 +836,19 @@ class Client:
             return {}
 
     async def add_favorite_album(self, album_id):
+        """Add an album to user's favorites."""
         return await self.api_call(
             "favorite/create", album_ids=str(album_id), artist_ids="", track_ids=""
         )
 
     async def add_favorite_track(self, track_id):
+        """Add a track to user's favorites."""
         return await self.api_call(
             "favorite/create", track_ids=str(track_id), album_ids="", artist_ids=""
         )
 
     async def add_favorite(self, item_id, item_type: str):
+        """Add an item to user's favorites (generic)."""
         if item_type == "track":
             return await self.add_favorite_track(item_id)
         elif item_type == "album":
@@ -876,18 +900,23 @@ class Client:
         return track
 
     def get_artist_meta(self, id):
+        """Get metadata for an artist by ID."""
         return self.multi_meta("artist/get", "albums_count", id, None)
 
     def get_plist_meta(self, id):
+        """Get metadata for a playlist by ID."""
         return self.multi_meta("playlist/get", "tracks_count", id, None)
 
     def get_label_meta(self, id):
+        """Get metadata for a label by ID."""
         return self.multi_meta("label/get", "albums_count", id, None)
 
     async def get_album_meta(self, id):
+        """Get metadata for an album by ID."""
         return await self.api_call("album/get", id=id)
 
     async def cfg_setup(self):
+        """Configure client with app ID and secrets."""
         for secret in self.secrets:
             try:
                 await self.api_call(

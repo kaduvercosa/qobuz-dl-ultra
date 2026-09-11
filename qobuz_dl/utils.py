@@ -32,9 +32,11 @@ class PartialFormatter(string.Formatter):
     # de metadados que podem não vir preenchidas na resposta da API.
 
     def __init__(self, missing="n/a", bad_fmt="n/a"):
+        """Initialize formatter with fallback values for missing or invalid fields."""
         self.missing, self.bad_fmt = missing, bad_fmt
 
     def get_field(self, field_name, args, kwargs):
+        """Get a field value, returning None if missing instead of raising KeyError."""
         # Campo ausente: em vez de lançar KeyError/AttributeError, devolve
         # None para que format_field() substitua pelo valor `missing`.
         try:
@@ -44,6 +46,7 @@ class PartialFormatter(string.Formatter):
         return val
 
     def format_field(self, value, spec):
+        """Format a field value, using fallbacks for empty/None values or invalid format specs."""
         # Valor vazio/None vira `self.missing`. Spec de formatação inválido
         # (ex.: aplicar formatação numérica a uma string) vira `self.bad_fmt`
         # em vez de lançar ValueError.
@@ -65,6 +68,7 @@ def make_m3u(pl_directory, remote_items=None):
     # fornecido, usa um algoritmo de 4 passes para casar cada item remoto
     # com o arquivo local correspondente e preservar a ordem exata da
     # playlist online -- ignorando completamente o nome físico do arquivo.
+    """Create an M3U playlist file from a list of audio file paths."""
     import logging
     import os
     import re
@@ -201,6 +205,7 @@ def make_m3u(pl_directory, remote_items=None):
     if not remote_items or len(ordered_files) == 0:
 
         def natural_sort_key(s):
+            """Generate a sort key for natural/human sorting of strings with numbers."""
             return [
                 int(text) if text.isdigit() else text.lower()
                 for text in re.split(r"(\d+)", s)
@@ -238,8 +243,10 @@ def smart_discography_filter(
     #   - álbuns duplicados em qualidades diferentes (mantém a melhor);
     #   - (opcionalmente) edições de colecionador, deluxe e ao vivo.
 
+    """Filter out likely tribute/cover albums from artist discographies."""
     def print_album(album: dict) -> None:
         # Auxiliar só para depuração (logger.debug).
+        """Print album information in a formatted way."""
         logger.debug(
             f"{album['title']} - {album.get('version', '~~')} "
             "({album['maximum_bit_depth']}/{album['maximum_sampling_rate']}"
@@ -254,6 +261,7 @@ def smart_discography_filter(
     def is_type(album_t: str, album: dict) -> bool:
         # Verifica se o título/versão do álbum casa com o regex do tipo
         # pedido (ex.: "remaster" ou "extra").
+        """Check if an item matches a specific type string."""
         version = album.get("version", "")
         title = album.get("title", "")
         regex = TYPE_REGEXES[album_t]
@@ -264,6 +272,7 @@ def smart_discography_filter(
         # parênteses/colchetes e deixa tudo minúsculo. Usado para agrupar
         # álbuns com nomes parecidos mas não idênticos (ex.: "Album" e
         # "Album (Deluxe Edition)" caem no mesmo grupo).
+        """Extract the core essence of a title (lowercase, no punctuation)."""
         r = re.match(r"([^\(]+)(?:\s*[\(\[][^\)][\)\]])*", album)
         return r.group(1).strip().lower()
 
@@ -308,6 +317,7 @@ def smart_discography_filter(
             _sampling_rate=best_sampling_rate,
             _remaster_exists=remaster_exists,
         ) -> bool:
+            """Check if an album release type is valid (Album/EP/Single)."""
             return (
                 album["maximum_bit_depth"] == _bit_depth
                 and album["maximum_sampling_rate"] == _sampling_rate
@@ -329,6 +339,7 @@ def smart_discography_filter(
 
 def format_duration(duration):
     # Formata uma duração em segundos como string HH:MM:SS.
+    """Format seconds into HH:MM:SS or MM:SS string."""
     return time.strftime("%H:%M:%S", time.gmtime(duration))
 
 
@@ -354,6 +365,7 @@ def encontrar_binario(nome):
     # álbum de 14 faixas produzia 14 mensagens de erro que pareciam 14
     # arquivos corrompidos, quando o problema real era um só (falta de
     # instalação).
+    """Find a binary executable in PATH."""
     if nome in _BINARIOS_CHECADOS:
         return _BINARIOS_CHECADOS[nome]
 
@@ -379,6 +391,7 @@ def _avisar(titulo, detalhe):
     # utilizável fora da CLI (ex.: importada por um script avulso), onde o
     # módulo ui pode não estar configurado -- nesse caso cai para logging
     # simples de uma linha só.
+    """Print a warning about missing external binaries."""
     try:
         from qobuz_dl import ui
 
@@ -398,6 +411,7 @@ def checar_binarios_externos(precisa_fpcalc=False):
     # `precisa_fpcalc` controla se o aviso sobre fpcalc é exibido: só faz
     # sentido cobrar Chromaprint de quem realmente vai usar fingerprint de
     # áudio, não de quem só quer baixar um álbum.
+    """Check for required external binaries (ffmpeg, ffprobe, optionally fpcalc)."""
     resultado = {"ffmpeg": encontrar_binario("ffmpeg"), "fpcalc": None}
 
     if not resultado["ffmpeg"]:
@@ -439,6 +453,7 @@ def verify_audio_integrity(filepath, timeout=180):
     # (descartando a saída com "-f null -") é a única forma confiável de
     # pegar isso, usando os mesmos flags do remux que já existe em
     # downloader.py (-nostdin, -v error).
+    """Verify audio file integrity by attempting full decode with ffmpeg."""
     if not os.path.isfile(filepath):
         return False, "Arquivo nao encontrado."
 
@@ -489,6 +504,7 @@ def verify_audio_integrity(filepath, timeout=180):
 def create_and_return_dir(directory):
     # Cria (se necessário) e devolve o caminho absoluto de um diretório,
     # expandindo "~" quando presente.
+    """Create directory if it doesn't exist and return the path."""
     fix = os.path.abspath(os.path.expanduser(directory))
     os.makedirs(fix, exist_ok=True)
     return fix
@@ -501,6 +517,7 @@ def get_url_info(url):
     #   https://open.qobuz.com/{type}/{id}
     #   https://play.qobuz.com/{type}/{id}
     #   /us-en/{type}/-/{id}
+    """Parse a Qobuz URL and extract item type and ID."""
     r = re.search(
         r"(?:https:\/\/(?:w{3}|open|play)\.qobuz\.com)?(?:\/[a-z]{2}-[a-z]{2})"
         r"?\/(album|artist|track|playlist|label)(?:\/[-\w\d]+)?\/([\w\d]+)",
@@ -514,6 +531,7 @@ def get_album_artist(qobuz_album: dict) -> list:
     # do Qobuz, devolvendo uma LISTA de strings (não uma string única) para
     # permitir Multi-Artist Tagging nativo -- Vorbis Comments discretos por
     # artista em arquivos FLAC.
+    """Determine the album artist from track metadata, handling multi-disc albums."""
     try:
         # Se a chave "artists" não existir, cai para o artista único do
         # campo "artist".
@@ -632,6 +650,7 @@ def apply_legacy_charmap(filename: str) -> str:
     # compatibilidade com caminhos do Windows, usando ASCII simples em vez
     # dos caracteres unicode full-width (para quem prefere ASCII puro).
     # Regras específicas pedidas pela comunidade (JosiahDanger):
+    """Apply legacy character mapping for compatibility."""
     filename = filename.replace(":", "-")
     filename = filename.replace("?", "")
 
@@ -657,6 +676,7 @@ def clean_filename(filename: str, legacy_charmap: bool = False) -> str:
     # compatibilidade entre sistemas operacionais diferentes).
 
     # Normaliza a string unicode para a forma NFC primeiro.
+    """Clean a filename by removing/replacing invalid characters."""
     filename = unicodedata.normalize("NFC", filename)
 
     # Funde múltiplos separadores consecutivos (espaços, vírgulas, pontos,
@@ -707,6 +727,7 @@ def invalid_chars_to_fullwidth(filename):
     # Converte caracteres ilegais em nomes de arquivo do Windows para os
     # equivalentes unicode "full-width" visualmente parecidos, em vez de
     # simplesmente removê-los ou trocar por "-".
+    """Convert invalid filename characters to fullwidth equivalents."""
     invalid_to_fullwidth = {
         "/": "／",
         "\\": "＼",
@@ -738,6 +759,7 @@ def extrair_essencia(texto: str) -> str:
     # Limpa acentos, pontuacao e qualquer coisa entre parenteses/colchetes,
     # pra uma comparacao "larga": acha candidatos com o mesmo
     # artista/album base, ignorando qual edicao especifica e' essa.
+    """Extract the essence of a text for fuzzy matching."""
     if not texto:
         return ""
     texto = (
@@ -757,6 +779,7 @@ def extrair_titulo_completo(texto: str) -> str:
     # etc.). Usado como trava final: comparar o titulo INTEIRO por
     # similaridade derruba sozinho qualquer edicao diferente da que foi
     # pedida, sem precisar manter uma lista fixa de palavras-chave.
+    """Extract full title including version/parenthetical info."""
     if not texto:
         return ""
     texto = (
@@ -787,6 +810,7 @@ async def get_apple_hq_cover(
     # fallback. `session`, quando fornecido, reaproveita o
     # httpx.AsyncClient existente (ex.: self.http_session do Downloader)
     # em vez de abrir uma conexao nova so' pra isso.
+    """Fetch high-quality album artwork from Apple Music."""
     import httpx
 
     headers = {
@@ -810,6 +834,7 @@ async def get_apple_hq_cover(
     LIMIAR_VERSAO_TRACK = 0.85
 
     def avaliar_resultados(data):
+        """Evaluate search results and score them for relevance."""
         melhor_capa = None
         maior_media = 0.0
 
@@ -912,6 +937,7 @@ async def get_apple_hq_cover(
         return None
 
     async def _buscar(client):
+        """Search for tracks using multiple strategies (ISRC, fuzzy title matching)."""
         for codigo, tipo in [(upc, "upc"), (isrc, "isrc")]:
             if codigo and codigo.lower() != "n/a":
                 try:
@@ -967,6 +993,7 @@ def get_config_paths():
     # manter uma única fonte de verdade significa que uma mudança futura
     # nessa lógica (ex.: suportar uma nova plataforma) só precisa
     # acontecer em um lugar.
+    """Return dictionary of config file paths for the platform."""
     ios_home = os.environ.get("QOBUZ_DL_IOS_HOME")
     config_dir = os.environ.get("CONFIG_DIR")
 

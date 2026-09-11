@@ -34,6 +34,7 @@ pt_style = Style.from_dict(
 
 
 def get_root_from_config():
+    """Search for a music directory path in nearby config files."""
     for cfg_name in ["config.ini", "settings.ini"]:
         if os.path.exists(cfg_name):
             config = configparser.ConfigParser()
@@ -48,6 +49,7 @@ def get_root_from_config():
 
 
 def find_audio_files(root_dir):
+    """Recursively find all audio files in root_dir. Returns list of (filename, full_path) tuples."""
     audio_extensions = (".flac", ".mp3", ".m4a", ".wav", ".alac")
     audio_files = []
     for dirpath, _, filenames in os.walk(root_dir):
@@ -101,6 +103,7 @@ def verify_library(root_dir):
 
 
 def main():
+    """Interactive audio file inspector: prompts for directory and file, then displays ffprobe output."""
     print("\033[36m=== Inspecionador Completo de Áudio (ffprobe) ===\033[0m\n")
 
     target_dir = ""

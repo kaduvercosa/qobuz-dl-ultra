@@ -80,6 +80,7 @@ def _get_safe_ncols():
 
 
 def _desc_budget(ncols):
+    """Calculate description budget for progress bar based on terminal width."""
     FIXED_OVERHEAD = 2 + 4 + 1 + 1 + 1 + 13
     MIN_BAR = 6
     return max(6, min(30, ncols - FIXED_OVERHEAD - MIN_BAR - 1))
@@ -87,18 +88,21 @@ def _desc_budget(ncols):
 
 class _PositionPool:
     def __init__(self, size):
+        """Initialize position pool for managing parallel download progress bar positions."""
         self._lock = threading.Lock()
         self._free = list(range(max(size, 1)))
         self.ncols = _get_safe_ncols()
         self.desc_len = _desc_budget(self.ncols)
 
     def acquire(self):
+        """Acquire a slot from the semaphore (async context manager)."""
         with self._lock:
             if self._free:
                 return self._free.pop(0)
             return 0
 
     def release(self, pos):
+        """Release a slot back to the semaphore."""
         with self._lock:
             if pos not in self._free:
                 self._free.append(pos)
@@ -139,6 +143,7 @@ def format_release_type(
 def process_folder_format_with_subdirs(
     folder_format, attr_dict, path=None, legacy_charmap=False
 ):
+    """Process folder format string and handle subdirectories."""
     path_parts = folder_format.split("/")
     cleaned_parts = []
     for part in path_parts:
@@ -178,6 +183,7 @@ def process_folder_format_with_subdirs(
 
 
 def _clean_format_str(folder: str, track: str, file_format: str) -> tuple[str, str]:
+    """Clean format string by removing invalid patterns."""
     final = []
     for _i, fs in enumerate((folder, track)):
         if fs.endswith(".mp3"):
@@ -190,6 +196,7 @@ def _clean_format_str(folder: str, track: str, file_format: str) -> tuple[str, s
 
 
 def _safe_get(d: dict, *keys, default=None):
+    """Safely get a value from dictionary with fallback."""
     curr = d
     res = default
     for key in keys:

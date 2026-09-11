@@ -9,6 +9,7 @@ for filepath in glob.glob("qobuz_dl/**/*.py", recursive=True):
     placeholders = {}
 
     def save_triple(m, placeholders=placeholders):
+        """Save triple-quoted strings temporarily to protect them from f-string fixes."""
         k = f"__TRIPLE_{len(placeholders)}__"
         placeholders[k] = m.group(0)
         return k
@@ -22,6 +23,7 @@ for filepath in glob.glob("qobuz_dl/**/*.py", recursive=True):
 
     # 2. Logica cirurgica: so tira o enter de dentro das chaves { }
     def fix_fstring(m):
+        """Replace newlines inside f-string braces with spaces to fix syntax errors."""
         s = m.group(0)
         res = []
         in_brace = 0

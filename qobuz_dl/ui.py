@@ -72,6 +72,7 @@ def raw_width():
     # Largura real do terminal, sem teto nem piso aplicados.
     # Respeita a variável de ambiente COLUMNS quando definida (útil em CI
     # e para forçar uma largura específica em testes).
+    """Return terminal width in characters without clamping."""
     env = os.environ.get("COLUMNS")
     if env:
         try:
@@ -90,6 +91,7 @@ def width(max_width=MAX_WIDTH, min_width=MIN_WIDTH):
     # Largura utilizável para desenhar blocos de texto, já com teto e piso
     # aplicados. Função única que substitui os cálculos redundantes que
     # existiam espalhados por vários arquivos do projeto.
+    """Return terminal width, clamped to 200 for ultra-wide displays."""
     return max(min(raw_width(), max_width), min_width)
 
 
@@ -97,6 +99,7 @@ def layout():
     # Classifica a largura atual do terminal em narrow/medium/wide, para
     # que outras funções decidam como se adaptar (empilhar valor, quebrar
     # linha, etc.).
+    """Return the current layout mode ('narrow' or 'wide') based on terminal width."""
     cols = raw_width()
     if cols < NARROW:
         return LAYOUT_NARROW
@@ -107,6 +110,7 @@ def layout():
 
 def is_narrow():
     # Atalho para checagens rápidas de "estou em tela estreita?".
+    """Check if terminal is narrow (width < 80)."""
     return layout() == LAYOUT_NARROW
 
 
@@ -114,6 +118,7 @@ def progress_ncols():
     # Largura usada pelas barras de progresso do tqdm.
     # Com teto em MAX_WIDTH: sem isso, numa janela muito larga a barra de
     # progresso ocuparia a tela inteira.
+    """Calculate optimal width for progress bars based on terminal size."""
     return max(min(raw_width() - 1, MAX_WIDTH), 20)
 
 
@@ -134,6 +139,7 @@ def _detect_color():
     # a regra aqui -- assim as duas partes do projeto nunca divergem sobre
     # quando a cor deve estar ligada ou desligada (ex.: saída redirecionada
     # para um arquivo com `> log.txt`).
+    """Detect if color output should be enabled based on environment and TTY."""
     from qobuz_dl.color import _detect_color_capability
 
     return _detect_color_capability()
@@ -141,12 +147,14 @@ def _detect_color():
 
 def _detect_unicode():
     # Assume unicode disponível se a codificação do stdout contiver "utf".
+    """Detect if Unicode glyphs are supported by the terminal."""
     enc = (getattr(sys.stdout, "encoding", None) or "").lower()
     return "utf" in enc
 
 
 def color_enabled():
     # Getter com cache preguiçoso (lazy) para o resultado de _detect_color().
+    """Check if color output is currently enabled."""
     global _color_enabled
     if _color_enabled is None:
         _color_enabled = _detect_color()
@@ -155,6 +163,7 @@ def color_enabled():
 
 def unicode_enabled():
     # Getter com cache preguiçoso para o resultado de _detect_unicode().
+    """Check if Unicode output is currently enabled."""
     global _unicode_enabled
     if _unicode_enabled is None:
         _unicode_enabled = _detect_unicode()
@@ -165,6 +174,7 @@ def configure(quiet=None, verbose=None, color=None, unicode=None):
     # Ponto único de ajuste do comportamento global da UI. Chamado uma vez,
     # no boot da CLI, com os valores vindos dos argumentos de linha de
     # comando. Parâmetros None são ignorados (mantêm o valor atual).
+    """Configure UI system (color, Unicode, quiet/verbose modes)."""
     global _quiet, _verbose, _color_enabled, _unicode_enabled
     if quiet is not None:
         _quiet = bool(quiet)
@@ -180,28 +190,33 @@ def c(code):
     # Devolve o código ANSI passado, ou string vazia quando a cor está
     # desligada. Usado em toda função de emit para envolver texto com cor
     # sem precisar de um `if color_enabled()` em cada chamada.
+    """Apply color escape sequence if color is enabled, otherwise return empty string."""
     return code if color_enabled() else ""
 
 
 def _glyph(fancy, plain):
     # Escolhe entre o glifo unicode "bonito" e o equivalente ASCII simples,
     # dependendo do suporte detectado do terminal.
+    """Return a Unicode glyph if supported, otherwise return ASCII fallback."""
     return fancy if unicode_enabled() else plain
 
 
 def heavy_bar_char():
     # Caractere usado nas barras/separadores grossos (títulos, banners).
+    """Return the heavy bar character for progress bars (Unicode-aware)."""
     return _glyph("\u2501", "=")  # ━
 
 
 def light_bar_char():
     # Caractere usado em separadores finos.
+    """Return the light bar character for progress bars (Unicode-aware)."""
     return _glyph("\u2500", "-")  # ─
 
 
 def block_char():
     # Caractere usado para preencher barras de progresso proporcionais
     # (ex.: bar_gauge no ranking de artistas).
+    """Return the block character for bar gauges (Unicode-aware)."""
     return _glyph("\u2588", "#")  # █
 
 
@@ -214,6 +229,7 @@ def emit(text="", end="\n"):
     # Usa tqdm.write() quando disponível, para que barras de progresso
     # ativas sejam apagadas e redesenhadas ao redor da mensagem em vez de
     # serem cortadas ao meio. Respeita --quiet (não imprime nada).
+    """Print a message unless quiet mode is active."""
     if _quiet:
         return
     with print_lock:
@@ -226,6 +242,7 @@ def _write_locked(text, end):
     # print() comum; se o terminal não suportar os caracteres unicode do
     # texto, reescreve substituindo o que não encaixa em vez de derrubar o
     # processo com UnicodeEncodeError.
+    """Thread-safe write to stdout with optional flushing."""
     try:
         from tqdm import tqdm
 
@@ -246,6 +263,7 @@ def emit_always(text="", end="\n"):
     # Igual a emit(), mas ignora --quiet. Reservado para mensagens que o
     # usuário precisa ver mesmo em modo silencioso: erros fatais e prompts
     # de confirmação.
+    """Print a message regardless of quiet mode (for critical output)."""
     with print_lock:
         _write_locked(text, end)
 
@@ -271,6 +289,7 @@ def _tagged(color, tag, message):
     # RESET é emitido em CADA linha de propósito, já que emit() escreve uma
     # linha por chamada e sem fechar a cor em cada uma ela vazaria para o
     # texto seguinte.
+    """Wrap text with a color tag and optional icon."""
     limite = max(width() - _LARGURA_TAG, 12)
     partes = _wrap_lines(message, limite)
     pad = " " * _LARGURA_TAG
@@ -283,6 +302,7 @@ def _tagged(color, tag, message):
 def _emit_tagged(color, tag, message, sempre=False):
     # Emite cada linha produzida por _tagged() separadamente, escolhendo
     # entre emit() e emit_always() conforme o parâmetro `sempre`.
+    """Emit a tagged message with consistent formatting."""
     escrever = emit_always if sempre else emit
     for linha in _tagged(color, tag, message):
         escrever(linha)
@@ -290,16 +310,19 @@ def _emit_tagged(color, tag, message, sempre=False):
 
 def ok(message):
     # Mensagem de sucesso -- prefixo "[+]" verde.
+    """Print a success message (green checkmark)."""
     _emit_tagged(SUCCESS, "+", message)
 
 
 def step(message):
     # Mensagem de etapa em andamento -- prefixo "[*]" na cor de destaque.
+    """Print a progress step message (arrow icon)."""
     _emit_tagged(HIGHLIGHT, "*", message)
 
 
 def info(message):
     # Informação neutra, sem prefixo colorido nem quebra automática de tag.
+    """Print an informational message (info icon)."""
     emit(message)
 
 
@@ -309,17 +332,20 @@ def warn(message):
     # e erros", então um aviso suprimido por --quiet contradiz a promessa
     # da flag. BUGFIX: antes chamava emit() puro e um --quiet escondia
     # avisos que o usuário tinha sido informado que continuariam visíveis.
+    """Print a warning message (yellow warning icon)."""
     _emit_tagged(WARNING, "!", message, sempre=True)
 
 
 def error(message):
     # Mensagem de erro -- prefixo "[!]" vermelho. Ignora --quiet (usa
     # emit_always) porque erro é informação que o usuário sempre precisa ver.
+    """Print an error message (red X icon)."""
     _emit_tagged(ERROR, "!", message, sempre=True)
 
 
 def skip(message):
     # Item ignorado/pulado -- prefixo "[-]" na cor apagada.
+    """Print a skip/omit message (yellow circle icon)."""
     _emit_tagged(MUTED, "-", message)
 
 
@@ -327,6 +353,7 @@ def detail(message, indent=4):
     # Linha secundária: comunica hierarquia pelo RECUO, não pela cor (texto
     # sai na cor padrão do terminal). Quebra automaticamente na largura
     # disponível, respeitando o recuo.
+    """Print a detail message with indentation (dim arrow)."""
     message = str(message)
     pad = " " * indent
     if len(message) + indent <= width():
@@ -338,12 +365,14 @@ def detail(message, indent=4):
 
 def debug(message):
     # Só aparece quando --verbose está ativo.
+    """Print a debug message if verbose mode is active."""
     if _verbose:
         emit(f"{c(MUTED)}[debug] {message}{c(RESET)}")
 
 
 def blank():
     # Atalho para uma linha em branco.
+    """Print a blank line unless quiet mode is active."""
     emit("")
 
 
@@ -353,6 +382,7 @@ def blank():
 def rule(char=None, cols=None, color=HIGHLIGHT):
     # Linha divisória de largura total (usa a largura do terminal por
     # padrão, ou `cols` se especificado).
+    """Print a horizontal rule line."""
     ch = char or heavy_bar_char()
     n = cols if cols is not None else width()
     emit(f"{c(color)}{ch * n}{c(RESET)}")
@@ -361,6 +391,7 @@ def rule(char=None, cols=None, color=HIGHLIGHT):
 def banner(title, cols=None):
     # Título centralizado entre duas linhas grossas -- usado para
     # destacar seções importantes (relatório de stats, menu de playlist).
+    """Print a banner with text centered in a box."""
     n = cols if cols is not None else width()
     bar = heavy_bar_char() * n
     emit(f"\n{c(HIGHLIGHT)}{bar}{c(RESET)}")
@@ -370,6 +401,7 @@ def banner(title, cols=None):
 
 def section(title):
     # Subtítulo de bloco dentro de um relatório maior.
+    """Print a section header."""
     emit(f"  {c(BG)}{title}{c(RESET)}")
 
 
@@ -381,6 +413,7 @@ def kv(label, value, label_width=30, narrow_stack=False):
     #   2) rótulo e valor empilhados, com o valor quebrado em várias linhas,
     #      quando o valor não cabe na coluna (ex.: listas longas);
     #   3) "rotulo: valor" corrido em telas estreitas.
+    """Print a key-value pair with aligned formatting."""
     value = str(value)
     total = width()
 
@@ -407,6 +440,7 @@ def header(kind, rows):
     # rótulo/valor alinhados. A largura da barra acompanha o conteúdo real
     # (piso 20, teto = largura utilizável), então em telas estreitas ela
     # não vaza para a linha seguinte.
+    """Print a header box with title and key-value pairs."""
     rows = list(rows)
     label_width = max((len(label) for label, _ in rows), default=8)
 
@@ -434,6 +468,7 @@ def bar_gauge(value, peak, max_blocks=None):
     # quantidade de faixas). `max_blocks` é derivado da largura real do
     # terminal quando não informado, em vez de um número fixo -- isso evita
     # que a barra estoure a linha em terminais estreitos.
+    """Print a horizontal bar gauge visualization."""
     if max_blocks is None:
         max_blocks = max(6, min(24, width() - 56))
     peak = peak or 1
@@ -444,6 +479,7 @@ def bar_gauge(value, peak, max_blocks=None):
 def _wrap_lines(text, limit):
     # Wrapper fino sobre textwrap.wrap: garante um piso mínimo de largura
     # e sempre devolve pelo menos uma linha (mesmo que vazia).
+    """Wrap long text to fit terminal width."""
     return textwrap.wrap(str(text), width=max(int(limit), 12)) or [""]
 
 
@@ -452,6 +488,7 @@ def wrapped(text, indent=0, cols=None):
     # Emite RESET no início de CADA linha de propósito: garante que texto
     # explicativo sempre saia na cor padrão do terminal, sem herdar cor de
     # quem escreveu antes.
+    """Print wrapped text with optional indentation."""
     n = (cols if cols is not None else width()) - indent
     pad = " " * indent
     for line in _wrap_lines(text, n):
@@ -461,6 +498,7 @@ def wrapped(text, indent=0, cols=None):
 def truncate(text, limit):
     # Encurta uma string preservando o início, adicionando reticências
     # quando o limite é ultrapassado.
+    """Truncate text to fit terminal width with ellipsis."""
     text = str(text)
     if len(text) <= limit:
         return text
@@ -480,6 +518,7 @@ class TqdmLoggingHandler(logging.Handler):
     # escrever direto no stdout por cima delas.
 
     def __init__(self, bypass_quiet=False):
+        """Initialize logging handler that respects quiet mode unless bypass_quiet is True."""
         super().__init__()
         # bypass_quiet=True quando --log-level foi passado explicitamente:
         # nesse caso o filtro de nivel do proprio `logging` (setLevel) ja'
@@ -490,6 +529,7 @@ class TqdmLoggingHandler(logging.Handler):
         self.bypass_quiet = bypass_quiet
 
     def emit(self, record):
+        """Print a message unless quiet mode is active."""
         try:
             msg = self.format(record)
         except Exception:
@@ -509,6 +549,7 @@ class TqdmLoggingHandler(logging.Handler):
 def install_logging(level=None):
     # Substitui os handlers do logger raiz pelo TqdmLoggingHandler. Deve
     # ser chamado uma vez, no início da CLI, depois de configure().
+    """Configure Python logging to route through the UI system."""
     explicit_level = level is not None
     if level is None:
         if _quiet:

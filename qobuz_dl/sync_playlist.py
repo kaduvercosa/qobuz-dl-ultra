@@ -319,6 +319,7 @@ async def sync_playlist(qobuz_dl, url, folder, auto_confirm=False):
         # Só remove órfãos depois que as novas faixas estão seguras. A lixeira
         # mantém a operação recuperável caso a seleção tenha sido incorreta.
         def _remove_orphan(path):
+            """Remove orphaned file from playlist sync."""
             try:
                 send2trash(path)
                 logger.info(

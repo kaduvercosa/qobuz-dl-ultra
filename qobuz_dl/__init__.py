@@ -1,7 +1,8 @@
-__version__ = "2.5.5"
+__version__ = "2.5.4.3"
 
 
 def __getattr__(name):
+    """Lazy-load main and Client to avoid circular imports."""
     if name == "main":
         from .cli import main
 

@@ -20,6 +20,7 @@ from qobuz_dl.color import RESET as OFF
 # ----------------------------------------------------------------------------
 class CustomHelpFormatter(argparse.RawTextHelpFormatter):
     def __init__(self, prog, indent_increment=2, max_help_position=50, width=None):
+        """Initialize formatter with terminal-aware width calculation."""
         try:
             term_width = shutil.get_terminal_size((100, 24)).columns
             width = term_width
@@ -41,6 +42,7 @@ class ColoredArgumentParser(argparse.ArgumentParser):
         super().__init__(*args, **kwargs)
 
     def print_help(self, file=None):
+        """Print help message with Portuguese translations and color highlighting."""
         if file is None:
             import sys
 
@@ -63,6 +65,7 @@ class ColoredArgumentParser(argparse.ArgumentParser):
         )
 
         def colorize_responsive(match):
+            """Apply color to command-line flags in help text."""
             spaces = match.group(1)
             flag_title = match.group(2)
             explanation = match.group(3)
@@ -83,6 +86,7 @@ class ColoredArgumentParser(argparse.ArgumentParser):
 # Pasta padrão de download.
 # ----------------------------------------------------------------------------
 def _default_download_folder():
+    """Return the default download folder based on environment (iOS-aware)."""
     ios_home = os.environ.get("QOBUZ_DL_IOS_HOME")
     if ios_home:
         return os.path.join(ios_home, "QobuzDownloads")
@@ -93,6 +97,7 @@ def _default_download_folder():
 # Subcomando: "interactive" (aliases: "i", "fun")
 # ----------------------------------------------------------------------------
 def fun_args(subparsers, default_limit):
+    """Define the 'interactive' subcommand and its arguments."""
     interactive = subparsers.add_parser(
         "interactive",
         usage="qobuz-dl interactive [opções]",
@@ -114,6 +119,7 @@ def fun_args(subparsers, default_limit):
 # Subcomando: "lucky"
 # ----------------------------------------------------------------------------
 def lucky_args(subparsers):
+    """Define the 'lucky' subcommand and its arguments."""
     lucky = subparsers.add_parser(
         "lucky",
         usage="qobuz-dl lucky [opções] <QUERY>",
@@ -142,6 +148,7 @@ def lucky_args(subparsers):
 # Subcomando: "dl"
 # ----------------------------------------------------------------------------
 def dl_args(subparsers):
+    """Define the 'dl' subcommand and its arguments."""
     download = subparsers.add_parser(
         "dl",
         usage="qobuz-dl dl [opções] <SOURCE>",
@@ -200,6 +207,7 @@ def dl_args(subparsers):
 # Subcomando: "auth" (alias: "login")
 # ----------------------------------------------------------------------------
 def auth_args(subparsers):
+    """Define the 'auth' subcommand and its arguments."""
     auth = subparsers.add_parser(
         "auth",
         usage="qobuz-dl auth",
@@ -214,6 +222,7 @@ def auth_args(subparsers):
 # Subcomando: "user" (aliases: "account", "profile", "me", "info")
 # ----------------------------------------------------------------------------
 def user_args(subparsers):
+    """Define the 'user' subcommand and its arguments."""
     user = subparsers.add_parser(
         "user",
         usage="qobuz-dl user [opções]",
@@ -234,6 +243,7 @@ def user_args(subparsers):
 # Subcomando: "lyrics"
 # ----------------------------------------------------------------------------
 def lyrics_args(subparsers, default_folder=None):
+    """Define the 'lyrics' subcommand and its arguments."""
     lyrics = subparsers.add_parser(
         "lyrics",
         usage="qobuz-dl lyrics [opções] [DIR]",
@@ -254,6 +264,7 @@ def lyrics_args(subparsers, default_folder=None):
 # Subcomando: "sync-playlist" (alias: "sp")
 # ----------------------------------------------------------------------------
 def sync_playlist_args(subparsers):
+    """Define the 'sync-playlist' subcommand and its arguments."""
     sync_pl = subparsers.add_parser(
         "sync-playlist",
         aliases=["sp"],
@@ -279,6 +290,7 @@ def sync_playlist_args(subparsers):
 # Subcomando: "import-playlist" (alias: "ip")
 # ----------------------------------------------------------------------------
 def import_playlist_args(subparsers):
+    """Define the 'import-playlist' subcommand and its arguments."""
     ip = subparsers.add_parser(
         "import-playlist",
         aliases=["ip"],
@@ -326,6 +338,7 @@ def import_playlist_args(subparsers):
 # Opções de saída no terminal (-v/--verbose, --quiet, --no-color)
 # ----------------------------------------------------------------------------
 def add_output_args(parser, suppress=False):
+    """Add output control arguments (--verbose, --quiet, --no-color, --log-level) to a parser."""
     kwargs = {"default": argparse.SUPPRESS} if suppress else {}
     group = parser.add_argument_group("saída no terminal")
     group.add_argument(
@@ -363,6 +376,7 @@ def add_output_args(parser, suppress=False):
 # Opções comuns de download
 # ----------------------------------------------------------------------------
 def add_common_arg(custom_parser, default_folder, default_quality):
+    """Add common download arguments (quality, directory, formats, tags, etc.) to a subcommand parser."""
     custom_parser.add_argument(
         "-d",
         "--directory",
@@ -679,6 +693,7 @@ def add_common_arg(custom_parser, default_folder, default_quality):
 # Subcomando: "stats"
 # ----------------------------------------------------------------------------
 def stats_args(subparsers):
+    """Define the 'stats' subcommand and its arguments."""
     stats = subparsers.add_parser(
         "stats",
         usage="qobuz-dl stats [opções]",
@@ -694,6 +709,7 @@ def stats_args(subparsers):
 
 
 def inspect_args(subparsers):
+    """Define the 'inspect' subcommand and its arguments."""
     inspect = subparsers.add_parser(
         "inspect",
         usage="qobuz-dl inspect [caminho]",
@@ -727,6 +743,7 @@ def inspect_args(subparsers):
 # Montagem do parser principal
 # ----------------------------------------------------------------------------
 def qobuz_dl_args(default_quality=6, default_limit=20, default_folder=None):
+    """Build and return the main ArgumentParser with all subcommands and global flags."""
     if default_folder is None:
         default_folder = _default_download_folder()
 

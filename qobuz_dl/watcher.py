@@ -37,11 +37,13 @@ class _NewAudioFileHandler(FileSystemEventHandler):
     """
 
     def __init__(self, loop, queue):
+        """Initialize file watcher with asyncio loop and queue for new audio files."""
         super().__init__()
         self._loop = loop
         self._queue = queue
 
     def _enqueue(self, path):
+        """Add file to processing queue."""
         if not path.lower().endswith(AUDIO_EXTENSIONS):
             return
         # call_soon_threadsafe e' obrigatorio aqui: a callback do watchdog
@@ -50,6 +52,7 @@ class _NewAudioFileHandler(FileSystemEventHandler):
         self._loop.call_soon_threadsafe(self._queue.put_nowait, os.path.dirname(path))
 
     def on_created(self, event):
+        """Handle file creation event."""
         if not event.is_directory:
             self._enqueue(event.src_path)
 
@@ -58,6 +61,7 @@ class _NewAudioFileHandler(FileSystemEventHandler):
         # temporario/parcial (on_created dispara, mas normalmente nao bate
         # AUDIO_EXTENSIONS) e depois renomeado pro nome final -- e' esse
         # evento de rename que importa de verdade.
+        """Handle file move event."""
         if not event.is_directory:
             self._enqueue(event.dest_path)
 

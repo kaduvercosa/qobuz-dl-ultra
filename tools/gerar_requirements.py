@@ -51,6 +51,7 @@ CABECALHO = """\
 
 
 def gerar() -> str:
+    """Generate requirements.txt from imports."""
     with PYPROJECT.open("rb") as f:
         dados = tomllib.load(f)
     deps = dados["project"]["dependencies"]
@@ -58,6 +59,7 @@ def gerar() -> str:
 
 
 def main() -> int:
+    """Main entry point for report viewer."""
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument(
         "--check",

@@ -33,6 +33,7 @@ def _fmt_date(value):
 
 
 def _row(label, value):
+    """Generate a table row with columns."""
     ui.kv(label, value, narrow_stack=label in _STACK_ON_NARROW)
 
 

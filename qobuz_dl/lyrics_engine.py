@@ -34,6 +34,7 @@ class LyricsEngine:
     """
 
     def __init__(self, genius_token=None, session=None, settings=None):
+        """Initialize lyrics engine with optional Genius token and HTTP session."""
         self.genius_token = genius_token
         self.genius = None
         self.settings = settings or QobuzDLSettings()
@@ -189,6 +190,7 @@ class LyricsEngine:
             return original_lrc or translated_lrc
 
         def parse_lrc(lrc_text, is_translation):
+            """Parse LRC lyrics format into timestamped lines."""
             parsed = []
             for line in lrc_text.splitlines():
                 tags = re.findall(r"\[\d{2,}:\d{2}\.\d{2,3}\]", line)
@@ -367,6 +369,7 @@ class LyricsEngine:
         _label = f"{MUTED}[{track_number}]{RESET} " if track_number else ""
 
         def _tw(msg):
+            """Text wrapping helper for lyrics display."""
             tqdm.write(f"{_label}{msg}")
 
         result = {
