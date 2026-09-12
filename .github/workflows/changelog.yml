@@ -1,22 +1,19 @@
 name: Changelog automático
 
-# Dispara em QUALQUER tag (o esquema de tags deste repo é inconsistente --
-# tem "v2.5.4", "2.4.5.1", "V1.5.0" misturados -- então filtrar por padrão
-# tipo "v*" deixaria escapar metade das tags reais). Roda o gerador de
-# changelog (tools/gerar_changelog.py) comparando a tag nova com a tag
-# anterior, e publica os resultados como Release RASCUNHO -- não published.
-#
-# Fluxo pretendido: você cria e empurra a tag (`git tag 2.6.0 && git push
-# --tags`) -> este workflow gera o changelog e abre o rascunho -> você
-# revisa/edita no GitHub -> clica em "Publish release" -> isso dispara o
-# evento "release: published", que já é o gatilho existente do pypi.yml.
-# Ou seja: não muda nada do fluxo de publicação que já existe, só
-# preenche automaticamente a parte que hoje você escrevia à mão.
+# Gera notas de versão no formato Keep a Changelog quando uma tag é enviada.
+# O resultado é criado como release rascunho para revisão manual antes da
+# publicação.
 
 on:
   push:
     tags:
       - "**"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag para gerar/regerar o changelog"
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -28,31 +25,50 @@ jobs:
       - name: Checkout com histórico completo
         uses: actions/checkout@v7
         with:
-          fetch-depth: 0  # precisa do histórico inteiro + todas as tags
+          fetch-depth: 0
 
-      - name: Setup Python
-        uses: actions/setup-python@v7
+      - name: Configurar Python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-      - name: Gerar changelog desde a tag anterior
-        id: changelog
+      - name: Definir tag da release
+        id: release
+        env:
+          EVENTO: ${{ github.event_name }}
+          TAG_PUSH: ${{ github.ref_name }}
+          TAG_MANUAL: ${{ inputs.tag }}
         run: |
-          python tools/gerar_changelog.py --para "${{ github.ref_name }}" -o /tmp/changelog.md
+          if [ "$EVENTO" = "workflow_dispatch" ]; then
+            echo "tag=$TAG_MANUAL" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=$TAG_PUSH" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Gerar changelog
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          python tools/gerar_changelog.py \
+            --para "$TAG" \
+            --versao "$TAG" \
+            --data "$(date -u +%F)" \
+            -o /tmp/changelog.md
           cat /tmp/changelog.md
 
-      - name: Criar Release rascunho com o changelog gerado
+      - name: Criar ou atualizar release rascunho
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release.outputs.tag }}
         run: |
-          # Se já existir uma release/rascunho pra essa tag (ex.: workflow
-          # re-rodado manualmente), atualiza em vez de falhar tentando
-          # criar de novo.
-          if gh release view "${{ github.ref_name }}" >/dev/null 2>&1; then
-            gh release edit "${{ github.ref_name }}" --notes-file /tmp/changelog.md
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" \
+              --title "$TAG" \
+              --notes-file /tmp/changelog.md \
+              --draft
           else
-            gh release create "${{ github.ref_name }}" \
-              --title "${{ github.ref_name }}" \
+            gh release create "$TAG" \
+              --title "$TAG" \
               --notes-file /tmp/changelog.md \
               --draft
           fi
