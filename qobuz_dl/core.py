@@ -1359,6 +1359,7 @@ class QobuzDL:
                     display_name = (
                         f"{base_title} ({version_tag})" if version_tag else base_title
                     )
+                    display_lower = display_name.lower()
 
                     is_blacklisted = False
                     for pattern in self.blacklist_patterns:
