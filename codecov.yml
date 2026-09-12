@@ -1,42 +1,78 @@
-# Configuração do Codecov -- por padrão (sem este arquivo), o Codecov
-# reporta dois checks separados por PR/commit:
-#   - "project": cobertura TOTAL do repositório, antes vs depois do commit
-#   - "patch":   cobertura só das linhas MUDADAS nesse commit específico
+# Configuração completa do Codecov.
 #
-# Sem essa config, os dois rodam em modo "auto" -- a meta do patch vira a
-# cobertura atual do projeto inteiro (foi isso que gerou o
-# "target 48.92%" que você viu: 48.92% era a cobertura total do repo
-# NAQUELE momento, usada como meta só pro pedaço que mudou).
+# O status project acompanha a cobertura total do repositório.
+# O status patch acompanha apenas as linhas alteradas e é informativo,
+# portanto não bloqueia o merge.
 #
-# Esta config deixa "project" como o check que importa de verdade
-# (cobertura do repositório inteiro, com uma meta explícita em vez de
-# "auto"), e desliga "patch" -- já que o pedido era focar no projeto
-# completo, não no diff de cada commit.
+# Este arquivo deve ficar na raiz do repositório:
+# codecov.yml
 
 coverage:
+  precision: 2
+  round: down
+  range: "60...100"
   status:
     project:
       default:
-        # "auto" compara contra a cobertura do commit anterior (base) --
-        # falha só se a cobertura total CAIR. Troque por um número fixo
-        # (ex.: target: 35%) se preferir uma barra mínima absoluta em vez
-        # de "não pode piorar".
+        enabled: true
         target: auto
-        # Quanto a cobertura pode cair sem falhar o check -- 1% de
-        # margem evita falso-negativo por flutuação pequena entre runs
-        # (ex.: um teste "slow" pulado numa run e não na outra).
         threshold: 1%
-
+        if_ci_failed: error
+        informational: false
+        only_pulls: false
     patch:
       default:
-        # Desativado de propósito -- o pedido era cobertura do projeto
-        # completo, não por diff. Reative (informative: false) se um dia
-        # quiser voltar a cobrar cobertura mínima só do código novo.
-        informative: true
+        enabled: true
+        target: auto
+        threshold: 0%
+        if_ci_failed: error
+        informational: true
+        only_pulls: false
 
-# Não bloqueia o merge enquanto o relatório do Codecov ainda não chegou
-# (evita PR ficando "pending" pra sempre se o upload atrasar ou falhar).
+comment:
+  layout: "header, diff, flags, components, footer"
+  behavior: default
+  require_changes: false
+  require_base: false
+  require_head: true
+  hide_project_coverage: false
+
+github_checks:
+  annotations: true
+
 codecov:
+  branch: master
   require_ci_to_pass: true
   notify:
     wait_for_ci: true
+    after_n_builds: 1
+  max_report_age: off
+  slug: "${{ github.repository }}"
+
+ignore:
+  - "**/__pycache__/**"
+  - "**/.pytest_cache/**"
+  - "**/.mypy_cache/**"
+  - "**/.ruff_cache/**"
+  - "**/htmlcov/**"
+  - "**/site-packages/**"
+  - "**/dist/**"
+  - "**/build/**"
+  - "**/*.egg-info/**"
+  - "tests/**/fixtures/**"
+  - "tests/**/data/**"
+  - "setup.py"
+  - "conftest.py"
+
+flags:
+  unittests:
+    paths:
+      - src/
+      - app/
+    carryforward: true
+
+  integration:
+    paths:
+      - src/
+      - app/
+    carryforward: true
