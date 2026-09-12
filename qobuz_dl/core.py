@@ -13,6 +13,7 @@ import os
 import shutil
 import sys
 import time
+import re
 
 import httpx
 from pathvalidate import sanitize_filename
@@ -1361,7 +1362,13 @@ class QobuzDL:
 
                     is_blacklisted = False
                     for pattern in self.blacklist_patterns:
-                        refex_pattern = rf"(?<!\w){re.escape(pattern)}(?!\w)"
+                        regex_pattern = rf"(?<!\w){re.escape(pattern)}(?!\w)"
+
+                        if re.search(regex_pattern, display_lower):
+                            is_blacklisted = True
+                            break
+
+                    if is_blacklisted:
                         logger.info(
                             f"{YELLOW}[!] Skipped (Blacklisted): {display_name}{OFF}"
                         )
