@@ -54,23 +54,46 @@ jobs:
           fi
 
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Release selecionada: $TAG"
 
-      - name: Gerar changelog
+      - name: Encontrar tag anterior
+        id: previous
         env:
           TAG: ${{ steps.release.outputs.tag }}
         shell: bash
         run: |
           set -euo pipefail
 
+          TAG_PREVIOUS="$(git describe --tags --abbrev=0 "$TAG^" 2>/dev/null || true)"
+
+          if [[ -z "$TAG_PREVIOUS" ]]; then
+            echo "Não foi possível encontrar a tag anterior a $TAG."
+            echo "Para a primeira release, defina uma tag inicial ou trate esse caso no workflow."
+            exit 1
+          fi
+
+          echo "tag=$TAG_PREVIOUS" >> "$GITHUB_OUTPUT"
+          echo "Tag anterior: $TAG_PREVIOUS"
+
+      - name: Gerar changelog
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+          TAG_PREVIOUS: ${{ steps.previous.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
           python tools/gerar_changelog.py \
+            --de "$TAG_PREVIOUS" \
             --para "$TAG" \
             --versao "$TAG" \
             --data "$(date -u +%F)" \
-            -o /tmp/changelog.md
+            --output /tmp/changelog.md
 
+          test -s /tmp/changelog.md
           cat /tmp/changelog.md
 
-      - name: Criar ou atualizar release rascunho
+      - name: Criar release rascunho
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.release.outputs.tag }}
@@ -80,6 +103,7 @@ jobs:
 
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "Release $TAG já existe; não será sobrescrita."
+            echo "Se ela já foi publicada ou ficou imutável, não será alterada."
             exit 0
           fi
 
