@@ -70,8 +70,7 @@ jobs:
 
           cat /tmp/changelog.md
 
-      - name: Criar release rascunho
-        id: release_create
+      - name: Criar ou atualizar release rascunho
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.release.outputs.tag }}
@@ -80,9 +79,7 @@ jobs:
           set -euo pipefail
 
           if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "Release $TAG já existe."
-            echo "Não será executado gh release edit para evitar erro em release imutável."
-            echo "Se ela já foi publicada, o changelog não pode mais ser substituído."
+            echo "Release $TAG já existe; não será sobrescrita."
             exit 0
           fi
 
