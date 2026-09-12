@@ -1,8 +1,5 @@
 name: Changelog automático
 
-# Gera notas de versão no formato Keep a Changelog quando uma tag é enviada.
-# A release é criada como rascunho para revisão manual antes da publicação.
-
 on:
   push:
     tags:
@@ -17,9 +14,13 @@ on:
 permissions:
   contents: write
 
+env:
+  PYTHON_VERSION: "3.12"
+
 jobs:
   gerar-changelog:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout com histórico completo
         uses: actions/checkout@v7
@@ -29,45 +30,63 @@ jobs:
       - name: Configurar Python
         uses: actions/setup-python@v7
         with:
-          python-version: "3.12"
+          python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Definir tag da release
         id: release
+        shell: bash
         env:
           EVENTO: ${{ github.event_name }}
           TAG_PUSH: ${{ github.ref_name }}
           TAG_MANUAL: ${{ inputs.tag }}
         run: |
-          if [ "$EVENTO" = "workflow_dispatch" ]; then
-            echo "tag=$TAG_MANUAL" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+
+          if [[ "$EVENTO" == "workflow_dispatch" ]]; then
+            TAG="$TAG_MANUAL"
           else
-            echo "tag=$TAG_PUSH" >> "$GITHUB_OUTPUT"
+            TAG="$TAG_PUSH"
           fi
+
+          if [[ -z "$TAG" ]]; then
+            echo "A tag da release não foi definida."
+            exit 1
+          fi
+
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
       - name: Gerar changelog
         env:
           TAG: ${{ steps.release.outputs.tag }}
+        shell: bash
         run: |
+          set -euo pipefail
+
           python tools/gerar_changelog.py \
             --para "$TAG" \
             --versao "$TAG" \
             --data "$(date -u +%F)" \
             -o /tmp/changelog.md
+
           cat /tmp/changelog.md
 
-      - name: Criar ou atualizar release rascunho
+      - name: Criar release rascunho
+        id: release_create
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.release.outputs.tag }}
+        shell: bash
         run: |
+          set -euo pipefail
+
           if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release edit "$TAG" \
-              --title "$TAG" \
-              --notes-file /tmp/changelog.md \
-              --draft
-          else
-            gh release create "$TAG" \
-              --title "$TAG" \
-              --notes-file /tmp/changelog.md \
-              --draft
+            echo "Release $TAG já existe."
+            echo "Não será executado gh release edit para evitar erro em release imutável."
+            echo "Se ela já foi publicada, o changelog não pode mais ser substituído."
+            exit 0
           fi
+
+          gh release create "$TAG" \
+            --title "$TAG" \
+            --notes-file /tmp/changelog.md \
+            --draft
