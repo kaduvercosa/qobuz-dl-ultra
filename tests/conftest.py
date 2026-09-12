@@ -62,6 +62,32 @@ if str(RAIZ) not in sys.path:
 
 import pytest  # noqa: E402
 
+# Mobile (a-Shell/iOS) e alguns runners tem um ulimit de file descriptors
+# bem mais baixo que desktop Linux comum (as vezes bem abaixo de 1024).
+# Numa suite de 800+ testes, qualquer coisa que abra socket/arquivo sem
+# fechar (ex.: um httpx.Client de teste que ninguem fecha) acumula ate'
+# estourar esse limite -- e o teste que quebra quase nunca e' o que
+# VAZOU, e' qualquer outra coisa que tentar abrir o PROXIMO file
+# descriptor depois do limite bater (`OSError: Too many open files`).
+# Sobe o limite pro teto que o SO permitir. So' e' uma rede de seguranca
+# contra vazamento residual -- nao substitui fechar client/arquivo nos
+# testes que os criam, so' evita que um vazamento pequeno em algum lugar
+# derrube um teste sem nenhuma relacao em outro arquivo.
+try:
+    import resource
+
+    _soft, _hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    if _hard != resource.RLIM_INFINITY and _soft < _hard:
+        resource.setrlimit(resource.RLIMIT_NOFILE, (_hard, _hard))
+    elif _hard == resource.RLIM_INFINITY and _soft < 4096:
+        resource.setrlimit(resource.RLIMIT_NOFILE, (4096, _hard))
+except (ImportError, ValueError, OSError):
+    # "resource" nao existe no Windows (a suite tambem roda la', ver
+    # tests.yml), e mesmo em Unix o SO pode negar o aumento num sandbox
+    # restrito. Em qualquer um dos casos, seguir sem o limite maior e'
+    # melhor que a suite inteira nao coletar por causa disto.
+    pass
+
 
 @pytest.fixture
 def dir_config_temp():
@@ -138,3 +164,4 @@ def sem_binarios(monkeypatch):
     monkeypatch.setattr(utils, "_DIRS_EXTRA", [])
     yield
     utils._BINARIOS_CHECADOS.clear()
+    

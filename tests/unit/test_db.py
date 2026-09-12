@@ -16,6 +16,7 @@ As três frentes cobertas:
   3. get_stats() -- agregações usadas pelo comando `stats`.
 """
 
+import contextlib
 import sqlite3
 
 import pytest
@@ -23,6 +24,27 @@ import pytest
 from qobuz_dl.db import create_db, get_stats, handle_download_id
 
 pytestmark = pytest.mark.unit
+
+
+@contextlib.contextmanager
+def _connect(caminho):
+    """sqlite3.connect() cujo `with conn:` embutido só cuida de
+    commit/rollback da transação -- ele NUNCA fecha a conexão (armadilha
+    bem conhecida do módulo sqlite3: `Connection.__exit__` não chama
+    `close()`). Este arquivo abria 16 conexões desse jeito sem fechar
+    nenhuma, contribuindo file descriptors vazados pra suíte inteira até
+    o ponto de outro arquivo, bem mais adiante, quebrar com
+    `OSError: Too many open files` num ambiente com ulimit apertado
+    (a-Shell/iOS) -- ver a docstring de tests/unit/test_lyrics_engine_unit.py
+    pra o sintoma. Este helper garante o close() de verdade, preservando o
+    mesmo commit/rollback automático que `with conn:` já dava.
+    """
+    conn = sqlite3.connect(caminho)
+    try:
+        with conn:
+            yield conn
+    finally:
+        conn.close()
 
 
 # ---------------------------------------------------------------------------
@@ -37,7 +59,7 @@ class TestCreateDbDoZero:
         caminho = str(tmp_path / "downloads.db")
         create_db(caminho)
 
-        with sqlite3.connect(caminho) as conn:
+        with _connect(caminho) as conn:
             colunas = {info[1] for info in conn.execute("PRAGMA table_info(downloads)")}
 
         esperadas = {
@@ -64,7 +86,7 @@ class TestCreateDbDoZero:
         create_db(caminho)
         create_db(caminho)  # não pode levantar exceção
 
-        with sqlite3.connect(caminho) as conn:
+        with _connect(caminho) as conn:
             n_tabelas = conn.execute(
                 "SELECT count(name) FROM sqlite_master WHERE type='table' AND name='downloads'"
             ).fetchone()[0]
@@ -77,7 +99,7 @@ class TestMigracaoV1ParaV2:
     perder os IDs já gravados."""
 
     def _criar_banco_v1(self, caminho, ids):
-        with sqlite3.connect(caminho) as conn:
+        with _connect(caminho) as conn:
             conn.execute('CREATE TABLE downloads ("id" text NOT NULL PRIMARY KEY)')
             for item_id in ids:
                 conn.execute("INSERT INTO downloads (id) VALUES (?)", (item_id,))
@@ -88,7 +110,7 @@ class TestMigracaoV1ParaV2:
 
         create_db(caminho)
 
-        with sqlite3.connect(caminho) as conn:
+        with _connect(caminho) as conn:
             ids = {row[0] for row in conn.execute("SELECT id FROM downloads")}
         assert ids == {"abc123", "def456"}
 
@@ -98,7 +120,7 @@ class TestMigracaoV1ParaV2:
 
         create_db(caminho)
 
-        with sqlite3.connect(caminho) as conn:
+        with _connect(caminho) as conn:
             linha = conn.execute(
                 "SELECT media_type, quality, file_format, quality_met, saved_path, "
                 "status, artist, album FROM downloads WHERE id='abc123'"
@@ -111,7 +133,7 @@ class TestMigracaoV1ParaV2:
 
         create_db(caminho)
 
-        with sqlite3.connect(caminho) as conn:
+        with _connect(caminho) as conn:
             existe = conn.execute(
                 "SELECT count(name) FROM sqlite_master WHERE type='table' AND name='downloads_old'"
             ).fetchone()[0]
@@ -119,7 +141,7 @@ class TestMigracaoV1ParaV2:
 
     def test_banco_legado_malformado_com_ids_repetidos_e_deduplicado(self, tmp_path):
         caminho = str(tmp_path / "downloads.db")
-        with sqlite3.connect(caminho) as conn:
+        with _connect(caminho) as conn:
             conn.execute('CREATE TABLE downloads ("id" text NOT NULL)')
             conn.executemany(
                 "INSERT INTO downloads (id) VALUES (?)",
@@ -128,7 +150,7 @@ class TestMigracaoV1ParaV2:
 
         create_db(caminho)
 
-        with sqlite3.connect(caminho) as conn:
+        with _connect(caminho) as conn:
             ids = [
                 row[0] for row in conn.execute("SELECT id FROM downloads ORDER BY id")
             ]
@@ -140,7 +162,7 @@ class TestMigracaoV2ParaV2_1_4:
     tem "artist"/"album" (adicionadas numa versão mais recente)."""
 
     def _criar_banco_v2_sem_artista(self, caminho):
-        with sqlite3.connect(caminho) as conn:
+        with _connect(caminho) as conn:
             conn.execute("""
                 CREATE TABLE downloads (
                   "id" text NOT NULL,
@@ -165,7 +187,7 @@ class TestMigracaoV2ParaV2_1_4:
 
         create_db(caminho)
 
-        with sqlite3.connect(caminho) as conn:
+        with _connect(caminho) as conn:
             colunas = {info[1] for info in conn.execute("PRAGMA table_info(downloads)")}
             linha = conn.execute(
                 "SELECT id, artist, album FROM downloads WHERE id='xyz789'"
@@ -182,7 +204,7 @@ class TestMigracaoV2ParaV2_1_4:
         create_db(caminho)  # cria já no schema atual
         create_db(caminho)  # roda de novo -- não deve migrar nem quebrar
 
-        with sqlite3.connect(caminho) as conn:
+        with _connect(caminho) as conn:
             colunas = {info[1] for info in conn.execute("PRAGMA table_info(downloads)")}
         assert "artist" in colunas and "album" in colunas
 
@@ -225,7 +247,7 @@ class TestHandleDownloadId:
         )
 
         assert await handle_download_id(caminho, "stale", quality=27) is None
-        with sqlite3.connect(caminho) as conn:
+        with _connect(caminho) as conn:
             assert conn.execute("SELECT COUNT(*) FROM downloads").fetchone()[0] == 0
 
     async def test_mesma_qualidade_duas_vezes_nao_derruba_o_programa(self, tmp_path):
@@ -241,7 +263,7 @@ class TestHandleDownloadId:
             caminho, "id-1", add_id=True, quality=27
         )  # não deve lançar
 
-        with sqlite3.connect(caminho) as conn:
+        with _connect(caminho) as conn:
             n = conn.execute(
                 "SELECT COUNT(*) FROM downloads WHERE id='id-1'"
             ).fetchone()[0]
@@ -256,7 +278,7 @@ class TestHandleDownloadId:
         await handle_download_id(caminho, "id-1", add_id=True, quality=5)
         await handle_download_id(caminho, "id-1", add_id=True, quality=27)
 
-        with sqlite3.connect(caminho) as conn:
+        with _connect(caminho) as conn:
             n = conn.execute(
                 "SELECT COUNT(*) FROM downloads WHERE id='id-1'"
             ).fetchone()[0]
@@ -287,7 +309,7 @@ class TestHandleDownloadId:
             album="Album Exemplo",
         )
 
-        with sqlite3.connect(caminho) as conn:
+        with _connect(caminho) as conn:
             conn.row_factory = sqlite3.Row
             linha = conn.execute(
                 "SELECT * FROM downloads WHERE id='id-completo'"
@@ -335,7 +357,7 @@ class TestGetStats:
     def _popular(self, caminho, registros):
         """Insere registros crus direto via SQL -- não depende de
         handle_download_id() pra manter este teste isolado do outro."""
-        with sqlite3.connect(caminho) as conn:
+        with _connect(caminho) as conn:
             for r in registros:
                 conn.execute(
                     """INSERT INTO downloads
