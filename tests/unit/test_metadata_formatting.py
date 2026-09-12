@@ -7,11 +7,13 @@ from qobuz_dl.metadata import (
     _format_copyright,
     _format_genres,
     _get_cover_path,
+    _get_tags_to_add,
     _get_title,
     _get_title_with_version,
     _make_sort_name,
     _normalize_name,
 )
+from qobuz_dl.settings import QobuzDLSettings
 
 
 # --------------------------------------------------------------------
@@ -226,3 +228,285 @@ class TestMetadataBordasETratamento:
         assert (
             _get_title_with_version("Track Title", "Deluxe") == "Track Title (Deluxe)"
         )
+
+
+# --------------------------------------------------------------------
+# _get_tags_to_add
+# --------------------------------------------------------------------
+def _album(**overrides):
+    base = {
+        "title": "Álbum Teste",
+        "version": "",
+        "artist": {"name": "Artista Principal"},
+        "genre": {"name": "Électronique"},
+        "genres_list": [],
+        "release_date_original": "2024-05-01",
+        "copyright": "(P) 2024 Gravadora (C) 2024 Editora",
+        "label": {"name": "Gravadora   Teste"},
+        "upc": "1234567890123",
+        "product_type": "album",
+        "release_type": "album",
+        "tracks_count": 10,
+        "duration": 3000,
+        "id": 999,
+    }
+    base.update(overrides)
+    return base
+
+
+def _item(**overrides):
+    base = {
+        "title": "Faixa Teste",
+        "version": "",
+        "performer": {"name": "Artista Principal"},
+        "performers": (
+            "Artista Principal, MainArtist - "
+            "Compositor Tal, Composer, ComposerLyricist"
+        ),
+        "composer": {"name": "Compositor Fallback"},
+        "isrc": "US1234567890",
+        "parental_warning": False,
+        "id": 555,
+        "audio_info": {},
+    }
+    base.update(overrides)
+    return base
+
+
+class TestGetTagsToAdd:
+    def test_album_ou_item_vazio_devolve_dict_vazio(self):
+        settings = QobuzDLSettings()
+        assert _get_tags_to_add(None, _item(), settings) == {}
+        assert _get_tags_to_add(_album(), None, settings) == {}
+        assert _get_tags_to_add({}, {}, settings) == {}
+
+    def test_tags_basicas_de_album_e_faixa(self):
+        settings = QobuzDLSettings()
+        tags = _get_tags_to_add(_album(), _item(), settings)
+
+        assert tags["ALBUM"] == "Álbum Teste"
+        assert tags["TITLE"] == "Faixa Teste"
+        assert tags["DATE"] == "2024-05-01"
+        assert tags["ISRC"] == "US1234567890"
+        assert tags["BARCODE"] == "1234567890123"
+        assert tags["MEDIATYPE"] == "ALBUM"
+
+    def test_titulo_nao_duplica_versao_ja_presente(self):
+        settings = QobuzDLSettings()
+        item = _item(title="Faixa Teste (Ao Vivo)", version="Ao Vivo")
+
+        tags = _get_tags_to_add(_album(), item, settings)
+
+        assert tags["TITLE"] == "Faixa Teste (Ao Vivo)"
+
+    def test_faixa_explicita_marca_emoji_e_tags_de_aviso(self):
+        settings = QobuzDLSettings()
+        tags_explicita = _get_tags_to_add(
+            _album(), _item(parental_warning=True), settings
+        )
+        tags_normal = _get_tags_to_add(
+            _album(), _item(parental_warning=False), settings
+        )
+
+        assert tags_explicita["TITLE"] == "Faixa Teste 🅴"
+        assert tags_explicita["ITUNESADVISORY"] == "1"
+        assert tags_explicita["EXPLICIT"] == "1"
+        assert tags_explicita["RATING"] == "Explicit"
+
+        assert tags_normal["TITLE"] == "Faixa Teste"
+        assert tags_normal["ITUNESADVISORY"] == ""
+        assert tags_normal["EXPLICIT"] == ""
+        assert tags_normal["RATING"] == ""
+
+    def test_album_artist_e_sort_name_vem_como_lista(self):
+        # get_album_artist() devolve LISTA (multi-artist tagging nativo em
+        # FLAC/Vorbis) -- ALBUMARTIST não é string aqui.
+        settings = QobuzDLSettings()
+        album = _album(artist={"name": "The Beatles"})
+
+        tags = _get_tags_to_add(album, _item(), settings)
+
+        assert tags["ALBUMARTIST"] == ["The Beatles"]
+        assert tags["ALBUMARTISTSORT"] == "Beatles, The"
+
+    def test_artistas_da_faixa_deduplicados_por_performers(self):
+        settings = QobuzDLSettings()
+        item = _item(
+            performer={"name": "Artista X"},
+            performers=(
+                "Artista X, MainArtist - "
+                "artista x, FeaturedArtist - "  # mesmo nome, acento/caixa diferentes
+                "Produtor Y, Producer - "  # role não elegível, não deve entrar
+                "Artista Z, PrimaryArtist"
+            ),
+        )
+
+        tags = _get_tags_to_add(_album(), item, settings)
+
+        assert tags["ARTIST"] == "Artista X, Artista Z"
+
+    def test_artist_vazio_quando_sem_performer_nem_artist_do_album(self):
+        settings = QobuzDLSettings()
+        album = _album(artist={})
+        item = _item(performer={}, performers="")
+
+        tags = _get_tags_to_add(album, item, settings)
+
+        assert tags["ARTIST"] == ""
+        assert "ARTISTSORT" not in tags
+
+    def test_compositor_via_performers_tem_prioridade_sobre_fallback(self):
+        settings = QobuzDLSettings()
+        tags = _get_tags_to_add(_album(), _item(), settings)
+
+        assert tags["COMPOSER"] == "Compositor Tal"
+
+    def test_compositor_cai_pro_fallback_sem_performers_elegiveis(self):
+        settings = QobuzDLSettings()
+        item = _item(performers="", composer={"name": "Compositor Fallback"})
+
+        tags = _get_tags_to_add(_album(), item, settings)
+
+        assert tags["COMPOSER"] == "Compositor Fallback"
+
+    def test_genero_traduzido_pelo_mapa_local_sem_duplicar(self):
+        settings = QobuzDLSettings()
+        album = _album(
+            genre={"name": "Électronique"},
+            genres_list=["Électronique", "Ambiance"],
+        )
+
+        tags = _get_tags_to_add(album, _item(), settings)
+
+        # genre principal (traduzido) substitui o primeiro item da lista
+        assert tags["GENRE"] == "Electronic, Ambient"
+
+    def test_copyright_formatado_e_label_com_espacos_colapsados(self):
+        settings = QobuzDLSettings()
+        tags = _get_tags_to_add(_album(), _item(), settings)
+
+        assert tags["COPYRIGHT"] == "\u2117 2024 Gravadora \u00a9 2024 Editora"
+        assert tags["LABEL"] == "Gravadora Teste"
+
+    def test_copyright_tag_e_controlada_por_no_label_tag_nao_no_copyright_tag(self):
+        """[BUG CONHECIDO, não corrigido aqui] `_get_tags_to_add` esconde
+        COPYRIGHT atrás de `settings.no_label_tag`, nunca lê
+        `settings.no_copyright_tag` -- apesar dela existir em
+        QobuzDLSettings e ter uma flag própria no CLI (`--no-copyright-tag`,
+        commands.py). Resultado: passar só `--no-copyright-tag` não
+        suprime a tag COPYRIGHT (só `--no-label-tag` suprime, e junto
+        derruba LABEL também). Este teste documenta o comportamento
+        ATUAL -- ver aviso na resposta sobre corrigir isso de verdade."""
+        settings_no_copyright = QobuzDLSettings(no_copyright_tag=True)
+        settings_no_label = QobuzDLSettings(no_label_tag=True)
+
+        tags_no_copyright = _get_tags_to_add(_album(), _item(), settings_no_copyright)
+        tags_no_label = _get_tags_to_add(_album(), _item(), settings_no_label)
+
+        assert "COPYRIGHT" in tags_no_copyright  # comportamento atual (bug)
+        assert "COPYRIGHT" not in tags_no_label
+        assert "LABEL" not in tags_no_label
+
+    def test_compilation_tag_via_classify_release_type(self):
+        settings = QobuzDLSettings()
+        album_compilation = _album(title="Greatest Hits", tracks_count=0, duration=0)
+        album_normal = _album(title="Álbum Normal", tracks_count=10)
+
+        tags_compilation = _get_tags_to_add(album_compilation, _item(), settings)
+        tags_normal = _get_tags_to_add(album_normal, _item(), settings)
+
+        assert tags_compilation["COMPILATION"] == "1"
+        assert "COMPILATION" not in tags_normal
+
+    def test_replaygain_somente_quando_presente_no_audio_info(self):
+        settings = QobuzDLSettings()
+        item_com_rg = _item(
+            audio_info={
+                "replaygain_track_gain": -6.5,
+                "replaygain_track_peak": 0.98,
+                "replaygain_album_gain": -7.0,
+                "replaygain_album_peak": 0.99,
+            }
+        )
+        item_sem_rg = _item(audio_info={})
+
+        tags_com_rg = _get_tags_to_add(_album(), item_com_rg, settings)
+        tags_sem_rg = _get_tags_to_add(_album(), item_sem_rg, settings)
+
+        assert tags_com_rg["REPLAYGAIN_TRACK_GAIN"] == "-6.5 dB"
+        assert tags_com_rg["REPLAYGAIN_TRACK_PEAK"] == "0.98"
+        assert tags_com_rg["REPLAYGAIN_ALBUM_GAIN"] == "-7.0 dB"
+        assert tags_com_rg["REPLAYGAIN_ALBUM_PEAK"] == "0.99"
+        assert "REPLAYGAIN_TRACK_GAIN" not in tags_sem_rg
+
+    def test_work_tag_apenas_quando_presente_e_habilitada(self):
+        settings = QobuzDLSettings()
+        tags_com_work = _get_tags_to_add(
+            _album(), _item(work="Sinfonia N.5"), settings
+        )
+        tags_sem_work = _get_tags_to_add(_album(), _item(), settings)
+        tags_desabilitada = _get_tags_to_add(
+            _album(),
+            _item(work="Sinfonia N.5"),
+            QobuzDLSettings(no_work_tag=True),
+        )
+
+        assert tags_com_work["WORK"] == "Sinfonia N.5"
+        assert "WORK" not in tags_sem_work
+        assert "WORK" not in tags_desabilitada
+
+    def test_regente_e_conjunto_via_performers(self):
+        settings = QobuzDLSettings()
+        item = _item(
+            performers=(
+                "Maestro Um, Conductor - "
+                "Orquestra Tal, Orchestra - "
+                "Coro Tal, Choir"
+            )
+        )
+
+        tags = _get_tags_to_add(_album(), item, settings)
+
+        assert tags["CONDUCTOR"] == "Maestro Um"  # 1 só -> string, não lista
+        assert set(tags["ENSEMBLE"]) == {"Orquestra Tal", "Coro Tal"}
+
+    def test_ids_qobuz_e_url_do_album_sao_montados(self):
+        settings = QobuzDLSettings()
+        album = _album(title="Test Album Two!", id=999)
+        item = _item(id=555)
+
+        tags = _get_tags_to_add(album, item, settings)
+
+        assert tags["QOBUZTRACKID"] == "555"
+        assert tags["QOBUZALBUMID"] == "999"
+        assert (
+            tags["QOBUZ ALBUM URL"]
+            == "https://www.qobuz.com/album/test-album-two/999"
+        )
+
+    def test_flags_no_x_tag_suprimem_a_tag_correspondente(self):
+        casos = [
+            ("no_album_title_tag", ["ALBUM"]),
+            ("no_track_title_tag", ["TITLE"]),
+            ("no_album_artist_tag", ["ALBUMARTIST", "ALBUMARTISTSORT"]),
+            ("no_composer_tag", ["COMPOSER"]),
+            ("no_release_date_tag", ["DATE"]),
+            ("no_genre_tag", ["GENRE"]),
+            ("no_isrc_tag", ["ISRC"]),
+            ("no_upc_tag", ["BARCODE"]),
+            ("no_media_type_tag", ["MEDIATYPE"]),
+            ("no_album_url_tag", ["QOBUZ ALBUM URL"]),
+        ]
+        for flag, chaves_esperadas_ausentes in casos:
+            settings = QobuzDLSettings(**{flag: True})
+            tags = _get_tags_to_add(_album(), _item(), settings)
+            for chave in chaves_esperadas_ausentes:
+                assert chave not in tags, f"{flag}=True deveria remover {chave}"
+
+    def test_no_explicit_tag_suprime_as_tres_tags_de_aviso(self):
+        settings = QobuzDLSettings(no_explicit_tag=True)
+        tags = _get_tags_to_add(_album(), _item(parental_warning=True), settings)
+
+        assert "ITUNESADVISORY" not in tags
+        assert "EXPLICIT" not in tags
+        assert "RATING" not in tags

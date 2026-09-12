@@ -357,6 +357,88 @@ class Download:
             except Exception as e:
                 logger.debug(f"Falha ao fechar http_session (ignorado): {e}")
 
+    async def _process_track(
+        self,
+        idx,
+        i,
+        *,
+        dirn,
+        album_meta,
+        is_multiple,
+        is_parallel,
+        position_pool,
+        semaphore,
+        report_track,
+    ):
+        """Processa e baixa UMA faixa do álbum.
+
+        Decide se a faixa é pulada (não-streamable ou apenas amostra),
+        tenta obter a URL de stream, baixa+tageia, e reporta o resultado
+        via `report_track` (callback assíncrono).
+
+        EXTRAÍDO de dentro de `download_release()`, onde antes vivia como
+        uma função aninhada chamada `process_track` -- fechava sobre
+        `dirn`/`album_meta`/`semaphore`/etc. em vez de recebê-los como
+        parâmetro, o que tornava impossível chamar/testar essa lógica sem
+        rodar `download_release()` inteiro (metadados do álbum, formato,
+        diretórios, handler de SIGINT, capa...). Comportamento idêntico
+        ao original -- só trocou closure por parâmetros explícitos; o
+        `download_release()` agora só tem um `process_track(idx, i)`
+        fininho que repassa pra cá (ver mais abaixo).
+        """
+        if abort_event.is_set():
+            return False
+        async with semaphore:
+            t_num = str(i.get("track_number", idx + 1)).zfill(2)
+            t_title = i.get("title", "Faixa Desconhecida")
+
+            streamable, reason = is_track_streamable(i)
+            if not streamable:
+                ui.skip(f"Faixa {t_num} - {t_title} ({reason})")
+                create_missing_placeholder(i, dirn, reason)
+                await report_track(i, t_num, "pulada", reason)
+                return "skipped"
+
+            try:
+                parse = await self.client.get_track_url(i["id"], fmt_id=self.quality)
+            except Exception as e:
+                ui.error(f"Erro de API na faixa {t_num} (ID: {i['id']}): {e}")
+                create_missing_placeholder(i, dirn, f"Erro de API: {e}")
+                await report_track(i, t_num, "falha", f"Erro de API: {e}")
+                return False
+
+            if "sample" not in parse and parse.get("sampling_rate"):
+                is_mp3 = True if int(self.quality) == 5 else False
+                letras_info = {}
+                res = await self._download_and_tag(
+                    dirn,
+                    idx,
+                    parse,
+                    i,
+                    album_meta,
+                    False,
+                    is_mp3,
+                    i.get("media_number") if is_multiple else None,
+                    is_parallel=is_parallel,
+                    position_pool=position_pool,
+                    letras_out=letras_info,
+                )
+                status = "ok" if res is True else "falha"
+                motivo = (
+                    ""
+                    if res is True
+                    else (str(res) if isinstance(res, Exception) else "erro")
+                )
+                await report_track(i, t_num, status, motivo, letras=letras_info)
+                return res
+            else:
+                ui.skip(f"Faixa {t_num} - {t_title} (Apenas amostra/demo)")
+                create_missing_placeholder(i, dirn, "Apenas amostra/demo (30s)")
+                await report_track(
+                    i, t_num, "pulada", "Apenas amostra/demo (30s)"
+                )
+                return "skipped"
+
     async def download_release(self, suppress_header=False):
         """Download a full album/release with all tracks."""
         album_meta = await self.client.get_album_meta(self.item_id)
@@ -589,63 +671,22 @@ class Download:
                 )
 
             async def process_track(idx, i):
-                """Process and download a single track with metadata and artwork."""
-                if abort_event.is_set():
-                    return False
-                async with semaphore:
-                    t_num = str(i.get("track_number", idx + 1)).zfill(2)
-                    t_title = i.get("title", "Faixa Desconhecida")
-
-                    streamable, reason = is_track_streamable(i)
-                    if not streamable:
-                        ui.skip(f"Faixa {t_num} - {t_title} ({reason})")
-                        create_missing_placeholder(i, dirn, reason)
-                        await _report_track(i, t_num, "pulada", reason)
-                        return "skipped"
-
-                    try:
-                        parse = await self.client.get_track_url(
-                            i["id"], fmt_id=self.quality
-                        )
-                    except Exception as e:
-                        ui.error(f"Erro de API na faixa {t_num} (ID: {i['id']}): {e}")
-                        create_missing_placeholder(i, dirn, f"Erro de API: {e}")
-                        await _report_track(i, t_num, "falha", f"Erro de API: {e}")
-                        return False
-
-                    if "sample" not in parse and parse.get("sampling_rate"):
-                        is_mp3 = True if int(self.quality) == 5 else False
-                        letras_info = {}
-                        res = await self._download_and_tag(
-                            dirn,
-                            idx,
-                            parse,
-                            i,
-                            album_meta,
-                            False,
-                            is_mp3,
-                            i.get("media_number") if is_multiple else None,
-                            is_parallel=is_parallel,
-                            position_pool=position_pool,
-                            letras_out=letras_info,
-                        )
-                        status = "ok" if res is True else "falha"
-                        motivo = (
-                            ""
-                            if res is True
-                            else (str(res) if isinstance(res, Exception) else "erro")
-                        )
-                        await _report_track(
-                            i, t_num, status, motivo, letras=letras_info
-                        )
-                        return res
-                    else:
-                        ui.skip(f"Faixa {t_num} - {t_title} (Apenas amostra/demo)")
-                        create_missing_placeholder(i, dirn, "Apenas amostra/demo (30s)")
-                        await _report_track(
-                            i, t_num, "pulada", "Apenas amostra/demo (30s)"
-                        )
-                        return "skipped"
+                """Repassa pra `self._process_track` (ver docstring dela --
+                extraída daqui pra ser testável isoladamente). Só existe
+                como função aninhada ainda porque fecha sobre variáveis
+                locais deste método (`dirn`, `album_meta`, etc.) e sobre
+                `_report_track`, que continua aninhada logo acima."""
+                return await self._process_track(
+                    idx,
+                    i,
+                    dirn=dirn,
+                    album_meta=album_meta,
+                    is_multiple=is_multiple,
+                    is_parallel=is_parallel,
+                    position_pool=position_pool,
+                    semaphore=semaphore,
+                    report_track=_report_track,
+                )
 
             faixas_previstas = []
             for idx, i in enumerate(album_meta["tracks"]["items"]):
