@@ -1359,10 +1359,9 @@ class QobuzDL:
                         f"{base_title} ({version_tag})" if version_tag else base_title
                     )
 
-                    if any(
-                        pattern in display_name.lower()
-                        for pattern in self.blacklist_patterns
-                    ):
+                    is_blacklisted = False
+                    for pattern in self.blacklist_patterns:
+                        refex_pattern = rf"(?<!\w){re.escape(pattern)}(?!\w)"
                         logger.info(
                             f"{YELLOW}[!] Skipped (Blacklisted): {display_name}{OFF}"
                         )
