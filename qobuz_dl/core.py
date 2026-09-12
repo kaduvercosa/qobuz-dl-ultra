@@ -1356,7 +1356,9 @@ class QobuzDL:
                     base_title = item.get("title") or item.get("name") or ""
                     version_tag = item.get("version") or ""
 
-                    display_name = f"{base_title} ({version_tag})" if version_tag else base_title
+                    display_name = (
+                        f"{base_title} ({version_tag})" if version_tag else base_title
+                    )
                     display_lower = display_name.lower()
 
                     is_blacklisted = False
@@ -1368,7 +1370,9 @@ class QobuzDL:
                             break
 
                     if is_blacklisted:
-                        logger.info(f"{YELLOW}[!] Skipped (Blacklisted): {display_name}{OFF}")
+                        logger.info(
+                            f"{YELLOW}[!] Skipped (Blacklisted): {display_name}{OFF}"
+                        )
                         continue
 
                 if can_parallelize:

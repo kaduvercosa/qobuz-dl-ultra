@@ -164,4 +164,3 @@ def sem_binarios(monkeypatch):
     monkeypatch.setattr(utils, "_DIRS_EXTRA", [])
     yield
     utils._BINARIOS_CHECADOS.clear()
-    

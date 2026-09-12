@@ -211,7 +211,7 @@ def test_fetch_and_inject_qobuz_plain_failure(engine, tmp_path, monkeypatch):
     qobuz_resp = {
         "original": {
             "lang": "en",
-            "lines": [{"line": "Plain lyric without timestamps"}]
+            "lines": [{"line": "Plain lyric without timestamps"}],
         }
     }
 
@@ -219,11 +219,15 @@ def test_fetch_and_inject_qobuz_plain_failure(engine, tmp_path, monkeypatch):
     monkeypatch.setattr(engine, "_save_lrc_file", lambda *args, **kwargs: False)
 
     result = engine.fetch_and_inject(
-        str(audio_file), "Artist", "Track", "Album",
-        save_lrc=True, embed_lyrics=False,
-        qobuz_lyrics_response=qobuz_resp
+        str(audio_file),
+        "Artist",
+        "Track",
+        "Album",
+        save_lrc=True,
+        embed_lyrics=False,
+        qobuz_lyrics_response=qobuz_resp,
     )
-    
+
     assert result["success"] is False
     assert result["saved_external"] is False
 
@@ -238,21 +242,21 @@ def test_fetch_and_inject_lrclib_only_save_lrc(engine, tmp_path, monkeypatch):
     mock_response.status_code = 200
     mock_response.json.return_value = {
         "syncedLyrics": "[00:01.000] Synced LRCLIB",
-        "plainLyrics": "Plain LRCLIB"
+        "plainLyrics": "Plain LRCLIB",
     }
     monkeypatch.setattr(engine.session, "get", lambda *args, **kwargs: mock_response)
 
     # Impede que o Musixmatch processe o mock do LRCLIB e quebre o teste
-    monkeypatch.setattr(engine, "_fetch_musixmatch_lyrics", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        engine, "_fetch_musixmatch_lyrics", lambda *args, **kwargs: None
+    )
 
     # Executa forçando embed_lyrics=False
     result = engine.fetch_and_inject(
-        str(audio_file), "Artist", "Track", "Album",
-        save_lrc=True, embed_lyrics=False
+        str(audio_file), "Artist", "Track", "Album", save_lrc=True, embed_lyrics=False
     )
 
     assert result["success"] is True
     assert result["source"] == "LRCLIB"
     assert result["saved_external"] is True
     assert result["embedded"] is False
-
