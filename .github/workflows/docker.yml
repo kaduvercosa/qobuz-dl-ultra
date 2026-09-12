@@ -56,7 +56,7 @@ jobs:
             type=raw,value=${{ github.ref_name }},enable=${{ github.event_name == 'release' }}
 
       - name: Build and push Docker image
-        uses: docker/build-push-action@v7.3.0
+        uses: docker/build-push-action@v7
         with:
           context: .
           push: true
