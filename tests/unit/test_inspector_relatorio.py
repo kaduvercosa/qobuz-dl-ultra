@@ -28,7 +28,14 @@ def ui_spy(monkeypatch):
         return _fn
 
     for nome in (
-        "banner", "section", "kv", "blank", "detail", "warn", "ok", "error",
+        "banner",
+        "section",
+        "kv",
+        "blank",
+        "detail",
+        "warn",
+        "ok",
+        "error",
     ):
         monkeypatch.setattr(inspector.ui, nome, _fabrica_spy(nome))
 
@@ -93,9 +100,7 @@ class TestMostrarRelatorio:
         )
 
         assert ("ok", ("Parece genuíno",)) in ui_spy
-        assert any(
-            nome == "ok" and destino_fake in args[0] for nome, args in ui_spy
-        )
+        assert any(nome == "ok" and destino_fake in args[0] for nome, args in ui_spy)
 
     def test_cor_warn_chama_ui_warn(self, monkeypatch, ui_spy, tmp_path):
         monkeypatch.setattr(inspector, "_gerar_grafico_html", lambda c, g: None)

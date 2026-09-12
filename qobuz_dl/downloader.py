@@ -434,9 +434,7 @@ class Download:
             else:
                 ui.skip(f"Faixa {t_num} - {t_title} (Apenas amostra/demo)")
                 create_missing_placeholder(i, dirn, "Apenas amostra/demo (30s)")
-                await report_track(
-                    i, t_num, "pulada", "Apenas amostra/demo (30s)"
-                )
+                await report_track(i, t_num, "pulada", "Apenas amostra/demo (30s)")
                 return "skipped"
 
     async def download_release(self, suppress_header=False):

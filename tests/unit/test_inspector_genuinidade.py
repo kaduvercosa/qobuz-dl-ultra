@@ -41,9 +41,7 @@ class TestGuardClauses:
         assert resultado["disponivel"] is False
         assert "numpy" in resultado["motivo"].lower()
 
-    def test_sem_ffmpeg_devolve_indisponivel_com_motivo(
-        self, numpy_fake, monkeypatch
-    ):
+    def test_sem_ffmpeg_devolve_indisponivel_com_motivo(self, numpy_fake, monkeypatch):
         monkeypatch.setattr(inspector, "encontrar_binario", lambda nome: None)
 
         resultado = inspector._checar_genuinidade("faixa.flac", 44100, 200)
@@ -63,7 +61,9 @@ class TestGuardClauses:
     def test_dados_insuficientes_devolve_indisponivel(
         self, numpy_fake, monkeypatch, sample_rate, duracao_s
     ):
-        monkeypatch.setattr(inspector, "encontrar_binario", lambda nome: "/usr/bin/ffmpeg")
+        monkeypatch.setattr(
+            inspector, "encontrar_binario", lambda nome: "/usr/bin/ffmpeg"
+        )
 
         resultado = inspector._checar_genuinidade("faixa.flac", sample_rate, duracao_s)
 

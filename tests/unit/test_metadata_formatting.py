@@ -260,8 +260,7 @@ def _item(**overrides):
         "version": "",
         "performer": {"name": "Artista Principal"},
         "performers": (
-            "Artista Principal, MainArtist - "
-            "Compositor Tal, Composer, ComposerLyricist"
+            "Artista Principal, MainArtist - Compositor Tal, Composer, ComposerLyricist"
         ),
         "composer": {"name": "Compositor Fallback"},
         "isrc": "US1234567890",
@@ -441,9 +440,7 @@ class TestGetTagsToAdd:
 
     def test_work_tag_apenas_quando_presente_e_habilitada(self):
         settings = QobuzDLSettings()
-        tags_com_work = _get_tags_to_add(
-            _album(), _item(work="Sinfonia N.5"), settings
-        )
+        tags_com_work = _get_tags_to_add(_album(), _item(work="Sinfonia N.5"), settings)
         tags_sem_work = _get_tags_to_add(_album(), _item(), settings)
         tags_desabilitada = _get_tags_to_add(
             _album(),
@@ -459,9 +456,7 @@ class TestGetTagsToAdd:
         settings = QobuzDLSettings()
         item = _item(
             performers=(
-                "Maestro Um, Conductor - "
-                "Orquestra Tal, Orchestra - "
-                "Coro Tal, Choir"
+                "Maestro Um, Conductor - Orquestra Tal, Orchestra - Coro Tal, Choir"
             )
         )
 
@@ -480,8 +475,7 @@ class TestGetTagsToAdd:
         assert tags["QOBUZTRACKID"] == "555"
         assert tags["QOBUZALBUMID"] == "999"
         assert (
-            tags["QOBUZ ALBUM URL"]
-            == "https://www.qobuz.com/album/test-album-two/999"
+            tags["QOBUZ ALBUM URL"] == "https://www.qobuz.com/album/test-album-two/999"
         )
 
     def test_flags_no_x_tag_suprimem_a_tag_correspondente(self):

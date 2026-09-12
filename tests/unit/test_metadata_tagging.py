@@ -16,7 +16,6 @@ imagem de verdade) e o embed de capa em si (`_embed_flac_img`/
 no conteúdo da imagem.
 """
 
-import os
 from types import SimpleNamespace
 
 import mutagen.id3 as id3
@@ -198,9 +197,7 @@ class TestTagFlac:
         item = _item(
             performer={},  # sem isso, "Artista" (default) entra como
             # 3o artista via main_artist_raw antes da string performers
-            performers=(
-                "Artista Um, MainArtist - Artista Dois, FeaturedArtist"
-            ),
+            performers=("Artista Um, MainArtist - Artista Dois, FeaturedArtist"),
         )
 
         metadata.tag_flac(
@@ -225,9 +222,7 @@ class TestTagFlac:
         item = _item(
             performer={},  # sem isso, "Artista" (default) entra como
             # 3o artista via main_artist_raw antes da string performers
-            performers=(
-                "Artista Um, MainArtist - Artista Dois, FeaturedArtist"
-            ),
+            performers=("Artista Um, MainArtist - Artista Dois, FeaturedArtist"),
         )
 
         metadata.tag_flac(
@@ -479,9 +474,7 @@ class TestTagMp3:
         assert "TENC" not in audio
         assert "TSSE" not in audio
 
-    def test_embed_image_chama_add_apic_quando_capa_existe(
-        self, monkeypatch, tmp_path
-    ):
+    def test_embed_image_chama_add_apic_quando_capa_existe(self, monkeypatch, tmp_path):
         monkeypatch.setattr(metadata.id3, "ID3", FakeID3)
         audios_criados = []
         original_init = FakeID3.__init__

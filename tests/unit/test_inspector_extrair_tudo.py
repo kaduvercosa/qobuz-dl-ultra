@@ -94,8 +94,11 @@ class TestExtrairTudoFlac:
         class FakeFLACAudio:
             def __init__(self, path):
                 self.info = FakeInfo(
-                    sample_rate=44100, bits_per_sample=16, channels=2,
-                    length=180.0, bitrate=1000000,
+                    sample_rate=44100,
+                    bits_per_sample=16,
+                    channels=2,
+                    length=180.0,
+                    bitrate=1000000,
                 )
                 # FLAC/Vorbis permite a MESMA chave aparecer mais de uma
                 # vez (ex.: múltiplos gêneros) -- _extrair_tudo concatena.
@@ -113,19 +116,23 @@ class TestExtrairTudoFlac:
 
 
 class TestExtrairTudoMp3:
-    def test_extrai_tecnico_e_separa_apic_das_demais_tags(
-        self, monkeypatch, tmp_path
-    ):
+    def test_extrai_tecnico_e_separa_apic_das_demais_tags(self, monkeypatch, tmp_path):
         class FakeMP3Audio:
             def __init__(self, path):
                 self.info = FakeInfo(
-                    sample_rate=44100, channels=2, length=200.5,
-                    bitrate=320000, mode="Stereo",
+                    sample_rate=44100,
+                    channels=2,
+                    length=200.5,
+                    bitrate=320000,
+                    mode="Stereo",
                 )
                 self.tags = {
                     "TIT2": "Faixa MP3 Teste",
                     "APIC:cover": APIC(
-                        encoding=3, mime="image/jpeg", type=3, desc="cover",
+                        encoding=3,
+                        mime="image/jpeg",
+                        type=3,
+                        desc="cover",
                         data=b"y" * 300,
                     ),
                 }
