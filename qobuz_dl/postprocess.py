@@ -16,9 +16,11 @@ import json
 import logging
 import os
 from datetime import datetime
-from typing import Any
+from typing import Any, Callable
 
 logger = logging.getLogger(__name__)
+
+_renderizar_report_html: Callable[[dict[Any, Any]], str] | None
 
 try:
     from qobuz_dl.report_viewer import renderizar_html as _renderizar_report_html
