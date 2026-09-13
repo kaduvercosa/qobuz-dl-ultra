@@ -1,0 +1,76 @@
+name: Canário -- API do Qobuz
+
+# Roda sozinho, num horário fixo, sem precisar de push/PR nenhum. Ajuste
+# o cron como quiser -- "0 9 * * *" = todo dia às 9h UTC (~6h em
+# horário de Brasília). Sintaxe: minuto hora dia mês dia-da-semana.
+on:
+  schedule:
+    - cron: "0 9 * * *"
+  workflow_dispatch:  # botão manual, pra testar sem esperar o horário
+
+permissions:
+  contents: read
+
+jobs:
+  canario:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v7
+
+      - name: Setup Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Instala só o necessário (httpx) -- sem precisar do projeto inteiro
+        run: pip install httpx
+
+      - name: Roda o health-check da extração de app_id/secrets
+        id: canario
+        run: python tools/canary_check.py
+
+      # -----------------------------------------------------------------
+      # NOTIFICAÇÃO POR E-MAIL -- duas camadas, redundantes de propósito:
+      #
+      # 1) GitHub já manda e-mail sozinho quando um workflow agendado
+      #    falha, SE a notificação de "Actions" estiver ligada nas suas
+      #    configurações pessoais do GitHub (Settings -> Notifications ->
+      #    Actions -> "Send notifications for failed workflows only" ou
+      #    "all"). Isso não exige NENHUM secret nem passo extra -- só
+      #    conferir se está marcado.
+      #
+      # 2) O passo abaixo manda um e-mail explícito via SMTP, que funciona
+      #    independente da configuração de notificação do GitHub (útil se
+      #    você silenciou notificações de Actions, ou quer o aviso
+      #    garantido em outra caixa de entrada). SÓ roda se o passo
+      #    anterior falhar (`if: failure()`), então em dia normal (tudo
+      #    ok) não gera e-mail nenhum -- sem spam diário.
+      #
+      #    Exige 3 secrets no repo (Settings -> Secrets and variables ->
+      #    Actions): EMAIL_USERNAME, EMAIL_PASSWORD (senha de app, não a
+      #    senha normal da conta -- Gmail/Outlook exigem isso pra SMTP de
+      #    terceiros) e EMAIL_TO (pra onde mandar o aviso). Se você já
+      #    confiou na camada 1, pode simplesmente apagar este passo.
+      - name: Envia e-mail de alerta (só se o canário falhou)
+        if: failure()
+        uses: dawidd6/action-send-mail@v4
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          username: ${{ secrets.EMAIL_USERNAME }}
+          password: ${{ secrets.EMAIL_PASSWORD }}
+          subject: "🚨 qobuz-dl-ultra: possível mudança na API do Qobuz"
+          to: ${{ secrets.EMAIL_TO }}
+          from: Canário qobuz-dl-ultra
+          body: |
+            O health-check agendado (tools/canary_check.py) detectou que a
+            extração de app_id/secrets do bundle.js do Qobuz parou de
+            funcionar como esperado.
+
+            Isso normalmente significa que o Qobuz mudou o formato do
+            HTML de login ou do bundle.js -- os regex em qobuz_dl/bundle.py
+            provavelmente precisam de ajuste.
+
+            Ver o log completo (com a mensagem de erro exata) em:
+            ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
