@@ -119,7 +119,8 @@ async def test_segmentos_iniciais_sao_gravados_e_memoria_e_limitada(
     async def subprocess_falso(*args, **_kwargs):
         nonlocal conteudo_remux
         entrada = args[args.index("-i") + 1]
-        conteudo_remux = open(entrada, "rb").read()
+        with open(entrada, "rb") as f:
+            conteudo_remux = f.read()
         return _ProcessoFalso()
 
     monkeypatch.setattr(downloader, "_get_qobuz_segment_uuid", lambda _data: b"u" * 16)

@@ -93,9 +93,16 @@ jobs:
 
       - name: Roda a suíte de testes com cobertura (job de referência)
         if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
+        # Piso revisado em 2026-09 depois de uma leva grande de testes novos
+        # (core.py, downloader.py, metadata.py, inspector.py, utils.py,
+        # bundle.py saíram de ~0% pra cobertura real). Cobertura medida
+        # localmente: 50% (7800 statements, 3875 sem cobrir). Piso fixado
+        # uns pontos abaixo do medido, não em cima do valor exato, pra
+        # deixar folga pra variação normal entre plataformas sem quebrar
+        # o CI à toa -- reavaliar de novo quando a cobertura subir mais.
         run: >
           pytest -m "not slow" -q
-          --cov=qobuz_dl --cov-fail-under=35 --cov-report=xml --cov-report=term-missing
+          --cov=qobuz_dl --cov-fail-under=47 --cov-report=xml --cov-report=term-missing
 
       - name: Envia cobertura para o Codecov
         if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'

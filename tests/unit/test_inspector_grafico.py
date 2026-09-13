@@ -56,14 +56,18 @@ def _genuinidade(veredito="genuino", **overrides):
 class TestGerarGraficoHtml:
     def test_indisponivel_devolve_none_sem_escrever_arquivo(self, tmp_path):
         audio = str(tmp_path / "Faixa.flac")
-        resultado = inspector._gerar_grafico_html(audio, _genuinidade(disponivel=False))
+        resultado = inspector._gerar_grafico_html(
+            audio, _genuinidade(disponivel=False)
+        )
 
         assert resultado is None
         assert list(tmp_path.glob("*-spec.html")) == []
 
     def test_sem_freqs_hz_devolve_none_sem_escrever_arquivo(self, tmp_path):
         audio = str(tmp_path / "Faixa.flac")
-        resultado = inspector._gerar_grafico_html(audio, _genuinidade(freqs_hz=[]))
+        resultado = inspector._gerar_grafico_html(
+            audio, _genuinidade(freqs_hz=[])
+        )
 
         assert resultado is None
         assert list(tmp_path.glob("*-spec.html")) == []
@@ -74,7 +78,8 @@ class TestGerarGraficoHtml:
         destino = inspector._gerar_grafico_html(audio, _genuinidade("suspeito"))
 
         assert destino == str(tmp_path / "Minha Faixa-spec.html")
-        conteudo = open(destino, encoding="utf-8").read()
+        with open(destino, encoding="utf-8") as f:
+            conteudo = f.read()
         assert "MINHA FAIXA" in conteudo
         assert "SUSPEITO" in conteudo
         assert "provavelmente N" in conteudo  # trecho da manchete de "suspeito"
@@ -92,7 +97,8 @@ class TestGerarGraficoHtml:
 
         destino = inspector._gerar_grafico_html(audio, _genuinidade(veredito))
 
-        conteudo = open(destino, encoding="utf-8").read()
+        with open(destino, encoding="utf-8") as f:
+            conteudo = f.read()
         assert f'class="badge badge-{veredito}"' in conteudo
         assert marca_esperada in conteudo
 
