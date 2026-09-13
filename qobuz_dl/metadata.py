@@ -20,6 +20,7 @@ from qobuz_dl.utils import (
     classify_release_type,
     get_album_artist,
 )
+
 logger = logging.getLogger(__name__)
 
 
@@ -661,10 +662,9 @@ def _get_tags_to_add(
                 seen_artists.add(normalized_name)
                 artists.append(restored_name)
 
-        main_artist_raw = (
-            qobuz_item.get("performer", {}).get("name", "")
-            or qobuz_album.get("artist", {}).get("name", "")
-        )
+        main_artist_raw = qobuz_item.get("performer", {}).get(
+            "name", ""
+        ) or qobuz_album.get("artist", {}).get("name", "")
 
         if main_artist_raw:
             for part in main_artist_raw.split(","):
