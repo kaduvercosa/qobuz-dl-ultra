@@ -79,7 +79,8 @@ def inspect_existing_lyrics(file_path: str) -> dict:
         try:
             audio_flac = FLAC(file_path)
             embedded = (
-                audio_flac.get("LYRICS", [""])[0] or audio_flac.get("UNSYNCEDLYRICS", [""])[0]
+                audio_flac.get("LYRICS", [""])[0]
+                or audio_flac.get("UNSYNCEDLYRICS", [""])[0]
             )
             lang_vals = audio_flac.get("LYRICS_LANG")
             if lang_vals:

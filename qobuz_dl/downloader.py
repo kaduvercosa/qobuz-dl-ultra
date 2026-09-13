@@ -29,7 +29,6 @@ import re
 import threading
 import signal
 import textwrap
-from typing import Optional
 import asyncio
 
 import httpx

@@ -276,7 +276,9 @@ def smart_discography_filter(
         # "Album (Deluxe Edition)" caem no mesmo grupo).
         """Extract the core essence of a title (lowercase, no punctuation)."""
         r = re.match(r"([^\(]+)(?:\s*[\(\[][^\)][\)\]])*", album)
-        return r.group(1).strip().lower() if r is not None else str(album).strip().lower()
+        return (
+            r.group(1).strip().lower() if r is not None else str(album).strip().lower()
+        )
 
     requested_artist = contents[0]["name"]
     items = [item["albums"]["items"] for item in contents][0]

@@ -29,6 +29,7 @@ Uso: QOBUZ_EMAIL=... QOBUZ_TOKEN=... python tools/canary_check_busca.py
 Saída: código 0 se tudo certo, código 1 (com mensagem clara) se algo
 quebrou -- mesmo padrão do canary_check.py, pensado pra virar falha de CI.
 """
+
 import asyncio
 import os
 import sys
@@ -53,7 +54,9 @@ async def checar() -> list[str]:
             email=email, pwd="", app_id="", secrets=[], user_auth_token=token
         )
     except Exception as e:
-        return [f"Login falhou -- token inválido/expirado ou fluxo de auth quebrado: {type(e).__name__}: {e}"]
+        return [
+            f"Login falhou -- token inválido/expirado ou fluxo de auth quebrado: {type(e).__name__}: {e}"
+        ]
 
     try:
         try:
@@ -73,7 +76,9 @@ async def checar() -> list[str]:
         primeiro = albuns[0]
         album_id = primeiro.get("id")
         if not album_id:
-            problemas.append(f"Item de álbum sem campo 'id' -- item bruto: {primeiro!r}")
+            problemas.append(
+                f"Item de álbum sem campo 'id' -- item bruto: {primeiro!r}"
+            )
             return problemas
 
         try:

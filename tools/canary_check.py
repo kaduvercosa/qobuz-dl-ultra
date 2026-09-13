@@ -22,6 +22,7 @@ Uso: python tools/canary_check.py
 Saída: código 0 se tudo certo, código 1 (com mensagem clara) se algo
 quebrou -- pensado pra virar uma falha de CI que dispara notificação.
 """
+
 import sys
 
 from qobuz_dl.bundle import Bundle

@@ -201,6 +201,8 @@ class Bundle:
         decoded_secrets: OrderedDict[str, str] = OrderedDict()
         for secret_pair, secret_parts in secrets.items():
             raw_b64 = "".join(secret_parts)[:-44]
-            decoded_secrets[secret_pair] = base64.standard_b64decode(raw_b64).decode("utf-8")
+            decoded_secrets[secret_pair] = base64.standard_b64decode(raw_b64).decode(
+                "utf-8"
+            )
 
         return decoded_secrets

@@ -34,11 +34,11 @@ from qobuz_dl.exceptions import (
     NoActiveSubscriptionError,
 )
 
-from typing import Any
 
 Bundle: Any = None
 try:
     from qobuz_dl.bundle import Bundle as _Bundle
+
     Bundle = _Bundle
 except ImportError:
     pass

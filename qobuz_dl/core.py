@@ -2494,7 +2494,9 @@ class QobuzDL:
             )
         else:
             if file_path is None:
-                logger.info(f"{RED}[!] Caminho do arquivo da playlist não informado.{OFF}")
+                logger.info(
+                    f"{RED}[!] Caminho do arquivo da playlist não informado.{OFF}"
+                )
                 return
             logger.info(f"{CYAN}[*] Importando playlist: {file_path}{OFF}")
             try:

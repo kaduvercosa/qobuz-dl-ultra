@@ -29,6 +29,7 @@ try:
     from prompt_toolkit.layout.containers import HSplit, ScrollOffsets, Window
     from prompt_toolkit.layout.controls import FormattedTextControl
     from prompt_toolkit.layout.layout import Layout
+
     Application = _Application
 except ImportError:
     pass

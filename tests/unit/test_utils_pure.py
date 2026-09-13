@@ -56,7 +56,14 @@ class TestClassifyReleaseType:
 
     @pytest.mark.parametrize(
         "faixas,esperado",
-        [(1, "single"), (3, "single"), (4, "ep"), (7, "ep"), (8, "album"), (20, "album")],
+        [
+            (1, "single"),
+            (3, "single"),
+            (4, "ep"),
+            (7, "ep"),
+            (8, "album"),
+            (20, "album"),
+        ],
     )
     def test_contagem_de_faixas_bate_com_a_regra_oficial(self, faixas, esperado):
         assert utils.classify_release_type(track_count=faixas) == esperado
@@ -79,9 +86,7 @@ class TestClassifyReleaseType:
         )
 
     def test_sem_nenhum_sinal_cai_pro_item_type(self):
-        assert (
-            utils.classify_release_type(item_type="download") == "download"
-        )
+        assert utils.classify_release_type(item_type="download") == "download"
 
     def test_titulo_e_versao_none_nao_lancam_excecao(self):
         # Uso real (ex.: album.get("title")) pode devolver None -- não
@@ -248,9 +253,7 @@ class TestGetConfigPaths:
     def test_deteccao_automatica_de_ios_via_home(self, monkeypatch):
         monkeypatch.delenv("CONFIG_DIR", raising=False)
         monkeypatch.delenv("QOBUZ_DL_IOS_HOME", raising=False)
-        monkeypatch.setenv(
-            "HOME", "/private/var/.../Containers/Data/Application/ABC"
-        )
+        monkeypatch.setenv("HOME", "/private/var/.../Containers/Data/Application/ABC")
 
         caminhos = utils.get_config_paths()
 
@@ -470,8 +473,9 @@ class TestVerifyAudioIntegrity:
 # --------------------------------------------------------------------
 # smart_discography_filter
 # --------------------------------------------------------------------
-def _album_item(titulo, artista="Artista X", bit_depth=24, sampling_rate=96.0,
-                 versao="", item_id=1):
+def _album_item(
+    titulo, artista="Artista X", bit_depth=24, sampling_rate=96.0, versao="", item_id=1
+):
     return {
         "id": item_id,
         "title": titulo,

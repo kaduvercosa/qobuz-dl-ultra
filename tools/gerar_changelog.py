@@ -31,54 +31,72 @@ RUIDO = [
 ]
 
 CATEGORIAS = [
-    ("Adicionado", [
-        r"^feat(?:\([^)]*\))?[!:]",
-        r"^Add\b",
-        r"^Create\b",
-        r"^Novo\b",
-        r"^Implement",
-    ]),
-    ("Modificado", [
-        r"^refactor(?:\([^)]*\))?[!:]",
-        r"^Refactor\b",
-        r"^update(?:\([^)]*\))?[!:]",
-        r"^Update\b",
-        r"^Modify\b",
-        r"^Change\b",
-        r"^Configure\b",
-        r"^Rename\b",
-        r"^deps(?:\([^)]*\))?[!:]",
-        r"^chore\(deps\)",
-        r"^ci:\s*bump the .* group",
-        r"^ci:",
-        r".*workflow.*",
-        r"^docs(?:\([^)]*\))?[!:]",
-        r".*README.*",
-        r".*documenta",
-    ]),
-    ("Removido", [
-        r"^Remove\b",
-        r"^Delete\b",
-        r"^Drop\b",
-    ]),
-    ("Corrigido", [
-        r"^fix(?:\([^)]*\))?[!:]",
-        r"^Fix\b",
-        r"^Corrig",
-        r"^Hotfix\b",
-        r"^Bugfix\b",
-    ]),
-    ("Obsoleto", [
-        r"^deprecat",
-        r"^Deprecat",
-        r"^Obsolet",
-    ]),
-    ("Segurança", [
-        r"^security(?:\([^)]*\))?[!:]",
-        r"^Security\b",
-        r"^CVE[-:]",
-        r".*vulnerabil",
-    ]),
+    (
+        "Adicionado",
+        [
+            r"^feat(?:\([^)]*\))?[!:]",
+            r"^Add\b",
+            r"^Create\b",
+            r"^Novo\b",
+            r"^Implement",
+        ],
+    ),
+    (
+        "Modificado",
+        [
+            r"^refactor(?:\([^)]*\))?[!:]",
+            r"^Refactor\b",
+            r"^update(?:\([^)]*\))?[!:]",
+            r"^Update\b",
+            r"^Modify\b",
+            r"^Change\b",
+            r"^Configure\b",
+            r"^Rename\b",
+            r"^deps(?:\([^)]*\))?[!:]",
+            r"^chore\(deps\)",
+            r"^ci:\s*bump the .* group",
+            r"^ci:",
+            r".*workflow.*",
+            r"^docs(?:\([^)]*\))?[!:]",
+            r".*README.*",
+            r".*documenta",
+        ],
+    ),
+    (
+        "Removido",
+        [
+            r"^Remove\b",
+            r"^Delete\b",
+            r"^Drop\b",
+        ],
+    ),
+    (
+        "Corrigido",
+        [
+            r"^fix(?:\([^)]*\))?[!:]",
+            r"^Fix\b",
+            r"^Corrig",
+            r"^Hotfix\b",
+            r"^Bugfix\b",
+        ],
+    ),
+    (
+        "Obsoleto",
+        [
+            r"^deprecat",
+            r"^Deprecat",
+            r"^Obsolet",
+        ],
+    ),
+    (
+        "Segurança",
+        [
+            r"^security(?:\([^)]*\))?[!:]",
+            r"^Security\b",
+            r"^CVE[-:]",
+            r".*vulnerabil",
+        ],
+    ),
 ]
 
 
@@ -163,11 +181,13 @@ def _coletar_commits(ref_de: str, ref_para: str) -> list[dict[str, str]]:
         campos = registro.split(_FS)
         if len(campos) < 2:
             continue
-        commits.append({
-            "hash": campos[0].strip(),
-            "titulo": campos[1].strip(),
-            "corpo": campos[2].strip() if len(campos) > 2 else "",
-        })
+        commits.append(
+            {
+                "hash": campos[0].strip(),
+                "titulo": campos[1].strip(),
+                "corpo": campos[2].strip() if len(campos) > 2 else "",
+            }
+        )
     return commits
 
 
@@ -202,10 +222,7 @@ def gerar_changelog(
         linhas.append("")
         for item in itens:
             if url_base:
-                referencia = (
-                    f"[`{item['hash']}`]"
-                    f"({url_base}/commit/{item['hash']})"
-                )
+                referencia = f"[`{item['hash']}`]({url_base}/commit/{item['hash']})"
             else:
                 referencia = f"`{item['hash']}`"
 
@@ -224,20 +241,24 @@ def gerar_changelog(
             linhas.append("")
 
     if not any(grupos.values()):
-        linhas.extend([
-            "_Sem mudanças relevantes registradas._",
-            "",
-        ])
+        linhas.extend(
+            [
+                "_Sem mudanças relevantes registradas._",
+                "",
+            ]
+        )
 
     total = len(commits)
     listados = total - ignorados
-    linhas.extend([
-        "<!--",
-        f"Intervalo analisado: {ref_de}..{ref_para}",
-        f"Commits analisados: {total}; listados: {listados}; "
-        f"ignorados: {ignorados}.",
-        "-->",
-    ])
+    linhas.extend(
+        [
+            "<!--",
+            f"Intervalo analisado: {ref_de}..{ref_para}",
+            f"Commits analisados: {total}; listados: {listados}; "
+            f"ignorados: {ignorados}.",
+            "-->",
+        ]
+    )
     return "\n".join(linhas).rstrip() + "\n"
 
 
@@ -280,8 +301,7 @@ def main() -> None:
     ref_de = args.de or _tag_anterior(args.para)
     if ref_de is None:
         print(
-            f"Não achei nenhuma tag antes de '{args.para}'. "
-            "Use --de explicitamente.",
+            f"Não achei nenhuma tag antes de '{args.para}'. Use --de explicitamente.",
             file=sys.stderr,
         )
         raise SystemExit(1)

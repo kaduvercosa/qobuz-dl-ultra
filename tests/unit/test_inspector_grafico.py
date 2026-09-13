@@ -56,18 +56,14 @@ def _genuinidade(veredito="genuino", **overrides):
 class TestGerarGraficoHtml:
     def test_indisponivel_devolve_none_sem_escrever_arquivo(self, tmp_path):
         audio = str(tmp_path / "Faixa.flac")
-        resultado = inspector._gerar_grafico_html(
-            audio, _genuinidade(disponivel=False)
-        )
+        resultado = inspector._gerar_grafico_html(audio, _genuinidade(disponivel=False))
 
         assert resultado is None
         assert list(tmp_path.glob("*-spec.html")) == []
 
     def test_sem_freqs_hz_devolve_none_sem_escrever_arquivo(self, tmp_path):
         audio = str(tmp_path / "Faixa.flac")
-        resultado = inspector._gerar_grafico_html(
-            audio, _genuinidade(freqs_hz=[])
-        )
+        resultado = inspector._gerar_grafico_html(audio, _genuinidade(freqs_hz=[]))
 
         assert resultado is None
         assert list(tmp_path.glob("*-spec.html")) == []
