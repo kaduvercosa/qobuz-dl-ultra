@@ -1,5 +1,5 @@
 # 𝗤𝗢𝗕𝗨𝗭-𝗗𝗟 𝗨𝗟𝗧𝗥𝗔
-[![Versão PyPI](https://img.shields.io/pypi/v/qobuz-dl-ultra.svg)](https://pypi.org/project/qobuz-dl-ultra/) [![Downloads PyPI](https://static.pepy.tech/personalized-badge/qobuz-dl-ultra?period=total&units=INTERNATIONAL_SYSTEM&left_color=BLACK&right_color=GREEN&left_text=downloads)](https://pepy.tech/projects/qobuz-dl-ultra) ![Docker Image CI](https://github.com/kaduvercosa/qobuz-dl-ultra/actions/workflows/docker.yml/badge.svg)
+[![Versão PyPI](https://img.shields.io/pypi/v/qobuz-dl-ultra.svg)](https://pypi.org/project/qobuz-dl-ultra/) [![Downloads PyPI](https://static.pepy.tech/personalized-badge/qobuz-dl-ultra?period=total&units=INTERNATIONAL_SYSTEM&left_color=BLACK&right_color=GREEN&left_text=downloads)](https://pepy.tech/projects/qobuz-dl-ultra) ![Docker Image CI](https://github.com/kaduvercosa/qobuz-dl-ultra/actions/workflows/docker.yml/badge.svg) [![codecov](https://codecov.io/gh/kaduvercosa/qobuz-dl-ultra/branch/master/graph/badge.svg)](https://codecov.io/gh/kaduvercosa/qobuz-dl-ultra)
 
 ## 📑 Índice
 

@@ -26,3 +26,7 @@ dist/
 
 # User configuration and local testing files
 blacklist.txt
+
+.coverage
+coverage.xml
+.pytest_cache/
