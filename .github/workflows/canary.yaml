@@ -28,7 +28,8 @@ jobs:
 
       - name: Roda o health-check da extração de app_id/secrets
         id: canario
-        run: python tools/canary_check.py
+        run: PYTHONPATH=. python tools/canary_check.py
+
 
       # -----------------------------------------------------------------
       # NOTIFICAÇÃO POR E-MAIL -- duas camadas, redundantes de propósito:
