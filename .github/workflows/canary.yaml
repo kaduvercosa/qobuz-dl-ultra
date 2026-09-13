@@ -30,6 +30,17 @@ jobs:
         id: canario
         run: PYTHONPATH=. python tools/canary_check.py
 
+      - name: Instala o projeto (necessário pra login real na Qobuz)
+        if: always() && steps.canario.outcome != 'cancelled'
+        run: pip install -e .
+
+      - name: Roda o health-check de login + busca + metadata
+        id: canario_busca
+        if: always() && steps.canario.outcome != 'cancelled'
+        env:
+          QOBUZ_EMAIL: ${{ secrets.QOBUZ_EMAIL }}
+          QOBUZ_TOKEN: ${{ secrets.QOBUZ_TOKEN }}
+        run: PYTHONPATH=. python tools/canary_check_busca.py
 
       # -----------------------------------------------------------------
       # NOTIFICAÇÃO POR E-MAIL -- duas camadas, redundantes de propósito:
@@ -44,16 +55,19 @@ jobs:
       # 2) O passo abaixo manda um e-mail explícito via SMTP, que funciona
       #    independente da configuração de notificação do GitHub (útil se
       #    você silenciou notificações de Actions, ou quer o aviso
-      #    garantido em outra caixa de entrada). SÓ roda se o passo
-      #    anterior falhar (`if: failure()`), então em dia normal (tudo
-      #    ok) não gera e-mail nenhum -- sem spam diário.
+      #    garantido em outra caixa de entrada). `if: failure()` dispara
+      #    se QUALQUER passo anterior do job falhar -- canario (bundle) OU
+      #    canario_busca (login+busca) -- então em dia normal (tudo ok)
+      #    não gera e-mail nenhum, sem spam diário.
       #
-      #    Exige 3 secrets no repo (Settings -> Secrets and variables ->
+      #    Exige 5 secrets no repo (Settings -> Secrets and variables ->
       #    Actions): EMAIL_USERNAME, EMAIL_PASSWORD (senha de app, não a
       #    senha normal da conta -- Gmail/Outlook exigem isso pra SMTP de
-      #    terceiros) e EMAIL_TO (pra onde mandar o aviso). Se você já
-      #    confiou na camada 1, pode simplesmente apagar este passo.
-      - name: Envia e-mail de alerta (só se o canário falhou)
+      #    terceiros), EMAIL_TO (pra onde mandar o aviso), e agora também
+      #    QOBUZ_EMAIL/QOBUZ_TOKEN (usados pelo canario_busca acima --
+      #    recomendo uma conta separada só pra isso). Se você já confiou
+      #    na camada 1, pode simplesmente apagar este passo.
+      - name: Envia e-mail de alerta (só se algum canário falhou)
         if: failure()
         uses: dawidd6/action-send-mail@v4
         with:
@@ -65,13 +79,15 @@ jobs:
           to: ${{ secrets.EMAIL_TO }}
           from: Canário qobuz-dl-ultra
           body: |
-            O health-check agendado (tools/canary_check.py) detectou que a
-            extração de app_id/secrets do bundle.js do Qobuz parou de
-            funcionar como esperado.
+            Um dos health-checks agendados contra a API da Qobuz falhou:
 
-            Isso normalmente significa que o Qobuz mudou o formato do
-            HTML de login ou do bundle.js -- os regex em qobuz_dl/bundle.py
-            provavelmente precisam de ajuste.
+              - tools/canary_check.py         (extração de app_id/secrets do bundle.js)
+              - tools/canary_check_busca.py   (login real + busca + metadata de álbum)
 
-            Ver o log completo (com a mensagem de erro exata) em:
+            Isso normalmente significa que o Qobuz mudou algo do lado de
+            fora -- formato do HTML de login/bundle.js, ou o formato da
+            resposta de busca/metadata.
+
+            Ver o log completo (com a mensagem de erro exata de qual dos
+            dois falhou) em:
             ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

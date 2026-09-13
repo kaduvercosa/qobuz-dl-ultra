@@ -43,6 +43,12 @@ on:
   pull_request:
     branches: ["master", "main"]
   workflow_dispatch:
+  # Roda a suite inteira 1x por semana mesmo sem push nenhum -- pega
+  # quebra causada por uma dependencia nova (ex.: mutagen/httpx lançou
+  # versão que muda comportamento), já que `pip install -e ".[all,dev]"`
+  # sempre traz a versão mais recente disponível no momento do run.
+  schedule:
+    - cron: "0 6 * * 1" # toda segunda as 06:00 UTC
   # Permite que outros workflows (pypi.yml, docker.yml) rodem esta mesma
   # suíte como um "gate" antes de publicar, via `uses:
   # ./.github/workflows/tests.yml` -- sem duplicar os passos de setup +
