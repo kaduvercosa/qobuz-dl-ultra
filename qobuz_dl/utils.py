@@ -13,7 +13,6 @@ import subprocess
 import time
 import unicodedata
 import urllib.parse
-from typing import Any, Optional
 
 import platformdirs
 
@@ -275,14 +274,14 @@ def smart_discography_filter(
         # álbuns com nomes parecidos mas não idênticos (ex.: "Album" e
         # "Album (Deluxe Edition)" caem no mesmo grupo).
         """Extract the core essence of a title (lowercase, no punctuation)."""
-        r = re.match(r"([^\(]+)(?:\s*[\(\[][^\)][\)\]])*", str(album))
-        return r.group(1).strip().lower()
+        r = re.match(r"([^\(]+)(?:\s*[\(\[][^\)][\)\]])*", album)
+        return r.group(1).strip().lower() if r is not None else str(album).strip().lower()
 
     requested_artist = contents[0]["name"]
     items = [item["albums"]["items"] for item in contents][0]
 
     # Agrupa os álbuns duplicados pelo título "essencial".
-    title_grouped: dict[str, list[dict[str, Any]]] = {}
+    title_grouped = dict()
     for item in items:
         title_ = essence(item["title"])
         if title_ not in title_grouped:
@@ -348,7 +347,7 @@ def format_duration(duration):
 # Cache do resultado da checagem de binários externos. Chave = nome do
 # binário, valor = caminho encontrado ou None. Existe para que o aviso saia
 # UMA vez por execução, não uma vez por arquivo processado.
-_BINARIOS_CHECADOS: dict[str, Optional[str]] = {}
+_BINARIOS_CHECADOS = {}
 
 # Onde procurar além do PATH. O a-Shell (iOS/iPadOS) traz ffmpeg nativo em
 # $APPDIR/bin, que nem sempre está no PATH do processo Python.
@@ -798,11 +797,11 @@ def extrair_titulo_completo(texto: str) -> str:
 
 async def get_apple_hq_cover(
     session=None,
-    upc: Optional[str] = None,
-    isrc: Optional[str] = None,
-    artist: Optional[str] = None,
-    album: Optional[str] = None,
-    track_title: Optional[str] = None,
+    upc: str = None,
+    isrc: str = None,
+    artist: str = None,
+    album: str = None,
+    track_title: str = None,
 ) -> str:
     # Busca uma capa em alta resolucao (ate 10000x10000) na API do
     # iTunes, validando o resultado por similaridade de texto antes de
@@ -823,12 +822,12 @@ async def get_apple_hq_cover(
         )
     }
 
-    q_artist_puro = extrair_essencia(artist or "")
-    q_album_puro = extrair_essencia(album or "")
+    q_artist_puro = extrair_essencia(artist)
+    q_album_puro = extrair_essencia(album)
     q_track_puro = extrair_essencia(track_title) if track_title else ""
 
     # Titulo completo (com a edicao/versao preservada) -- usado como trava final.
-    q_album_completo = extrair_titulo_completo(album or "")
+    q_album_completo = extrair_titulo_completo(album)
     q_track_completo = extrair_titulo_completo(track_title) if track_title else ""
 
     # Limiares de similaridade pro titulo COMPLETO (com versao). Quanto

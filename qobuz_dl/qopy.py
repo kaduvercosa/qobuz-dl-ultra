@@ -9,7 +9,7 @@ import logging
 import time
 import unicodedata
 from datetime import date, datetime
-from typing import Any, Optional
+from typing import Any
 
 import httpx
 from cryptography.hazmat.primitives import hashes, padding
@@ -34,11 +34,14 @@ from qobuz_dl.exceptions import (
     NoActiveSubscriptionError,
 )
 
-try:
-    from qobuz_dl.bundle import Bundle as _BundleClass
-except ImportError:
-    _BundleClass = None
+from typing import Any
 
+Bundle: Any = None
+try:
+    from qobuz_dl.bundle import Bundle as _Bundle
+    Bundle = _Bundle
+except ImportError:
+    pass
 
 logger = logging.getLogger(__name__)
 
@@ -80,9 +83,9 @@ class Client:
         self.force_english = force_english
 
         if not self.id or self.id == "798273057":
-            if _BundleClass is not None:
+            if Bundle:
                 try:
-                    b = await _BundleClass.create()
+                    b = await Bundle.create()
                     fresh_id = str(b.get_app_id())
                     if fresh_id:
                         self.id = fresh_id
