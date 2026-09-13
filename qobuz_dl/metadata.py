@@ -16,8 +16,10 @@ from mutagen.flac import FLAC, Picture
 from mutagen.id3 import ID3NoHeaderError
 
 from qobuz_dl.settings import QobuzDLSettings
-from qobuz_dl.utils import classify_release_type, get_album_artist
-
+from qobuz_dl.utils import (
+    classify_release_type,
+    get_album_artist,
+)
 logger = logging.getLogger(__name__)
 
 
@@ -615,46 +617,81 @@ def _get_tags_to_add(
         tags["ALBUMARTIST"] = _albumartist_val
         tags["ALBUMARTISTSORT"] = _make_sort_name(_albumartist_val)
 
-    # # Deduplica artistas por nome normalizado e preserva a ordem recebida.
     if not settings.no_track_artist_tag:
         artists = []
         seen_artists = set()
 
-        def add_unique_artist(name):
-            """Add artist to a list, avoiding duplicates."""
-            if not name:
-                return
-            norm_name = _normalize_name(name)
-            if norm_name and norm_name not in seen_artists:
-                seen_artists.add(norm_name)
-                artists.append(name)
+        structured_artist_lookup = {}
+        for artist_source in (
+            qobuz_album.get("artists"),
+            qobuz_item.get("artists"),
+        ):
+            if not isinstance(artist_source, list):
+                continue
 
-        main_artist_raw = qobuz_item.get("performer", {}).get(
-            "name", ""
-        ) or qobuz_album.get("artist", {}).get("name", "")
+            for artist_data in artist_source:
+                if not isinstance(artist_data, dict):
+                    continue
+
+                artist_name = artist_data.get("name")
+                if not isinstance(artist_name, str):
+                    continue
+                if not artist_name.strip():
+                    continue
+
+                normalized_name = _normalize_name(artist_name)
+                if normalized_name and normalized_name not in structured_artist_lookup:
+                    structured_artist_lookup[normalized_name] = artist_name.strip()
+
+        def restore_artist_spelling(name):
+            """Restores accents from structured Qobuz artist data."""
+            clean_name = name.strip()
+            normalized_name = _normalize_name(clean_name)
+            return structured_artist_lookup.get(normalized_name, clean_name)
+
+        def add_unique_artist(name):
+            """Adds an artist once while preserving API spelling."""
+            if not name or not name.strip():
+                return
+
+            restored_name = restore_artist_spelling(name)
+            normalized_name = _normalize_name(restored_name)
+
+            if normalized_name and normalized_name not in seen_artists:
+                seen_artists.add(normalized_name)
+                artists.append(restored_name)
+
+        main_artist_raw = (
+            qobuz_item.get("performer", {}).get("name", "")
+            or qobuz_album.get("artist", {}).get("name", "")
+        )
 
         if main_artist_raw:
             for part in main_artist_raw.split(","):
-                add_unique_artist(part.strip())
+                add_unique_artist(part)
 
         performers_str = qobuz_item.get("performers", "")
         if performers_str:
             for performer_block in performers_str.split(" - "):
-                parts = [p.strip() for p in performer_block.split(", ")]
-                if len(parts) > 1:
-                    name = parts[0]
-                    roles = parts[1:]
+                parts = [part.strip() for part in performer_block.split(",")]
+                if len(parts) <= 1:
+                    continue
 
-                    if (
-                        "FeaturedArtist" in roles
-                        or "MainArtist" in roles
-                        or "PrimaryArtist" in roles
-                    ):
-                        add_unique_artist(name)
+                name = parts[0]
+                roles = parts[1:]
 
-        if len(artists) > 0:
+                if (
+                    "FeaturedArtist" in roles
+                    or "MainArtist" in roles
+                    or "PrimaryArtist" in roles
+                ):
+                    add_unique_artist(name)
+
+        if artists:
             tags["ARTIST"] = ", ".join(artists)
-            tags["ARTISTSORT"] = ", ".join(_make_sort_name(a) for a in artists)
+            tags["ARTISTSORT"] = ", ".join(
+                _make_sort_name(artist) for artist in artists
+            )
         else:
             tags["ARTIST"] = ""
 
