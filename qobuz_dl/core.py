@@ -2493,6 +2493,9 @@ class QobuzDL:
                 self.directory, sanitize_filename(playlist_name)
             )
         else:
+            if file_path is None:
+                logger.info(f"{RED}[!] Caminho do arquivo da playlist não informado.{OFF}")
+                return
             logger.info(f"{CYAN}[*] Importando playlist: {file_path}{OFF}")
             try:
                 tracks_list = parse_playlist_file(file_path)

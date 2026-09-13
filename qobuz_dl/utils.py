@@ -823,12 +823,12 @@ async def get_apple_hq_cover(
         )
     }
 
-    q_artist_puro = extrair_essencia(artist)
-    q_album_puro = extrair_essencia(album)
+    q_artist_puro = extrair_essencia(artist or "")
+    q_album_puro = extrair_essencia(album or "")
     q_track_puro = extrair_essencia(track_title) if track_title else ""
 
     # Titulo completo (com a edicao/versao preservada) -- usado como trava final.
-    q_album_completo = extrair_titulo_completo(album)
+    q_album_completo = extrair_titulo_completo(album or "")
     q_track_completo = extrair_titulo_completo(track_title) if track_title else ""
 
     # Limiares de similaridade pro titulo COMPLETO (com versao). Quanto

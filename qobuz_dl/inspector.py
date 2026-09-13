@@ -16,7 +16,6 @@
 # ==============================================================================
 import os
 import subprocess
-from typing import Optional
 
 from qobuz_dl import ui
 from qobuz_dl.utils import encontrar_binario, format_duration
@@ -28,7 +27,7 @@ try:
     from prompt_toolkit.layout.controls import FormattedTextControl
     from prompt_toolkit.layout.layout import Layout
 except ImportError:
-    PromptToolkitApplication: Optional[type] = None
+    PromptToolkitApplication = None
 
 # Reaproveita o MESMO estilo visual do seletor principal (cores, "hovered",
 # etc.) -- assim o navegador de arquivos parece parte do mesmo programa,

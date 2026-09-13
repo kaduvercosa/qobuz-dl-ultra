@@ -336,6 +336,8 @@ def tag_flac(
 ):
     """Apply tags to FLAC file."""
     audio = FLAC(filename)
+    if settings is None:
+        settings = QobuzDLSettings()
 
     if istrack:
         qobuz_item = d
