@@ -227,7 +227,7 @@ jobs:
       - name: Audita as dependências instaladas
         id: audit
         continue-on-error: true
-        run: pip-audit --strict > pip_audit_saida.log 2>&1
+        run: pip-audit --strict --skip-editable > pip_audit_saida.log 2>&1
 
       - name: Mostra o resultado no resumo do run
         if: always()
