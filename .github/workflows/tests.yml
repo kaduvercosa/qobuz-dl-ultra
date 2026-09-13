@@ -1,70 +1,13 @@
 name: CI
 
-# Antes este arquivo se chamava lint.yml e tinha DOIS jobs: um rodando
-# Flake8 e outro rodando a suite de testes. O job de lint foi removido
-# daqui porque o Ruff (ver ruff.yml) cobre as mesmas regras (E, F, W, B,
-# C, T) e já roda em paralelo -- ter os dois linters no mesmo CI custava
-# o dobro do tempo pra checar a mesma coisa duas vezes, com risco real de
-# um aprovar e o outro reprovar por regra configurada de forma diferente
-# entre .flake8 e [tool.ruff] no pyproject.toml.
-#
-# O job de testes continua igual: roda a suíte (tests/test_*.py). Os
-# testes marcados "slow" (abrem subprocesso real do programa) ficam de
-# fora por padrão pra manter o CI rápido -- rode-os manualmente com
-# `pytest -m slow` quando precisar.
-#
-# tests/manual/ (ex.: verificar_letras_qobuz.py) fica DE FORA de
-# propósito: exige login real no Qobuz e acesso à internet, não é
-# coletado pelo pytest (não tem prefixo "test_"), e não faz sentido em
-# CI. Ver tests/manual/README.md.
-#
-# NOTIFICAÇÃO POR E-MAIL COM O ERRO EXATO: cada combinação do matrix
-# roda de forma independente e em paralelo, então o e-mail (se algum
-# falhar) sai POR COMBINAÇÃO -- o assunto já diz qual SO/versão de Python
-# falhou, e o corpo traz a saída real do pytest daquele job (as linhas
-# "FAILED tests/..." de verdade, não um texto fixo genérico). Se uma
-# mudança quebrar em várias combinações ao mesmo tempo, chegam vários
-# e-mails de uma vez -- cada um com o contexto específico daquele SO/
-# versão, o que costuma ajudar a ver se é um problema geral ou só de uma
-# plataforma.
-#
-# MUDANÇAS DESTA REVISÃO:
-#   - cache: 'pip' no setup-python -- evita reinstalar tudo do zero em
-#     cada uma das 7 combinações do matrix (5 versões de Python + 2 SOs
-#     extras). A chave do cache é derivada automaticamente do
-#     pyproject.toml pelo próprio setup-python.
-#   - Matrix ganhou Windows e macOS, mas só numa versão de Python (3.13)
-#     -- não faz sentido multiplicar as 5 versões por 3 SOs (15 jobs)
-#     quando o que queremos testar é especificamente os caminhos
-#     dependentes de SO (Keyring do Windows/macOS, `_find_config_file()`
-#     em color.py), não "todo Python em todo SO".
-#   - Cobertura de testes (pytest-cov) + upload pro Codecov, mas só a
-#     partir de UM job (ubuntu + Python 3.12) -- gerar/subir cobertura
-#     nos 7 jobs seria redundante e mais lento sem ganho real.
-#     REQUISITO: precisa existir o secret CODECOV_TOKEN no repositório
-#     (Settings -> Secrets and variables -> Actions) depois de conectar
-#     o repositório em https://codecov.io. Sem o secret, este passo
-#     específico falha, mas `fail_ci_if_error: false` garante que isso
-#     não derruba o restante do CI.
-#   - E-mail com o erro exato do pytest quando algo falha (ver acima) --
-#     reaproveita os mesmos secrets EMAIL_* do canary.yaml.
-
 on:
   push:
     branches: ["master", "main"]
   pull_request:
     branches: ["master", "main"]
   workflow_dispatch:
-  # Roda a suite inteira 1x por semana mesmo sem push nenhum -- pega
-  # quebra causada por uma dependencia nova (ex.: mutagen/httpx lançou
-  # versão que muda comportamento), já que `pip install -e ".[all,dev]"`
-  # sempre traz a versão mais recente disponível no momento do run.
   schedule:
-    - cron: "0 6 * * 1" # toda segunda as 06:00 UTC
-  # Permite que outros workflows (pypi.yml, docker.yml) rodem esta mesma
-  # suíte como um "gate" antes de publicar, via `uses:
-  # ./.github/workflows/tests.yml` -- sem duplicar os passos de setup +
-  # pytest em cada um deles.
+    - cron: "0 6 * * 1"
   workflow_call:
 
 jobs:
@@ -72,74 +15,44 @@ jobs:
     name: Testes (pytest) - ${{ matrix.os }} / py${{ matrix.python-version }}
     runs-on: ${{ matrix.os }}
     strategy:
-      # fail-fast: false -- se o job do Windows falhar, os outros 6 (Linux
-      # e macOS) continuam rodando até o fim. Sem isso, o GitHub cancela
-      # tudo no primeiro job que falhar, e um problema isolado do Windows
-      # esconde se o restante da matrix também tinha algo errado.
       fail-fast: false
       matrix:
         os: [ubuntu-latest]
         python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
-        # `include` acrescenta combinações extras SEM multiplicar o
-        # produto cartesiano acima -- ubuntu roda nas 5 versões, Windows
-        # e macOS rodam só na 3.13 (a versão "de referência" do projeto).
-        # Total: 5 + 1 + 1 = 7 jobs, não 15.
         include:
           - os: windows-latest
             python-version: "3.13"
           - os: macos-latest
             python-version: "3.13"
-
     steps:
       - name: Checkout do código
         uses: actions/checkout@v7
-
       - name: Setup Python
         uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
           cache: "pip"
-
       - name: Instala o projeto com as dependências de dev
         run: python -m pip install --upgrade pip && pip install -e ".[all, dev]"
-
-      # `continue-on-error: true` nos dois passos de pytest abaixo é de
-      # propósito: sem isso, o job pararia aqui e os passos de e-mail
-      # (mais abaixo) nunca rodariam pra avisar você. A saída completa do
-      # pytest vai pra um arquivo .log, que o passo de "resumo" lê depois
-      # pra montar o e-mail com a saída REAL (as linhas "FAILED
-      # tests/..." de verdade), não um texto fixo genérico.
       - name: Roda a suíte de testes (pula os marcados "slow")
         id: pytest
         continue-on-error: true
-        # Só gera relatório de cobertura no job de referência (ubuntu +
-        # 3.12) -- nos outros 6 jobs roda exatamente como antes.
         if: matrix.os != 'ubuntu-latest' || matrix.python-version != '3.12'
         shell: bash
         run: pytest -m "not slow" -q > pytest_saida.log 2>&1
-
       - name: Roda a suíte de testes com cobertura (job de referência)
         id: pytest_cov
         continue-on-error: true
         if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
-        # Piso revisado em 2026-09 depois de uma leva grande de testes novos
-        # (core.py, downloader.py, metadata.py, inspector.py, utils.py,
-        # bundle.py saíram de ~0% pra cobertura real). Cobertura medida
-        # localmente: 50% (7800 statements, 3875 sem cobrir). Piso fixado
-        # uns pontos abaixo do medido, não em cima do valor exato, pra
-        # deixar folga pra variação normal entre plataformas sem quebrar
-        # o CI à toa -- reavaliar de novo quando a cobertura subir mais.
         shell: bash
         run: >
           pytest -m "not slow" -q
           --cov=qobuz_dl --cov-fail-under=47 --cov-report=xml --cov-report=term-missing
           > pytest_saida.log 2>&1
-
       - name: Mostra a saída do pytest no resumo do run
         if: always()
         shell: bash
         run: cat pytest_saida.log
-
       - name: Envia cobertura para o Codecov
         if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
         uses: codecov/codecov-action@v5
@@ -147,10 +60,6 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./coverage.xml
           fail_ci_if_error: false
-
-      # Monta o ASSUNTO (com o SO/versão de Python exatos que falharam) e
-      # o CORPO (com a saída real do pytest, não um texto fixo) -- só
-      # roda se algum dos dois passos de pytest acima falhou.
       - name: Monta o resumo do que falhou
         id: resumo
         if: steps.pytest.outcome == 'failure' || steps.pytest_cov.outcome == 'failure'
@@ -158,7 +67,6 @@ jobs:
         run: |
           ASSUNTO="🚨 qobuz-dl-ultra: testes falharam (${{ matrix.os }} / py${{ matrix.python-version }})"
           echo "assunto=$ASSUNTO" >> "$GITHUB_OUTPUT"
-
           {
             echo "corpo<<FIM_DO_CORPO"
             echo "A suíte de testes falhou em ${{ matrix.os }} / Python ${{ matrix.python-version }}."
@@ -172,12 +80,6 @@ jobs:
             echo "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
             echo "FIM_DO_CORPO"
           } >> "$GITHUB_OUTPUT"
-
-      # Reaproveita os MESMOS secrets EMAIL_* do canary.yaml (secrets do
-      # repositório valem pra qualquer workflow dele, não precisa
-      # cadastrar de novo). Só roda se "resumo" rodou (ou seja, só se
-      # algo falhou) -- em PR/push normal com tudo passando, nenhum
-      # e-mail é gerado.
       - name: Envia e-mail com o erro exato (só se os testes falharam)
         if: steps.resumo.outcome == 'success'
         uses: dawidd6/action-send-mail@v4
@@ -190,49 +92,57 @@ jobs:
           to: ${{ secrets.EMAIL_TO }}
           from: CI qobuz-dl-ultra
           body: ${{ steps.resumo.outputs.corpo }}
-
-      # Sem isso, o job apareceria "verde" mesmo com os testes falhando
-      # (por causa do `continue-on-error: true` lá em cima) -- e a
-      # notificação nativa do GitHub, o badge do README e o gate usado
-      # por pypi.yml/docker.yml (workflow_call) nunca veriam a falha.
       - name: Marca o job como falho (se os testes falharam)
         if: steps.pytest.outcome == 'failure' || steps.pytest_cov.outcome == 'failure'
         shell: bash
         run: exit 1
 
-  # Job separado (não faz parte do matrix acima) -- roda 1x só, é rápido,
-  # e verifica se alguma dependência JÁ INSTALADA tem uma vulnerabilidade
-  # (CVE) conhecida publicada. Isso é diferente do Dependabot: o
-  # Dependabot avisa quando existe uma versão NOVA disponível (não importa
-  # o motivo), enquanto este job aqui checa ativamente contra o banco de
-  # vulnerabilidades a cada run -- pega o caso de uma CVE ser publicada
-  # para uma versão que o projeto já usa há tempos, sem que nada tenha
-  # mudado no pyproject.toml que motivasse um PR do Dependabot.
   auditoria-dependencias:
     name: Auditoria de segurança das dependências (pip-audit)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout do código
         uses: actions/checkout@v7
-
       - name: Setup Python
         uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: "pip"
-
-      - name: Instala o projeto e o pip-audit
-        run: python -m pip install --upgrade pip && pip install -e ".[all]" pip-audit
-
+      - name: Instala as dependências externas e o pip-audit
+        run: |
+          python -m pip install --upgrade pip
+          pip install \
+            pathvalidate \
+            httpx \
+            aiosqlite \
+            send2trash \
+            humanize \
+            aiofiles \
+            tenacity \
+            platformdirs \
+            charset_normalizer \
+            mutagen \
+            tqdm \
+            prompt_toolkit \
+            packaging \
+            "colorama>=0.4.6" \
+            cryptography \
+            keyring \
+            rapidfuzz \
+            brotli \
+            "Pillow>=10.0.0" \
+            watchdog \
+            pyacoustid \
+            "lyricsgenius>=3.0" \
+            numpy \
+            pip-audit
       - name: Audita as dependências instaladas
         id: audit
         continue-on-error: true
-        run: pip-audit --strict --skip-editable > pip_audit_saida.log 2>&1
-
+        run: pip-audit --strict > pip_audit_saida.log 2>&1
       - name: Mostra o resultado no resumo do run
         if: always()
         run: cat pip_audit_saida.log
-
       - name: Monta o resumo do que falhou
         id: resumo
         if: steps.audit.outcome == 'failure'
@@ -249,7 +159,6 @@ jobs:
             echo "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
             echo "FIM_DO_CORPO"
           } >> "$GITHUB_OUTPUT"
-
       - name: Envia e-mail com a vulnerabilidade exata (só se algo foi encontrado)
         if: steps.resumo.outcome == 'success'
         uses: dawidd6/action-send-mail@v4
@@ -262,69 +171,33 @@ jobs:
           to: ${{ secrets.EMAIL_TO }}
           from: CI qobuz-dl-ultra
           body: ${{ steps.resumo.outputs.corpo }}
-
       - name: Marca o job como falho (se alguma vulnerabilidade foi encontrada)
         if: steps.audit.outcome == 'failure'
         run: exit 1
 
-  # -------------------------------------------------------------------
-  # AVISO: este job foi escrito sem conseguir instalar/rodar mypy e
-  # mypy-baseline de verdade antes (sem acesso a internet no momento em
-  # que isto foi montado) -- os comandos abaixo seguem a documentação
-  # das duas ferramentas, mas a PRIMEIRA execução real disto no GitHub é
-  # que vai confirmar se o comportamento bate 100%. Por isso todo passo
-  # crítico usa `continue-on-error`/`|| true` -- na pior hipótese este
-  # job específico falha ou fica com comportamento estranho, mas nunca
-  # derruba `tests` nem `auditoria-dependencias` acima.
-  #
-  # COMO FUNCIONA (mecanismo de baseline, pensado pra introduzir type
-  # checking numa base grande que nunca foi checada):
-  #
-  #   1) Primeira vez (não existe mypy-baseline.txt no repo): o job
-  #      roda o mypy, gera um arquivo com TODOS os apontamentos atuais
-  #      (o "baseline"), sobe esse arquivo como artefato pra download, e
-  #      passa (verde) sem exigir que você corrija nada agora.
-  #
-  #   2) Você baixa o artefato "mypy-baseline" desta execução (aba
-  #      "Summary" do run, seção "Artifacts"), salva como
-  #      `mypy-baseline.txt` na raiz do projeto, e faz commit.
-  #
-  #   3) A partir daí, toda execução futura só falha se aparecer um erro
-  #      NOVO (que não estava no baseline) -- os que já existiam
-  #      continuam ali, documentados, sem travar o CI. Pra encolher o
-  #      baseline aos poucos, corrija alguns erros de tipo de vez em
-  #      quando e rode `mypy qobuz_dl | mypy-baseline sync` de novo
-  #      (dentro de uma Action manual, já que vocês rodam isso só no
-  #      GitHub) pra atualizar o arquivo.
   verificacao-de-tipos:
     name: Verificação estática de tipos (mypy)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout do código
         uses: actions/checkout@v7
-
       - name: Setup Python
         uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: "pip"
-
       - name: Instala o projeto, mypy e mypy-baseline
         run: python -m pip install --upgrade pip && pip install -e ".[all]" mypy mypy-baseline
-
       - name: Roda o mypy (não falha aqui -- a decisão fica pros passos seguintes)
         run: mypy --python-version 3.12 qobuz_dl > mypy_saida.log 2>&1 || true
-
       - name: Mostra a saída completa do mypy no resumo do run
         run: cat mypy_saida.log
-
       - name: Sem baseline ainda -- gera um novo com os apontamentos atuais
         id: gera_baseline
         if: hashFiles('mypy-baseline.txt') == ''
         run: |
           cat mypy_saida.log | mypy-baseline sync || true
           echo "::warning::mypy-baseline.txt não existia -- gerei um novo com os apontamentos atuais do mypy. Baixe o artefato 'mypy-baseline' desta execução, salve como mypy-baseline.txt na raiz do projeto e faça commit. A partir da próxima execução, só erros NOVOS vão falhar o CI."
-
       - name: Sobe o baseline gerado como artefato pra download
         if: steps.gera_baseline.outcome == 'success'
         uses: actions/upload-artifact@v4
@@ -332,13 +205,11 @@ jobs:
           name: mypy-baseline
           path: mypy-baseline.txt
           if-no-files-found: warn
-
       - name: Compara contra o baseline existente (só roda se já houver um)
         id: mypy_filter
         if: hashFiles('mypy-baseline.txt') != ''
         continue-on-error: true
         run: cat mypy_saida.log | mypy-baseline filter
-
       - name: Marca o job como falho (só se havia baseline E apareceu erro novo)
         if: hashFiles('mypy-baseline.txt') != '' && steps.mypy_filter.outcome == 'failure'
         run: exit 1
