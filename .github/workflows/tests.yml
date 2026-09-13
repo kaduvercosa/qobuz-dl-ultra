@@ -280,14 +280,14 @@ jobs:
   # COMO FUNCIONA (mecanismo de baseline, pensado pra introduzir type
   # checking numa base grande que nunca foi checada):
   #
-  #   1) Primeira vez (não existe .mypy-baseline.txt no repo): o job
+  #   1) Primeira vez (não existe mypy-baseline.txt no repo): o job
   #      roda o mypy, gera um arquivo com TODOS os apontamentos atuais
   #      (o "baseline"), sobe esse arquivo como artefato pra download, e
   #      passa (verde) sem exigir que você corrija nada agora.
   #
   #   2) Você baixa o artefato "mypy-baseline" desta execução (aba
   #      "Summary" do run, seção "Artifacts"), salva como
-  #      `.mypy-baseline.txt` na raiz do projeto, e faz commit.
+  #      `mypy-baseline.txt` na raiz do projeto, e faz commit.
   #
   #   3) A partir daí, toda execução futura só falha se aparecer um erro
   #      NOVO (que não estava no baseline) -- os que já existiam
@@ -313,31 +313,32 @@ jobs:
         run: python -m pip install --upgrade pip && pip install -e ".[all]" mypy mypy-baseline
 
       - name: Roda o mypy (não falha aqui -- a decisão fica pros passos seguintes)
-        run: mypy qobuz_dl > mypy_saida.log 2>&1 || true
+        run: mypy --python-version 3.12 qobuz_dl > mypy_saida.log 2>&1 || true
 
       - name: Mostra a saída completa do mypy no resumo do run
         run: cat mypy_saida.log
 
       - name: Sem baseline ainda -- gera um novo com os apontamentos atuais
-        if: hashFiles('.mypy-baseline.txt') == ''
+        id: gera_baseline
+        if: hashFiles('mypy-baseline.txt') == ''
         run: |
           cat mypy_saida.log | mypy-baseline sync || true
-          echo "::warning::.mypy-baseline.txt não existia -- gerei um novo com os apontamentos atuais do mypy. Baixe o artefato 'mypy-baseline' desta execução, salve como .mypy-baseline.txt na raiz do projeto e faça commit. A partir da próxima execução, só erros NOVOS vão falhar o CI."
+          echo "::warning::mypy-baseline.txt não existia -- gerei um novo com os apontamentos atuais do mypy. Baixe o artefato 'mypy-baseline' desta execução, salve como mypy-baseline.txt na raiz do projeto e faça commit. A partir da próxima execução, só erros NOVOS vão falhar o CI."
 
       - name: Sobe o baseline gerado como artefato pra download
-        if: hashFiles('.mypy-baseline.txt') == ''
+        if: steps.gera_baseline.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: mypy-baseline
-          path: .mypy-baseline.txt
+          path: mypy-baseline.txt
           if-no-files-found: warn
 
       - name: Compara contra o baseline existente (só roda se já houver um)
         id: mypy_filter
-        if: hashFiles('.mypy-baseline.txt') != ''
+        if: hashFiles('mypy-baseline.txt') != ''
         continue-on-error: true
         run: cat mypy_saida.log | mypy-baseline filter
 
       - name: Marca o job como falho (só se havia baseline E apareceu erro novo)
-        if: hashFiles('.mypy-baseline.txt') != '' && steps.mypy_filter.outcome == 'failure'
+        if: hashFiles('mypy-baseline.txt') != '' && steps.mypy_filter.outcome == 'failure'
         run: exit 1
