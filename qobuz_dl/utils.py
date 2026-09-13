@@ -518,12 +518,13 @@ def get_url_info(url):
     #   https://open.qobuz.com/{type}/{id}
     #   https://play.qobuz.com/{type}/{id}
     #   /us-en/{type}/-/{id}
-    """Parse a Qobuz URL and extract item type and ID."""
     r = re.search(
         r"(?:https:\/\/(?:w{3}|open|play)\.qobuz\.com)?(?:\/[a-z]{2}-[a-z]{2})"
         r"?\/(album|artist|track|playlist|label)(?:\/[-\w\d]+)?\/([\w\d]+)",
         url,
     )
+    if r is None:
+        raise AttributeError("Formato de URL do Qobuz inválido.")
     return r.groups()
 
 

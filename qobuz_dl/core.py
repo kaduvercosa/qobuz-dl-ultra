@@ -1503,9 +1503,10 @@ class QobuzDL:
                 continue
             try:
                 url_type, item_id = get_url_info(probe_url)
-            except (KeyError, IndexError):
+            except (KeyError, IndexError, AttributeError):
                 other_urls.append((i, url))
                 continue
+
             if url_type == "track":
                 track_urls.append((i, url, item_id))
             else:
