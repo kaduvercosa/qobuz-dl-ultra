@@ -166,7 +166,7 @@ class Bundle:
         # vira lista de 3 itens (seed, info, extras) no passo 4, antes de virar
         # a string final decodificada no passo 5.
         seed_matches = _SEED_TIMEZONE_REGEX.finditer(self._bundle)
-        secrets = OrderedDict()
+        secrets: OrderedDict[str, list[str]] = OrderedDict()
 
         for match in seed_matches:
             seed, timezone = match.group("seed", "timezone")
@@ -198,8 +198,9 @@ class Bundle:
         # Os 44 caracteres finais são "lixo" de ofuscação inserido pelo Qobuz
         # (não fazem parte do segredo real); se o Qobuz mudar esse tamanho de
         # padding, o base64 abaixo vai falhar com erro de padding inválido.
-        for secret_pair in secrets:
-            raw_b64 = "".join(secrets[secret_pair])[:-44]
-            secrets[secret_pair] = base64.standard_b64decode(raw_b64).decode("utf-8")
+        decoded_secrets: OrderedDict[str, str] = OrderedDict()
+        for secret_pair, secret_parts in secrets.items():
+            raw_b64 = "".join(secret_parts)[:-44]
+            decoded_secrets[secret_pair] = base64.standard_b64decode(raw_b64).decode("utf-8")
 
-        return secrets
+        return decoded_secrets

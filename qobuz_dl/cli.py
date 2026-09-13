@@ -22,6 +22,7 @@ import sys
 import tempfile
 import time
 from datetime import datetime
+from typing import Any, Optional
 
 import httpx
 import keyring
@@ -489,7 +490,7 @@ def _remove_leftovers(directory: str):
                 )
 
 
-def _format_timestamp(ts: int) -> str:
+def _format_timestamp(ts: Optional[int]) -> str:
     """Convert Unix timestamp to Brazilian date format (DD/MM/YYYY HH:MM:SS)."""
     if not ts:
         return "N/A"
@@ -942,7 +943,7 @@ async def _handle_commands(qobuz: QobuzDL, arguments):
         elif arguments.command in ("import-playlist", "ip"):
             await qobuz.import_playlist_from_url_or_file(
                 source=arguments.SOURCE,
-                name=getattr(arguments, "name", None),
+                name=str(getattr(arguments, "name", "") or ""),
                 auto=getattr(arguments, "auto", False),
             )
 

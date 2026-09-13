@@ -8,6 +8,7 @@ import logging
 import os
 import re
 import unicodedata
+from typing import Any, Optional
 
 import humanize
 import mutagen.id3 as id3
@@ -172,7 +173,9 @@ def _format_genres(genres: list) -> str:
     """Format genre list for tags."""
     genres = re.findall(r"([^\u2192\/]+)", "/".join(genres))
     no_repeats = []
-    [no_repeats.append(g) for g in genres if g not in no_repeats]
+    for g in genres:
+        if g not in no_repeats:
+            no_repeats.append(g)
     return ", ".join(no_repeats)
 
 
@@ -327,7 +330,7 @@ def tag_flac(
     album,
     istrack=True,
     em_image=False,
-    settings: QobuzDLSettings = None,
+    settings: Optional[QobuzDLSettings] = None,
     embed_cover_path=None,
     musicbrainz_ids=None,
 ):
@@ -452,7 +455,7 @@ def tag_mp3(
     album,
     istrack=True,
     em_image=False,
-    settings: QobuzDLSettings = None,
+    settings: Optional[QobuzDLSettings] = None,
     embed_cover_path=None,
     musicbrainz_ids=None,
 ):
@@ -579,11 +582,13 @@ def tag_mp3(
 def _get_tags_to_add(
     qobuz_album: dict,
     qobuz_item: dict,
-    settings: QobuzDLSettings = None,
+    settings: Optional[QobuzDLSettings] = None,
     musicbrainz_ids=None,
 ):
     """Build dictionary of tags to add based on settings."""
-    tags = dict()
+    tags: dict[str, Any] = {}
+    if settings is None:
+        settings = QobuzDLSettings()
     if not qobuz_album or not qobuz_item:
         return tags
 

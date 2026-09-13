@@ -14,6 +14,7 @@ import shutil
 import sys
 import time
 import re
+from typing import Any, Optional
 
 import httpx
 from pathvalidate import sanitize_filename
@@ -959,7 +960,7 @@ class QobuzDL:
         genius_token=None,
         force_english=True,
         no_credits=False,
-        settings: QobuzDLSettings = None,
+        settings: Optional[QobuzDLSettings] = None,
         booklet_only: bool = False,
         blacklist=None,
         playlist_as_albums: bool = False,
@@ -2340,7 +2341,7 @@ class QobuzDL:
     async def import_playlist_from_url_or_file(
         self,
         source: str,
-        name: str = None,
+        name: Optional[str] = None,
         auto: bool = False,
     ):
         """Comando `import-playlist`/`ip`: importa uma playlist de outra
@@ -2467,10 +2468,10 @@ class QobuzDL:
 
     async def download_from_playlist_file(
         self,
-        file_path: str = None,
-        name: str = None,
+        file_path: Optional[str] = None,
+        name: Optional[str] = None,
         auto: bool = False,
-        _preloaded_track_ids: list = None,
+        _preloaded_track_ids: Optional[list[Any]] = None,
     ):
         """Baixa as faixas já "matcheadas" no Qobuz (track_ids) numa pasta
         própria da playlist. Pode ser chamado com um arquivo ainda não

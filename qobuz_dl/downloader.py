@@ -6,6 +6,7 @@
 # Ponto de entrada tipico: Download(...).download_id_by_type(...).
 # ============================================================================
 from qobuz_dl.settings import QobuzDLSettings
+from typing import Optional
 from qobuz_dl.constants import (
     DEFAULT_FOLDER,
     DEFAULT_TRACK,
@@ -256,16 +257,16 @@ class Download:
         track_format=None,
         fetch_lyrics: bool = False,
         no_lrc_files: bool = False,
-        genius_token: str = None,
+        genius_token: Optional[str] = None,
         no_credits: bool = False,
-        settings: QobuzDLSettings = None,
+        settings: Optional[QobuzDLSettings] = None,
         download_db=None,
         is_playlist: bool = False,
-        playlist_track_number: int = None,
+        playlist_track_number: Optional[int] = None,
         booklet_only: bool = False,
         playlist_as_albums: bool = False,
-        playlist_title: str = None,
-        playlist_id: str = None,
+        playlist_title: Optional[str] = None,
+        playlist_id: Optional[str] = None,
     ):
         """Initialize downloader with client, item ID, quality settings, and formatting options."""
         self.client = client

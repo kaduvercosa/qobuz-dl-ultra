@@ -13,6 +13,7 @@ suporte nativo, o que cobre o caso do iSH/a-Shell no iOS).
 import asyncio
 import logging
 import os
+from typing import Any
 
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
@@ -36,13 +37,13 @@ class _NewAudioFileHandler(FileSystemEventHandler):
     do lado async, em watch_directory() abaixo.
     """
 
-    def __init__(self, loop, queue):
+    def __init__(self, loop: Any, queue: asyncio.Queue[str]):
         """Initialize file watcher with asyncio loop and queue for new audio files."""
         super().__init__()
         self._loop = loop
         self._queue = queue
 
-    def _enqueue(self, path):
+    def _enqueue(self, path: str) -> None:
         """Add file to processing queue."""
         if not path.lower().endswith(AUDIO_EXTENSIONS):
             return
@@ -51,12 +52,12 @@ class _NewAudioFileHandler(FileSystemEventHandler):
         # queue.put_nowait() direto NAO seria thread-safe.
         self._loop.call_soon_threadsafe(self._queue.put_nowait, os.path.dirname(path))
 
-    def on_created(self, event):
+    def on_created(self, event: Any) -> None:
         """Handle file creation event."""
         if not event.is_directory:
             self._enqueue(event.src_path)
 
-    def on_moved(self, event):
+    def on_moved(self, event: Any) -> None:
         # Cobre o padrao comum de download: arquivo criado com nome
         # temporario/parcial (on_created dispara, mas normalmente nao bate
         # AUDIO_EXTENSIONS) e depois renomeado pro nome final -- e' esse
@@ -67,8 +68,12 @@ class _NewAudioFileHandler(FileSystemEventHandler):
 
 
 async def watch_directory(
-    directory, client=None, genius_token=None, settings=None, debounce_seconds=15
-):
+    directory: str,
+    client: Any = None,
+    genius_token: str | None = None,
+    settings: Any = None,
+    debounce_seconds: int = 15,
+) -> None:
     """
     Fica rodando indefinidamente (Ctrl+C pra sair) observando 'directory'
     recursivamente. Quando arquivos de audio novos aparecem, espera
@@ -93,7 +98,7 @@ async def watch_directory(
         raise NotADirectoryError(f"Pasta não encontrada: {directory}")
 
     loop = asyncio.get_running_loop()
-    queue: asyncio.Queue = asyncio.Queue()
+    queue: asyncio.Queue[str] = asyncio.Queue()
 
     handler = _NewAudioFileHandler(loop, queue)
     observer = Observer()

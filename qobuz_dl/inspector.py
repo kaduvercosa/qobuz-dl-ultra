@@ -16,18 +16,19 @@
 # ==============================================================================
 import os
 import subprocess
+from typing import Optional
 
 from qobuz_dl import ui
 from qobuz_dl.utils import encontrar_binario, format_duration
 
 try:
-    from prompt_toolkit import Application
+    from prompt_toolkit import Application as PromptToolkitApplication
     from prompt_toolkit.key_binding import KeyBindings
     from prompt_toolkit.layout.containers import HSplit, ScrollOffsets, Window
     from prompt_toolkit.layout.controls import FormattedTextControl
     from prompt_toolkit.layout.layout import Layout
 except ImportError:
-    Application = None
+    PromptToolkitApplication: Optional[type] = None
 
 # Reaproveita o MESMO estilo visual do seletor principal (cores, "hovered",
 # etc.) -- assim o navegador de arquivos parece parte do mesmo programa,
@@ -186,7 +187,7 @@ async def _navegar_arquivos(diretorio_inicial):
         ← ou h ou Backspace -- volta pra pasta anterior
         Ctrl+C ou Esc    -- cancela (devolve None)
     """
-    if Application is None:
+    if PromptToolkitApplication is None:
         ui.error("prompt_toolkit não está instalado. Rode: pip install prompt_toolkit")
         return None
 
@@ -353,7 +354,7 @@ async def _navegar_arquivos(diretorio_inicial):
     )
 
     layout = Layout(HSplit([header_window, list_window, footer_window]))
-    app = Application(
+    app = PromptToolkitApplication(
         layout=layout,
         key_bindings=bindings,
         full_screen=True,

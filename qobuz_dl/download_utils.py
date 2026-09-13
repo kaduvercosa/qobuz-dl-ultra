@@ -184,7 +184,7 @@ def process_folder_format_with_subdirs(
 
 def _clean_format_str(folder: str, track: str, file_format: str) -> tuple[str, str]:
     """Clean format string by removing invalid patterns."""
-    final = []
+    final: list[str] = []
     for _i, fs in enumerate((folder, track)):
         if fs.endswith(".mp3"):
             fs = fs[:-4]
@@ -192,7 +192,7 @@ def _clean_format_str(folder: str, track: str, file_format: str) -> tuple[str, s
             fs = fs[:-5]
         fs = fs.strip()
         final.append(fs)
-    return tuple(final)
+    return final[0], final[1]
 
 
 def _safe_get(d: dict, *keys, default=None):

@@ -29,12 +29,12 @@ def extract_track_id(file_path: str) -> str | None:
     ext = os.path.splitext(file_path)[1].lower()
     if ext == ".flac":
         try:
-            audio = FLAC(file_path)
+            audio_flac = FLAC(file_path)
             for tag in ["QOBUZTRACKID", "QOBUZ TRACK ID", "TRACK_ID", "QOBUZ_TRACK_ID"]:
-                val = audio.get(tag)
+                val = audio_flac.get(tag)
                 if val and str(val[0]).strip():
                     return str(val[0]).strip()
-            for comment in audio.get("COMMENT", []):
+            for comment in audio_flac.get("COMMENT", []):
                 m = re.search(r"Trk ID:\s*([0-9a-zA-Z]+)", str(comment), re.IGNORECASE)
                 if m:
                     return m.group(1).strip()
@@ -45,13 +45,13 @@ def extract_track_id(file_path: str) -> str | None:
 
     elif ext == ".mp3":
         try:
-            audio = id3.ID3(file_path)
-            for frame in audio.getall("TXXX"):
+            audio_id3 = id3.ID3(file_path)
+            for frame in audio_id3.getall("TXXX"):
                 desc_clean = frame.desc.upper().replace(" ", "").replace("_", "")
                 if desc_clean in ["QOBUZTRACKID", "TRACKID", "QOBUZTRACK"]:
                     if frame.text and str(frame.text[0]).strip():
                         return str(frame.text[0]).strip()
-            for frame in audio.getall("COMM"):
+            for frame in audio_id3.getall("COMM"):
                 text = str(frame.text[0]) if frame.text else ""
                 m = re.search(r"Trk ID:\s*([0-9a-zA-Z]+)", text, re.IGNORECASE)
                 if m:
@@ -77,23 +77,23 @@ def inspect_existing_lyrics(file_path: str) -> dict:
     embedded_lang = None
     if ext == ".flac":
         try:
-            audio = FLAC(file_path)
+            audio_flac = FLAC(file_path)
             embedded = (
-                audio.get("LYRICS", [""])[0] or audio.get("UNSYNCEDLYRICS", [""])[0]
+                audio_flac.get("LYRICS", [""])[0] or audio_flac.get("UNSYNCEDLYRICS", [""])[0]
             )
-            lang_vals = audio.get("LYRICS_LANG")
+            lang_vals = audio_flac.get("LYRICS_LANG")
             if lang_vals:
                 embedded_lang = str(lang_vals[0]).strip().lower() or None
         except Exception as e:
             logger.debug(f"Falha ao ler letra/idioma embutidos no FLAC: {e}")
     elif ext == ".mp3":
         try:
-            audio = id3.ID3(file_path)
-            for uslt in audio.getall("USLT"):
+            audio_id3 = id3.ID3(file_path)
+            for uslt in audio_id3.getall("USLT"):
                 if uslt.text:
                     embedded = uslt.text
                     break
-            for txxx in audio.getall("TXXX:LYRICS_LANG"):
+            for txxx in audio_id3.getall("TXXX:LYRICS_LANG"):
                 if txxx.text:
                     embedded_lang = str(txxx.text[0]).strip().lower() or None
                     break

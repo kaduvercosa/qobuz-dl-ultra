@@ -137,6 +137,8 @@ def _normalizar_status(status: str) -> str:
 def _track_sort_key(entry: dict) -> tuple:
     """Ordena faixas por disco e numero."""
     numero = entry.get("numero")
+    if numero is None:
+        return (1, "")
     try:
         return (0, int(numero))
     except (TypeError, ValueError):

@@ -13,6 +13,7 @@ import subprocess
 import time
 import unicodedata
 import urllib.parse
+from typing import Any, Optional
 
 import platformdirs
 
@@ -274,14 +275,14 @@ def smart_discography_filter(
         # álbuns com nomes parecidos mas não idênticos (ex.: "Album" e
         # "Album (Deluxe Edition)" caem no mesmo grupo).
         """Extract the core essence of a title (lowercase, no punctuation)."""
-        r = re.match(r"([^\(]+)(?:\s*[\(\[][^\)][\)\]])*", album)
+        r = re.match(r"([^\(]+)(?:\s*[\(\[][^\)][\)\]])*", str(album))
         return r.group(1).strip().lower()
 
     requested_artist = contents[0]["name"]
     items = [item["albums"]["items"] for item in contents][0]
 
     # Agrupa os álbuns duplicados pelo título "essencial".
-    title_grouped = dict()
+    title_grouped: dict[str, list[dict[str, Any]]] = {}
     for item in items:
         title_ = essence(item["title"])
         if title_ not in title_grouped:
@@ -347,7 +348,7 @@ def format_duration(duration):
 # Cache do resultado da checagem de binários externos. Chave = nome do
 # binário, valor = caminho encontrado ou None. Existe para que o aviso saia
 # UMA vez por execução, não uma vez por arquivo processado.
-_BINARIOS_CHECADOS = {}
+_BINARIOS_CHECADOS: dict[str, Optional[str]] = {}
 
 # Onde procurar além do PATH. O a-Shell (iOS/iPadOS) traz ffmpeg nativo em
 # $APPDIR/bin, que nem sempre está no PATH do processo Python.
@@ -797,11 +798,11 @@ def extrair_titulo_completo(texto: str) -> str:
 
 async def get_apple_hq_cover(
     session=None,
-    upc: str = None,
-    isrc: str = None,
-    artist: str = None,
-    album: str = None,
-    track_title: str = None,
+    upc: Optional[str] = None,
+    isrc: Optional[str] = None,
+    artist: Optional[str] = None,
+    album: Optional[str] = None,
+    track_title: Optional[str] = None,
 ) -> str:
     # Busca uma capa em alta resolucao (ate 10000x10000) na API do
     # iTunes, validando o resultado por similaridade de texto antes de

@@ -23,6 +23,11 @@ ImportError` pelos modulos que precisam comparar strings.
 """
 
 import difflib
+from types import ModuleType
+from typing import Optional
+
+_rf_fuzz: Optional[ModuleType]
+_rf_process: Optional[ModuleType]
 
 try:
     from rapidfuzz import fuzz as _rf_fuzz
@@ -51,6 +56,7 @@ def ratio(a: str, b: str) -> float:
     if not a or not b:
         return 0.0
     if RAPIDFUZZ_DISPONIVEL:
+        assert _rf_fuzz is not None
         return _rf_fuzz.ratio(a, b) / 100.0
     return difflib.SequenceMatcher(None, a, b).ratio()
 
@@ -84,6 +90,8 @@ def melhor_match(consulta: str, opcoes, corte: float = 0.6):
     corte = min(1.0, max(0.0, float(corte)))
 
     if RAPIDFUZZ_DISPONIVEL:
+        assert _rf_fuzz is not None
+        assert _rf_process is not None
         achado = _rf_process.extractOne(
             consulta, opcoes, scorer=_rf_fuzz.ratio, score_cutoff=corte * 100
         )
