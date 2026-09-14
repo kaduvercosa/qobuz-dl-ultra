@@ -1,1 +1,6 @@
-{}
+{
+  "tests/unit/test_core_remaining_interactive.py::test_interactive_artista_catalogo_albuns": true,
+  "tests/unit/test_core_remaining_interactive.py::test_interactive_artista_sem_catalogo": true,
+  "tests/unit/test_core_remaining_interactive.py::test_interactive_busca_novamente": true,
+  "tests/unit/test_core_remaining_interactive_safe.py::test_interactive_sem_resultados_sem_prompt_toolkit": true
+}

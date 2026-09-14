@@ -1,6 +1,6 @@
 """Testes adicionais de caminhos de core.py ainda não cobertos."""
 
-import os
+import builtins
 from types import SimpleNamespace
 
 import httpx
@@ -9,10 +9,6 @@ import pytest
 from qobuz_dl import core
 
 pytestmark = pytest.mark.unit
-
-
-async def _noop_sleep(_seconds):
-    return None
 
 
 async def test_download_from_id_http_500_conta_falha(monkeypatch):
@@ -41,11 +37,7 @@ async def test_download_from_id_http_500_conta_falha(monkeypatch):
     monkeypatch.setattr(core, "handle_download_id", handle_download_id)
     monkeypatch.setattr(core.downloader, "Download", FakeDownload)
 
-    result = await core.QobuzDL.download_from_id(
-        app,
-        "1",
-        is_playlist=True,
-    )
+    result = await core.QobuzDL.download_from_id(app, "1", is_playlist=True)
 
     assert result is False
     assert app.settings.pl_failed == 1
@@ -73,22 +65,17 @@ async def test_download_from_id_request_error_conta_falha(monkeypatch):
     monkeypatch.setattr(core, "handle_download_id", handle_download_id)
     monkeypatch.setattr(core.downloader, "Download", FakeDownload)
 
-    result = await core.QobuzDL.download_from_id(
-        app,
-        "1",
-        is_playlist=True,
-    )
+    result = await core.QobuzDL.download_from_id(app, "1", is_playlist=True)
 
     assert result is False
     assert app.settings.pl_failed == 1
 
 
 async def test_mark_url_done_ignora_arquivo_inexistente(tmp_path):
-    app = SimpleNamespace()
     missing = tmp_path / "missing.txt"
 
     core.QobuzDL.mark_url_done_in_file(
-        app,
+        SimpleNamespace(),
         str(missing),
         "https://play.qobuz.com/track/1",
     )
@@ -100,14 +87,15 @@ async def test_mark_url_done_trata_erro_de_escrita(monkeypatch, tmp_path):
     path = tmp_path / "urls.txt"
     path.write_text("https://play.qobuz.com/track/1\n", encoding="utf-8")
 
-    real_open = open
+    real_open = builtins.open
 
     def failing_open(filename, *args, **kwargs):
-        if "w" in args or kwargs.get("mode") == "w":
+        mode = args[0] if args else kwargs.get("mode", "r")
+        if "w" in mode:
             raise OSError("read-only")
         return real_open(filename, *args, **kwargs)
 
-    monkeypatch.setattr(core, "open", failing_open)
+    monkeypatch.setattr(builtins, "open", failing_open)
 
     core.QobuzDL.mark_url_done_in_file(
         SimpleNamespace(),
@@ -116,7 +104,7 @@ async def test_mark_url_done_trata_erro_de_escrita(monkeypatch, tmp_path):
     )
 
 
-async def test_download_list_vazio_retorna(monkeypatch):
+async def test_download_list_vazio_retorna():
     app = SimpleNamespace(settings=SimpleNamespace(max_workers=1), delay=0)
     await core.QobuzDL.download_list_of_urls(app, [])
     await core.QobuzDL.download_list_of_urls(app, None)
@@ -124,10 +112,7 @@ async def test_download_list_vazio_retorna(monkeypatch):
 
 async def test_download_list_track_sequencial_delega(monkeypatch):
     calls = []
-    app = SimpleNamespace(
-        settings=SimpleNamespace(max_workers=1),
-        delay=0,
-    )
+    app = SimpleNamespace(settings=SimpleNamespace(max_workers=1), delay=0)
 
     monkeypatch.setattr(
         core,
@@ -151,14 +136,11 @@ async def test_download_list_track_sequencial_delega(monkeypatch):
 
 
 async def test_download_from_txt_file_trata_erro_de_leitura(monkeypatch):
-    app = SimpleNamespace()
-    monkeypatch.setattr(
-        core,
-        "open",
-        lambda *args, **kwargs: (_ for _ in ()).throw(OSError("erro")),
-    )
+    def failing_open(*args, **kwargs):
+        raise OSError("erro")
 
-    await core.QobuzDL.download_from_txt_file(app, "urls.txt")
+    monkeypatch.setattr(builtins, "open", failing_open)
+    await core.QobuzDL.download_from_txt_file(SimpleNamespace(), "urls.txt")
 
 
 async def test_lucky_mode_query_valida_sem_download():
@@ -230,7 +212,15 @@ async def test_search_favoritos_playlists_usa_fallback(monkeypatch):
     async def request(*args, **kwargs):
         return next(responses)
 
+    async def unused_method(*args, **kwargs):
+        return None
+
     client = SimpleNamespace(
+        search_albums=unused_method,
+        search_artists=unused_method,
+        search_tracks=unused_method,
+        search_playlists=unused_method,
+        get_favorites=unused_method,
         session=SimpleNamespace(request=request),
         base="https://api/",
         sec="secret",
@@ -238,12 +228,12 @@ async def test_search_favoritos_playlists_usa_fallback(monkeypatch):
         _modern_sig=lambda *args: "sig",
     )
 
-    def metadata(self, item, item_type, mode_dict, fav_subtype=None):
+    def extract_rich_metadata(item, item_type, mode_dict, fav_subtype=None):
         return {"name": item.get("name", "Unknown"), "id": item.get("id")}
 
     app = SimpleNamespace(
         client=client,
-        _extract_rich_metadata=metadata,
+        _extract_rich_metadata=extract_rich_metadata,
     )
 
     result = await core.QobuzDL.search_by_type(
