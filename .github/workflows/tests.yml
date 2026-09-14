@@ -10,6 +10,9 @@ on:
     - cron: "0 6 * * 1"
   workflow_call:
 
+permissions:
+  contents: read
+
 jobs:
   tests:
     name: Testes (pytest) - ${{ matrix.os }} / py${{ matrix.python-version }}
@@ -40,7 +43,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[all, dev]"
 
-      - name: Roda a suíte de testes (pula os marcados slow)
+      - name: Roda a suíte de testes
         id: pytest
         continue-on-error: true
         if: matrix.os != 'ubuntu-latest' || matrix.python-version != '3.12'
@@ -48,7 +51,7 @@ jobs:
         run: |
           pytest -m "not slow" -q > pytest_saida.log 2>&1
 
-      - name: Roda a suíte de testes com cobertura (job de referência)
+      - name: Roda a suíte de testes com cobertura
         id: pytest_cov
         continue-on-error: true
         if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
@@ -59,6 +62,7 @@ jobs:
             --cov-fail-under=47 \
             --cov-report=xml \
             --cov-report=term-missing \
+            --junitxml=test-results.xml \
             > pytest_saida.log 2>&1
 
       - name: Mostra a saída do pytest
@@ -76,6 +80,13 @@ jobs:
             } >> "$GITHUB_STEP_SUMMARY"
           fi
 
+      - name: Upload test results to Codecov
+        if: ${{ !cancelled() && matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12' }}
+        uses: codecov/test-results-action@v1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./test-results.xml
+
       - name: Envia cobertura para o Codecov
         if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
         uses: codecov/codecov-action@v5
@@ -90,17 +101,13 @@ jobs:
         shell: bash
         run: |
           assunto="🚨 qobuz-dl-ultra: testes falharam (${{ matrix.os }} / py${{ matrix.python-version }})"
+          echo "assunto=$assunto" >> "$GITHUB_OUTPUT"
           {
-            echo "assunto=$assunto"
-            echo "corpo<<EOF"
-            cat pytest_saida.log
+            echo 'corpo<<EOF'
+            echo "Falha nos testes em ${{ matrix.os }} / Python ${{ matrix.python-version }}"
             echo
-            echo "Repositório: ${{ github.repository }}"
-            echo "Branch ou tag: ${{ github.ref_name }}"
-            echo "Sistema: ${{ matrix.os }}"
-            echo "Python: ${{ matrix.python-version }}"
-            echo "Execução: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-            echo "EOF"
+            cat pytest_saida.log
+            echo 'EOF'
           } >> "$GITHUB_OUTPUT"
 
       - name: Envia e-mail com o erro exato
@@ -142,40 +149,18 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install \
-            pathvalidate \
-            httpx \
-            aiosqlite \
-            send2trash \
-            humanize \
-            aiofiles \
-            tenacity \
-            platformdirs \
-            charset_normalizer \
-            mutagen \
-            tqdm \
-            prompt_toolkit \
-            packaging \
-            "colorama>=0.4.6" \
-            cryptography \
-            keyring \
-            rapidfuzz \
-            brotli \
-            "Pillow>=10.0.0" \
-            watchdog \
-            pyacoustid \
-            "lyricsgenius>=3.0" \
-            numpy \
-            pip-audit
+            pathvalidate httpx aiosqlite send2trash humanize aiofiles \
+            tenacity platformdirs charset_normalizer mutagen tqdm \
+            prompt_toolkit packaging "colorama>=0.4.6" cryptography keyring \
+            rapidfuzz brotli "Pillow>=10.0.0" watchdog pyacoustid \
+            "lyricsgenius>=3.0" numpy pip-audit
 
       - name: Audita somente as dependências externas
         id: audit
         continue-on-error: true
         shell: bash
         run: |
-          pip-audit \
-            --strict \
-            --progress-spinner off \
-            > pip_audit_saida.log 2>&1
+          pip-audit --strict --progress-spinner off > pip_audit_saida.log 2>&1
 
       - name: Mostra o resultado do pip-audit
         if: always()
@@ -203,16 +188,11 @@ jobs:
         if: steps.audit.outcome == 'failure'
         shell: bash
         run: |
-          assunto="🔒 qobuz-dl-ultra: vulnerabilidade encontrada numa dependência"
+          echo "assunto=🔒 qobuz-dl-ultra: vulnerabilidade encontrada numa dependência" >> "$GITHUB_OUTPUT"
           {
-            echo "assunto=$assunto"
-            echo "corpo<<EOF"
+            echo 'corpo<<EOF'
             cat pip_audit_saida.log
-            echo
-            echo "Repositório: ${{ github.repository }}"
-            echo "Branch ou tag: ${{ github.ref_name }}"
-            echo "Execução: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-            echo "EOF"
+            echo 'EOF'
           } >> "$GITHUB_OUTPUT"
 
       - name: Envia e-mail com a vulnerabilidade exata
@@ -241,10 +221,10 @@ jobs:
 
     steps:
       - name: Checkout do código
-        uses: actions/checkout@v7
+        uses: actions/checkout@v4
 
       - name: Setup Python
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: "pip"
@@ -278,7 +258,7 @@ jobs:
         shell: bash
         run: |
           cat mypy_saida.log | mypy-baseline sync || true
-          echo "::warning::mypy-baseline.txt não existia -- gerei um novo com os apontamentos atuais do mypy. Baixe o artefato 'mypy-baseline' desta execução, salve como mypy-baseline.txt na raiz do projeto e faça commit. A partir da próxima execução, só erros novos vão falhar o CI."
+          echo "::warning::mypy-baseline.txt não existia -- gerei um novo com os apontamentos atuais do mypy."
 
       - name: Sobe o baseline gerado como artefato
         if: steps.gera_baseline.outcome == 'success'
