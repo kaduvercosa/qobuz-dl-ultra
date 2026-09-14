@@ -89,7 +89,7 @@ jobs:
 
       - name: Envia cobertura para o Codecov
         if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v7
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./coverage.xml
@@ -112,7 +112,7 @@ jobs:
 
       - name: Envia e-mail com o erro exato
         if: steps.resumo.outcome == 'success'
-        uses: dawidd6/action-send-mail@v4
+        uses: dawidd6/action-send-mail@v21
         with:
           server_address: smtp.gmail.com
           server_port: 465
@@ -177,7 +177,7 @@ jobs:
 
       - name: Sobe o relatório da auditoria
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: pip-audit-report
           path: pip_audit_saida.log
@@ -197,7 +197,7 @@ jobs:
 
       - name: Envia e-mail com a vulnerabilidade exata
         if: steps.resumo.outcome == 'success'
-        uses: dawidd6/action-send-mail@v4
+        uses: dawidd6/action-send-mail@v21
         with:
           server_address: smtp.gmail.com
           server_port: 465
@@ -221,10 +221,10 @@ jobs:
 
     steps:
       - name: Checkout do código
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: "pip"
@@ -262,7 +262,7 @@ jobs:
 
       - name: Sobe o baseline gerado como artefato
         if: steps.gera_baseline.outcome == 'success'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: mypy-baseline
           path: mypy-baseline.txt
