@@ -16,5 +16,9 @@
   "tests/unit/test_downloader_release_outcomes.py::test_download_release_consolida_resultados[outcomes1-True]": true,
   "tests/unit/test_downloader_release_outcomes.py::test_download_release_consolida_resultados[outcomes2-False]": true,
   "tests/unit/test_downloader_release_outcomes.py::test_download_release_consolida_resultados[outcomes3-False]": true,
-  "tests/unit/test_downloader_release_outcomes_fixed.py::test_download_release_consolida_resultados[outcomes1-True]": true
+  "tests/unit/test_downloader_release_outcomes_fixed.py::test_download_release_consolida_resultados[outcomes1-True]": true,
+  "tests/unit/test_downloader_single_track.py::test_download_track_amostra": true,
+  "tests/unit/test_downloader_single_track.py::test_download_track_falha_no_download_and_tag": true,
+  "tests/unit/test_downloader_single_track_fixed2.py::test_download_track_falha_no_download_and_tag": true,
+  "tests/unit/test_downloader_download_and_tag_paths.py::test_download_and_tag_direct_success": true
 }
