@@ -135,6 +135,30 @@ markers = [
 
 asyncio_mode = "auto"
 
+[tool.coverage.run]
+source = ["qobuz_dl"]
+branch = true
+
+[tool.coverage.report]
+precision = 2
+fail_under = 100
+skip_covered = false
+exclude_also = [
+    # Guarda de entrypoint (__main__.py): nunca roda sob pytest, cobrir
+    # isso é medir o interpretador, não o programa.
+    'if __name__ == .__main__.:',
+    # Type checking apenas: nunca executa em tempo de execução real.
+    'if TYPE_CHECKING:',
+    # Protocolos/ABCs: corpo é só "..." ou "pass", nada a exercitar.
+    '\.\.\.',
+    '@(abc\.)?abstractmethod',
+    # Guarda de import opcional (ex.: rapidfuzz/Pillow/numpy quando os
+    # extras não estão instalados) -- marque manualmente com
+    # "# pragma: no cover" linha a linha nesses blocos específicos em vez
+    # de confiar num padrão genérico daqui, para não mascarar um ImportError
+    # real que devesse ser coberto.
+]
+
 # Filtra avisos barulhentos que nao sao bugs do projeto
 filterwarnings = [
     "ignore::DeprecationWarning:httpx",

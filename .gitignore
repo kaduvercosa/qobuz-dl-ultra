@@ -28,5 +28,10 @@ dist/
 blacklist.txt
 
 .coverage
+.coverage.*
 coverage.xml
+coverage-downloader.xml
+junit.xml
+test-results.xml
+htmlcov/
 .pytest_cache/
