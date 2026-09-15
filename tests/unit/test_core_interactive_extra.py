@@ -17,7 +17,7 @@ class PromptFake:
         try:
             return next(self.values)
         except StopIteration:
-            raise KeyboardInterrupt
+            raise KeyboardInterrupt from None
 
 
 def _base_app():
@@ -110,7 +110,7 @@ async def test_interactive_keyboard_interrupt_retorna_none(monkeypatch):
     app = _base_app()
 
     async def tui(*args, **kwargs):
-        raise KeyboardInterrupt
+        raise KeyboardInterrupt from None
 
     monkeypatch.setattr(core, "_tui_select", tui)
 

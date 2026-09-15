@@ -17,7 +17,7 @@ class Prompt:
         try:
             return next(self.values)
         except StopIteration:
-            raise KeyboardInterrupt
+            raise KeyboardInterrupt from None
 
 
 async def _done(*args, **kwargs):
