@@ -24,6 +24,8 @@ sinalizar isso a forçar um teste que não prova nada.
 
 import pytest
 
+from pathlib import PurePath
+
 from qobuz_dl import download_utils as du
 
 pytestmark = pytest.mark.unit
