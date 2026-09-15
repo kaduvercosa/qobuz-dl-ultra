@@ -200,6 +200,18 @@ class TestParseCsv:
         arquivo.write_text("title\nCreep\n", encoding="utf-8")
         assert parse_playlist_file(str(arquivo)) == [{"artist": "", "title": "Creep"}]
 
+    def test_csv_totalmente_vazio_levanta_valueerror_sem_cabecalho(self, tmp_path):
+        arquivo = tmp_path / "vazio.csv"
+        arquivo.write_text("", encoding="utf-8")
+        with pytest.raises(ValueError, match="sem cabeçalho"):
+            parse_playlist_file(str(arquivo))
+
+    def test_csv_com_cabecalho_mas_sem_nenhuma_linha_valida(self, tmp_path):
+        arquivo = tmp_path / "sem_dados.csv"
+        arquivo.write_text("artist,title\nRadiohead,\nPixies,\n", encoding="utf-8")
+        with pytest.raises(ValueError, match="Nenhuma entrada válida"):
+            parse_playlist_file(str(arquivo))
+
 
 # ---------------------------------------------------------------------------
 # JSON
@@ -237,6 +249,19 @@ class TestParseJson:
         arquivo = tmp_path / "p.json"
         arquivo.write_text(
             json.dumps([{"Track Name": "Creep", "Artist Name(s)": "Radiohead, Outro"}]),
+            encoding="utf-8",
+        )
+        assert parse_playlist_file(str(arquivo)) == [
+            {"artist": "Radiohead", "title": "Creep"}
+        ]
+
+    def test_exportify_com_um_unico_artista_sem_virgula(self, tmp_path):
+        # Complementa test_exportify: lá "Artist Name(s)" tem vírgula (2+
+        # artistas); aqui não tem nenhuma -- o `if "," in artist:` (que
+        # corta pro primeiro nome) tem que ficar de fora sem quebrar nada.
+        arquivo = tmp_path / "p.json"
+        arquivo.write_text(
+            json.dumps([{"Track Name": "Creep", "Artist Name(s)": "Radiohead"}]),
             encoding="utf-8",
         )
         assert parse_playlist_file(str(arquivo)) == [
@@ -354,4 +379,15 @@ class TestDeteccaoPorConteudo:
         arquivo.write_text("artist,title\nRadiohead,Creep\n", encoding="utf-8")
         assert parse_playlist_file(str(arquivo)) == [
             {"artist": "Radiohead", "title": "Creep"}
+        ]
+
+    def test_conteudo_sem_json_nem_csv_cai_no_parser_txt(self, tmp_path):
+        # Sem "{"/"[" no início E sem vírgula/tab/ponto-e-vírgula em lugar
+        # nenhum -- último ramo da detecção por conteúdo (fallback pro
+        # parser de texto simples).
+        arquivo = tmp_path / "playlist.dat"
+        arquivo.write_text("Radiohead - Creep\nPixies - Debaser\n", encoding="utf-8")
+        assert parse_playlist_file(str(arquivo)) == [
+            {"artist": "Radiohead", "title": "Creep"},
+            {"artist": "Pixies", "title": "Debaser"},
         ]

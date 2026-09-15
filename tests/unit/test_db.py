@@ -21,9 +21,53 @@ import sqlite3
 
 import pytest
 
+from qobuz_dl import db as db_module
 from qobuz_dl.db import create_db, get_stats, handle_download_id
 
 pytestmark = pytest.mark.unit
+
+
+class _ConexaoComFalhaSimulada:
+    """Encapsula uma sqlite3.Connection real, mas faz `execute()` levantar
+    um erro específico quando o SQL bate com um predicado -- usado pra
+    forçar caminhos de erro (race conditions, ALTER TABLE que falha) que
+    não dá pra provocar só manipulando o conteúdo do banco."""
+
+    def __init__(self, real, quando, erro):
+        self._real = real
+        self._quando = quando
+        self._erro = erro
+
+    def execute(self, sql, *args, **kwargs):
+        if self._quando(sql):
+            raise self._erro
+        return self._real.execute(sql, *args, **kwargs)
+
+    def cursor(self):
+        return self._real.cursor()
+
+    def close(self):
+        return self._real.close()
+
+    def __enter__(self):
+        self._real.__enter__()
+        return self
+
+    def __exit__(self, *exc):
+        return self._real.__exit__(*exc)
+
+
+def _patch_connect_com_falha(monkeypatch, quando, erro):
+    """Faz db.sqlite3.connect(...) devolver uma conexão real encapsulada
+    por _ConexaoComFalhaSimulada, sem trocar o motor sqlite3 de verdade
+    (só intercepta o SQL específico que o teste quer fazer falhar)."""
+    original_connect = sqlite3.connect
+
+    def _fake_connect(caminho, *args, **kwargs):
+        real_conn = original_connect(caminho, *args, **kwargs)
+        return _ConexaoComFalhaSimulada(real_conn, quando, erro)
+
+    monkeypatch.setattr(db_module.sqlite3, "connect", _fake_connect)
 
 
 @contextlib.contextmanager
@@ -92,6 +136,24 @@ class TestCreateDbDoZero:
             ).fetchone()[0]
         assert n_tabelas == 1
 
+    def test_create_table_com_operational_error_e_absorvido(
+        self, tmp_path, monkeypatch
+    ):
+        """Simula a corrida entre processos citada no comentário do código:
+        outro processo cria a tabela entre a checagem inicial (PASSO 1) e
+        o CREATE TABLE deste. sqlite3.OperationalError nesse ponto
+        específico tem que ser ignorado, não propagado."""
+        caminho = str(tmp_path / "downloads.db")
+        _patch_connect_com_falha(
+            monkeypatch,
+            quando=lambda sql: "CREATE TABLE downloads (" in sql,
+            erro=sqlite3.OperationalError("table downloads already exists"),
+        )
+
+        resultado = create_db(caminho)  # não pode levantar
+
+        assert resultado == caminho
+
 
 class TestMigracaoV1ParaV2:
     """Banco antigo (v1) só tinha a coluna "id" -- sem quality, sem
@@ -156,6 +218,54 @@ class TestMigracaoV1ParaV2:
             ]
         assert ids == ["abc123", "def456"]
 
+    def test_contagem_divergente_apos_copiar_ids_aborta_a_migracao(
+        self, tmp_path, monkeypatch
+    ):
+        """Guarda de integridade pós-cópia (comentário no código: "contagem
+        divergente após copiar os IDs legados"). Faz a contagem final
+        VIR ERRADA (sem a query explodir sozinha) pra exercitar o próprio
+        `raise sqlite3.DatabaseError(...)` -- e não só o `except` genérico
+        que capturaria qualquer outro erro de SQLite. Nunca observado na
+        prática com SQLite saudável, mas é a rede de segurança do código:
+        ROLLBACK do savepoint, log de erro e re-raise."""
+        caminho = str(tmp_path / "downloads.db")
+        self._criar_banco_v1(caminho, ["abc123", "def456"])
+
+        class _CursorComContagemFalsa:
+            def fetchone(self):
+                return (999,)  # força old_count(2) != new_count(999)
+
+        original_connect = sqlite3.connect
+
+        def _fake_connect(caminho_db, *args, **kwargs):
+            real_conn = original_connect(caminho_db, *args, **kwargs)
+
+            class _ConexaoComContagemFalsa:
+                def execute(self, sql, *a, **k):
+                    if sql.strip() == "SELECT COUNT(*) FROM downloads":
+                        return _CursorComContagemFalsa()
+                    return real_conn.execute(sql, *a, **k)
+
+                def cursor(self):
+                    return real_conn.cursor()
+
+                def close(self):
+                    return real_conn.close()
+
+                def __enter__(self):
+                    real_conn.__enter__()
+                    return self
+
+                def __exit__(self, *exc):
+                    return real_conn.__exit__(*exc)
+
+            return _ConexaoComContagemFalsa()
+
+        monkeypatch.setattr(db_module.sqlite3, "connect", _fake_connect)
+
+        with pytest.raises(sqlite3.DatabaseError, match="contagem divergente"):
+            create_db(caminho)
+
 
 class TestMigracaoV2ParaV2_1_4:
     """Banco intermediário: já tem "quality" e companhia, mas ainda não
@@ -207,6 +317,70 @@ class TestMigracaoV2ParaV2_1_4:
         with _connect(caminho) as conn:
             colunas = {info[1] for info in conn.execute("PRAGMA table_info(downloads)")}
         assert "artist" in colunas and "album" in colunas
+
+    def _criar_banco_v2_com_uma_das_duas(self, caminho, presente):
+        """Banco intermediário com só UMA das duas colunas novas -- cada
+        `if` de ALTER TABLE (artist/album) precisa ser exercitado nos dois
+        sentidos (True e False) independentemente um do outro."""
+        with _connect(caminho) as conn:
+            conn.execute(f"""
+                CREATE TABLE downloads (
+                  "id" text NOT NULL,
+                  "media_type" text NOT NULL DEFAULT 'album',
+                  "quality" integer NOT NULL DEFAULT 27,
+                  "file_format" text NOT NULL DEFAULT 'FLAC',
+                  "quality_met" integer NOT NULL DEFAULT 0,
+                  "bit_depth" text,
+                  "sampling_rate" text,
+                  "saved_path" text NOT NULL DEFAULT '',
+                  "status" text NOT NULL DEFAULT 'downloaded',
+                  "url" text NOT NULL DEFAULT '',
+                  "release_date" text NOT NULL DEFAULT '',
+                  "{presente}" text NOT NULL DEFAULT '',
+                  PRIMARY KEY ("id", "quality")
+                )
+            """)
+
+    def test_so_falta_album_pula_o_alter_de_artist(self, tmp_path):
+        caminho = str(tmp_path / "downloads.db")
+        self._criar_banco_v2_com_uma_das_duas(caminho, presente="artist")
+
+        create_db(caminho)
+
+        with _connect(caminho) as conn:
+            colunas = {info[1] for info in conn.execute("PRAGMA table_info(downloads)")}
+        assert {"artist", "album"} <= colunas
+
+    def test_so_falta_artist_pula_o_alter_de_album(self, tmp_path):
+        caminho = str(tmp_path / "downloads.db")
+        self._criar_banco_v2_com_uma_das_duas(caminho, presente="album")
+
+        create_db(caminho)
+
+        with _connect(caminho) as conn:
+            colunas = {info[1] for info in conn.execute("PRAGMA table_info(downloads)")}
+        assert {"artist", "album"} <= colunas
+
+    def test_falha_no_alter_table_e_logada_sem_propagar(self, tmp_path, monkeypatch):
+        """Se o ALTER TABLE falhar (ex.: banco bloqueado por outro
+        processo), create_db() loga o erro e segue -- não derruba a
+        inicialização do programa inteiro por causa de uma coluna que não
+        deu pra adicionar agora."""
+        caminho = str(tmp_path / "downloads.db")
+        self._criar_banco_v2_com_uma_das_duas(caminho, presente="album")
+        _patch_connect_com_falha(
+            monkeypatch,
+            quando=lambda sql: "ADD COLUMN artist" in sql,
+            erro=sqlite3.OperationalError("duplicate column name: artist"),
+        )
+
+        resultado = create_db(caminho)  # não pode levantar
+
+        assert resultado == caminho
+        with _connect(caminho) as conn:
+            colunas = {info[1] for info in conn.execute("PRAGMA table_info(downloads)")}
+        # a tentativa falhou de propósito -- "artist" continua ausente
+        assert "artist" not in colunas
 
 
 # ---------------------------------------------------------------------------

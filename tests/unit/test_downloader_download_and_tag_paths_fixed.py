@@ -1,3 +1,4 @@
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -27,10 +28,24 @@ def make_obj(tmp_path, monkeypatch, quality=6):
         embed_lyrics=True,
         lyrics_translation_lang="pt",
     )
+
     client = SimpleNamespace()
+
+    # `Download.__init__` sempre cria um httpx.AsyncClient de verdade
+    # (abre contexto SSL e sockets), mesmo que o teste nunca use rede.
+    # Como a linha abaixo (`obj.http_session = object()`) sobrescreve essa
+    # referencia sem nunca chamar `aclose()`, cada chamada a make_obj()
+    # vazava um AsyncClient inteiro. Numa suite grande isso esgota o limite
+    # de file descriptors do processo -- e' a causa do
+    # "OSError: [Errno 24] Too many open files" visto no a-Shell.
+    # Trocamos o AsyncClient por um objeto leve ANTES de instanciar Download,
+    # entao nenhum socket/SSL real chega a ser aberto por este teste.
+    monkeypatch.setattr(downloader.httpx, "AsyncClient", lambda *a, **k: object())
+
     obj = downloader.Download(
         client, "track-1", str(tmp_path), quality, settings=settings
     )
+
     obj.track_format = "{track_number} - {track_title}"
     obj.embed_art = False
     obj.http_session = object()
@@ -58,7 +73,6 @@ async def test_download_and_tag_aborted(monkeypatch, tmp_path):
     result = await obj._download_and_tag(
         str(tmp_path), 1, {"url": "x"}, metadata(), metadata(), True, False
     )
-
     assert result is False
 
 
@@ -69,7 +83,6 @@ async def test_download_and_tag_missing_url(monkeypatch, tmp_path):
     result = await obj._download_and_tag(
         str(tmp_path), 1, {}, metadata(), metadata(), True, False
     )
-
     assert result is False
 
 
@@ -81,10 +94,10 @@ async def test_download_and_tag_direct_success(monkeypatch, tmp_path):
         return {"url": "https://example.test/audio"}
 
     async def fake_download(url, filename, desc, **kwargs):
-        open(filename, "wb").write(b"audio")
+        Path(filename).write_bytes(b"audio")
 
     def fake_tag(src, root, final, *args, **kwargs):
-        open(final, "wb").write(open(src, "rb").read())
+        Path(final).write_bytes(Path(src).read_bytes())
 
     obj.client.get_track_url = fresh_url
     monkeypatch.setattr(downloader, "tqdm_download", fake_download)
@@ -93,7 +106,6 @@ async def test_download_and_tag_direct_success(monkeypatch, tmp_path):
     result = await obj._download_and_tag(
         str(tmp_path), 1, {"url": "x"}, metadata(), metadata(), True, False
     )
-
     assert result is True
     assert obj.last_downloaded_file.endswith("01 - Song.flac")
 
@@ -109,10 +121,10 @@ async def test_download_and_tag_direct_fallback_to_segments(monkeypatch, tmp_pat
 
     async def segmented(*args, **kwargs):
         calls.append("segments")
-        open(args[1], "wb").write(b"audio")
+        Path(args[1]).write_bytes(b"audio")
 
     def fake_tag(src, root, final, *args, **kwargs):
-        open(final, "wb").write(b"tagged")
+        Path(final).write_bytes(b"tagged")
 
     async def fresh_url(item_id, fmt_id=None, force_segments=False):
         return {"url_template": "template"} if force_segments else {"url": "x"}
@@ -125,7 +137,6 @@ async def test_download_and_tag_direct_fallback_to_segments(monkeypatch, tmp_pat
     result = await obj._download_and_tag(
         str(tmp_path), 1, {"url": "initial"}, metadata(), metadata(), True, False
     )
-
     assert result is True
     assert calls == ["direct", "segments"]
 
@@ -146,5 +157,4 @@ async def test_download_and_tag_permanent_failure(monkeypatch, tmp_path):
     result = await obj._download_and_tag(
         str(tmp_path), 1, {"url": "initial"}, metadata(), metadata(), True, False
     )
-
     assert result is False

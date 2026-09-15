@@ -6,11 +6,13 @@ adicionar um subcomando novo numa dessas listas e ele silenciosamente não
 ganhar as flags esperadas).
 """
 
+import io
 import os
 
 import pytest
 
 from qobuz_dl.commands import (
+    ColoredArgumentParser,
     CustomHelpFormatter,
     _default_download_folder,
     qobuz_dl_args,
@@ -252,3 +254,24 @@ class TestDistribuicaoDeFlagsComuns:
     def test_flag_depois_do_subcomando_tambem_funciona(self, parser):
         args = parser.parse_args(["stats", "--verbose"])
         assert args.verbose is True
+
+
+# --------------------------------------------------------------------
+# ColoredArgumentParser.print_help
+# --------------------------------------------------------------------
+class TestColoredArgumentParserPrintHelp:
+    def test_sem_file_usa_stdout(self, capsys):
+        parser = ColoredArgumentParser(prog="qobuz-dl")
+        parser.print_help()
+        assert "qobuz-dl" in capsys.readouterr().out
+
+    def test_com_file_explicito_escreve_nele_em_vez_de_stdout(self, capsys):
+        # Cobre o ramo em que `file` já vem preenchido -- print_help() não
+        # deve criar/usar sys.stdout nesse caso.
+        parser = ColoredArgumentParser(prog="qobuz-dl")
+        destino = io.StringIO()
+
+        parser.print_help(file=destino)
+
+        assert "qobuz-dl" in destino.getvalue()
+        assert capsys.readouterr().out == ""

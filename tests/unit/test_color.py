@@ -30,6 +30,7 @@ precisam, porque essas leem o estado atual a cada chamada.
 """
 
 import importlib
+import os
 import sys
 
 import pytest
@@ -262,3 +263,72 @@ class TestColorOnRegressao:
 
         assert mod.OFF == Style.RESET_ALL
         assert mod.OFF != Style.DIM
+
+
+# ---------------------------------------------------------------------
+# _find_config_file
+# ---------------------------------------------------------------------
+class TestFindConfigFile:
+    """CONFIG_DIR vem sempre preenchido pelo conftest.py pra suíte inteira
+    -- então `if not config_dir:` nunca era exercitado por NENHUM outro
+    teste do projeto. Aqui removemos CONFIG_DIR de propósito pra cobrir
+    os 4 caminhos que só acontecem quando ele está ausente de verdade
+    (o que acontece em uso real: CONFIG_DIR só existe pra viabilizar os
+    testes, não é uma variável que o programa normalmente espera)."""
+
+    def _limpar_env(self, monkeypatch):
+        for chave in ("QOBUZ_DL_IOS_HOME", "CONFIG_DIR", "HOME", "APPDATA"):
+            monkeypatch.delenv(chave, raising=False)
+
+    def test_com_qobuz_dl_ios_home_usa_ele_direto(self, monkeypatch):
+        self._limpar_env(monkeypatch)
+        monkeypatch.setenv("QOBUZ_DL_IOS_HOME", "/caminho/ios")
+
+        resultado = color._find_config_file()
+
+        assert resultado == os.path.join(
+            "/caminho/ios", "qobuz-dl", "config.ini"
+        )
+
+    def test_sem_ios_home_usa_home_barra_ponto_config(self, monkeypatch):
+        self._limpar_env(monkeypatch)
+        monkeypatch.setattr(os, "name", "posix")
+        monkeypatch.setenv("HOME", "/home/usuario")
+
+        resultado = color._find_config_file()
+
+        assert resultado == os.path.join(
+            "/home/usuario", ".config", "qobuz-dl", "config.ini"
+        )
+
+    def test_home_dentro_de_containers_ios_usa_pasta_documents(self, monkeypatch):
+        # Sandbox real de app iOS (quando QOBUZ_DL_IOS_HOME não foi
+        # setado por algum motivo) -- HOME aponta pra dentro de
+        # Containers/Data/Application, caso especial documentado no
+        # próprio código.
+        self._limpar_env(monkeypatch)
+        monkeypatch.setattr(os, "name", "posix")
+        monkeypatch.setenv(
+            "HOME",
+            "/private/var/mobile/Containers/Data/Application/ABC-123",
+        )
+
+        resultado = color._find_config_file()
+
+        assert resultado == os.path.join(
+            "/private/var/mobile/Containers/Data/Application/ABC-123",
+            "Documents",
+            "qobuz-dl",
+            "config.ini",
+        )
+
+    def test_windows_usa_appdata(self, monkeypatch):
+        self._limpar_env(monkeypatch)
+        monkeypatch.setattr(os, "name", "nt")
+        monkeypatch.setenv("APPDATA", "C:\\Users\\Fulano\\AppData\\Roaming")
+
+        resultado = color._find_config_file()
+
+        assert resultado == os.path.join(
+            "C:\\Users\\Fulano\\AppData\\Roaming", "qobuz-dl", "config.ini"
+        )

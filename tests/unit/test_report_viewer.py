@@ -150,6 +150,16 @@ class TestRenderizarFaixa:
         assert "Sem tradução PT" in out
         assert "Sincronizada" not in out and "Bilíngue" not in out
 
+    def test_letras_sucesso_sem_bilingue_e_traducao_disponivel_ausente(self):
+        # bilingue ausente (falsy) -> cai no elif; mas aqui
+        # "traducao_disponivel" também está ausente (None), então
+        # `is False` dá False -- o elif inteiro fica falso e pula direto
+        # pro `if letras.get("fonte")`, sem badge nenhum de tradução.
+        # Ramo diferente do teste anterior (lá o elif era verdadeiro).
+        out = rv._renderizar_faixa({"letras": {"situacao": "sucesso"}}, False)
+        assert "Sem tradução PT" not in out
+        assert "Sincronizada" not in out and "Bilíngue" not in out
+
     def test_letras_falha(self):
         out = rv._renderizar_faixa({"letras": {"situacao": "falha"}}, False)
         assert "Falha ao buscar letra" in out and "chip-err" in out

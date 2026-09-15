@@ -135,6 +135,13 @@ markers = [
 
 asyncio_mode = "auto"
 
+# Filtra avisos barulhentos que nao sao bugs do projeto
+filterwarnings = [
+    "ignore::DeprecationWarning:httpx",
+    "ignore::DeprecationWarning:tqdm",
+    "ignore::PendingDeprecationWarning",
+]
+
 [tool.coverage.run]
 source = ["qobuz_dl"]
 branch = true
@@ -159,12 +166,6 @@ exclude_also = [
     # real que devesse ser coberto.
 ]
 
-# Filtra avisos barulhentos que nao sao bugs do projeto
-filterwarnings = [
-    "ignore::DeprecationWarning:httpx",
-    "ignore::DeprecationWarning:tqdm",
-    "ignore::PendingDeprecationWarning",
-]
 
 # Exibe os 10 testes mais lentos quando a suite inteira roda
 # (util para perceber quando um teste unitario virou lento sem querer)

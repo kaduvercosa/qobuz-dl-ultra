@@ -23,7 +23,12 @@ from qobuz_dl.constants import (
     DEFAULT_MULTIPLE_DISC_TRACK,
     DEFAULT_TRACK,
 )
-from qobuz_dl.settings import QobuzDLSettings, _merge_bool_opt_in, _merge_bool_opt_out
+from qobuz_dl.settings import (
+    QobuzDLSettings,
+    _bounded_workers,
+    _merge_bool_opt_in,
+    _merge_bool_opt_out,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -259,3 +264,24 @@ class TestFromArgumentsConfigparser:
         dos outros booleans, que default pra False."""
         s = QobuzDLSettings.from_arguments_configparser(_args(), _config())
         assert s.embed_art is True
+
+
+class TestBoundedWorkers:
+    """_bounded_workers(value, default, maximum): normaliza valores de
+    concorrência. O caminho feliz (int válido, dentro do range) já é
+    exercitado indiretamente por outros testes -- faltava o valor que
+    não dá pra converter (`int(value)` explode) e cai no `except`."""
+
+    def test_valor_nao_numerico_cai_no_default(self):
+        assert _bounded_workers("abc", default=4, maximum=16) == 4
+
+    def test_valor_none_cai_no_default(self):
+        assert _bounded_workers(None, default=4, maximum=16) == 4
+
+    def test_valor_zero_ou_negativo_tambem_cai_no_default(self):
+        assert _bounded_workers(0, default=4, maximum=16) == 4
+        assert _bounded_workers(-5, default=4, maximum=16) == 4
+
+    def test_valor_valido_e_limitado_pelo_maximo(self):
+        assert _bounded_workers(999, default=4, maximum=16) == 16
+        assert _bounded_workers(8, default=4, maximum=16) == 8

@@ -164,6 +164,18 @@ class TestRenderStatsComDados:
         secoes = [c[1][0] for c in capturado if c[0] == "section"]
         assert "TOP ARTISTAS" not in secoes
 
+    def test_sem_bit_depths_nem_sample_rates_pula_essas_linhas(
+        self, monkeypatch, capturado
+    ):
+        # bit_depths/sample_rates vazios -> os dois `if` de exibição são
+        # falsos (nenhum teste existente deixava essas chaves vazias).
+        stats = _stats_completo(bit_depths={}, sample_rates={})
+        monkeypatch.setattr(stats_view, "get_stats", lambda db_path: stats)
+        render_stats("qualquer.db")
+        labels_kv = {c[1][0] for c in capturado if c[0] == "kv"}
+        assert "Bit depths" not in labels_kv
+        assert "Sample rates" not in labels_kv
+
     def test_dica_de_flag_aparece_so_quando_nao_pediu_todos_os_artistas(
         self, monkeypatch, capturado
     ):

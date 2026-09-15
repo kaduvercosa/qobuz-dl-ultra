@@ -1,3 +1,4 @@
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -23,9 +24,22 @@ def make_obj(tmp_path, monkeypatch, quality=6):
         embed_lyrics=True,
         lyrics_translation_lang="pt",
     )
+
+    # `Download.__init__` sempre cria um httpx.AsyncClient de verdade
+    # (abre contexto SSL e sockets), mesmo que o teste nunca use rede.
+    # Como a linha abaixo (`obj.http_session = object()`) sobrescreve essa
+    # referencia sem nunca chamar `aclose()`, cada chamada a make_obj()
+    # vazava um AsyncClient inteiro. Numa suite grande isso esgota o limite
+    # de file descriptors do processo -- e' a causa do
+    # "OSError: [Errno 24] Too many open files" visto no a-Shell.
+    # Trocamos o AsyncClient por um objeto leve ANTES de instanciar Download,
+    # entao nenhum socket/SSL real chega a ser aberto por este teste.
+    monkeypatch.setattr(downloader.httpx, "AsyncClient", lambda *a, **k: object())
+
     obj = downloader.Download(
         SimpleNamespace(), "track-1", str(tmp_path), quality, settings=settings
     )
+
     obj.track_format = "{track_number} - {track_title}"
     obj.embed_art = False
     obj.http_session = object()
@@ -63,7 +77,6 @@ async def test_sample_url_creates_missing_placeholder(monkeypatch, tmp_path):
     result = await obj._download_and_tag(
         str(tmp_path), 1, {"url": "initial"}, metadata(), metadata(), True, False
     )
-
     assert result is False
     assert len(missing) == 1
 
@@ -95,7 +108,6 @@ async def test_failed_direct_download_without_segment_template(monkeypatch, tmp_
     result = await obj._download_and_tag(
         str(tmp_path), 1, {"url": "initial"}, metadata(), metadata(), True, False
     )
-
     assert result is False
     assert calls == ["direct", "direct"]
 
@@ -108,7 +120,7 @@ async def test_tag_failure_returns_false(monkeypatch, tmp_path):
         return {"url": "direct"}
 
     async def download(url, filename, desc, **kwargs):
-        open(filename, "wb").write(b"audio")
+        Path(filename).write_bytes(b"audio")
 
     def failing_tag(*args, **kwargs):
         raise RuntimeError("bad tags")
@@ -120,7 +132,6 @@ async def test_tag_failure_returns_false(monkeypatch, tmp_path):
     result = await obj._download_and_tag(
         str(tmp_path), 1, {"url": "initial"}, metadata(), metadata(), True, False
     )
-
     assert result is False
 
 
@@ -134,10 +145,10 @@ async def test_integrity_failure_emits_failed_event(monkeypatch, tmp_path):
         return {"url": "direct"}
 
     async def download(url, filename, desc, **kwargs):
-        open(filename, "wb").write(b"audio")
+        Path(filename).write_bytes(b"audio")
 
     def tag(src, root, final, *args, **kwargs):
-        open(final, "wb").write(b"tagged")
+        Path(final).write_bytes(b"tagged")
 
     def invalid(*args, **kwargs):
         return False, "invalid audio"
@@ -155,6 +166,5 @@ async def test_integrity_failure_emits_failed_event(monkeypatch, tmp_path):
     result = await obj._download_and_tag(
         str(tmp_path), 1, {"url": "initial"}, metadata(), metadata(), True, False
     )
-
     assert result is False
     assert any(args[1] == "track_failed" for args, kwargs in events)

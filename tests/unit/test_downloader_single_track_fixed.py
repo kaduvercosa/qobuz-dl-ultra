@@ -28,6 +28,7 @@ def make_obj(tmp_path, monkeypatch):
         pl_success=0,
         pl_skipped=0,
     )
+    monkeypatch.setattr(downloader.httpx, "AsyncClient", lambda *a, **k: object())
     obj = downloader.Download(
         SimpleNamespace(), "track-1", str(tmp_path), 6, settings=settings
     )

@@ -24,6 +24,7 @@ def make_obj(tmp_path, monkeypatch):
         lyrics_translation_lang="pt",
     )
     client = SimpleNamespace()
+    monkeypatch.setattr(downloader.httpx, "AsyncClient", lambda *a, **k: object())
     obj = downloader.Download(
         client, "track-1", str(tmp_path), 6, settings=settings
     )
