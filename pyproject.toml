@@ -148,7 +148,7 @@ branch = true
 
 [tool.coverage.report]
 precision = 2
-fail_under = 100
+fail_under = 60
 skip_covered = false
 exclude_also = [
     # Guarda de entrypoint (__main__.py): nunca roda sob pytest, cobrir

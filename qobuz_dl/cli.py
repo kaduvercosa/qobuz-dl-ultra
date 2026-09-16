@@ -10,7 +10,6 @@
 import argparse
 import asyncio
 import configparser
-import getpass
 import glob
 import io
 import json
@@ -300,7 +299,7 @@ def _pick_accent_color() -> str:
     return rgb
 
 
-def _reset_config(config_file: str):
+async def _reset_config(config_file: str):
     """Run the interactive configuration wizard and save the result to config_file."""
     if ui.width() >= 41:
         logging.info(f"\n{BG}[ QOBUZ-DL-ULTRA - CONFIGURAÇÃO INICIAL ]{OFF}")
@@ -327,7 +326,7 @@ def _reset_config(config_file: str):
         f"{C_ACCENT}[!] Obtenha seu Token no navegador (F12 > Application/Storage > Local Storage > token).{OFF}"
     )
 
-    auth_token = getpass.getpass("Cole o token do seu navegador aqui:\n- ").strip()
+    auth_token = input("Cole o token do seu navegador aqui:\n- ").strip()
     config["qobuz"]["password"] = ""
 
     ui.emit(f"\n{C_ACCENT}[?] Armazenamento de Senhas (OS Keyring):{OFF}")
@@ -383,7 +382,17 @@ def _reset_config(config_file: str):
         ui.emit(
             f"\n{C_ACCENT}[!] Para usar o Genius como fallback, insira seu API Token (Enter para pular e usar apenas LRCLIB):{OFF}"
         )
-        genius_token = getpass.getpass("Genius API Token:\n- ").strip()
+        # ANTES: getpass.getpass(...) -- tenta abrir /dev/tty diretamente
+        # pra esconder o que é digitado. Em terminais sandboxed como o
+        # a-Shell no iOS (que não expõe um /dev/tty POSIX de verdade),
+        # isso trava silenciosamente ou não registra o Enter -- o usuário
+        # aperta Enter e nada acontece, sem nenhum erro visível. É o
+        # ÚNICO uso de getpass no wizard inteiro; todo o resto (inclusive
+        # a pergunta de idioma logo acima) já usa input() sem problema.
+        # Um token de API do Genius também não tem o mesmo nível de
+        # sensibilidade de uma senha de conta -- a própria Qobuz nem pede
+        # senha direta neste fluxo (ver comentário duas perguntas acima).
+        genius_token = input("Genius API Token:\n- ").strip()
     else:
         config["qobuz"]["lyrics_translation_lang"] = "pt"
 
@@ -424,9 +433,38 @@ def _reset_config(config_file: str):
     logging.info(
         f"\n{C_ACCENT}Obtendo credenciais da API via [bundle.js]. Por favor, aguarde...{OFF}"
     )
-    bundle = Bundle()
-    config["qobuz"]["app_id"] = str(bundle.get_app_id())
-    config["qobuz"]["secrets"] = ",".join(bundle.get_secrets().values())
+    bundle = await Bundle.create()
+    fetched_app_id = str(bundle.get_app_id())
+    fetched_secrets = [s for s in bundle.get_secrets().values() if s]
+    config["qobuz"]["app_id"] = fetched_app_id
+    config["qobuz"]["secrets"] = ",".join(fetched_secrets)
+    logging.info(f"{GREEN}[+] app_id e secrets obtidos com sucesso.{OFF}")
+
+    # app_id/secrets valerem não garante que o e-mail/token DO USUÁRIO
+    # estão certos -- são duas coisas independentes (a API em si vs. a
+    # conta dele nela). Testa o login de verdade aqui, com as credenciais
+    # que a pessoa acabou de colar, e mostra sucesso/falha antes de
+    # seguir -- é bem melhor descobrir um token errado/expirado agora do
+    # que só na primeira tentativa de download.
+    logging.info(
+        f"\n{C_ACCENT}Testando login com o e-mail e o token informados...{OFF}"
+    )
+    from qobuz_dl.qopy import Client as _Client
+
+    try:
+        _test_client = await _Client.create(
+            email, "", fetched_app_id, fetched_secrets, user_auth_token=auth_token
+        )
+        await _test_client.close()
+        logging.info(
+            f"{GREEN}[+] Login realizado com sucesso! Suas credenciais estão corretas.{OFF}"
+        )
+    except Exception as e:
+        logging.info(
+            f"{RED}[!] Falha ao logar com este e-mail/token: {e}{OFF}\n"
+            f"{YELLOW}[!] A configuração foi salva mesmo assim -- confira seu e-mail/token "
+            f"e rode 'qdl -r' de novo (ou 'qdl auth -l') se precisar corrigi-los.{OFF}"
+        )
 
     config["qobuz"]["track_format"] = "{track_number} - {track_title}"
     config["qobuz"]["fallback_folder_format"] = "{album_artist} - {album_title}"
@@ -600,7 +638,7 @@ async def _auth_command(
             config.set(section, "email", email)
 
         ui.emit(f"\n{CYAN}[!] Cole o novo Token de autenticação do seu navegador:{OFF}")
-        new_token = getpass.getpass("- ").strip()
+        new_token = input("- ").strip()
 
         if not new_token:
             ui.warn("Token vazio. Operação cancelada.")
@@ -1114,12 +1152,12 @@ def _print_welcome_screen():
     ui.rule("=")
 
 
-def _initial_checks():
+async def _initial_checks():
     """Check if config exists, run wizard if needed, and display welcome screen if no args given."""
     if not os.path.isdir(CONFIG_PATH) or not os.path.isfile(CONFIG_FILE):
         os.makedirs(CONFIG_PATH, exist_ok=True)
         if "-r" not in sys.argv and "--reset" not in sys.argv:
-            _reset_config(CONFIG_FILE)
+            await _reset_config(CONFIG_FILE)
 
     if len(sys.argv) < 2:
         _print_welcome_screen()
@@ -1181,7 +1219,7 @@ def check_for_updates():
 # ==============================================================================
 async def async_main():
     """Main async entry point: initialize, parse arguments, route to commands, and manage client lifecycle."""
-    _initial_checks()
+    await _initial_checks()
 
     async def _async_check_updates():
         """Background task to check for updates on GitHub without blocking the main flow."""
@@ -1343,7 +1381,7 @@ async def async_main():
     )
 
     if arguments.reset:
-        _reset_config(CONFIG_FILE)
+        await _reset_config(CONFIG_FILE)
         sys.exit(0)
 
     if arguments.show_config:
@@ -1569,6 +1607,14 @@ async def async_main():
             directory_to_use = "\\\\?\\" + directory_to_use
 
     settings = QobuzDLSettings.from_arguments_configparser(arguments, config)
+    # BUGFIX: from_arguments_configparser() lê config[section]["user_auth_token"],
+    # mas em NENHUM lugar deste arquivo gravamos o token sob esse nome -- o
+    # wizard de reset, o comando auth e o keyring usam todos "auth_token".
+    # Sem esta linha, `token` (já resolvido corretamente acima, com
+    # fallback pro keyring) nunca chegava em settings.user_auth_token, e
+    # a autenticação real do download sempre via token vazio mesmo com
+    # config.ini/keyring configurados certinho.
+    settings.user_auth_token = token
     settings.legacy_charmap = legacy_charmap
 
     formats_to_validate = {

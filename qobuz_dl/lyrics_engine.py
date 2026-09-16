@@ -482,20 +482,20 @@ class LyricsEngine:
                         result["success"] = True
                         result["source"] = source_label
 
-                    is_bilingual_str = "BILINGUAL " if is_bilingual else ""
+                    is_bilingual_str = " BILINGUAL " if is_bilingual else ""
                     if embed_lyrics and save_lrc:
                         _tw(
-                            f" ✅ Letras {GREEN}{is_bilingual_str}{RESET}sincronizadas "
+                            f" ✅ Letras {GREEN}{is_bilingual_str}{RESET} sincronizadas "
                             f"injetadas e salvas em .lrc (via Qobuz)!"
                         )
                     elif save_lrc:
                         _tw(
-                            f" ✅ Letras {GREEN}{is_bilingual_str}{RESET}sincronizadas "
+                            f" ✅ Letras {GREEN}{is_bilingual_str}{RESET} sincronizadas "
                             f"salvas em .lrc (via Qobuz)!"
                         )
                     elif embed_lyrics:
                         _tw(
-                            f" ✅ Letras {GREEN}{is_bilingual_str}{RESET}sincronizadas "
+                            f" ✅ Letras {GREEN}{is_bilingual_str}{RESET} sincronizadas "
                             f"injetadas no metadata (via Qobuz)!"
                         )
                     else:
@@ -539,17 +539,17 @@ class LyricsEngine:
                     is_bilingual_str = "BILINGUAL " if is_bilingual else ""
                     if embed_lyrics and save_lrc:
                         _tw(
-                            f" ✅ Letras {GREEN}{is_bilingual_str}{RESET}padrao "
+                            f" ✅ Letras {GREEN}{is_bilingual_str}{RESET} padrao "
                             f"injetadas e salvas em .txt (via Qobuz)!"
                         )
                     elif save_lrc:
                         _tw(
-                            f" ✅ Letras {GREEN}{is_bilingual_str}{RESET}padrao "
+                            f" ✅ Letras {GREEN}{is_bilingual_str}{RESET} padrao "
                             f"salvas em .txt (via Qobuz)!"
                         )
                     elif embed_lyrics:
                         _tw(
-                            f" ✅ Letras {GREEN}{is_bilingual_str}{RESET}padrao "
+                            f" ✅ Letras {GREEN}{is_bilingual_str}{RESET} padrao "
                             f"injetadas no metadata (via Qobuz)!"
                         )
                     else:

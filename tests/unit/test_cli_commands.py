@@ -188,7 +188,7 @@ class TestCLIConfigHandling:
     @patch("qobuz_dl.cli.os.path.isdir", return_value=False)
     @patch("qobuz_dl.cli.os.path.isfile", return_value=False)
     @patch("qobuz_dl.qopy.Client.create", new_callable=AsyncMock)
-    def test_config_directory_creation(
+    async def test_config_directory_creation(
         self, mock_client_create, mock_isfile, mock_isdir, mock_makedirs
     ):
         """Verifica se o diretorio de config e criado quando necessario."""
@@ -203,8 +203,11 @@ class TestCLIConfigHandling:
 
         original_argv = sys.argv.copy()
         try:
+            # "-r" no argv faz _initial_checks() PULAR o await
+            # _reset_config(...) (ver o próprio código-fonte) -- resta só
+            # o os.makedirs, que é exatamente o que este teste verifica.
             sys.argv = ["qobuz-dl", "-r"]
-            cli._initial_checks()
+            await cli._initial_checks()
             mock_makedirs.assert_called()
         finally:
             sys.argv = original_argv
@@ -213,10 +216,15 @@ class TestCLIConfigHandling:
     @patch("qobuz_dl.cli.os.path.isdir", return_value=False)
     @patch("qobuz_dl.cli.os.path.isfile", return_value=False)
     @patch("qobuz_dl.qopy.Client.create", new_callable=AsyncMock)
-    def test_config_file_loading(
+    async def test_config_file_loading(
         self, mock_client_create, mock_isfile, mock_isdir, mock_makedirs
     ):
-        """Testa carregamento de arquivo de configuracao."""
+        """Testa carregamento de arquivo de configuracao.
+
+        Mesmo cenário do teste acima (o nome do teste é sobre "carregar
+        config", mas com isdir/isfile mockados pra False, o único efeito
+        observável de _initial_checks() aqui também é o os.makedirs --
+        não há chamada a Client.create dentro dessa função)."""
         mock_client = AsyncMock()
         mock_client.check_subscription = MagicMock(
             return_value={
@@ -229,7 +237,7 @@ class TestCLIConfigHandling:
         original_argv = sys.argv.copy()
         try:
             sys.argv = ["qobuz-dl", "-r"]
-            cli._initial_checks()
-            assert True
+            await cli._initial_checks()
+            mock_makedirs.assert_called()
         finally:
             sys.argv = original_argv
