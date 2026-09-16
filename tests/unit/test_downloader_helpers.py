@@ -72,3 +72,28 @@ def test_emit_progress_json_ligado(capsys):
     assert payload["id"] == "track-1"
     assert payload["status"] == "ok"
     assert isinstance(payload["ts"], float)
+
+
+def test_safe_print_junta_args_com_espaco_e_usa_ui_emit(monkeypatch):
+    chamadas = []
+    monkeypatch.setattr(
+        downloader.ui, "emit", lambda text="", end="\n": chamadas.append((text, end))
+    )
+
+    downloader.safe_print("a", 1, "b")
+    downloader.safe_print("x", end="")
+
+    assert chamadas == [("a 1 b", "\n"), ("x", "")]
+
+
+def test_get_description_inclui_bit_depth_e_sampling_rate():
+    assert (
+        downloader._get_description({"bit_depth": 24, "sampling_rate": 96}, "Musica")
+        == "Musica [24/96]"
+    )
+
+
+def test_get_description_com_multiple_adiciona_prefixo_de_cd():
+    assert (
+        downloader._get_description({}, "Musica", multiple=2) == "[CD 2] Musica [/]"
+    )
