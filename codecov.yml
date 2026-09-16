@@ -59,7 +59,6 @@ ignore:
   - "**/dist/**"
   - "**/build/**"
   - "**/*.egg-info/**"
-  - "tests/**/fixtures/**"
-  - "tests/**/data/**"
+  - "tests/**"
   - "setup.py"
   - "conftest.py"
