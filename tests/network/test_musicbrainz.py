@@ -24,12 +24,20 @@ preso a um event loop de um teste anterior. O fixture `mb` abaixo garante
 os dois limpos antes E depois de cada teste.
 """
 
+import asyncio
 from unittest.mock import AsyncMock
 
 import httpx
 import pytest
 
 from qobuz_dl import musicbrainz
+
+# Capturado aqui, na importação do módulo -- ANTES de qualquer fixture
+# rodar -- porque sem_throttle_de_verdade (autouse) substitui
+# asyncio.sleep globalmente (é o mesmo objeto módulo em todo o processo,
+# não uma cópia local de musicbrainz.py). TestCachePreenchidoEnquanto...
+# usa isso pra ceder a vez de verdade pra outra task, sem cair no mock.
+_sleep_de_verdade = asyncio.sleep
 
 URL_RECORDING = f"{musicbrainz._MB_BASE}/recording/"
 
@@ -71,6 +79,21 @@ def _resposta_com_recording(**overrides):
     }
     base.update(overrides)
     return base
+
+
+class TestSessaoExterna:
+    async def test_sessao_passada_por_fora_nao_e_fechada_pela_funcao(self, httpx_mock):
+        """own_session=False (sessão veio de fora) -- só quem CRIOU o
+        client é responsável por fechá-lo. Até aqui só havia teste do
+        caminho own_session=True (sem passar `session`)."""
+        httpx_mock.add_response(json=_resposta_com_recording())
+
+        async with httpx.AsyncClient() as client:
+            resultado = await musicbrainz.lookup_by_isrc(
+                "GBAYE0000077", session=client
+            )
+            assert resultado == ("track-mbid-123", "album-mbid-456", "artist-mbid-789")
+            assert client.is_closed is False
 
 
 class TestEntradaInvalida:
@@ -251,3 +274,27 @@ class TestThrottle:
 
         await musicbrainz.lookup_by_isrc("GBAYE0000009")
         sem_throttle_de_verdade.assert_not_awaited()
+
+
+class TestCachePreenchidoEnquantoEsperaSemaphore:
+    async def test_segunda_checagem_apos_semaphore_evita_requisicao(self, httpx_mock):
+        """Cobre a re-checagem de _MB_CACHE feita DEPOIS de conseguir o
+        semaphore (double-checked locking). Segura o slot antes da
+        lookup, deixa ela travar esperando, popula o cache "por fora"
+        (simulando outra task que terminou enquanto esperávamos) e só
+        então libera o semaphore. Sem essa segunda checagem, o código
+        cairia direto pra fazer uma requisição de verdade -- e como
+        nenhum httpx_mock.add_response() foi registrado aqui, isso faria
+        o teste falhar sozinho.
+        """
+        sem = musicbrainz._get_sem()
+        await sem.acquire()
+
+        tarefa = asyncio.create_task(musicbrainz.lookup_by_isrc("GBAYE0000099"))
+        await _sleep_de_verdade(0)
+
+        musicbrainz._MB_CACHE["GBAYE0000099"] = ("t-race", "a-race", "ar-race")
+        sem.release()
+
+        resultado = await tarefa
+        assert resultado == ("t-race", "a-race", "ar-race")

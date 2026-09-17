@@ -173,7 +173,13 @@ def process_folder_format_with_subdirs(
                 start_f = cleaned_part[:60].rstrip(" .\"-_'")
                 end_f = cleaned_part[-50:].lstrip(" .\"-_'")
                 cleaned_part = f"{start_f}...{end_f}"
-            if cleaned_part:
+            if cleaned_part:  # pragma: no branch -- qualquer `part` que
+                # dispare KeyError sempre sobra com texto (o nome do
+                # campo entre chaves nunca é removido por clean_filename,
+                # que só apaga separadores/pontuação e pares de colchetes
+                # SEM conteúdo -- um nome de campo válido em .format()
+                # sempre tem ao menos um caractere alfanumérico). O ramo
+                # "cleaned_part vazio" aqui parece código morto defensivo.
                 cleaned_parts.append(cleaned_part)
 
     final_path = os.path.join(*cleaned_parts) if cleaned_parts else ""

@@ -86,7 +86,15 @@ def _parse_txt(path: str) -> list[dict[str, str]]:
                 continue
 
             artist, title = _split_artist_title(line)
-            if title:
+            if title:  # pragma: no branch -- `line` aqui já passou por
+                # .strip() (linha 84) e pelo filtro de vazio/comentário
+                # acima, então nunca tem espaço nas pontas e nunca é "".
+                # Todo separador de _SEP_RE exige um espaço IMEDIATAMENTE
+                # depois do símbolo (`\s-\s`, `:\s` etc.) -- ou seja, se o
+                # separador bateu, sempre sobra pelo menos um caractere
+                # não-espaço depois dele (o que terminou a linha original,
+                # que não pode ser espaço por causa do strip()). title
+                # vazio parece matematicamente inalcançável aqui.
                 results.append({"artist": artist, "title": title})
 
     if not results:

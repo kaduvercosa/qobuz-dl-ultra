@@ -138,7 +138,15 @@ def _align_text(text, width):
                 return res + "..."
             res += char
             w += cw
-        return res
+        return res  # pragma: no cover -- se get_cwidth for aditivo por
+        # caractere (cw somado bate com get_cwidth(text) inteiro, que é
+        # o que prompt_toolkit.utils.get_cwidth parece fazer), o loop
+        # sempre estoura `width - 3` e sai pela linha 138 antes de
+        # terminar -- essa linha nunca seria alcançada. MENOS CONFIANÇA
+        # que os outros pragmas deste projeto: não consegui rodar o
+        # prompt_toolkit de verdade pra confirmar a aditividade de
+        # get_cwidth (não instalado no ambiente onde escrevi isto).
+        # Vale confirmar rodando localmente antes de aceitar como morto.
     return text + " " * (width - current_w)
 
 

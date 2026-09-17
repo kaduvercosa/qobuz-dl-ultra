@@ -1122,7 +1122,7 @@ def _print_welcome_screen():
     ui.wrapped(
         f"{ACCENT}Help:{RESET} qobuz-dl <comando> --help "
         f"{MUTED}(lista todas as opções do comando){OFF} ",
-        indent=4,
+        indent=2,
     )
     ui.blank()
 

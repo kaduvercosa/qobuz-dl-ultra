@@ -499,6 +499,38 @@ class TestHandleDownloadId:
         assert linha["artist"] == "Artista Exemplo"
         assert linha["album"] == "Album Exemplo"
 
+    async def test_erro_de_banco_diferente_de_integrity_e_logado_sem_propagar(
+        self, tmp_path, monkeypatch
+    ):
+        """O except sqlite3.IntegrityError (chave duplicada) já tinha
+        teste; faltava o `except sqlite3.Error` genérico logo abaixo --
+        outro tipo de erro de banco (disco cheio, arquivo bloqueado por
+        outro processo etc.) que também não pode derrubar o programa,
+        só logar e seguir."""
+        caminho = str(tmp_path / "downloads.db")
+        create_db(caminho)
+
+        class _ConexaoComErroGenerico:
+            async def execute(self, sql, params=()):
+                raise sqlite3.OperationalError("disco cheio")
+
+            async def commit(self):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *exc):
+                return False
+
+        monkeypatch.setattr(
+            db_module.aiosqlite, "connect", lambda *a, **k: _ConexaoComErroGenerico()
+        )
+
+        resultado = await handle_download_id(caminho, "id-x", add_id=True, quality=27)
+
+        assert resultado is None
+
 
 # ---------------------------------------------------------------------------
 # get_stats()
