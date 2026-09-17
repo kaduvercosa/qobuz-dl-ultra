@@ -1132,7 +1132,7 @@ def _print_welcome_screen():
     for name, aliases, help_text in _extract_subcommands(parser):
         label = name if not aliases else f"{name} ({aliases})"
         desc = _COMMAND_DESCRIPTIONS_PT.get(name, help_text or "")
-        ui.emit(f"  {ACCENT}{label}{OFF}")
+        ui.wrapped(f"{ACCENT}{label}{OFF}", indent=2)
         ui.wrapped(desc, indent=4)
     ui.blank()
 

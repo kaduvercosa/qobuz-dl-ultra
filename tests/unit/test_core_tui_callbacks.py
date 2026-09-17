@@ -134,3 +134,42 @@ async def test_callback_enter_lista_vazia_nao_sai(monkeypatch):
     event = Event()
     _enter_handler()(event)
     assert event.app.exited is None
+
+
+async def test_callbacks_space_e_t_com_lista_vazia_nao_quebram(monkeypatch):
+    """Guardas `if not options_dicts: return` de space/t (linhas 193 e
+    203) -- só o de enter (213) tinha teste com lista vazia."""
+    App.result = None
+    monkeypatch.setattr(core, "Application", App)
+
+    await core._tui_select("Título", [], is_multi=True)
+
+    _space_handler()(Event())  # não pode levantar
+    _handler("t")(Event())  # não pode levantar
+
+
+async def test_callback_enter_modo_single_confirma_item_sob_cursor(monkeypatch):
+    """Modo não-multi (is_multi=False): enter confirma o item sob o
+    cursor direto, sem a lógica de seleção múltipla (linha 222) -- os
+    testes existentes de single-select só cobriam escape/ctrl-c."""
+    App.result = None
+    monkeypatch.setattr(core, "Application", App)
+
+    await core._tui_select("Título", ["a", "b"], is_multi=False)
+
+    event = Event()
+    _enter_handler()(event)
+
+    assert event.app.exited == (("a", 0), None)
+
+
+async def test_run_async_devolvendo_excecao_e_relancada(monkeypatch):
+    """app.run_async() pode devolver a própria exceção em vez de
+    levantá-la (é assim que escape/ctrl-c saem do Application de
+    verdade) -- _tui_select precisa relançar isso, não devolver a
+    exceção como se fosse um resultado válido."""
+    App.result = RuntimeError("cancelado pelo usuário")
+    monkeypatch.setattr(core, "Application", App)
+
+    with pytest.raises(RuntimeError, match="cancelado pelo usuário"):
+        await core._tui_select("Título", ["a"], is_multi=False)
