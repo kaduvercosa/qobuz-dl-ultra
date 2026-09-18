@@ -12,15 +12,22 @@ from datetime import date, datetime
 from typing import Any
 
 import httpx
-from cryptography.hazmat.primitives import hashes, padding
-from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from tenacity import (
     AsyncRetrying,
     retry_if_exception,
     stop_after_attempt,
     wait_exponential,
 )
+
+# Import condicional do cryptography para compatibilidade com iOS/a-Shell
+try:
+    from cryptography.hazmat.primitives import hashes, padding
+    from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+    from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+    _CRYPTO_AVAILABLE = True
+except ImportError:
+    hashes = padding = Cipher = algorithms = modes = HKDF = None
+    _CRYPTO_AVAILABLE = False
 
 from qobuz_dl import ui
 from qobuz_dl.color import GREEN
@@ -34,11 +41,9 @@ from qobuz_dl.exceptions import (
     NoActiveSubscriptionError,
 )
 
-
 Bundle: Any = None
 try:
     from qobuz_dl.bundle import Bundle as _Bundle
-
     Bundle = _Bundle
 except ImportError:
     pass
@@ -46,13 +51,9 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
-# Núcleo do cliente Qobuz: autentica, assina chamadas, gerencia sessão e chaves AES.
 class Client:
     """
     O cliente principal da API Qobuz para o Qobuz-DL Ultra Edition.
-    Lida com autenticação segura, Anti-Ban Stealth Spoofing (WAF bypass), criptográfico
-    Desembrulhamento de token para fluxos de segmento do Web Player e pesquisa dinâmica de metadados.
-    Suporta autenticação padrão de e-mail/senha e injeção segura de user_auth_token.
     """
 
     def __init__(self):
@@ -73,9 +74,7 @@ class Client:
         force_english=True,
         **kwargs,
     ):
-        """
-        Fábrica assíncrona. Inicializa o cliente API e configura a sessão resiliente.
-        """
+        """Fabrica assincrona."""
         self = cls()
         print(f"{YELLOW}Logando...{OFF}", end="", flush=True)
         self.secrets = secrets
@@ -95,12 +94,12 @@ class Client:
                         )
                 except Exception:
                     ui.emit(
-                        f"\r{YELLOW} [!] ID não atualizado (usando padrão).{OFF}\033[K"
+                        f"\r{YELLOW} [!] ID nao atualizado (usando padrao).{OFF}\033[K"
                     )
-        else:
-            logger.info(
-                f"\r{GREEN}[+] Usando ID legado personalizado: {self.id}{OFF}\033[K"
-            )
+            else:
+                logger.info(
+                    f"\r{GREEN}[+] Usando ID legado personalizado: {self.id}{OFF}\033[K"
+                )
 
         headers = {}
         if self.force_english:
@@ -120,13 +119,14 @@ class Client:
                     "X-App-Id": self.id,
                 }
             )
+        else:
+            headers.update(
+                {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                    "X-App-Id": self.id,
+                }
+            )
 
-        headers.update(
-            {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                "X-App-Id": self.id,
-            }
-        )
         client_timeout = httpx.Timeout(None, connect=15.0, read=90.0)
         limits = httpx.Limits(max_keepalive_connections=10, max_connections=50)
 
@@ -151,7 +151,6 @@ class Client:
         return self
 
     async def close(self):
-        """Fecha a sessão httpx subjacente."""
         if self.session is not None:
             await self.session.aclose()
 
@@ -162,7 +161,6 @@ class Client:
         await self.close()
 
     def _normalize_json_strings(self, obj):
-        """Normalize JSON string encodings."""
         if isinstance(obj, str):
             if "..." in obj and "://" not in obj:
                 obj = obj.replace("...", "…")
@@ -175,49 +173,47 @@ class Client:
             return obj
 
     async def auth(self, email, pwd, user_auth_token=None):
-        """
-        Autentica a sessão do usuário com o Qobuz e recupera os metadados da conta.
-        """
         if user_auth_token:
             self.uat = user_auth_token
+            if self.session is not None:
+                self.session.headers.update({"X-User-Auth-Token": self.uat})
         elif len(pwd) > 60:
             self.uat = pwd
+            if self.session is not None:
+                self.session.headers.update({"X-User-Auth-Token": self.uat})
         else:
             usr_info = await self.api_call("user/login", email=email, pwd=pwd)
             if not usr_info.get("user", {}).get("credential", {}).get("parameters"):
                 logger.info(
-                    f"{YELLOW}[!] Conta gratuita detectada ou validação ignorada.{OFF}"
+                    f"{YELLOW}[!] Conta gratuita detectada ou validacao ignorada.{OFF}"
                 )
             self.uat = usr_info["user_auth_token"]
 
-        if self.session is not None:
-            self.session.headers.update({"X-User-Auth-Token": self.uat})
+            if self.session is not None:
+                self.session.headers.update({"X-User-Auth-Token": self.uat})
 
-        try:
-            raw_user_info = await self.api_call("user/get")
-            self.user_info = raw_user_info.get("user", raw_user_info)
-            cred = self.user_info.get("credential") or {}
-            self.label = cred.get("parameters", {}).get("short_label") or cred.get(
-                "description", "Membro Qobuz"
-            )
-            self.user_id = self.user_info.get("id")
-
-            sub = self.check_subscription()
-            if sub["is_active"]:
-                logger.info(f"{GREEN}Logado: OK (Assinatura: {self.label}){OFF}")
-            else:
-                logger.warning(
-                    f"{YELLOW}[!] Logado: OK, mas a assinatura está {RED}INATIVA{RESET} ({sub['status']}){OFF}"
+            try:
+                raw_user_info = await self.api_call("user/get")
+                self.user_info = raw_user_info.get("user", raw_user_info)
+                cred = self.user_info.get("credential") or {}
+                self.label = cred.get("parameters", {}).get("short_label") or cred.get(
+                    "description", "Membro Qobuz"
                 )
-        except Exception:
-            logger.info(f"{YELLOW}[!] Validação do perfil ignorada.{OFF}")
-            self.label = "Studio"
-            self.user_id = None
+                self.user_id = self.user_info.get("id")
+
+                sub = self.check_subscription()
+                if sub["is_active"]:
+                    logger.info(f"{GREEN}Logado: OK (Assinatura: {self.label}){OFF}")
+                else:
+                    logger.warning(
+                        f"{YELLOW}[!] Logado: OK, mas a assinatura esta {RED}INATIVA{RESET} ({sub['status']}){OFF}"
+                    )
+            except Exception:
+                logger.info(f"{YELLOW}[!] Validacao do perfil ignorada.{OFF}")
+                self.label = "Studio"
+                self.user_id = None
 
     def check_subscription(self) -> dict[str, Any]:
-        """
-        Valida o estado da assinatura a partir dos dados do usuário (user_info).
-        """
         user_info = self.user_info or {}
         sub = user_info.get("subscription")
 
@@ -251,8 +247,6 @@ class Client:
                     str(start_date)[:10], "%Y-%m-%d"
                 ).strftime("%d/%m/%Y")
             except ValueError:
-                # Data em formato inesperado -- mantem a string original
-                # (start_date_br ja' foi inicializado com ela acima).
                 pass
 
         end_date_br = end_date
@@ -293,13 +287,11 @@ class Client:
         }
 
     async def get_user_profile(self) -> dict[str, Any]:
-        """Consulta dados atualizados do endpoint user/get."""
         raw = await self.api_call("user/get")
         self.user_info = raw.get("user", raw)
         return self.user_info
 
     def _modern_sig(self, epoint, params, sec):
-        """Generate modern signature for Qobuz API requests."""
         object_, method = epoint.split("/")
         r_sig = [object_, method]
         for key in sorted(params):
@@ -313,11 +305,14 @@ class Client:
 
     @staticmethod
     def _b64url_decode(value):
-        """Decode base64url-encoded string."""
         return base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
 
     def _derive_session_key(self):
         """Derive session key from Qobuz API response."""
+        if not _CRYPTO_AVAILABLE:
+            raise RuntimeError(
+                "cryptography não está disponivel. HKDF requer extensoes nativas."
+            )
         salt, info = self.session_infos.split(".")
         hkdf = HKDF(
             algorithm=hashes.SHA256(),
@@ -329,6 +324,10 @@ class Client:
 
     def _unwrap_track_key(self, key_token):
         """Unwrap encrypted track key."""
+        if not _CRYPTO_AVAILABLE:
+            raise RuntimeError(
+                "cryptography nao esta disponivel. AES-CBC requer extensoes nativas."
+            )
         _, wrapped, iv = key_token.split(".")
         decryptor = Cipher(
             algorithms.AES(self.session_key), modes.CBC(self._b64url_decode(iv))
@@ -338,7 +337,6 @@ class Client:
         return unpadder.update(padded) + unpadder.finalize()
 
     async def api_call(self, epoint, **kwargs):
-        """Make an API call to Qobuz with authentication."""
         if epoint == "user/login":
             if "user_auth_token" in kwargs and kwargs["user_auth_token"]:
                 params = {
@@ -363,7 +361,7 @@ class Client:
             fmt_id = kwargs["fmt_id"]
             if int(fmt_id) not in (5, 6, 7, 27):
                 raise InvalidQuality(
-                    "ID de qualidade inválido: escolha entre 5, 6, 7 or 27"
+                    "ID de qualidade invalido: escolha entre 5, 6, 7 or 27"
                 )
             params = {
                 "track_id": track_id,
@@ -375,7 +373,6 @@ class Client:
             r_sig = f"trackgetFileUrlformat_id{fmt_id}intentstreamtrack_id{track_id}{unix}{sec_to_use}"
             params["request_ts"] = unix
             params["request_sig"] = hashlib.md5(r_sig.encode()).hexdigest()
-
         elif epoint == "session/start":
             params = {"profile": "qbz-1"}
             params["request_ts"] = int(time.time())
@@ -387,7 +384,7 @@ class Client:
             fmt_id = kwargs["fmt_id"]
             if int(fmt_id) not in (6, 7, 27):
                 raise InvalidQuality(
-                    "ID de qualidade inválido: escolha entre 6, 7 or 27"
+                    "ID de qualidade invalido: escolha entre 6, 7 or 27"
                 )
             params = {
                 "track_id": track_id,
@@ -400,9 +397,7 @@ class Client:
             )
         elif epoint == "track/lyricsUrl":
             track_id = kwargs["track_id"]
-            params = {
-                "track_id": track_id,
-            }
+            params = {"track_id": track_id}
             params["request_ts"] = int(time.time())
             params["request_sig"] = self._modern_sig(
                 epoint, params, kwargs.get("sec", self.sec)
@@ -423,16 +418,13 @@ class Client:
             }
         else:
             params = {"app_id": self.id}
-
             if getattr(self, "force_english", True):
                 params["lang"] = "en"
                 params["locale"] = "en_US"
-
             val_id = kwargs.get("id")
             for k, v in kwargs.items():
                 if k not in ["id", "sec", "fmt_id"] and v is not None:
                     params[k] = v
-
             if epoint == "album/get":
                 params["album_id"] = val_id
             elif epoint == "track/get":
@@ -475,13 +467,6 @@ class Client:
         else:
             method, req_kwargs = "get", {"params": params}
 
-        # Antes: loop de retry escrito na mao (_retry_delays = (1, 3, 6)),
-        # duplicando o que downloader.py ja resolve com tenacity (dependencia
-        # ja declarada no projeto). Agora usa AsyncRetrying no mesmo estilo
-        # das outras retentativas do projeto (ver downloader.py). Só
-        # Erros de transporte sempre acionam nova tentativa. GETs e o início
-        # idempotente de sessão também repetem em 429/5xx; POSTs mutáveis não,
-        # para evitar duplicar favoritos ou playlists após resposta incerta.
         mutable_endpoints = {
             "favorite/create",
             "playlist/create",
@@ -489,7 +474,6 @@ class Client:
         }
 
         def _retryable(exc):
-            """Retry decorator for network operations."""
             if isinstance(exc, (httpx.RequestError, asyncio.TimeoutError)):
                 if epoint not in mutable_endpoints:
                     return True
@@ -514,17 +498,11 @@ class Client:
                 n = attempt.retry_state.attempt_number
                 if n > 1:
                     logger.debug(f"Retentativa de rede em '{epoint}' ({n}/4)...")
-
-                resp = await self.session.request(
-                    method, self.base + epoint, **req_kwargs
-                )
-
+                resp = await self.session.request(method, self.base + epoint, **req_kwargs)
                 if epoint == "user/login" and resp.status_code == 400:
                     text = resp.text
                     if "invalid" in text.lower():
                         raise AuthenticationError("Invalid email or password.")
-                    else:
-                        logger.info(f"{GREEN}Logged: OK{OFF}")
                 elif (
                     epoint
                     in [
@@ -536,74 +514,52 @@ class Client:
                     and resp.status_code == 400
                 ):
                     body = resp.json()
-                    raise InvalidAppSecretError(
-                        f"Invalid app secret: {body}.\n" + RESET
-                    )
-
+                    raise InvalidAppSecretError(f"Invalid app secret: {body}.\n" + RESET)
                 if epoint == "user/get" and resp.status_code == 400:
                     return {}
-
                 resp.raise_for_status()
                 data = resp.json()
-
                 return self._normalize_json_strings(data)
 
     async def multi_meta(self, epoint, key, id, type):
-        """Fetch metadata for multiple items in batch."""
         offset = 0
         limit = 50
-
         while True:
-            j = await self.api_call(
-                epoint, id=id, offset=offset, limit=limit, type=type
-            )
+            j = await self.api_call(epoint, id=id, offset=offset, limit=limit, type=type)
             res = j[type] if type and type in j else j
-
             items_key = "tracks" if "playlist" in epoint else "albums"
             items = res.get(items_key, {}).get("items", [])
-
             if not items:
                 break
-
             yield res
-
             offset += len(items)
             total_available = res.get(items_key, {}).get("total", res.get(key, 0))
             if offset >= total_available:
                 break
 
     async def get_track_meta(self, id):
-        """Get metadata for a single track by ID."""
         return await self.api_call("track/get", id=id)
 
     async def get_track_lyrics_url(self, id):
-        """Get lyrics URL for a track."""
         return await self.api_call("track/lyricsUrl", track_id=id)
 
     async def get_track_ids_from_list(self, tracks_list: list) -> list:
-        """Extract track IDs from a playlist/favorites list."""
         from qobuz_dl import fuzzy
-
         ui.emit(
-            f"{CYAN}[*] Correspondência de faixas Last.fm com o banco de dados Qobuz (correspondência Fuzzy e modo interativo ativado)...{OFF}"
+            f"{CYAN}[*] Correspondencia de faixas Last.fm com o banco de dados Qobuz (correspondencia Fuzzy e modo interativo ativado)...{OFF}"
         )
         valid_track_ids = []
-
         AUTO_ACCEPT_THRESHOLD = 0.75
         PROMPT_THRESHOLD = 0.60
-
         for item in tracks_list:
             target_artist = item["artist"].lower()
             target_title = item["title"].lower()
             query = f"{item['artist']} {item['title']}"
-
             try:
                 search_results = await self.search_tracks(query, limit=5)
-
                 best_match_id = None
                 best_match_name = ""
                 highest_ratio = 0.0
-
                 if (
                     search_results
                     and "tracks" in search_results
@@ -614,61 +570,47 @@ class Client:
                             "name", "Unknown"
                         )
                         q_title_raw = q_track.get("title", "Unknown")
-
                         q_artist = q_artist_raw.lower()
                         q_title = q_title_raw.lower()
-
                         target_str = f"{target_artist} {target_title}"
                         q_str = f"{q_artist} {q_title}"
-
                         ratio = fuzzy.ratio(target_str, q_str)
-
                         if ratio > highest_ratio:
                             highest_ratio = ratio
                             best_match_id = q_track["id"]
                             best_match_name = f"{q_artist_raw} - {q_title_raw}"
-
                     if highest_ratio >= AUTO_ACCEPT_THRESHOLD and best_match_id:
                         valid_track_ids.append(best_match_id)
-
                     elif highest_ratio >= PROMPT_THRESHOLD and best_match_id:
                         ui.emit(
-                            f"\n{YELLOW}[?] Correspondência limítrofe detectada "
-                            f"({highest_ratio * 100:.0f}% de semelhança){OFF}"
+                            f"\n{YELLOW}[?] Correspondencia limetrofe detectada "
+                            f"({highest_ratio * 100:.0f}% de semelhanca){OFF}"
                         )
-                        ui.emit(
-                            f"    Target (Last.fm): {item['artist']} - {item['title']}"
-                        )
-                        ui.emit(f"    Found  (Qobuz)  : {best_match_name}")
-
+                        ui.emit(f" Target (Last.fm): {item['artist']} - {item['title']}")
+                        ui.emit(f" Found (Qobuz) : {best_match_name}")
                         choice = (
                             input(
-                                f"{CYAN}    Você quer baixar esta faixa de qualquer maneira? [y/n]: {OFF}"
+                                f"{CYAN} Voce quer baixar esta faixa de qualquer maneira? [y/n]: {OFF}"
                             )
                             .strip()
                             .lower()
                         )
-
                         if choice == "y":
                             valid_track_ids.append(best_match_id)
-                            ui.emit(f"{GREEN}    [+] Faixa aceita manualmente.{OFF}")
+                            ui.emit(f"{GREEN} [+] Faixa aceita manualmente.{OFF}")
                         else:
-                            ui.emit(f"{RED}    [-] Faixa ignorada manualmente.{OFF}")
-
+                            ui.emit(f"{RED} [-] Faixa ignorada manualmente.{OFF}")
                     else:
                         ui.emit(
-                            f"{YELLOW}[!] Pulando: '{query}' (A melhor combinação foi apenas "
+                            f"{YELLOW}[!] Pulando: '{query}' (A melhor combinacao foi apenas "
                             f"{highest_ratio * 100:.0f}% similar){OFF}"
                         )
-
                 else:
                     ui.emit(
                         f"{YELLOW}[!] Pulando (Sem resultados no Qobuz para): '{query}'{OFF}"
                     )
-
             except Exception as e:
                 ui.emit(f"{RED}[!] Erro ao procurar por '{query}': {e}{OFF}")
-
         ui.emit(
             f"\n{GREEN}[+] Combinado com sucesso {len(valid_track_ids)} "
             f"Fora de {len(tracks_list)} faixas!{OFF}"
@@ -676,48 +618,38 @@ class Client:
         return valid_track_ids
 
     async def search_by_isrc(self, isrc: str):
-        """Search for track by ISRC code."""
         if not isrc:
             return None
         try:
             results = await self.api_call(
-                "catalog/search",
-                query=isrc.strip().upper(),
-                type="tracks",
-                limit=1,
+                "catalog/search", query=isrc.strip().upper(), type="tracks", limit=1
             )
             items = (results or {}).get("tracks", {}).get("items", [])
             if items:
                 return items[0].get("id")
         except Exception as e:
             logger.debug(f"Falha na pesquisa ISRC para {isrc}: {e}")
-        return None
+            return None
 
     async def search_by_upc(self, upc: str):
-        """Search for album by UPC barcode."""
         if not upc:
             return None
         try:
             results = await self.api_call(
-                "catalog/search",
-                query=upc.strip(),
-                type="albums",
-                limit=1,
+                "catalog/search", query=upc.strip(), type="albums", limit=1
             )
             items = (results or {}).get("albums", {}).get("items", [])
             if items:
                 return items[0].get("id")
         except Exception as e:
             logger.debug(f"Falha na pesquisa UPC para {upc}: {e}")
-        return None
+            return None
 
     async def match_external_tracks(self, tracks: list, auto: bool = False) -> list:
-        """Match external track list against Qobuz catalog."""
         matched_ids = []
         fuzzy_queue = []
         isrc_hits = 0
         isrc_misses = 0
-
         for track in tracks:
             isrc = (track.get("isrc") or "").strip().upper()
             if isrc:
@@ -727,29 +659,25 @@ class Client:
                     isrc_hits += 1
                     continue
                 isrc_misses += 1
-            fuzzy_queue.append(track)
-
+                fuzzy_queue.append(track)
         if isrc_hits or isrc_misses:
             logger.info(
                 f"{GREEN}[+] ISRC: {isrc_hits} match(es) exato(s){OFF}"
                 + (
-                    f", {YELLOW}{isrc_misses} miss(es) → fuzzy fallback{OFF}"
+                    f", {YELLOW}{isrc_misses} miss(es) -> fuzzy fallback{OFF}"
                     if isrc_misses
                     else ""
                 )
             )
-
         if fuzzy_queue:
             logger.info(
-                f"{CYAN}[*] Correspondência difusa {len(fuzzy_queue)} faixa(s)...{OFF}"
+                f"{CYAN}[*] Correspondencia difusa {len(fuzzy_queue)} faixa(s)...{OFF}"
             )
             fuzzy_ids = await self.get_track_ids_from_list(fuzzy_queue)
             matched_ids.extend(fuzzy_ids)
-
         return matched_ids
 
     async def search_albums(self, query, limit=20):
-        """Search for albums by query string."""
         try:
             return await self.api_call(
                 "catalog/search", query=query, type="albums", limit=limit
@@ -758,7 +686,6 @@ class Client:
             return {}
 
     async def search_tracks(self, query, limit=20):
-        """Search for tracks by query string."""
         try:
             return await self.api_call(
                 "catalog/search", query=query, type="tracks", limit=limit
@@ -769,13 +696,9 @@ class Client:
     async def create_qobuz_playlist(
         self, name: str, description: str = "", is_public: bool = False
     ):
-        """Create a new playlist on Qobuz."""
         try:
             resp = await self.api_call(
-                "playlist/create",
-                name=name,
-                description=description,
-                is_public=is_public,
+                "playlist/create", name=name, description=description, is_public=is_public
             )
             pl_id = str(resp.get("id") or resp.get("playlist", {}).get("id", ""))
             if pl_id:
@@ -790,7 +713,6 @@ class Client:
     async def add_tracks_to_qobuz_playlist(
         self, playlist_id: str, track_ids: list
     ) -> bool:
-        """Add tracks to an existing Qobuz playlist."""
         BATCH = 50
         success = True
         for i in range(0, len(track_ids), BATCH):
@@ -803,13 +725,12 @@ class Client:
                 )
             except Exception as e:
                 logger.info(
-                    f"{YELLOW}[!] Erro ao adicionar faixas à playlist {playlist_id}: {e}{OFF}"
+                    f"{YELLOW}[!] Erro ao adicionar faixas a playlist {playlist_id}: {e}{OFF}"
                 )
                 success = False
         return success
 
     async def search_playlists(self, query, limit=20):
-        """Search for playlists by query string."""
         try:
             return await self.api_call(
                 "catalog/search", query=query, type="playlists", limit=limit
@@ -818,7 +739,6 @@ class Client:
             return {}
 
     async def search_artists(self, query, limit=20):
-        """Search for artists by query string."""
         try:
             return await self.api_call(
                 "catalog/search", query=query, type="artists", limit=limit
@@ -827,32 +747,25 @@ class Client:
             return {}
 
     async def get_favorites(self, fav_type="albums", limit=100, offset=0):
-        """Get user's favorite albums, tracks, or artists."""
         try:
             return await self.api_call(
-                "favorite/getUserFavorites",
-                fav_type=fav_type,
-                limit=limit,
-                offset=offset,
+                "favorite/getUserFavorites", fav_type=fav_type, limit=limit, offset=offset
             )
         except Exception as e:
             logger.error(f"{RED}[!] API Error fetching favorites: {e}{OFF}")
             return {}
 
     async def add_favorite_album(self, album_id):
-        """Add an album to user's favorites."""
         return await self.api_call(
             "favorite/create", album_ids=str(album_id), artist_ids="", track_ids=""
         )
 
     async def add_favorite_track(self, track_id):
-        """Add a track to user's favorites."""
         return await self.api_call(
             "favorite/create", track_ids=str(track_id), album_ids="", artist_ids=""
         )
 
     async def add_favorite(self, item_id, item_type: str):
-        """Add an item to user's favorites (generic)."""
         if item_type == "track":
             return await self.add_favorite_track(item_id)
         elif item_type == "album":
@@ -861,30 +774,20 @@ class Client:
             raise ValueError(f"Tipo de favorito desconhecido: {item_type}")
 
     async def get_track_url(self, id, fmt_id, force_segments=False):
-        """
-        Recupera a URL de streaming ou download para uma faixa específica.
-        Bloqueia antecipadamente se a assinatura da conta estiver inativa.
-        """
         sub_info = self.check_subscription()
         if not sub_info["is_active"]:
             raise NoActiveSubscriptionError(
                 f"Assinatura inativa ou expirada ({sub_info['status']}). Download bloqueado."
             )
-
         if int(fmt_id) == 5:
             return await self.api_call("track/getFileUrl", id=id, fmt_id=fmt_id)
-
         if not force_segments:
             try:
                 track = await self.api_call("track/getFileUrl", id=id, fmt_id=fmt_id)
                 if "url" in track:
                     return track
             except Exception as e:
-                # Caminho normal falhou -- cai pro download segmentado
-                # abaixo de proposito (qualquer erro aqui e' motivo valido
-                # pra fallback), so' registra pra facilitar diagnostico.
                 logger.debug(f"track/getFileUrl falhou, caindo pro segmentado: {e}")
-
         if self.session_id is None:
             async with self._session_init_lock:
                 if self.session_id is None:
@@ -893,7 +796,6 @@ class Client:
                     self.session_infos = session["infos"]
                     self.session_key = self._derive_session_key()
                     self.session.headers.update({"X-Session-Id": self.session_id})
-
         track = await self.api_call("file/url", id=id, fmt_id=fmt_id)
         if "bits_depth" in track and "bit_depth" not in track:
             track["bit_depth"] = track["bits_depth"]
@@ -904,28 +806,21 @@ class Client:
         return track
 
     def get_artist_meta(self, id):
-        """Get metadata for an artist by ID."""
         return self.multi_meta("artist/get", "albums_count", id, None)
 
     def get_plist_meta(self, id):
-        """Get metadata for a playlist by ID."""
         return self.multi_meta("playlist/get", "tracks_count", id, None)
 
     def get_label_meta(self, id):
-        """Get metadata for a label by ID."""
         return self.multi_meta("label/get", "albums_count", id, None)
 
     async def get_album_meta(self, id):
-        """Get metadata for an album by ID."""
         return await self.api_call("album/get", id=id)
 
     async def cfg_setup(self):
-        """Configure client with app ID and secrets."""
         for secret in self.secrets:
             try:
-                await self.api_call(
-                    "track/getFileUrl", id=5966783, fmt_id=5, sec=secret
-                )
+                await self.api_call("track/getFileUrl", id=5966783, fmt_id=5, sec=secret)
                 self.sec = secret
                 break
             except Exception:

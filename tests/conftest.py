@@ -25,7 +25,6 @@ import os
 import sys
 import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock
 
 # Precisa acontecer antes de importar qobuz_dl: o pacote le' estas variaveis
 # no import, nao na primeira chamada.
@@ -60,19 +59,19 @@ RAIZ = Path(__file__).resolve().parent.parent
 if str(RAIZ) not in sys.path:
     sys.path.insert(0, str(RAIZ))
 
+# NOTA: O mock do cryptography foi REMOVIDO. Em builds recentes do a-Shell
+# (iOS/iPadOS), o pacote cryptography funciona corretamente porque vem
+# pre-compilado. O mock foi criado para contornar builds antigas onde o
+# cryptography nao funcionava, mas ele quebra os testes de criptografia real
+# (TestDeriveSessionKey e TestUnwrapTrackKey) que dependem do cryptography
+# verdadeiro. Se em algum ambiente o cryptography realmente falhar, a solucao
+# correta e' usar skips condicionais nesses testes especificos, nao mockar
+# o pacote inteiro.
+
 import pytest  # noqa: E402
 
 # Mobile (a-Shell/iOS) e alguns runners tem um ulimit de file descriptors
 # bem mais baixo que desktop Linux comum (as vezes bem abaixo de 1024).
-# Numa suite de 800+ testes, qualquer coisa que abra socket/arquivo sem
-# fechar (ex.: um httpx.Client de teste que ninguem fecha) acumula ate'
-# estourar esse limite -- e o teste que quebra quase nunca e' o que
-# VAZOU, e' qualquer outra coisa que tentar abrir o PROXIMO file
-# descriptor depois do limite bater (`OSError: Too many open files`).
-# Sobe o limite pro teto que o SO permitir. So' e' uma rede de seguranca
-# contra vazamento residual -- nao substitui fechar client/arquivo nos
-# testes que os criam, so' evita que um vazamento pequeno em algum lugar
-# derrube um teste sem nenhuma relacao em outro arquivo.
 try:
     import resource
 
@@ -82,10 +81,6 @@ try:
     elif _hard == resource.RLIM_INFINITY and _soft < 4096:
         resource.setrlimit(resource.RLIMIT_NOFILE, (4096, _hard))
 except (ImportError, ValueError, OSError):
-    # "resource" nao existe no Windows (a suite tambem roda la', ver
-    # tests.yml), e mesmo em Unix o SO pode negar o aumento num sandbox
-    # restrito. Em qualquer um dos casos, seguir sem o limite maior e'
-    # melhor que a suite inteira nao coletar por causa disto.
     pass
 
 
@@ -97,12 +92,7 @@ def dir_config_temp():
 
 @pytest.fixture
 def ambiente_isolado():
-    """`os.environ` pronto para passar a um subprocesso do programa.
-
-    Centralizado aqui porque cada teste que montava isso na mao errava um
-    detalhe diferente (esquecer o APPDIR, esquecer o NO_COLOR, apontar para o
-    CONFIG_DIR errado).
-    """
+    """`os.environ` pronto para passar a um subprocesso do programa."""
     return dict(
         os.environ,
         CONFIG_DIR=str(_TMP),
@@ -111,52 +101,9 @@ def ambiente_isolado():
     )
 
 
-# Mock do cryptography para testes no a-Shell -- SOMENTE se o pacote real
-# nao conseguir importar. ANTES este bloco mockava incondicionalmente
-# sempre que `sys.platform == "ios"`, e a lista de submodulos mockados
-# estava incompleta: faltavam exatamente `ciphers` (Cipher/algorithms/
-# modes) e `kdf.hkdf` (HKDF) -- os dois que `qopy.py` e `downloader.py`
-# realmente usam. Resultado pratico: em qualquer a-Shell onde o
-# `cryptography` de verdade funciona (confirmado que funciona em builds
-# recentes), o mock incompleto SUBSTITUIA o pacote que funcionava por um
-# stub quebrado, e todo import de `cryptography.hazmat.primitives.ciphers`
-# passava a falhar com "'cryptography.hazmat.primitives' is not a
-# package" -- um erro bem mais confuso do que a falha original que o mock
-# tentava evitar.
-#
-# Agora: tenta o import real primeiro (com os MESMOS nomes que o projeto
-# usa de verdade); só cai pro mock, já completo, se isso falhar.
-if sys.platform == "ios":
-    try:
-        from cryptography.hazmat.primitives import hashes, padding  # noqa: F401
-        from cryptography.hazmat.primitives.ciphers import (  # noqa: F401
-            Cipher,
-            algorithms,
-            modes,
-        )
-        from cryptography.hazmat.primitives.kdf.hkdf import HKDF  # noqa: F401
-    except ImportError:
-        cryptography_mock = MagicMock()
-        sys.modules["cryptography"] = cryptography_mock
-        sys.modules["cryptography.hazmat"] = MagicMock()
-        sys.modules["cryptography.hazmat.primitives"] = MagicMock()
-        sys.modules["cryptography.hazmat.primitives.hashes"] = MagicMock()
-        sys.modules["cryptography.hazmat.primitives.padding"] = MagicMock()
-        sys.modules["cryptography.hazmat.primitives.ciphers"] = MagicMock()
-        sys.modules["cryptography.hazmat.primitives.kdf"] = MagicMock()
-        sys.modules["cryptography.hazmat.primitives.kdf.hkdf"] = MagicMock()
-        sys.modules["cryptography.hazmat.bindings"] = MagicMock()
-        sys.modules["cryptography.hazmat.bindings._padding"] = MagicMock()
-
-
 @pytest.fixture
 def sem_binarios(monkeypatch):
-    """Simula um sistema sem ffmpeg e sem fpcalc no PATH.
-
-    Limpa tambem o cache de `utils`, senao um teste que rodou antes deixa o
-    caminho real memorizado e este fixture nao tem efeito nenhum -- o tipo de
-    falso verde que faz a suite inteira perder valor.
-    """
+    """Simula um sistema sem ffmpeg e sem fpcalc no PATH."""
     from qobuz_dl import utils
 
     utils._BINARIOS_CHECADOS.clear()
