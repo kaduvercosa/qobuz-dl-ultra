@@ -1,0 +1,72 @@
+[tool.poetry]
+name = "streamrip"
+version = "3.0.0"
+description = "Web UI for managing Qobuz and Tidal libraries — a FastAPI + SvelteKit frontend on top of the standalone Qobuz and Tidal SDKs"
+authors = ["Arthur Soares"]
+license = "GPL-3.0-only"
+readme = "README.md"
+repository = "https://github.com/arthursoares/libsync"
+classifiers = [
+  "License :: OSI Approved :: GNU General Public License (GPL)",
+  "Operating System :: OS Independent",
+]
+packages = [{ include = "backend" }]
+
+[tool.poetry.dependencies]
+# Capped below 3.14: pydantic-core 2.33.2 has no cp314 wheel.
+python = ">=3.10,<3.14"
+# Web stack
+fastapi = ">=0.110"
+uvicorn = ">=0.29"
+httpx = ">=0.27"
+websockets = "*"
+# Shared HTTP / async runtime (also pulled in transitively by the SDKs)
+# 3.11.13 was yanked from PyPI (transport regression, aio-libs/aiohttp#10617);
+# pinned to the newest non-yanked release. Keep the pin: the SDKs declare
+# aiohttp>=3.9 and take whatever the venv has installed.
+aiohttp = "^3.14"
+# The qobuz and tidal SDKs are installed from the sdks/qobuz_api_client
+# submodule — see `make deps`. They carry their own dependencies (mutagen,
+# aiolimiter, pycryptodomex, aiofiles).
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^9.0.2"
+pytest-asyncio = "^0.21.1"
+pytest-mock = "^3.11.1"
+ruff = "^0.16"
+
+[tool.pytest.ini_options]
+minversion = "6.0"
+addopts = "-ra -q"
+testpaths = ["tests"]
+log_level = "DEBUG"
+asyncio_mode = "auto"
+log_cli = true
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.ruff]
+# .claude/ holds maintainer tooling (skill library + diagnostic scripts), not
+# product code. Keep it out of the linter so the required `ruff` check ignores it.
+extend-exclude = [".claude"]
+# Restrict ruff's file discovery to Python source. Ruff 0.16+ started
+# formatting fenced ```python code blocks embedded in Markdown files by
+# default, which would flag docs/superpowers/*.md and break the required
+# `ruff` check on CI's whole-repo scan even though the docs aren't ours to
+# lint. Pinning this include list keeps that out regardless of ruff version.
+include = ["*.py", "*.pyi", "**/pyproject.toml"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "ASYNC", "N", "RUF", "ERA001"]
+ignore = []
+fixable = ["ALL"]
+unfixable = []
+dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"

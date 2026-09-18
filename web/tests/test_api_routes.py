@@ -1,0 +1,264 @@
+"""Tests for API routes."""
+
+from unittest.mock import AsyncMock, patch
+
+import pytest
+from httpx import ASGITransport, AsyncClient
+
+from backend.main import create_app
+
+
+@pytest.fixture
+def app():
+    return create_app(db_path=":memory:")
+
+
+@pytest.fixture
+async def client(app):
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as c:
+        yield c
+
+
+class TestLibraryRoutes:
+    async def test_get_albums_empty(self, client, app):
+        resp = await client.get("/api/library/qobuz/albums")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 0
+        assert data["albums"] == []
+
+    async def test_get_albums_with_data(self, client, app):
+        app.state.db.upsert_album("qobuz", "a1", "Test Album", "Test Artist")
+        resp = await client.get("/api/library/qobuz/albums")
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 1
+
+    async def test_get_album_detail(self, client, app):
+        album_id = app.state.db.upsert_album("qobuz", "a1", "Test", "Artist")
+        app.state.db.upsert_track(album_id, "t1", "Track 1", "Artist", track_number=1)
+        resp = await client.get(f"/api/library/qobuz/albums/{album_id}")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["title"] == "Test"
+        assert len(data["tracks"]) == 1
+
+    async def test_negative_page_size_does_not_return_entire_table(self, client, app):
+        for i in range(5):
+            app.state.db.upsert_album("qobuz", f"a{i}", f"Test {i}", "Artist")
+        resp = await client.get(
+            "/api/library/qobuz/albums", params={"page_size": -1, "page": 0}
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        # page_size=-1 must clamp to 1 (max(1, min(-1, 200))), not be
+        # treated as SQLite's "unbounded LIMIT" sentinel that would return
+        # all 5 rows; page=0 must clamp to page 1. `total` reflects the
+        # full library regardless of pagination.
+        assert data["page"] == 1
+        assert data["page_size"] == 1
+        assert len(data["albums"]) == 1
+        assert data["total"] == 5
+
+    async def test_page_size_clamped_to_max(self, client, app):
+        for i in range(3):
+            app.state.db.upsert_album("qobuz", f"b{i}", f"Test {i}", "Artist")
+        resp = await client.get(
+            "/api/library/qobuz/albums", params={"page_size": 10000}
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["page_size"] == 200
+        assert data["total"] == 3
+
+
+class TestDownloadRoutes:
+    async def test_get_empty_queue(self, client):
+        resp = await client.get("/api/downloads/queue")
+        assert resp.status_code == 200
+        assert resp.json()["items"] == []
+
+    async def test_enqueue_download(self, client, app):
+        app.state.db.upsert_album("qobuz", "a1", "Test", "Artist")
+        resp = await client.post(
+            "/api/downloads/queue", json={"source": "qobuz", "album_ids": ["a1"]}
+        )
+        assert resp.status_code == 200
+        assert len(resp.json()) == 1
+
+
+class TestConfigRoutes:
+    async def test_get_config(self, client):
+        resp = await client.get("/api/config")
+        assert resp.status_code == 200
+
+    async def test_update_config(self, client):
+        resp = await client.patch("/api/config", json={"downloads_path": "/new/path"})
+        assert resp.status_code == 200
+
+    async def test_config_round_trip_includes_scan_sentinel_toggle(self, client):
+        resp = await client.patch(
+            "/api/config", json={"scan_sentinel_write_enabled": False}
+        )
+        assert resp.status_code == 200
+        got = (await client.get("/api/config")).json()
+        assert got["scan_sentinel_write_enabled"] is False
+
+    @pytest.mark.parametrize("source", ["qobuz", "tidal"])
+    async def test_unset_naming_defaults_match_effective_download_config(
+        self, client, app, source
+    ):
+        config = (await client.get("/api/config")).json()
+        kwargs = app.state.download_service._build_dl_config_kwargs(
+            source=source,
+            item={"force": False},
+            quality=3,
+            downloads_db=None,
+        )
+
+        assert config["folder_format"] == (
+            "{albumartist}/({year}) {title} [{container}-{bit_depth}-{sampling_rate}]"
+        )
+        assert config["track_format"] == (
+            "{tracknumber:02}. {artist} - {title}{explicit}"
+        )
+        assert kwargs["folder_format"] == config["folder_format"]
+        assert kwargs["track_format"] == config["track_format"]
+
+    async def test_naming_defaults_survive_get_patch_download_round_trip(
+        self, client, app
+    ):
+        config = (await client.get("/api/config")).json()
+        naming = {
+            "folder_format": config["folder_format"],
+            "track_format": config["track_format"],
+        }
+
+        response = await client.patch("/api/config", json=naming)
+
+        assert response.status_code == 200
+        assert {
+            "folder_format": response.json()["folder_format"],
+            "track_format": response.json()["track_format"],
+        } == naming
+        for source in ("qobuz", "tidal"):
+            kwargs = app.state.download_service._build_dl_config_kwargs(
+                source=source,
+                item={"force": False},
+                quality=3,
+                downloads_db=None,
+            )
+            assert kwargs["folder_format"] == naming["folder_format"]
+            assert kwargs["track_format"] == naming["track_format"]
+
+    async def test_explicit_stored_naming_formats_are_preserved(self, client, app):
+        app.state.db.set_config("folder_format", "custom/{albumartist}/{title}")
+        app.state.db.set_config("track_format", "{discnumber}-{tracknumber}-{title}")
+
+        config = (await client.get("/api/config")).json()
+
+        assert config["folder_format"] == "custom/{albumartist}/{title}"
+        assert config["track_format"] == "{discnumber}-{tracknumber}-{title}"
+        for source in ("qobuz", "tidal"):
+            kwargs = app.state.download_service._build_dl_config_kwargs(
+                source=source,
+                item={"force": False},
+                quality=3,
+                downloads_db=None,
+            )
+            assert kwargs["folder_format"] == config["folder_format"]
+            assert kwargs["track_format"] == config["track_format"]
+
+    async def test_explicit_empty_naming_formats_keep_existing_fallback_behavior(
+        self, client, app
+    ):
+        app.state.db.set_config("folder_format", "")
+        app.state.db.set_config("track_format", "")
+
+        config = (await client.get("/api/config")).json()
+        kwargs = app.state.download_service._build_dl_config_kwargs(
+            source="qobuz",
+            item={"force": False},
+            quality=3,
+            downloads_db=None,
+        )
+
+        assert config["folder_format"] == ""
+        assert config["track_format"] == ""
+        assert kwargs["folder_format"] == (
+            "{albumartist}/({year}) {title} [{container}-{bit_depth}-{sampling_rate}]"
+        )
+        assert kwargs["track_format"] == (
+            "{tracknumber:02}. {artist} - {title}{explicit}"
+        )
+
+
+class TestAuthRoutes:
+    async def test_auth_status(self, client):
+        resp = await client.get("/api/auth/status")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data) == 2
+        assert data[0]["source"] == "qobuz"
+        assert data[1]["source"] == "tidal"
+
+
+class TestSyncRoutes:
+    async def test_sync_status(self, client, app):
+        resp = await client.get("/api/sync/status/qobuz")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "new_albums" in data
+        assert "removed_albums" in data
+        assert data["source"] == "qobuz"
+        # No client registered for this test app — get_diff should report
+        # the source as disconnected rather than a silently empty diff.
+        assert data["connected"] is False
+
+    async def test_sync_history(self, client):
+        resp = await client.get("/api/sync/history?source=qobuz")
+        assert resp.status_code == 200
+        assert isinstance(resp.json(), list)
+
+
+class TestAuthOAuthRoutes:
+    async def test_oauth_url(self, client):
+        resp = await client.get("/api/auth/qobuz/oauth-url")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "url" in data
+        assert "qobuz.com" in data["url"]
+
+    async def test_oauth_from_url_returns_400_on_exchange_failure(self, client):
+        with (
+            patch("qobuz.auth.extract_code_from_url", return_value="code"),
+            patch(
+                "qobuz.auth.exchange_code",
+                new=AsyncMock(side_effect=RuntimeError("bad code")),
+            ),
+        ):
+            resp = await client.post(
+                "/api/auth/qobuz/oauth-from-url",
+                json={"redirect_url": "https://example.com/callback?code=bad"},
+            )
+
+        assert resp.status_code == 400
+        assert resp.json()["detail"] == "bad code"
+
+
+class TestConfigReload:
+    async def test_update_config_saves_values(self, client, app):
+        resp = await client.patch("/api/config", json={"downloads_path": "/test/path"})
+        assert resp.status_code == 200
+        # Verify persisted
+        get_resp = await client.get("/api/config")
+        assert get_resp.json()["downloads_path"] == "/test/path"
+
+    async def test_config_type_conversion(self, client, app):
+        app.state.db.set_config("qobuz_quality", "3")
+        app.state.db.set_config("auto_sync_enabled", "true")
+        resp = await client.get("/api/config")
+        data = resp.json()
+        assert isinstance(data["qobuz_quality"], int)
+        assert isinstance(data["auto_sync_enabled"], bool)

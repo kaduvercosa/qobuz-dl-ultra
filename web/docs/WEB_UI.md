@@ -1,0 +1,242 @@
+# Streamrip Web UI
+
+Detailed documentation for the streamrip web UI — the app-level README (`../README.md`) is the "getting started" page; this file is the reference.
+
+## Architecture
+
+```
+          ┌──────────────────────────────┐
+          │  Frontend (SvelteKit 5)      │
+          │  — compiled to static HTML   │
+          │  — served by backend on /    │
+          └───────────────┬──────────────┘
+                          │  REST + WebSocket
+                          ▼
+          ┌──────────────────────────────┐
+          │  Backend (FastAPI)           │
+          │  backend/api/                │
+          │  backend/services/           │
+          │  backend/models/             │
+          └───────┬──────────────┬───────┘
+                  │              │
+                  ▼              ▼
+       ┌──────────────┐  ┌──────────────┐
+       │  SQLite      │  │  SDKs        │
+       │  (WAL mode)  │  │              │
+       │              │  │  qobuz/      │
+       │  albums      │  │  tidal/      │
+       │  tracks      │  │              │
+       │  sync_runs   │  │  (from       │
+       │  config      │  │   submodule) │
+       └──────────────┘  └──────────────┘
+                                  │
+                                  ▼
+                         Qobuz / Tidal APIs
+```
+
+Key points:
+- **One process** — FastAPI serves both the static frontend and the API. There is no separate web server, no background worker daemon.
+- **No TOML config** — the streamrip TOML config and `streamrip.config.Config` dataclass are gone. All settings live in the SQLite `config` table and are round-tripped through the Settings page.
+- **SDKs come from a submodule** — `sdks/qobuz_api_client/` is a git submodule pinned to a specific commit of [`arthursoares/qobuz_api_client`](https://github.com/arthursoares/qobuz_api_client). Both `qobuz` and `tidal` Python packages are installed from that subdirectory via `make deps`.
+- **Both sources use the same facade shape** — every SDK client exposes `client.catalog`, `client.favorites`, `client.streaming`, and can be used with `async with client:`. The backend uses `hasattr(client, 'catalog')` as the "is this an SDK client" check.
+- **Downloads dispatch on source** — `DownloadService._download_album` picks `qobuz.AlbumDownloader` or `tidal.AlbumDownloader` based on `item["source"]` and wires the same progress callbacks either way.
+- **Per-source dedup DBs** — Qobuz uses `data/downloads.db` (legacy name preserved for existing users), Tidal uses `data/downloads-tidal.db`. Track IDs from different services can never collide.
+
+## First-time setup
+
+### Qobuz (OAuth)
+
+1. Open the **Settings** page.
+2. Click **Login with Browser** — this opens the Qobuz OAuth page in your browser. Sign in and authorize.
+3. The backend catches the callback on `localhost:11111` and stores the resulting user ID + auth token in the SQLite DB.
+4. Clients are hot-reloaded immediately; the green "Connected" dot appears next to Qobuz.
+
+**Headless / remote hosts** (the browser callback can't reach the server):
+
+1. On your local machine, visit the OAuth URL from the **Headless Login** button.
+2. Sign in. Instead of catching the callback, copy the full URL you were redirected to (it contains `?code_autorisation=…`).
+3. Paste it into the **Redirect URL** field. The backend extracts the code and exchanges it on your behalf.
+
+### Tidal (device-code OAuth)
+
+1. Open the **Settings** page → **Connect Tidal**.
+2. The backend calls Tidal's `device_authorization` endpoint and the UI shows a 5-letter user code + opens `https://link.tidal.com/<code>` in a new browser tab.
+3. Sign in on Tidal and click Authorize. The backend polls in the background; once approved it stores the access token, refresh token, user ID, and country code in the SQLite DB and hot-reloads the client.
+4. The flow works on any device — if the browser tab can't reach Tidal (e.g. a remote server with no display), open the link manually from any other device using the user code.
+
+The Tidal SDK auto-refreshes any token that expires within 24 hours on `__aenter__` and has a 401 retry path on the HTTP transport, so once credentials are in the DB you shouldn't need to touch them again unless the refresh token itself expires.
+
+### Credential activation
+
+Credential writes are transactional. Libsync constructs and opens a replacement client, resolves required signing credentials, and validates the account with a minimal favorites request before committing the complete config update and publishing the client. Failure or cancellation before that commit leaves the database and current client unchanged. Once the database commit is admitted, publication finishes as an owned transition even if shutdown starts; shutdown-time scheduler maintenance is skipped, and post-commit maintenance failures are logged without reporting a false rollback.
+
+An affected source cannot be reconfigured while its catalog request, sync, scan, queued/current download, or soft-cancelled SDK download is still active. The auth or config endpoint returns HTTP 409; retry the same action after that work finishes. Other sources remain available. OAuth codes and Tidal PKCE handles are not consumed when this busy check rejects the request.
+
+## Features
+
+### Library
+
+- Browse every album you've favorited on the streaming service, paginated and cached locally in SQLite
+- Sortable columns: title, artist, year, added-date, download status
+- Filter by title/artist text or by download status (all / downloaded / not-downloaded)
+- Click an album to open the side detail panel: full track list, per-track download status, cover art, metadata
+- **Refresh Library** — pulls the full favorites list from the streaming service and diffs against local state
+
+### Search
+
+- Queries the streaming service directly (not the local library)
+- Results carry the current local download status when that album is already known to the DB
+- **Download** button on any result — the backend auto-creates a DB entry for the album before downloading so track statuses persist
+
+### Playlists
+
+- Qobuz-only frontend surface today; Tidal playlist reads are not exposed yet
+- Browse your Qobuz playlists and open a detail panel with the playlist tracks
+- **Download All Albums** queues the distinct album IDs referenced by the playlist's tracks
+
+### Downloads
+
+- Queue albums individually or in batch (multi-select checkbox in the library table)
+- Real-time progress over WebSocket: per-track status, aggregated bytes, speed, current track name
+- Click a queue entry to expand the per-track breakdown
+- **Force re-download** toggle bypasses the dedup DB for single downloads
+- Failed tracks don't cancel the album; the `AlbumDownloader` uses `asyncio.gather(..., return_exceptions=True)` under a semaphore so one bad track can't block the rest
+- Success threshold: if fewer than 80% of tracks downloaded, the whole album is marked failed (configurable in code, not yet in UI)
+- Manual cancellation is soft for an active album: the SDK finishes that album, then Libsync records it as cancelled and does not advance it as complete
+
+### Sync
+
+- **Auto-sync** — on a schedule (1h / 6h / daily) the backend re-runs a library refresh and optionally auto-downloads new albums
+- **Sync history** — every manual or auto-sync run is recorded in the `sync_runs` table with counts of found / new / removed / downloaded
+- Syncs interrupted by shutdown are retained in history with status `interrupted`
+
+### Shutdown behavior
+
+- Once shutdown begins, new downloads, manual syncs, scans, and credential writes return HTTP 503
+- The current album is allowed to drain because the SDK has no downloader-wide cancellation cleanup; queued albums are cancelled without starting
+- Fuzzy scans stop between folders and wait for any already-dispatched database mutation to finish
+- SDK clients close only after owned download, sync, scan, and progress-event tasks finish
+- Repeated cancellation of the shutdown caller is deferred until that complete drainage and client cleanup operation finishes
+- Libsync does not impose an internal drain timeout. The process supervisor controls hard-termination timing if an SDK operation cannot finish.
+
+### Settings
+
+- **Source credentials** — Qobuz (OAuth + optional `App ID` / `App Secret` overrides), Tidal (device-code OAuth)
+- **Qobuz quality** and **Tidal quality** — both selectable in the UI (each maps onto its SDK's tier scale)
+- **Download path**
+- **Scan Downloads** — walks the download directory and reconciles local folders against the DB. Does two things: (a) re-ingests any `.streamrip.json` sentinels, (b) fuzzy-matches unsentineled `Artist/Album/` folders against the synced library by normalized artist+album, with bit-depth equality required for auto-match. Opens a three-section review slide-over: auto-matched (read-only), needs review (per-row Confirm), and unmatched folders (read-only paths + copy to clipboard). See [library scan spec](superpowers/specs/2026-04-18-library-scan-fuzzy-match-design.md).
+- **Write sentinel file** toggle — turn OFF when scanning a read-only mount (NFS/SMB export of an existing library). The scan still runs; sentinel writes that would fail are just skipped.
+- **Folder format** / **Track format** with live preview and sample data
+- **Source subdirectories** — nest under `Qobuz/` and `Tidal/` top-level folders
+- **Disc subdirectories** — multi-disc albums get `Disc N/` per CD
+- **Artwork embedding** + size (`thumbnail` / `small` / `large` / `original`)
+- **Auto-sync** toggle + interval
+- **Reset Database** — nukes library and history (config preserved) with a two-step confirmation
+
+### Album detail
+
+- **Mark as downloaded** / **Unmark** button — flips `download_status` without any file-system involvement. Use when you know you already have the album but the fuzzy scan can't match it (or you don't want to scan). The primitive behind this button is the same one used by the scan's Confirm action.
+
+## Environment variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `STREAMRIP_DB_PATH` | `data/streamrip.db` | Path to the SQLite database |
+| `STREAMRIP_DOWNLOADS_PATH` | `/music` | Fallback download directory if none set in Settings |
+
+Runtime paths derived from `STREAMRIP_DB_PATH`:
+
+- `{dir}/downloads.db` — Qobuz dedup (legacy name, preserved)
+- `{dir}/downloads-tidal.db` — Tidal dedup
+
+## API reference
+
+All endpoints live under `/api` and return JSON. Content-Type is `application/json` unless otherwise stated.
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/api/health` | GET | `{"status": "ok"}` liveness check |
+| `/api/auth/status` | GET | List of sources with `authenticated`, `user_id`, `has_credentials` |
+| `/api/auth/qobuz/oauth-url` | GET | `{"url": "…"}` — open in a browser to start the Qobuz OAuth flow |
+| `/api/auth/qobuz/oauth-callback` | POST | Exchange an OAuth code for credentials (browser flow) |
+| `/api/auth/qobuz/oauth-from-url` | POST | Extract the code from a pasted redirect URL and exchange it (headless flow) |
+| `/api/auth/tidal/device-code` | POST | Start the Tidal device-code OAuth flow — returns `{device_code, user_code, verification_url, expires_in, interval}` |
+| `/api/auth/tidal/poll` | POST | Poll for Tidal authorization — `{"device_code": "..."}` → `{"status": "pending"\|"authorized"\|"error"}` |
+| `/api/library/{source}/albums` | GET | Paginated album list — `?page=1&page_size=50&sort_by=added_to_library_at&sort_dir=DESC&status=…&search=…` |
+| `/api/library/{source}/albums/{id}` | GET | Album detail with tracks |
+| `/api/library/refresh/{source}` | POST | Full library refresh from the streaming service |
+| `/api/library/search/{source}` | GET | Paginated catalog search — `?q=…&page=1&page_size=60`. Returns the same `{albums, total, limit, offset}` envelope as `/albums`. |
+| `/api/library/{source}/playlists` | GET | List playlists for the current source. Currently returns data only for Qobuz. |
+| `/api/library/{source}/playlists/{id}` | GET | Fetch a playlist and its tracks |
+| `/api/downloads/queue` | GET | Current queue with progress |
+| `/api/downloads/queue` | POST | `{"source": "qobuz", "album_ids": [...], "force": false}` — enqueue |
+| `/api/downloads/queue/{id}` | DELETE | Cancel a single queued/running item |
+| `/api/downloads/scan` | POST | Reconcile `.streamrip.json` sentinels under `downloads_path` against the DB |
+| `/api/downloads/cancel` | POST | Cancel everything |
+| `/api/library/scan-fuzzy` | POST | Start a background scan that fuzzy-matches `Artist/Album/` folders against the synced library. Returns `{job_id}`. 409 if another scan is already running. |
+| `/api/library/scan-fuzzy/{job_id}` | GET | Job status — `{status: "running"}`, `{status: "complete", scanned, sentinel_skipped, skipped_dirs, auto_matched, review, unmatched}`, or `{status: "error", error: "..."}`. |
+| `/api/library/albums/{id}/mark-downloaded` | POST | `{"local_folder_path": "..."|null}` — flip status to complete, populate per-source dedup DB, optionally write a sentinel. `local_folder_path` must be inside the configured downloads path (400 if not). |
+| `/api/library/albums/{id}/unmark-downloaded` | POST | Reverse of mark-downloaded: clear status, remove dedup entries, delete sentinel if present. |
+| `/api/sync/status/{source}` | GET | Diff: new / removed vs local DB + last sync timestamp |
+| `/api/sync/run/{source}` | POST | Trigger a sync run (records a row in `sync_runs`) |
+| `/api/sync/history` | GET | `?source=qobuz&limit=10` — sync run history |
+| `/api/config` | GET | Current config as `AppConfig` |
+| `/api/config` | PATCH | Partial update as `ConfigUpdate`; atomically validates and activates credential changes. Returns 409 while the affected source is busy. |
+| `/api/config/reset` | POST | Wipe library data (albums, tracks, sync_runs). Config and credentials are preserved. Files on disk are untouched. |
+| `/api/ws` | WS | WebSocket channel — emits `download_progress`, `download_complete`, `download_failed`, `sync_started`, `sync_complete`, `library_updated`, `token_expired`, `scan_progress`, `scan_complete`, `album_status_changed` |
+
+## Testing
+
+```bash
+make test          # unit tests — ~1s, no credentials
+make test-unit     # same but verbose
+make lint          # ruff check on backend/
+cd frontend && npm run check
+node --test frontend/tests/*.test.js
+```
+
+The test suite covers:
+- `backend/services/library.py` — library fetch, search, track caching
+- `backend/services/download.py` — queue management and source dispatch
+- `backend/services/sync.py` — diff + run_sync + history
+- `backend/models/database.py` — SQLite schema + CRUD
+- `backend/api/*.py` — route contracts via the FastAPI test client
+- `backend/main.py:create_app` — startup smoke test
+
+SDK-level tests live in the submodule at `sdks/qobuz_api_client/clients/python/{tests,tidal/tests}/` — see the [upstream repo](https://github.com/arthursoares/qobuz_api_client) for those.
+
+## Design system
+
+Uses the [Arthur Soares Design System](../frontend/src/lib/design-system/tokens.css):
+
+- Hard edges — `border-radius: 0` everywhere
+- Solid shadows — 0px blur
+- [Atkinson Hyperlegible](https://brailleinstitute.org/freefont) as the only font family
+- Warm near-black (`#1a1918`) dark mode default
+- TUI-inspired decorations (diamond, block characters in section headers)
+- No CSS transitions except 80ms on hover
+
+## Updating the SDK submodule
+
+When the upstream `qobuz_api_client` repo has new commits you want to pick up:
+
+```bash
+# pull the latest on the submodule's tracked branch (main)
+git -C sdks/qobuz_api_client pull --ff-only origin main
+
+# re-install editably (only needed if SDK deps changed)
+poetry run pip install -e sdks/qobuz_api_client/clients/python
+poetry run pip install -e sdks/qobuz_api_client/clients/python/tidal
+
+# commit the new pin
+git add sdks/qobuz_api_client
+git commit -m "chore: bump qobuz_api_client submodule to <sha>"
+```
+
+The Dockerfile also COPYs from `sdks/qobuz_api_client/clients/python/`, so rebuilding the image picks up the new pin automatically.
+
+## Known gaps
+
+- **Qobuz token refresh** is manual — the Qobuz API doesn't expose a refresh endpoint, so the credentials have to be re-captured via the OAuth flow when they expire.
+- **Tidal playlists** — the frontend only surfaces playlists for Qobuz. Tidal still shows a “not supported” placeholder on the Playlists page.
+- **Browser E2E** — frontend build/check and small logic tests exist, but there is no Playwright/Cypress browser harness wired into the repo yet.

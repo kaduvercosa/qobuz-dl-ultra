@@ -1,0 +1,179 @@
+"""Tests for DownloadService.
+
+Test Plan: DownloadService
+
+Scenario: Enqueue albums adds items to queue with pending status
+  Given a database with a known album
+  When enqueue is called with that album's source ID
+  Then the returned item has the correct source_album_id and status "pending"
+
+Scenario: Get queue returns all enqueued items
+  Given a database with two albums
+  When both are enqueued
+  Then get_queue returns a list of length 2
+
+Scenario: Cancel marks a pending item as cancelled
+  Given a service with one pending item in the queue
+  When cancel is called with that item's ID
+  Then the item's status is "cancelled"
+"""
+
+import os
+import tempfile
+
+import pytest
+
+from backend.models.database import AppDatabase
+from backend.services.download import DownloadService
+from backend.services.event_bus import EventBus
+
+
+@pytest.fixture
+def db():
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
+        path = f.name
+    database = AppDatabase(path)
+    yield database
+    os.unlink(path)
+
+
+@pytest.fixture
+def event_bus():
+    return EventBus()
+
+
+class TestDownloadServiceQueue:
+    async def test_enqueue_adds_items(self, db, event_bus):
+        db.upsert_album("qobuz", "a1", "Album A", "Artist A")
+        service = DownloadService(db, event_bus, clients={}, download_path="/tmp")
+        items = await service.enqueue("qobuz", ["a1"])
+        assert len(items) == 1
+        assert items[0]["source_album_id"] == "a1"
+        assert items[0]["status"] == "pending"
+
+    async def test_get_queue(self, db, event_bus):
+        db.upsert_album("qobuz", "a1", "Album A", "Artist A")
+        db.upsert_album("qobuz", "a2", "Album B", "Artist B")
+        service = DownloadService(db, event_bus, clients={}, download_path="/tmp")
+        await service.enqueue("qobuz", ["a1", "a2"])
+        queue = service.get_queue()
+        assert len(queue) == 2
+
+    async def test_cancel_removes_from_queue(self, db, event_bus):
+        db.upsert_album("qobuz", "a1", "Album A", "Artist A")
+        service = DownloadService(db, event_bus, clients={}, download_path="/tmp")
+        items = await service.enqueue("qobuz", ["a1"])
+        item_id = items[0]["id"]
+        await service.cancel([item_id])
+        queue = service.get_queue()
+        cancelled = [q for q in queue if q["id"] == item_id]
+        assert cancelled[0]["status"] == "cancelled"
+
+
+class TestDownloadQueue:
+    async def test_cancel_all(self, db, event_bus):
+        db.upsert_album("qobuz", "a1", "Album A", "Artist A")
+        db.upsert_album("qobuz", "a2", "Album B", "Artist B")
+        service = DownloadService(db, event_bus, clients={}, download_path="/tmp")
+        await service.enqueue("qobuz", ["a1", "a2"])
+        await service.cancel_all()
+        queue = service.get_queue()
+        assert all(q["status"] == "cancelled" for q in queue)
+
+    async def test_enqueue_auto_creates_unknown_album_from_supplied_metadata(
+        self, db, event_bus
+    ):
+        """Search results carry their metadata in `supplied_metadata` so the
+        backend doesn't have to round-trip to the streaming service."""
+        service = DownloadService(db, event_bus, clients={}, download_path="/tmp")
+        supplied = {
+            "new-search-result": {
+                "source_album_id": "new-search-result",
+                "title": "Brand New Album",
+                "artist": "Brand New Artist",
+                "cover_url": "https://example/cover.jpg",
+                "track_count": 12,
+                "release_date": "2026-01-01",
+            }
+        }
+        items = await service.enqueue(
+            "qobuz", ["new-search-result"], supplied_metadata=supplied
+        )
+        assert len(items) == 1
+        assert items[0]["source_album_id"] == "new-search-result"
+        album = db.get_album_by_source_id("qobuz", "new-search-result")
+        assert album is not None
+        assert album["title"] == "Brand New Album"
+        assert album["artist"] == "Brand New Artist"
+
+    async def test_enqueue_unknown_album_without_metadata_or_client_raises(
+        self, db, event_bus
+    ):
+        """No supplied metadata + no client = loud failure. The previous
+        silent-fallback wrote 'Album {id}' to the DB, masking real auth /
+        network failures."""
+        service = DownloadService(db, event_bus, clients={}, download_path="/tmp")
+        with pytest.raises(ValueError, match="No client configured"):
+            await service.enqueue("qobuz", ["new-search-result"])
+
+    async def test_force_flag_preserved(self, db, event_bus):
+        db.upsert_album("qobuz", "a1", "Album", "Artist")
+        service = DownloadService(db, event_bus, clients={}, download_path="/tmp")
+        items = await service.enqueue("qobuz", ["a1"], force=True)
+        assert items[0]["force"] is True
+
+
+class TestDownloadAlbumIntegration:
+    async def test_download_album_raises_without_client(self, db, event_bus):
+        """_download_album should raise ValueError when no client for source."""
+        service = DownloadService(db, event_bus, clients={}, download_path="/tmp")
+        item = {
+            "id": "test-id",
+            "album_db_id": 1,
+            "source": "qobuz",
+            "source_album_id": "123",
+            "title": "Test",
+            "artist": "Test Artist",
+            "track_count": 10,
+            "status": "downloading",
+        }
+        with pytest.raises(ValueError, match="No client for source"):
+            await service._download_album(item)
+
+
+class TestEnqueueResilience:
+    """One unresolvable album must not strand the rest of the batch.
+
+    ``enqueue`` marks each album "queued" in the DB as it goes but only
+    starts the worker after the loop, so an exception part-way through
+    used to leave the earlier albums queued forever with nothing to
+    process them.
+    """
+
+    async def test_failing_album_does_not_strand_the_batch(self, db, event_bus):
+        db.upsert_album("qobuz", "a1", "Album A", "Artist A")
+        db.upsert_album("qobuz", "a3", "Album C", "Artist C")
+        service = DownloadService(db, event_bus, clients={}, download_path="/tmp")
+
+        async def fake_fetch(source, source_album_id):
+            raise RuntimeError(f"boom for {source_album_id}")
+
+        service._fetch_album_metadata = fake_fetch
+
+        # "a2" is absent from the DB and has no supplied metadata, so it
+        # falls through to _fetch_album_metadata and raises.
+        items = await service.enqueue("qobuz", ["a1", "a2", "a3"])
+
+        assert [i["source_album_id"] for i in items] == ["a1", "a3"]
+        assert db.get_album_by_source_id("qobuz", "a1")["download_status"] == "queued"
+        assert db.get_album_by_source_id("qobuz", "a3")["download_status"] == "queued"
+        assert db.get_album_by_source_id("qobuz", "a2") is None
+        # The worker must have been started for what did get queued.
+        assert service._worker_task is not None
+
+    async def test_all_albums_failing_still_raises(self, db, event_bus):
+        """A batch where nothing could be queued stays a loud failure —
+        an empty list would read as "nothing to do" in the UI."""
+        service = DownloadService(db, event_bus, clients={}, download_path="/tmp")
+        with pytest.raises(ValueError, match="No client configured"):
+            await service.enqueue("qobuz", ["nope-1", "nope-2"])

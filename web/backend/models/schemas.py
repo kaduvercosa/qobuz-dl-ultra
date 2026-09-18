@@ -1,0 +1,189 @@
+"""Pydantic models for API request/response."""
+
+from pydantic import BaseModel
+
+DEFAULT_FOLDER_FORMAT = (
+    "{albumartist}/({year}) {title} [{container}-{bit_depth}-{sampling_rate}]"
+)
+DEFAULT_TRACK_FORMAT = "{tracknumber:02}. {artist} - {title}{explicit}"
+
+
+class AlbumSummary(BaseModel):
+    id: int
+    source: str
+    source_album_id: str
+    title: str
+    artist: str
+    release_date: str | None = None
+    label: str | None = None
+    genre: str | None = None
+    track_count: int | None = None
+    duration_seconds: int | None = None
+    cover_url: str | None = None
+    quality: str | None = None
+    download_status: str = "not_downloaded"
+    downloaded_at: str | None = None
+    added_to_library_at: str | None = None
+
+
+class TrackDetail(BaseModel):
+    id: int
+    source_track_id: str
+    title: str
+    artist: str
+    track_number: int | None = None
+    disc_number: int = 1
+    duration_seconds: int | None = None
+    explicit: bool = False
+    isrc: str | None = None
+    format: str | None = None
+    bit_depth: int | None = None
+    sample_rate: int | None = None
+    file_path: str | None = None
+    download_status: str = "not_downloaded"
+
+
+class AlbumDetail(AlbumSummary):
+    tracks: list[TrackDetail] = []
+
+
+class PaginatedAlbums(BaseModel):
+    albums: list[AlbumSummary]
+    total: int
+    page: int
+    page_size: int
+
+
+class SearchResult(AlbumSummary):
+    in_library: bool = False
+
+
+class SearchResponse(BaseModel):
+    results: list[SearchResult]
+    query: str
+    source: str
+
+
+class MarkDownloadedRequest(BaseModel):
+    local_folder_path: str | None = None
+
+
+class DownloadAlbumMetadata(BaseModel):
+    """Optional metadata supplied alongside album_ids when enqueueing.
+
+    When provided, the backend uses this in preference to re-fetching from
+    the streaming service. Lets a search-result download skip a redundant
+    metadata round-trip (and avoid the 'Album {id}' fallback that bites
+    when that round-trip fails).
+    """
+
+    source_album_id: str
+    title: str
+    artist: str
+    cover_url: str | None = None
+    track_count: int | None = None
+    release_date: str | None = None
+
+
+class DownloadRequest(BaseModel):
+    source: str
+    album_ids: list[str]
+    force: bool = False
+    albums: list[DownloadAlbumMetadata] | None = None
+
+
+class QueueItem(BaseModel):
+    id: str
+    source: str
+    source_album_id: str
+    title: str
+    artist: str
+    cover_url: str | None = None
+    track_count: int = 0
+    tracks_done: int = 0
+    bytes_done: int = 0
+    bytes_total: int = 0
+    speed: float = 0.0
+    status: str = "pending"
+
+
+class QueueStatus(BaseModel):
+    items: list[QueueItem]
+    active_count: int
+    total_speed: float
+
+
+class SyncDiff(BaseModel):
+    new_albums: list[AlbumSummary]
+    removed_albums: list[AlbumSummary]
+    source: str
+    last_sync: str | None = None
+
+
+class SyncRunSummary(BaseModel):
+    id: int
+    source: str
+    started_at: str
+    completed_at: str | None = None
+    albums_found: int = 0
+    albums_new: int = 0
+    albums_removed: int = 0
+    albums_downloaded: int = 0
+    status: str
+
+
+class AuthStatus(BaseModel):
+    source: str
+    authenticated: bool
+    user_id: str | None = None
+    token_expires: str | None = None
+
+
+class AppConfig(BaseModel):
+    qobuz_quality: int = 3
+    qobuz_user_id: str = ""
+    qobuz_token: str = ""
+    qobuz_app_id: str = ""
+    qobuz_app_secret: str = ""
+    qobuz_download_booklets: bool = True
+    tidal_quality: int = 3
+    tidal_access_token: str = ""
+    tidal_auth_method: str = "device_code"
+    downloads_path: str = ""
+    max_connections: int = 6
+    source_subdirectories: bool = False
+    disc_subdirectories: bool = True
+    folder_format: str = DEFAULT_FOLDER_FORMAT
+    track_format: str = DEFAULT_TRACK_FORMAT
+    embed_artwork: bool = True
+    artwork_size: str = "large"
+    auto_sync_enabled: bool = False
+    auto_sync_interval: str = "6h"
+    scan_sentinel_write_enabled: bool = True
+
+
+class ConfigUpdate(BaseModel):
+    qobuz_quality: int | None = None
+    qobuz_user_id: str | None = None
+    qobuz_token: str | None = None
+    qobuz_app_id: str | None = None
+    qobuz_app_secret: str | None = None
+    qobuz_download_booklets: bool | None = None
+    tidal_quality: int | None = None
+    tidal_access_token: str | None = None
+    downloads_path: str | None = None
+    max_connections: int | None = None
+    source_subdirectories: bool | None = None
+    disc_subdirectories: bool | None = None
+    folder_format: str | None = None
+    track_format: str | None = None
+    embed_artwork: bool | None = None
+    artwork_size: str | None = None
+    auto_sync_enabled: bool | None = None
+    auto_sync_interval: str | None = None
+    scan_sentinel_write_enabled: bool | None = None
+
+
+class EventMessage(BaseModel):
+    type: str
+    data: dict

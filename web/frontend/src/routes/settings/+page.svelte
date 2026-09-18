@@ -1,0 +1,1271 @@
+<script lang="ts">
+  import { onMount, onDestroy } from 'svelte';
+  import { api } from '$lib/api/client';
+  import ScanReview from '$lib/components/ScanReview.svelte';
+  import {
+    isSourceAuthenticated,
+  } from '$lib/auth-ui-logic.js';
+
+  // Config state
+  let configState = $state<'loading' | 'loaded' | 'error'>('loading');
+  let configRequest = 0;
+  let configInFlight = false;
+  let qobuzUserId = $state('');
+  let qobuzAuthToken = $state('');
+  let qobuzAppId = $state('');
+  let qobuzAppSecret = $state('');
+  let qobuzQuality = $state('3');
+  let qobuzDownloadBooklets = $state(true);
+  let qobuzConnected = $state(false);
+
+  let tidalConnected = $state(false);
+  let tidalQuality = $state('3');
+
+  let downloadPath = $state('');
+  let maxConnections = $state(6);
+  let sourceSubdirectories = $state(false);
+  let discSubdirectories = $state(true);
+  let folderFormat = $state('{albumartist}/({year}) {title} [{container}-{bit_depth}-{sampling_rate}]');
+  let trackFormat = $state('{tracknumber:02}. {artist} - {title}{explicit}');
+
+  let embedArtwork = $state(true);
+  let artworkSize = $state('large');
+
+  let autoSyncEnabled = $state(false);
+  let syncInterval = $state('6h');
+  let scanSentinelWriteEnabled = $state(true);
+
+  // Sample data for format preview
+  const sampleAlbum = {
+    albumartist: 'Radiohead',
+    title: 'In Rainbows',
+    year: '2007',
+    container: 'FLAC',
+    bit_depth: '24',
+    sampling_rate: '96',
+    id: '0634904032067',
+    albumcomposer: 'Radiohead',
+  };
+  const sampleTrack = {
+    tracknumber: 3,
+    artist: 'Radiohead',
+    albumartist: 'Radiohead',
+    title: 'Nude',
+    explicit: '',
+    composer: 'Thom Yorke',
+  };
+
+  function previewFormat(fmt: string, data: Record<string, any>): string {
+    try {
+      let result = fmt;
+      // Handle Python-style format specifiers like {tracknumber:02}
+      result = result.replace(/\{(\w+):(\d+)\}/g, (_, key, pad) => {
+        const val = data[key];
+        if (val === undefined) return `{${key}}`;
+        return String(val).padStart(parseInt(pad), '0');
+      });
+      // Handle simple {key} replacements
+      result = result.replace(/\{(\w+)\}/g, (_, key) => {
+        const val = data[key];
+        return val !== undefined ? String(val) : `{${key}}`;
+      });
+      return result || '(empty)';
+    } catch {
+      return fmt;
+    }
+  }
+
+  let folderPreview = $derived(previewFormat(folderFormat, sampleAlbum));
+  let trackPreview = $derived(previewFormat(trackFormat, sampleTrack) + '.flac');
+
+  let scanOpen = $state(false);
+  let scanResultState = $state<any>({ status: 'running', scanned: 0, total: 0 });
+  let scanJobId = $state<string | null>(null);
+  let scanPollTimer: ReturnType<typeof setTimeout> | null = null;
+  let scanController: AbortController | null = null;
+  let scanGeneration = 0;
+  let scanRetryable = $state(false);
+
+  let confirmFlush = $state(false);
+  let flushResult = $state<string | null>(null);
+
+  async function scanDownloads() {
+    stopScanPolling();
+    const generation = scanGeneration;
+    const controller = new AbortController();
+    scanController = controller;
+    scanJobId = null;
+    scanRetryable = false;
+    scanOpen = true;
+    scanResultState = { status: 'running', scanned: 0, total: 0 };
+    try {
+      const { job_id } = await api.library.scanFuzzy(controller.signal);
+      if (generation !== scanGeneration) return;
+      scanJobId = job_id;
+      scheduleScanPoll(job_id, generation, controller.signal);
+    } catch (e: any) {
+      if (generation !== scanGeneration) return;
+      scanResultState = { status: 'error', error: e?.message ?? 'Could not start scan. Please try again.' };
+    }
+  }
+
+  function stopScanPolling() {
+    scanGeneration++;
+    scanController?.abort();
+    scanController = null;
+    if (scanPollTimer) clearTimeout(scanPollTimer);
+    scanPollTimer = null;
+  }
+
+  function scheduleScanPoll(jobId: string, generation: number, signal: AbortSignal) {
+    scanPollTimer = setTimeout(() => {
+      scanPollTimer = null;
+      void pollScan(jobId, generation, signal);
+    }, 500);
+  }
+
+  async function pollScan(jobId: string, generation: number, signal: AbortSignal) {
+    if (generation !== scanGeneration) return;
+    try {
+      const data = await api.library.scanFuzzyStatus(jobId, signal);
+      if (generation !== scanGeneration) return;
+      scanResultState = data;
+      // Schedule only after the preceding request finishes: never overlap polls.
+      if (data.status === 'running') scheduleScanPoll(jobId, generation, signal);
+    } catch (e: any) {
+      if (generation !== scanGeneration) return;
+      const missing = e?.status === 404;
+      scanRetryable = !missing;
+      if (missing) scanJobId = null;
+      scanResultState = {
+        status: 'error',
+        error: missing
+          ? 'This scan is no longer available. Start a new scan.'
+          : 'Could not check scan progress. Try checking again.',
+      };
+    }
+  }
+
+  function retryScanStatus() {
+    if (!scanJobId || !scanRetryable) return;
+    const jobId = scanJobId;
+    stopScanPolling();
+    scanController = new AbortController();
+    scanRetryable = false;
+    scanResultState = { status: 'running', scanned: 0, total: 0 };
+    scheduleScanPoll(jobId, scanGeneration, scanController.signal);
+  }
+
+  async function onScanConfirm(albumId: number, folder: string) {
+    await api.library.markDownloaded(albumId, folder);
+  }
+
+  function onScanClose() {
+    scanOpen = false;
+    stopScanPolling();
+    scanJobId = null;
+    scanRetryable = false;
+  }
+
+  async function flushDatabase() {
+    try {
+      const resp = await fetch('/api/config/reset', { method: 'POST' });
+      const data = await resp.json();
+      flushResult = data.message || 'Database reset';
+      confirmFlush = false;
+      setTimeout(() => { flushResult = null; }, 5000);
+    } catch {
+      flushResult = 'Reset failed';
+    }
+  }
+
+  let saving = $state(false);
+  let saveError = $state('');
+  let saveSuccess = $state(false);
+
+  // OAuth state
+  let oauthLoading = $state(false);
+  let oauthError = $state('');
+  let showHeadlessInput = $state(false);
+  let headlessRedirectUrl = $state('');
+
+  async function startQobuzOAuth() {
+    oauthLoading = true;
+    oauthError = '';
+    try {
+      const origin = window.location.origin;
+      const resp = await fetch(`/api/auth/qobuz/oauth-url?origin=${encodeURIComponent(origin)}`);
+      const data = await resp.json();
+      // Redirect in the same window — the backend callback will redirect
+      // back to /settings?oauth=success after exchanging the code.
+      window.location.href = data.url;
+    } catch (e: any) {
+      oauthError = e?.message ?? 'Failed to start OAuth';
+      oauthLoading = false;
+    }
+  }
+
+  async function startQobuzOAuthHeadless() {
+    oauthLoading = true;
+    oauthError = '';
+    try {
+      const origin = window.location.origin;
+      const resp = await fetch(`/api/auth/qobuz/oauth-url?origin=${encodeURIComponent(origin)}`);
+      const data = await resp.json();
+      showHeadlessInput = true;
+      oauthError = `Open this URL: ${data.url}`;
+    } catch (e: any) {
+      oauthError = e?.message ?? 'Failed to get OAuth URL';
+    } finally {
+      oauthLoading = false;
+    }
+  }
+
+  async function submitHeadlessUrl() {
+    if (!headlessRedirectUrl.trim()) return;
+    oauthLoading = true;
+    oauthError = '';
+    try {
+      const resp = await fetch('/api/auth/qobuz/oauth-from-url', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ redirect_url: headlessRedirectUrl.trim() }),
+      });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.detail || err.error || 'OAuth failed');
+      }
+      const data = await resp.json();
+      if (data.success) {
+        qobuzUserId = String(data.user_id);
+        qobuzConnected = true;
+        showHeadlessInput = false;
+        oauthError = '';
+        // Reload config to get the token
+        const config = await api.config.get();
+        qobuzAuthToken = config.qobuz_token ?? '';
+      } else {
+        oauthError = data.detail || data.error || 'OAuth failed';
+      }
+    } catch (e: any) {
+      oauthError = e?.message ?? 'Failed to exchange OAuth code';
+    } finally {
+      oauthLoading = false;
+    }
+  }
+
+  // Tidal device-code OAuth state
+  let tidalOauthStep = $state<'idle' | 'waiting' | 'authorized' | 'error'>('idle');
+  let tidalVerificationUrl = $state('');
+  let tidalUserCode = $state('');
+  let tidalDeviceCode = $state('');
+  let tidalError = $state('');
+  let _tidalPollTimerId: ReturnType<typeof setInterval> | null = null;
+
+  async function startTidalOAuth() {
+    tidalOauthStep = 'waiting';
+    tidalError = '';
+    try {
+      const resp = await fetch('/api/auth/tidal/device-code', { method: 'POST' });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.detail || `HTTP ${resp.status}`);
+      }
+      const data = await resp.json();
+      tidalDeviceCode = data.device_code;
+      tidalUserCode = data.user_code;
+      tidalVerificationUrl = data.verification_url;
+
+      // Open in new tab
+      window.open(tidalVerificationUrl, '_blank');
+
+      // Poll automatically until authorized or expired
+      const intervalMs = (data.interval ?? 5) * 1000;
+      _tidalPollTimerId = setInterval(pollTidal, intervalMs);
+
+      // Auto-cancel after expires_in
+      const expiresMs = (data.expires_in ?? 300) * 1000;
+      setTimeout(() => {
+        if (tidalOauthStep === 'waiting') {
+          cancelTidalOAuth();
+          tidalError = 'Login window expired. Please try again.';
+          tidalOauthStep = 'error';
+        }
+      }, expiresMs);
+    } catch (e: any) {
+      tidalError = e?.message ?? 'Failed to start Tidal login';
+      tidalOauthStep = 'error';
+    }
+  }
+
+  async function pollTidal() {
+    if (!tidalDeviceCode) return;
+    try {
+      const resp = await fetch('/api/auth/tidal/poll', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ device_code: tidalDeviceCode }),
+      });
+      const data = await resp.json();
+      if (data.status === 'authorized') {
+        if (_tidalPollTimerId !== null) {
+          clearInterval(_tidalPollTimerId);
+          _tidalPollTimerId = null;
+        }
+        tidalConnected = true;
+        tidalOauthStep = 'authorized';
+      } else if (data.status === 'error') {
+        if (_tidalPollTimerId !== null) {
+          clearInterval(_tidalPollTimerId);
+          _tidalPollTimerId = null;
+        }
+        tidalError = data.error ?? 'Authorization failed';
+        tidalOauthStep = 'error';
+      }
+      // status === 'pending': keep polling
+    } catch {
+      // Network error — keep polling
+    }
+  }
+
+  function cancelTidalOAuth() {
+    if (_tidalPollTimerId !== null) {
+      clearInterval(_tidalPollTimerId);
+      _tidalPollTimerId = null;
+    }
+    tidalOauthStep = 'idle';
+    tidalDeviceCode = '';
+    tidalVerificationUrl = '';
+    tidalUserCode = '';
+  }
+
+  // Tidal PKCE OAuth state (HiRes-capable client). Distinct from the
+  // device-code flow because PKCE requires a redirect URL the user pastes
+  // back, and only this flow's tokens unlock LOSSLESS / HI_RES tiers.
+  let tidalPkceStep = $state<'idle' | 'awaiting_paste' | 'exchanging' | 'authorized' | 'error'>('idle');
+  let tidalPkceHandle = $state('');
+  let tidalPkceAuthUrl = $state('');
+  let tidalPkceRedirectUri = $state('');
+  let tidalPkceRedirectInput = $state('');
+  let tidalPkceError = $state('');
+
+  async function startTidalPkce() {
+    tidalPkceStep = 'idle';
+    tidalPkceError = '';
+    try {
+      const resp = await fetch('/api/auth/tidal/pkce-start', { method: 'POST' });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.detail || `HTTP ${resp.status}`);
+      }
+      const data = await resp.json();
+      tidalPkceHandle = data.handle;
+      tidalPkceAuthUrl = data.auth_url;
+      tidalPkceRedirectUri = data.redirect_uri_prefix;
+      tidalPkceStep = 'awaiting_paste';
+      window.open(tidalPkceAuthUrl, '_blank');
+    } catch (e: any) {
+      tidalPkceError = e?.message ?? 'Failed to start Tidal HiRes login';
+      tidalPkceStep = 'error';
+    }
+  }
+
+  async function submitTidalPkceUrl() {
+    if (!tidalPkceRedirectInput.trim() || !tidalPkceHandle) return;
+    tidalPkceStep = 'exchanging';
+    tidalPkceError = '';
+    try {
+      const resp = await fetch('/api/auth/tidal/pkce-complete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          handle: tidalPkceHandle,
+          redirect_url: tidalPkceRedirectInput.trim(),
+        }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        throw Object.assign(new Error(data.detail || `HTTP ${resp.status}`), { status: resp.status });
+      }
+      if (data.status !== 'authorized') {
+        throw new Error(data.error || 'Authorization failed');
+      }
+      tidalConnected = true;
+      tidalPkceStep = 'authorized';
+      tidalPkceHandle = '';
+      tidalPkceAuthUrl = '';
+      tidalPkceRedirectInput = '';
+    } catch (e: any) {
+      tidalPkceError = e?.message ?? 'Failed to exchange code';
+      // Busy responses leave the backend handle unconsumed. Keep the pasted
+      // URL and let the user retry the same exchange after active work finishes.
+      tidalPkceStep = e?.status === 409 ? 'awaiting_paste' : 'error';
+    }
+  }
+
+  function cancelTidalPkce() {
+    tidalPkceStep = 'idle';
+    tidalPkceHandle = '';
+    tidalPkceAuthUrl = '';
+    tidalPkceRedirectInput = '';
+    tidalPkceError = '';
+  }
+
+  onDestroy(() => {
+    configRequest++;
+    if (_tidalPollTimerId !== null) clearInterval(_tidalPollTimerId);
+    stopScanPolling();
+  });
+
+  onMount(() => {
+    // Handle OAuth redirect result
+    const params = new URLSearchParams(window.location.search);
+    const oauthResult = params.get('oauth');
+    if (oauthResult === 'success') {
+      oauthError = '';
+      // Clean up URL params
+      window.history.replaceState({}, '', '/settings');
+    } else if (oauthResult === 'error') {
+      oauthError = `Login failed: ${params.get('reason') ?? 'unknown error'}`;
+      window.history.replaceState({}, '', '/settings');
+    }
+
+    void loadSettings();
+  });
+
+  async function loadSettings() {
+    if (configInFlight || configState === 'loaded') return;
+    const request = ++configRequest;
+    configInFlight = true;
+    configState = 'loading';
+    try {
+      const config = await api.config.get();
+      if (request !== configRequest) return;
+      if (!config || typeof config !== 'object' || Array.isArray(config)) {
+        throw new Error('Invalid configuration response');
+      }
+      qobuzUserId = config.qobuz_user_id ?? '';
+      qobuzAuthToken = config.qobuz_token ?? '';
+      qobuzAppId = config.qobuz_app_id ?? '';
+      qobuzAppSecret = config.qobuz_app_secret ?? '';
+      qobuzQuality = String(config.qobuz_quality ?? 3);
+      qobuzDownloadBooklets = config.qobuz_download_booklets ?? true;
+      tidalQuality = String(config.tidal_quality ?? 3);
+      downloadPath = config.downloads_path ?? '';
+      maxConnections = config.max_connections ?? 6;
+      sourceSubdirectories = config.source_subdirectories ?? false;
+      discSubdirectories = config.disc_subdirectories ?? true;
+      folderFormat = config.folder_format ?? '{albumartist}/({year}) {title} [{container}-{bit_depth}-{sampling_rate}]';
+      trackFormat = config.track_format ?? '{tracknumber:02}. {artist} - {title}{explicit}';
+
+      embedArtwork = config.embed_artwork ?? true;
+      artworkSize = config.artwork_size ?? 'large';
+
+      autoSyncEnabled = config.auto_sync_enabled ?? false;
+      syncInterval = config.auto_sync_interval ?? '6h';
+      scanSentinelWriteEnabled = config.scan_sentinel_write_enabled ?? true;
+      configState = 'loaded';
+      // Hydrate the whole form before starting this independent status check.
+      void loadAuthStatus(config, request);
+    } catch {
+      if (request === configRequest) configState = 'error';
+    } finally {
+      if (request === configRequest) configInFlight = false;
+    }
+  }
+
+  async function loadAuthStatus(config: Record<string, any>, request: number) {
+    try {
+      const statuses = await api.auth.status();
+      if (request !== configRequest) return;
+      qobuzConnected = isSourceAuthenticated(statuses, 'qobuz');
+      tidalConnected = isSourceAuthenticated(statuses, 'tidal');
+      if (tidalConnected && config.tidal_auth_method === 'pkce') {
+        tidalPkceStep = 'authorized';
+      }
+    } catch {
+      if (request !== configRequest) return;
+      qobuzConnected = !!config.qobuz_token;
+      tidalConnected = !!config.tidal_access_token;
+    }
+  }
+
+  async function saveSettings() {
+    if (configState !== 'loaded' || saving) return;
+    configRequest++; // Ignore a late initial auth check after saving changed credentials.
+    saving = true;
+    saveError = '';
+    saveSuccess = false;
+    try {
+      await api.config.update({
+        qobuz_user_id: qobuzUserId,
+        qobuz_token: qobuzAuthToken,
+        qobuz_app_id: qobuzAppId,
+        qobuz_app_secret: qobuzAppSecret,
+        qobuz_quality: parseInt(qobuzQuality),
+        qobuz_download_booklets: qobuzDownloadBooklets,
+        tidal_quality: parseInt(tidalQuality),
+        downloads_path: downloadPath,
+        max_connections: maxConnections,
+        source_subdirectories: sourceSubdirectories,
+        disc_subdirectories: discSubdirectories,
+        folder_format: folderFormat,
+        track_format: trackFormat,
+        embed_artwork: embedArtwork,
+        artwork_size: artworkSize,
+        auto_sync_enabled: autoSyncEnabled,
+        auto_sync_interval: syncInterval,
+        scan_sentinel_write_enabled: scanSentinelWriteEnabled,
+      });
+
+      // Refresh auth status after save (backend hot-reloads clients)
+      try {
+        const statuses = await api.auth.status();
+        qobuzConnected = isSourceAuthenticated(statuses, 'qobuz');
+        tidalConnected = isSourceAuthenticated(statuses, 'tidal');
+      } catch {
+        // ignore auth check failure
+      }
+
+      saveSuccess = true;
+      setTimeout(() => { saveSuccess = false; }, 2500);
+    } catch (e: any) {
+      saveError = e?.message ?? 'Failed to save settings';
+    } finally {
+      saving = false;
+    }
+  }
+</script>
+
+<svelte:head>
+  <title>Settings — Libsync</title>
+</svelte:head>
+
+<div class="page-header">
+  <div>
+    <div class="page-title">Settings</div>
+    <div class="page-subtitle">Configuration</div>
+  </div>
+  <div class="header-actions">
+    {#if saveError}
+      <span class="save-error">{saveError}</span>
+    {/if}
+    {#if saveSuccess}
+      <span class="save-ok">Saved</span>
+    {/if}
+    <button class="btn btn-primary btn-sm" onclick={saveSettings} disabled={saving || configState !== 'loaded'}>
+      {saving ? 'Saving…' : 'Save Changes'}
+    </button>
+  </div>
+</div>
+
+{#if configState === 'loading'}
+  <p role="status">Loading settings…</p>
+{:else if configState === 'error'}
+  <div class="settings-row">
+    <p role="alert" class="save-error">Could not load settings. Your saved settings have not been changed.</p>
+    <button class="btn btn-secondary btn-sm" onclick={loadSettings}>Retry</button>
+  </div>
+{:else}
+<!-- ── Qobuz ── -->
+<div class="settings-section">
+  <div class="settings-section-header">
+    <span>◆ Qobuz</span>
+    {#if qobuzConnected}
+      <span class="tag tag-positive">Connected</span>
+    {:else}
+      <span class="tag tag-default">Not Connected</span>
+    {/if}
+  </div>
+
+  <div class="settings-row">
+    <div>
+      <div class="settings-label">Login with Qobuz</div>
+      <div class="settings-label-sub">OAuth login — no need to find tokens manually</div>
+    </div>
+    <div style="display: flex; gap: var(--space-2); align-items: center;">
+      <button class="btn btn-primary btn-sm" onclick={startQobuzOAuth} disabled={oauthLoading}>
+        {#if oauthLoading}Waiting...{:else}▸ Login with Browser{/if}
+      </button>
+      <button class="btn btn-secondary btn-sm" onclick={startQobuzOAuthHeadless} disabled={oauthLoading}>
+        Headless Login
+      </button>
+    </div>
+  </div>
+
+  {#if oauthError}
+    <div class="settings-row" style="border-bottom: none;">
+      <div></div>
+      <span style="color: var(--destructive); font-size: var(--text-xs);">{oauthError}</span>
+    </div>
+  {/if}
+
+  {#if showHeadlessInput}
+    <div class="settings-row">
+      <div>
+        <div class="settings-label">Redirect URL</div>
+        <div class="settings-label-sub">Paste the URL from your browser after login</div>
+      </div>
+      <div style="display: flex; gap: var(--space-2); align-items: center;">
+        <input
+          class="settings-input"
+          type="text"
+          placeholder="http://localhost:11111/callback?code_autorisation=..."
+          bind:value={headlessRedirectUrl}
+          style="max-width: 400px;"
+        />
+        <button class="btn btn-primary btn-sm" onclick={submitHeadlessUrl} disabled={oauthLoading}>
+          Submit
+        </button>
+      </div>
+    </div>
+  {/if}
+
+  <div class="settings-row">
+    <div>
+      <div class="settings-label">User ID</div>
+      <div class="settings-label-sub">Auto-filled after OAuth login</div>
+    </div>
+    <input
+      class="settings-input"
+      type="text"
+      placeholder="Your numeric user ID"
+      bind:value={qobuzUserId}
+      style="max-width: 200px;"
+    />
+  </div>
+
+  <div class="settings-row">
+    <div>
+      <div class="settings-label">Auth Token</div>
+      <div class="settings-label-sub">Auto-filled after OAuth login, or paste from play.qobuz.com DevTools (Network → any api.json request → X-User-Auth-Token)</div>
+    </div>
+    <input
+      class="settings-input"
+      type="password"
+      placeholder="Paste token from browser DevTools"
+      bind:value={qobuzAuthToken}
+      style="max-width: 400px;"
+    />
+  </div>
+
+  <div class="settings-row">
+    <div>
+      <div class="settings-label">App ID</div>
+      <div class="settings-label-sub">Override the X-App-Id sent on every request. Leave blank to auto-detect from the spoofer (798273057). OAuth tokens use 304027809.</div>
+    </div>
+    <input
+      class="settings-input"
+      type="text"
+      placeholder="Auto-detect"
+      bind:value={qobuzAppId}
+      style="max-width: 200px;"
+    />
+  </div>
+
+  <div class="settings-row">
+    <div>
+      <div class="settings-label">App Secret (override)</div>
+      <div class="settings-label-sub">Override the request-signing secret used for downloads. Required when the App ID above is anything other than the spoofed web-player ID — only the app's owner has this. Leave blank to use the spoofer's auto-detected secret.</div>
+    </div>
+    <input
+      class="settings-input"
+      type="password"
+      placeholder="Auto-detect from spoofer"
+      bind:value={qobuzAppSecret}
+      style="max-width: 400px;"
+    />
+  </div>
+
+  <div class="settings-row">
+    <div>
+      <div class="settings-label">Quality</div>
+    </div>
+    <select class="settings-select" bind:value={qobuzQuality} style="max-width: 220px;">
+      <option value="1">320kbps MP3</option>
+      <option value="2">16-bit / 44.1kHz</option>
+      <option value="3">24-bit / up to 96kHz</option>
+      <option value="4">24-bit / up to 192kHz</option>
+    </select>
+  </div>
+  <div class="settings-row">
+    <div>
+      <div class="settings-label">Download Booklets</div>
+      <div class="settings-label-sub">Download PDF booklets included with albums</div>
+    </div>
+    <button
+      type="button"
+      class="toggle-track"
+      class:on={qobuzDownloadBooklets}
+      onclick={() => qobuzDownloadBooklets = !qobuzDownloadBooklets}
+      aria-pressed={qobuzDownloadBooklets}
+      aria-label="Toggle Qobuz booklet downloads"
+    >
+      <div class="toggle-thumb"></div>
+    </button>
+  </div>
+</div>
+
+<!-- ── Tidal ── -->
+<div class="settings-section">
+  <div class="settings-section-header">
+    <span>◆ Tidal</span>
+    {#if tidalConnected}
+      <span class="tag tag-positive">Connected</span>
+    {:else}
+      <span class="tag tag-default">Not Connected</span>
+    {/if}
+  </div>
+
+  <div class="settings-row">
+    <div>
+      <div class="settings-label">Login with Tidal (HiRes)</div>
+      <div class="settings-label-sub">Required for Lossless / HiRes / Atmos. After approval, copy the URL from the address bar and paste below.</div>
+    </div>
+    {#if tidalPkceStep === 'authorized'}
+      <span style="color: var(--success, #4caf50); font-size: var(--text-sm);">Connected ↻</span>
+      <button class="btn btn-secondary btn-sm" onclick={startTidalPkce} style="margin-left: var(--space-2);">Re-auth</button>
+    {:else if tidalPkceStep === 'idle' || tidalPkceStep === 'error'}
+      <button class="btn btn-primary btn-sm" onclick={startTidalPkce}>▸ Connect Tidal (HiRes)</button>
+    {:else}
+      <button class="btn btn-secondary btn-sm" onclick={cancelTidalPkce}>Cancel</button>
+    {/if}
+  </div>
+
+  {#if tidalPkceStep === 'awaiting_paste' || tidalPkceStep === 'exchanging'}
+    <div class="settings-row">
+      <div>
+        <div class="settings-label">Paste the redirect URL</div>
+        <div class="settings-label-sub">After signing in, the browser lands on a Tidal "404"-style page starting with <code>{tidalPkceRedirectUri}</code>. Copy the full URL from the address bar and paste it here.</div>
+      </div>
+      <div style="display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; justify-content: flex-end;">
+        <input
+          class="settings-input"
+          type="text"
+          placeholder="{tidalPkceRedirectUri}?code=..."
+          bind:value={tidalPkceRedirectInput}
+          style="min-width: 320px; max-width: 500px;"
+        />
+        <button class="btn btn-primary btn-sm" onclick={submitTidalPkceUrl} disabled={tidalPkceStep === 'exchanging' || !tidalPkceRedirectInput.trim()}>
+          {#if tidalPkceStep === 'exchanging'}Exchanging...{:else}Submit{/if}
+        </button>
+        <a href={tidalPkceAuthUrl} target="_blank" rel="noopener" style="font-size: var(--text-xs); color: var(--muted);">Open link manually ↗</a>
+      </div>
+    </div>
+  {/if}
+
+  {#if tidalPkceError}
+    <div class="settings-row">
+      <div></div>
+      <span style="color: var(--destructive); font-size: var(--text-xs);">{tidalPkceError}</span>
+    </div>
+  {/if}
+
+  <div class="settings-row">
+    <div>
+      <div class="settings-label">Login with Tidal (legacy, AAC only)</div>
+      <div class="settings-label-sub">Headless device-code flow — works on any device but capped at 320kbps AAC regardless of subscription.</div>
+    </div>
+    {#if tidalOauthStep === 'idle' || tidalOauthStep === 'error'}
+      <button class="btn btn-secondary btn-sm" onclick={startTidalOAuth}>▸ Connect Tidal (AAC)</button>
+    {:else if tidalOauthStep === 'waiting'}
+      <button class="btn btn-secondary btn-sm" onclick={cancelTidalOAuth}>Cancel</button>
+    {:else if tidalOauthStep === 'authorized'}
+      <span style="color: var(--success, #4caf50); font-size: var(--text-sm);">Connected</span>
+    {/if}
+  </div>
+
+  {#if tidalOauthStep === 'waiting'}
+    <div class="settings-row">
+      <div>
+        <div class="settings-label">Waiting for authorization…</div>
+        <div class="settings-label-sub">Approve the request in the browser tab that just opened, then return here.</div>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: var(--space-1); align-items: flex-end;">
+        <span style="font-family: monospace; font-size: var(--text-sm); letter-spacing: 3px; font-weight: bold;">{tidalUserCode}</span>
+        <a href={tidalVerificationUrl} target="_blank" rel="noopener" style="font-size: var(--text-xs); color: var(--muted);">Open link manually ↗</a>
+      </div>
+    </div>
+  {/if}
+
+  {#if tidalError}
+    <div class="settings-row">
+      <div></div>
+      <span style="color: var(--destructive); font-size: var(--text-xs);">{tidalError}</span>
+    </div>
+  {/if}
+
+  <div class="settings-row" style="border-bottom: none;">
+    <div>
+      <div class="settings-label">Quality</div>
+    </div>
+    <select class="settings-select" bind:value={tidalQuality} style="max-width: 220px;">
+      <option value="0">AAC ~96kbps</option>
+      <option value="1">AAC 320kbps</option>
+      <option value="2">16-bit / 44.1kHz FLAC (CD lossless)</option>
+      <option value="3">MQA / FLAC (legacy HiRes)</option>
+      <option value="4">HiRes Lossless (24-bit, up to 192kHz) — coming soon</option>
+    </select>
+  </div>
+</div>
+
+<!-- ── Downloads ── -->
+<div class="settings-section">
+  <div class="settings-section-header">
+    <span>◆ Downloads</span>
+  </div>
+
+  <div class="settings-row">
+    <div>
+      <div class="settings-label">Download Path</div>
+    </div>
+    <div>
+      <input
+        class="settings-input"
+        type="text"
+        placeholder="/music"
+        bind:value={downloadPath}
+      />
+    </div>
+  </div>
+
+  <div class="settings-row">
+    <div>
+      <div class="settings-label">Scan Downloads</div>
+      <div class="settings-label-sub">Scan download folder for existing albums and sync with database</div>
+    </div>
+    <div style="display: flex; gap: var(--space-2); align-items: center;">
+      <button class="btn btn-secondary btn-sm" onclick={scanDownloads} disabled={scanOpen}>
+        {scanOpen ? 'Scanning…' : '▸ Scan Folder'}
+      </button>
+    </div>
+  </div>
+
+  <div class="settings-row">
+    <div>
+      <div class="settings-label">Write Sentinel File</div>
+      <div class="settings-label-sub">Write sentinel file in album folders — disable when scanning a read-only mount.</div>
+    </div>
+    <button
+      type="button"
+      class="toggle-track"
+      class:on={scanSentinelWriteEnabled}
+      onclick={() => scanSentinelWriteEnabled = !scanSentinelWriteEnabled}
+      aria-pressed={scanSentinelWriteEnabled}
+      aria-label="Toggle sentinel file writes"
+    >
+      <div class="toggle-thumb"></div>
+    </button>
+  </div>
+
+  <div class="settings-row">
+    <div>
+      <div class="settings-label">Reset Database</div>
+      <div class="settings-label-sub">Clear library data and download history. Config and credentials are preserved.</div>
+    </div>
+    <div style="display: flex; gap: var(--space-2); align-items: center;">
+      {#if confirmFlush}
+        <button class="btn btn-destructive btn-sm" onclick={flushDatabase}>Confirm Reset</button>
+        <button class="btn btn-secondary btn-sm" onclick={() => confirmFlush = false}>Cancel</button>
+      {:else}
+        <button class="btn btn-secondary btn-sm" onclick={() => confirmFlush = true}>▸ Reset</button>
+      {/if}
+      {#if flushResult}
+        <span class="scan-result">{flushResult}</span>
+      {/if}
+    </div>
+  </div>
+
+  <div class="settings-row">
+    <div>
+      <div class="settings-label">Max Connections</div>
+    </div>
+    <input
+      class="settings-input"
+      type="number"
+      min="1"
+      max="20"
+      bind:value={maxConnections}
+      style="max-width: 80px;"
+    />
+  </div>
+
+  <div class="settings-row">
+    <div>
+      <div class="settings-label">Folder Format</div>
+      <div class="settings-label-sub">{'{albumartist}'}, {'{title}'}, {'{year}'}, {'{container}'}, {'{bit_depth}'}, {'{sampling_rate}'}</div>
+    </div>
+    <div>
+      <input
+        class="settings-input"
+        type="text"
+        bind:value={folderFormat}
+      />
+      <div class="format-preview">▸ {folderPreview}</div>
+    </div>
+  </div>
+
+  <div class="settings-row">
+    <div>
+      <div class="settings-label">Track Format</div>
+      <div class="settings-label-sub">{'{tracknumber}'}, {'{artist}'}, {'{title}'}, {'{explicit}'}, {'{albumartist}'}</div>
+    </div>
+    <div>
+      <input
+        class="settings-input"
+        type="text"
+        bind:value={trackFormat}
+      />
+      <div class="format-preview">▸ {trackPreview}</div>
+    </div>
+  </div>
+  <div class="settings-row">
+    <div>
+      <div class="settings-label">Source Subdirectories</div>
+      <div class="settings-label-sub">Put albums in Qobuz/, Tidal/ subfolders</div>
+    </div>
+    <button
+      type="button"
+      class="toggle-track"
+      class:on={sourceSubdirectories}
+      onclick={() => sourceSubdirectories = !sourceSubdirectories}
+      aria-pressed={sourceSubdirectories}
+      aria-label="Toggle source subdirectories"
+    >
+      <div class="toggle-thumb"></div>
+    </button>
+  </div>
+  <div class="settings-row" style="border-bottom: none;">
+    <div>
+      <div class="settings-label">Disc Subdirectories</div>
+      <div class="settings-label-sub">Create Disc N subfolders for multi-disc albums</div>
+    </div>
+    <button
+      type="button"
+      class="toggle-track"
+      class:on={discSubdirectories}
+      onclick={() => discSubdirectories = !discSubdirectories}
+      aria-pressed={discSubdirectories}
+      aria-label="Toggle disc subdirectories"
+    >
+      <div class="toggle-thumb"></div>
+    </button>
+  </div>
+</div>
+
+<!-- ── Artwork ── -->
+<div class="settings-section">
+  <div class="settings-section-header">
+    <span>◆ Artwork</span>
+  </div>
+  <div class="settings-row">
+    <div>
+      <div class="settings-label">Embed Artwork</div>
+      <div class="settings-label-sub">Write cover art into audio file tags</div>
+    </div>
+    <button
+      type="button"
+      class="toggle-track"
+      class:on={embedArtwork}
+      onclick={() => embedArtwork = !embedArtwork}
+      aria-pressed={embedArtwork}
+      aria-label="Toggle embedded artwork"
+    >
+      <div class="toggle-thumb"></div>
+    </button>
+  </div>
+  <div class="settings-row" style="border-bottom: none;">
+    <div>
+      <div class="settings-label">Artwork Size</div>
+    </div>
+    <select class="settings-select" bind:value={artworkSize} style="max-width: 160px;">
+      <option value="thumbnail">Thumbnail</option>
+      <option value="small">Small</option>
+      <option value="large">Large</option>
+      <option value="original">Original (up to 30MB)</option>
+    </select>
+  </div>
+</div>
+
+<!-- ── Auto Sync ── -->
+<div class="settings-section">
+  <div class="settings-section-header">
+    <span>◆ Auto Sync</span>
+  </div>
+
+  <div class="settings-row">
+    <div>
+      <div class="settings-label">Enable Auto Sync</div>
+      <div class="settings-label-sub">Automatically download new library additions</div>
+    </div>
+    <button
+      class="toggle-track"
+      class:on={autoSyncEnabled}
+      onclick={() => { autoSyncEnabled = !autoSyncEnabled; }}
+      aria-pressed={autoSyncEnabled}
+      aria-label="Enable auto sync"
+    >
+      <div class="toggle-thumb"></div>
+    </button>
+  </div>
+
+  <div class="settings-row" style="border-bottom: none;">
+    <div>
+      <div class="settings-label">Sync Interval</div>
+    </div>
+    <select class="settings-select" bind:value={syncInterval} style="max-width: 160px;">
+      <option value="1h">Every hour</option>
+      <option value="6h">Every 6 hours</option>
+      <option value="daily">Daily</option>
+      <option value="custom">Custom cron</option>
+    </select>
+  </div>
+</div>
+
+{#if scanOpen}
+  <ScanReview result={scanResultState} onConfirm={onScanConfirm} onClose={onScanClose}
+    onRetry={scanRetryable ? retryScanStatus : undefined}
+    onRestart={scanRetryable ? undefined : scanDownloads} />
+{/if}
+
+{/if}
+
+<style>
+  /* ── Page header ── */
+  .page-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: var(--space-6);
+  }
+
+  .page-title {
+    font-size: var(--text-3xl);
+    font-weight: 800;
+    letter-spacing: var(--tracking-tight);
+    line-height: var(--leading-tight);
+  }
+
+  .page-subtitle {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: var(--text-tertiary);
+    letter-spacing: var(--tracking-mono);
+    margin-top: var(--space-1);
+  }
+
+  .header-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+  }
+
+  .save-error {
+    font-size: var(--text-xs);
+    color: var(--destructive);
+    font-weight: 600;
+  }
+
+  .save-ok {
+    font-size: var(--text-xs);
+    color: var(--positive);
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: var(--tracking-wide);
+  }
+
+  /* ── Settings section card ── */
+  .settings-section {
+    border: 2px solid var(--border);
+    box-shadow: var(--shadow-sm);
+    background: var(--canvas-raised);
+    margin-bottom: var(--space-5);
+  }
+
+  .settings-section-header {
+    padding: var(--space-3) var(--space-4);
+    border-bottom: 2px solid var(--border);
+    font-size: var(--text-sm);
+    font-weight: 700;
+    background: var(--canvas-inset);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  /* ── Settings rows ── */
+  .settings-row {
+    padding: var(--space-3) var(--space-4);
+    border-bottom: 1px solid var(--border-subtle);
+    display: grid;
+    grid-template-columns: 200px 1fr;
+    gap: var(--space-4);
+    align-items: center;
+  }
+
+  .settings-label {
+    font-size: var(--text-sm);
+    font-weight: 600;
+  }
+
+  .settings-label-sub {
+    font-size: var(--text-xs);
+    color: var(--text-tertiary);
+    margin-top: 2px;
+  }
+
+  /* ── Inputs ── */
+  .settings-input {
+    font-family: var(--font-family);
+    font-size: var(--text-sm);
+    padding: var(--space-2) var(--space-3);
+    border: 2px solid var(--border-subtle);
+    border-radius: 0;
+    background: var(--canvas-inset);
+    color: var(--text-primary);
+    outline: none;
+    width: 100%;
+  }
+
+  .settings-input:focus {
+    border-color: var(--accent);
+    box-shadow: var(--shadow-accent);
+  }
+
+  .scan-result {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: var(--positive);
+    letter-spacing: var(--tracking-mono);
+  }
+
+  .format-preview {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--accent);
+    letter-spacing: var(--tracking-mono);
+    margin-top: var(--space-1);
+    padding: var(--space-1) 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .settings-input::placeholder {
+    color: var(--text-tertiary);
+  }
+
+  .settings-select {
+    font-family: var(--font-family);
+    font-size: var(--text-sm);
+    padding: var(--space-2) var(--space-3);
+    border: 2px solid var(--border-subtle);
+    border-radius: 0;
+    background: var(--canvas-inset);
+    color: var(--text-primary);
+    outline: none;
+    appearance: none;
+    -webkit-appearance: none;
+    width: 100%;
+    cursor: pointer;
+  }
+
+  .settings-select:focus {
+    border-color: var(--accent);
+    box-shadow: var(--shadow-accent);
+  }
+
+  /* ── Toggle ── */
+  .toggle-track {
+    width: 40px;
+    height: 20px;
+    border: 2px solid var(--border);
+    background: var(--canvas-inset);
+    cursor: pointer;
+    position: relative;
+    display: inline-block;
+    border-radius: 0;
+    padding: 0;
+    flex-shrink: 0;
+    appearance: none;
+  }
+
+  .toggle-track.on {
+    background: var(--accent);
+    border-color: var(--accent);
+  }
+
+  .toggle-thumb {
+    width: 12px;
+    height: 12px;
+    background: var(--text-primary);
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    transition: left 80ms ease;
+  }
+
+  .toggle-track.on .toggle-thumb {
+    left: 22px;
+    background: #1a1918;
+  }
+
+  /* ── Shared btn/tag (re-used from global tokens) ── */
+  .btn {
+    font-family: var(--font-family);
+    font-size: var(--text-sm);
+    font-weight: 700;
+    padding: var(--space-2) var(--space-5);
+    border: 2px solid var(--border);
+    border-radius: 0;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  .btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .btn-primary {
+    background: var(--accent);
+    color: var(--text-inverse);
+    box-shadow: var(--shadow-accent);
+  }
+
+  .btn-primary:hover:not(:disabled) { box-shadow: var(--shadow-lg); }
+  .btn-primary:active:not(:disabled) { box-shadow: 1px 1px 0 rgba(0,0,0,0.3); transform: translate(1px, 1px); }
+
+  .btn-secondary {
+    background: var(--canvas-raised);
+    color: var(--text-primary);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .btn-sm {
+    font-size: var(--text-xs);
+    padding: var(--space-1) var(--space-3);
+  }
+
+  .tag {
+    font-size: 10px;
+    font-weight: 700;
+    padding: 2px var(--space-2);
+    border: 1.5px solid var(--border);
+    text-transform: uppercase;
+    letter-spacing: var(--tracking-wide);
+    display: inline-block;
+  }
+
+  .tag-positive {
+    background: var(--positive);
+    color: var(--text-primary);
+  }
+
+  .tag-default {
+    background: var(--canvas-raised);
+    color: var(--text-secondary);
+  }
+</style>
