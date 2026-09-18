@@ -112,6 +112,58 @@ def test_nome_do_motor_e_honesto():
     assert ("difflib" in nome) is not bool(fuzzy.RAPIDFUZZ_DISPONIVEL)
 
 
+class _FakeRfFuzz:
+    """Imita rapidfuzz.fuzz o suficiente pra exercitar as linhas que só
+    rodam com RAPIDFUZZ_DISPONIVEL=True -- sem precisar do pacote
+    compilado de verdade instalado (nem aqui nem no a-Shell ele está,
+    já que é dependência opcional do grupo `speed`)."""
+
+    def ratio(self, a, b):
+        return 84.0
+
+
+class _FakeRfProcess:
+    def __init__(self, achado):
+        self._achado = achado
+
+    def extractOne(self, consulta, opcoes, scorer=None, score_cutoff=None):
+        return self._achado
+
+
+class TestComRapidfuzzFake:
+    """RAPIDFUZZ_DISPONIVEL=True de verdade só acontece com o pacote
+    compilado instalado -- que não está disponível neste ambiente nem
+    no a-Shell (dependência opcional). O fixture `motor` acima então só
+    consegue exercitar esse branch em CI Linux, se o rapidfuzz lá
+    estiver instalado. Aqui simulamos a API mínima de rapidfuzz.fuzz/
+    rapidfuzz.process pra fechar as linhas 59-60 (ratio) e 93-98
+    (melhor_match) independente de ambiente."""
+
+    def test_ratio_usa_rf_fuzz_e_divide_por_100(self, monkeypatch):
+        monkeypatch.setattr(fuzzy, "RAPIDFUZZ_DISPONIVEL", True)
+        monkeypatch.setattr(fuzzy, "_rf_fuzz", _FakeRfFuzz())
+
+        assert fuzzy.ratio("a", "b") == 0.84
+
+    def test_melhor_match_usa_rf_process_e_devolve_so_a_string(self, monkeypatch):
+        monkeypatch.setattr(fuzzy, "RAPIDFUZZ_DISPONIVEL", True)
+        monkeypatch.setattr(fuzzy, "_rf_fuzz", _FakeRfFuzz())
+        monkeypatch.setattr(
+            fuzzy, "_rf_process", _FakeRfProcess(("opcao_certa", 90.0, 2))
+        )
+
+        assert fuzzy.melhor_match("consulta", ["x", "y", "opcao_certa"]) == (
+            "opcao_certa"
+        )
+
+    def test_melhor_match_sem_achado_do_rf_process_devolve_none(self, monkeypatch):
+        monkeypatch.setattr(fuzzy, "RAPIDFUZZ_DISPONIVEL", True)
+        monkeypatch.setattr(fuzzy, "_rf_fuzz", _FakeRfFuzz())
+        monkeypatch.setattr(fuzzy, "_rf_process", _FakeRfProcess(None))
+
+        assert fuzzy.melhor_match("consulta", ["x", "y"]) is None
+
+
 def test_cli_importa_sem_rapidfuzz(monkeypatch):
     """A regressao original, testada de verdade: com o rapidfuzz bloqueado no
     nivel do import, o CLI ainda tem que importar."""
