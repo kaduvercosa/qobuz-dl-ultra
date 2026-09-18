@@ -78,9 +78,7 @@ async def test_download_release_processa_faixa_sequencial(
 async def test_download_release_sem_faixas_retorna_false(
     monkeypatch, tmp_path, no_http_session
 ):
-    obj = downloader.Download(
-        SimpleNamespace(), "album-1", str(tmp_path), 6
-    )
+    obj = downloader.Download(SimpleNamespace(), "album-1", str(tmp_path), 6)
 
     async def get_album_meta(item_id):
         return album_data([])

@@ -94,9 +94,7 @@ def test_get_description_inclui_bit_depth_e_sampling_rate():
 
 
 def test_get_description_com_multiple_adiciona_prefixo_de_cd():
-    assert (
-        downloader._get_description({}, "Musica", multiple=2) == "[CD 2] Musica [/]"
-    )
+    assert downloader._get_description({}, "Musica", multiple=2) == "[CD 2] Musica [/]"
 
 
 class TestResolveArtUrl:
@@ -124,7 +122,9 @@ class TestResolveArtUrl:
 
 
 class TestCleanEmbedArt:
-    def test_remove_o_arquivo_de_capa_embutida_quando_existe(self, tmp_path, monkeypatch):
+    def test_remove_o_arquivo_de_capa_embutida_quando_existe(
+        self, tmp_path, monkeypatch
+    ):
         monkeypatch.setattr(downloader.time, "sleep", lambda s: None)
         embed_path = tmp_path / downloader.EMB_COVER_NAME
         embed_path.write_bytes(b"fake-jpg")
@@ -204,7 +204,10 @@ class TestGetExtra:
         )
 
         await downloader._get_extra(
-            "https://x.com/img_600.jpg", str(tmp_path), extra="cover.jpg", art_size="300"
+            "https://x.com/img_600.jpg",
+            str(tmp_path),
+            extra="cover.jpg",
+            art_size="300",
         )
 
         assert capturado["item"] == "https://x.com/img_300.jpg"

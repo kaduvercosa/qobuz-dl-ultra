@@ -122,8 +122,7 @@ async def test_limit_trunca_resultados():
         return {
             "albums": {
                 "items": [
-                    {"id": str(i), "title": "X", "tracks_count": 1}
-                    for i in range(5)
+                    {"id": str(i), "title": "X", "tracks_count": 1} for i in range(5)
                 ],
             },
         }

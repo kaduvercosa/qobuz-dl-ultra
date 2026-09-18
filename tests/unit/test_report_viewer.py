@@ -65,7 +65,9 @@ class TestFmtDt:
 # --------------------------------------------------------------------
 class TestBadge:
     def test_cor_default_e_chip(self):
-        assert rv._badge("Sincronizada") == '<span class="badge chip">Sincronizada</span>'
+        assert (
+            rv._badge("Sincronizada") == '<span class="badge chip">Sincronizada</span>'
+        )
 
     def test_cor_customizada(self):
         assert rv._badge("X", "chip-err") == '<span class="badge chip-err">X</span>'
@@ -103,8 +105,11 @@ class TestCarregarReport:
 class TestRenderizarFaixa:
     def test_status_conhecido_usa_label_cor_e_glifo_da_tabela(self):
         out = rv._renderizar_faixa(
-            {"numero": 1, "identificacao": {"titulo": "Musica"},
-             "download": {"situacao": "concluido"}},
+            {
+                "numero": 1,
+                "identificacao": {"titulo": "Musica"},
+                "download": {"situacao": "concluido"},
+            },
             mostrar_artista_col=False,
         )
         assert 'class="status-pill ok"' in out
@@ -134,8 +139,14 @@ class TestRenderizarFaixa:
 
     def test_letras_sucesso_sincronizada_bilingue_e_fonte(self):
         out = rv._renderizar_faixa(
-            {"letras": {"situacao": "sucesso", "sincronizada": True,
-                        "bilingue": True, "fonte": "Genius"}},
+            {
+                "letras": {
+                    "situacao": "sucesso",
+                    "sincronizada": True,
+                    "bilingue": True,
+                    "fonte": "Genius",
+                }
+            },
             False,
         )
         assert "Sincronizada" in out and "Bilíngue" in out
@@ -199,7 +210,9 @@ class TestRenderizarHtml:
                 "tipo_lancamento": "Deluxe",
             },
             "qualidade": {
-                "formato": "FLAC", "bit_depth": 24, "sampling_rate": 96,
+                "formato": "FLAC",
+                "bit_depth": 24,
+                "sampling_rate": 96,
                 "alvo_atingida": True,
             },
             "progresso": {
@@ -209,16 +222,27 @@ class TestRenderizarHtml:
                     "atualizado_em": "2026-01-02T11:30:00-03:00",
                 },
                 "resumo": {
-                    "total": 10, "concluidas": 7, "puladas": 1,
-                    "falhas": 1, "pendentes": 1,
+                    "total": 10,
+                    "concluidas": 7,
+                    "puladas": 1,
+                    "falhas": 1,
+                    "pendentes": 1,
                 },
             },
-            "extra": {"rotulo": "Gravadora X", "genero": "Rock", "url": "https://x.com/1"},
+            "extra": {
+                "rotulo": "Gravadora X",
+                "genero": "Rock",
+                "url": "https://x.com/1",
+            },
             "faixas": [
-                {"identificacao": {"titulo": "F1", "artista": "A1"},
-                 "download": {"situacao": "concluido"}},
-                {"identificacao": {"titulo": "F2", "artista": "A2"},
-                 "download": {"situacao": "falha", "motivo": "erro"}},
+                {
+                    "identificacao": {"titulo": "F1", "artista": "A1"},
+                    "download": {"situacao": "concluido"},
+                },
+                {
+                    "identificacao": {"titulo": "F2", "artista": "A2"},
+                    "download": {"situacao": "falha", "motivo": "erro"},
+                },
             ],
         }
         out = rv.renderizar_html(report)

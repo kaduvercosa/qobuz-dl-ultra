@@ -1,7 +1,5 @@
 """Branches de qualidade em download_release()."""
 
-from types import SimpleNamespace
-
 import pytest
 
 from qobuz_dl import downloader

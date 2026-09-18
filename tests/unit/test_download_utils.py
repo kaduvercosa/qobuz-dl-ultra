@@ -16,9 +16,7 @@ def _portable_path(value):
 
 class TestProcessFolderFormatComSubdirs:
     def test_parte_que_sanitiza_para_vazio_e_ignorada(self):
-        resultado = du.process_folder_format_with_subdirs(
-            "normal/ /outro", {}
-        )
+        resultado = du.process_folder_format_with_subdirs("normal/ /outro", {})
 
         assert _portable_path(resultado) == PurePath("normal/outro")
 

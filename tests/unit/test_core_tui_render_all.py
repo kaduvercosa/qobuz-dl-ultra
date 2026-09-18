@@ -1,7 +1,5 @@
 """Exercita os renderizadores internos de _tui_select em todos os modos."""
 
-from types import SimpleNamespace
-
 import os
 import shutil
 
@@ -45,9 +43,40 @@ def _render_windows():
     "category,options",
     [
         ("filter", ["Filtro", "Outro"]),
-        ("album", [{"meta": {"title": "A", "artist": "B", "type": "Album", "year": "2024", "tracks_count": 4, "quality": "16b/44.1kHz"}}]),
-        ("track", [{"meta": {"title": "T", "artist": "B", "album": "A", "type": "Track", "duration": "03:00", "quality": "16b/44.1kHz"}}]),
-        ("playlist", [{"meta": {"name": "P", "owner": "O", "count": 2, "duration": "04:00"}}]),
+        (
+            "album",
+            [
+                {
+                    "meta": {
+                        "title": "A",
+                        "artist": "B",
+                        "type": "Album",
+                        "year": "2024",
+                        "tracks_count": 4,
+                        "quality": "16b/44.1kHz",
+                    }
+                }
+            ],
+        ),
+        (
+            "track",
+            [
+                {
+                    "meta": {
+                        "title": "T",
+                        "artist": "B",
+                        "album": "A",
+                        "type": "Track",
+                        "duration": "03:00",
+                        "quality": "16b/44.1kHz",
+                    }
+                }
+            ],
+        ),
+        (
+            "playlist",
+            [{"meta": {"name": "P", "owner": "O", "count": 2, "duration": "04:00"}}],
+        ),
         ("artist", [{"meta": {"name": "Artist", "count": 2}}]),
     ],
 )
@@ -66,13 +95,29 @@ async def test_renderers_for_all_categories(monkeypatch, category, options):
 
 async def test_renderers_fallback_largura_e_texto_longo(monkeypatch):
     monkeypatch.setattr(core, "Application", FakeApplication)
-    monkeypatch.setattr(core, "get_app", lambda: (_ for _ in ()).throw(RuntimeError("no app")))
-    monkeypatch.setattr(shutil, "get_terminal_size", lambda *args, **kwargs: os.terminal_size((20, 10)),)
-
+    monkeypatch.setattr(
+        core, "get_app", lambda: (_ for _ in ()).throw(RuntimeError("no app"))
+    )
+    monkeypatch.setattr(
+        shutil,
+        "get_terminal_size",
+        lambda *args, **kwargs: os.terminal_size((20, 10)),
+    )
 
     await core._tui_select(
         "Título muito longo",
-        [{"meta": {"title": "X" * 200, "artist": "Y" * 200, "type": "Album", "year": "2024", "tracks_count": 99, "quality": "24b/96kHz"}}],
+        [
+            {
+                "meta": {
+                    "title": "X" * 200,
+                    "artist": "Y" * 200,
+                    "type": "Album",
+                    "year": "2024",
+                    "tracks_count": 99,
+                    "quality": "24b/96kHz",
+                }
+            }
+        ],
         is_multi=False,
         item_category="album",
     )

@@ -65,7 +65,9 @@ async def test_search_ignora_item_nao_dict():
     assert result == []
 
 
-async def test_download_list_track_paralelo_marca_somente_sucesso(monkeypatch, tmp_path):
+async def test_download_list_track_paralelo_marca_somente_sucesso(
+    monkeypatch, tmp_path
+):
     marked = []
     calls = []
     settings = SimpleNamespace(

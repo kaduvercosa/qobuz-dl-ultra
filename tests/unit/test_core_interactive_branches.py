@@ -36,14 +36,18 @@ def _app():
 
 async def test_interactive_favoritos_albums(monkeypatch):
     app = _app()
-    options = [{"meta": {"title": "Album", "id": "a1", "type": "Album"}, "url": "album-url"}]
-    selections = iter([
-        ("⭐ Favorites", 0),
-        ("💿 Albums", 1),
-        [(options[0], 0)],
-        ("❌ Não", 1),
-        ("🎚️ Lossless", 1),
-    ])
+    options = [
+        {"meta": {"title": "Album", "id": "a1", "type": "Album"}, "url": "album-url"}
+    ]
+    selections = iter(
+        [
+            ("⭐ Favorites", 0),
+            ("💿 Albums", 1),
+            [(options[0], 0)],
+            ("❌ Não", 1),
+            ("🎚️ Lossless", 1),
+        ]
+    )
 
     async def tui(*args, **kwargs):
         return next(selections)
@@ -63,13 +67,15 @@ async def test_interactive_favoritos_albums(monkeypatch):
 async def test_interactive_favoritos_playlists(monkeypatch):
     app = _app()
     options = [{"meta": {"name": "Playlist", "id": "p1"}, "url": "playlist-url"}]
-    selections = iter([
-        ("⭐ Favorites", 0),
-        ("📋 Playlists", 4),
-        [(options[0], 0)],
-        ("❌ Não", 1),
-        ("🎚️ MP3", 0),
-    ])
+    selections = iter(
+        [
+            ("⭐ Favorites", 0),
+            ("📋 Playlists", 4),
+            [(options[0], 0)],
+            ("❌ Não", 1),
+            ("🎚️ MP3", 0),
+        ]
+    )
 
     async def tui(*args, **kwargs):
         return next(selections)
@@ -89,13 +95,15 @@ async def test_interactive_favoritos_playlists(monkeypatch):
 async def test_interactive_artista_singles(monkeypatch):
     app = _app()
     artist = [{"meta": {"name": "Artist", "id": "a1"}, "url": "artist-url"}]
-    selections = iter([
-        ("🎤 Artists", 0),
-        (artist[0], 0),
-        ("📀 Explorar Singles", 1),
-        ("❌ Não", 1),
-        ("🎚️ MP3", 0),
-    ])
+    selections = iter(
+        [
+            ("🎤 Artists", 0),
+            (artist[0], 0),
+            ("📀 Explorar Singles", 1),
+            ("❌ Não", 1),
+            ("🎚️ MP3", 0),
+        ]
+    )
 
     async def tui(*args, **kwargs):
         # A seleção de lançamentos precisa devolver None para simular

@@ -25,9 +25,7 @@ def make_obj(tmp_path, monkeypatch):
     )
     client = SimpleNamespace()
     monkeypatch.setattr(downloader.httpx, "AsyncClient", lambda *a, **k: object())
-    obj = downloader.Download(
-        client, "track-1", str(tmp_path), 6, settings=settings
-    )
+    obj = downloader.Download(client, "track-1", str(tmp_path), 6, settings=settings)
     obj.track_format = "{track_number} - {track_title}"
     obj.embed_art = False
     obj.http_session = object()
@@ -90,7 +88,13 @@ async def test_download_and_tag_lyrics_updates_report(monkeypatch, tmp_path):
     report = {}
 
     result = await obj._download_and_tag(
-        str(tmp_path), 1, {"url": "initial"}, metadata(), metadata(), True, False,
+        str(tmp_path),
+        1,
+        {"url": "initial"},
+        metadata(),
+        metadata(),
+        True,
+        False,
         letras_out=report,
     )
 
@@ -153,7 +157,9 @@ async def test_download_and_tag_verify_failure_isolated(monkeypatch, tmp_path):
     await prepare_success(monkeypatch, obj)
     events = []
 
-    monkeypatch.setattr(downloader, "verify_audio_integrity", lambda path: (False, "invalid"))
+    monkeypatch.setattr(
+        downloader, "verify_audio_integrity", lambda path: (False, "invalid")
+    )
     monkeypatch.setattr(
         downloader,
         "emit_progress_json",

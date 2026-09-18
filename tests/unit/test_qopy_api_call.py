@@ -16,7 +16,11 @@ import httpx
 import pytest
 
 from qobuz_dl import qopy
-from qobuz_dl.exceptions import AuthenticationError, InvalidAppSecretError, InvalidQuality
+from qobuz_dl.exceptions import (
+    AuthenticationError,
+    InvalidAppSecretError,
+    InvalidQuality,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -73,7 +77,10 @@ async def test_login_com_token_usa_user_auth_token_nao_email_senha():
         self, "user/login", user_auth_token="tok123", email="x@x.com", pwd="senha"
     )
 
-    assert captured["kwargs"]["data"] == {"user_auth_token": "tok123", "app_id": "app123"}
+    assert captured["kwargs"]["data"] == {
+        "user_auth_token": "tok123",
+        "app_id": "app123",
+    }
     assert captured["method"] == "post"
 
 
@@ -90,7 +97,9 @@ async def test_login_sem_token_usa_email_e_senha():
 
 
 async def test_login_400_com_invalid_no_corpo_lanca_authentication_error():
-    self, _ = _client(response=FakeResponse(status_code=400, text="Invalid credentials"))
+    self, _ = _client(
+        response=FakeResponse(status_code=400, text="Invalid credentials")
+    )
 
     with pytest.raises(AuthenticationError):
         await qopy.Client.api_call(self, "user/login", email="x", pwd="y")

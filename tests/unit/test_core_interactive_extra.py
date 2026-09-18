@@ -50,10 +50,12 @@ async def test_interactive_cancela_na_primeira_selecao(monkeypatch):
 
 async def test_interactive_pesquisa_sem_resultados_volta(monkeypatch):
     app = _base_app()
-    selections = iter([
-        ("🎵 Tracks", 0),
-        None,
-    ])
+    selections = iter(
+        [
+            ("🎵 Tracks", 0),
+            None,
+        ]
+    )
 
     async def tui(*args, **kwargs):
         return next(selections)
@@ -69,10 +71,12 @@ async def test_interactive_pesquisa_sem_resultados_volta(monkeypatch):
 
 async def test_interactive_busca_e_cancela_apos_resultados(monkeypatch):
     app = _base_app()
-    selections = iter([
-        ("🎵 Tracks", 0),
-        None,
-    ])
+    selections = iter(
+        [
+            ("🎵 Tracks", 0),
+            None,
+        ]
+    )
 
     async def tui(*args, **kwargs):
         return next(selections)
@@ -88,11 +92,13 @@ async def test_interactive_busca_e_cancela_apos_resultados(monkeypatch):
 
 async def test_interactive_favoritos_sem_resultados(monkeypatch):
     app = _base_app()
-    selections = iter([
-        ("⭐ Favorites", 0),
-        ("🎵 Tracks", 0),
-        None,
-    ])
+    selections = iter(
+        [
+            ("⭐ Favorites", 0),
+            ("🎵 Tracks", 0),
+            None,
+        ]
+    )
 
     async def tui(*args, **kwargs):
         return next(selections)

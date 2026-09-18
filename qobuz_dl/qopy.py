@@ -24,6 +24,7 @@ try:
     from cryptography.hazmat.primitives import hashes, padding
     from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
     from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+
     _CRYPTO_AVAILABLE = True
 except ImportError:
     hashes = padding = Cipher = algorithms = modes = HKDF = None
@@ -44,6 +45,7 @@ from qobuz_dl.exceptions import (
 Bundle: Any = None
 try:
     from qobuz_dl.bundle import Bundle as _Bundle
+
     Bundle = _Bundle
 except ImportError:
     pass
@@ -498,7 +500,9 @@ class Client:
                 n = attempt.retry_state.attempt_number
                 if n > 1:
                     logger.debug(f"Retentativa de rede em '{epoint}' ({n}/4)...")
-                resp = await self.session.request(method, self.base + epoint, **req_kwargs)
+                resp = await self.session.request(
+                    method, self.base + epoint, **req_kwargs
+                )
                 if epoint == "user/login" and resp.status_code == 400:
                     text = resp.text
                     if "invalid" in text.lower():
@@ -514,7 +518,9 @@ class Client:
                     and resp.status_code == 400
                 ):
                     body = resp.json()
-                    raise InvalidAppSecretError(f"Invalid app secret: {body}.\n" + RESET)
+                    raise InvalidAppSecretError(
+                        f"Invalid app secret: {body}.\n" + RESET
+                    )
                 if epoint == "user/get" and resp.status_code == 400:
                     return {}
                 resp.raise_for_status()
@@ -525,7 +531,9 @@ class Client:
         offset = 0
         limit = 50
         while True:
-            j = await self.api_call(epoint, id=id, offset=offset, limit=limit, type=type)
+            j = await self.api_call(
+                epoint, id=id, offset=offset, limit=limit, type=type
+            )
             res = j[type] if type and type in j else j
             items_key = "tracks" if "playlist" in epoint else "albums"
             items = res.get(items_key, {}).get("items", [])
@@ -545,6 +553,7 @@ class Client:
 
     async def get_track_ids_from_list(self, tracks_list: list) -> list:
         from qobuz_dl import fuzzy
+
         ui.emit(
             f"{CYAN}[*] Correspondencia de faixas Last.fm com o banco de dados Qobuz (correspondencia Fuzzy e modo interativo ativado)...{OFF}"
         )
@@ -586,7 +595,9 @@ class Client:
                             f"\n{YELLOW}[?] Correspondencia limetrofe detectada "
                             f"({highest_ratio * 100:.0f}% de semelhanca){OFF}"
                         )
-                        ui.emit(f" Target (Last.fm): {item['artist']} - {item['title']}")
+                        ui.emit(
+                            f" Target (Last.fm): {item['artist']} - {item['title']}"
+                        )
                         ui.emit(f" Found (Qobuz) : {best_match_name}")
                         choice = (
                             input(
@@ -698,7 +709,10 @@ class Client:
     ):
         try:
             resp = await self.api_call(
-                "playlist/create", name=name, description=description, is_public=is_public
+                "playlist/create",
+                name=name,
+                description=description,
+                is_public=is_public,
             )
             pl_id = str(resp.get("id") or resp.get("playlist", {}).get("id", ""))
             if pl_id:
@@ -749,7 +763,10 @@ class Client:
     async def get_favorites(self, fav_type="albums", limit=100, offset=0):
         try:
             return await self.api_call(
-                "favorite/getUserFavorites", fav_type=fav_type, limit=limit, offset=offset
+                "favorite/getUserFavorites",
+                fav_type=fav_type,
+                limit=limit,
+                offset=offset,
             )
         except Exception as e:
             logger.error(f"{RED}[!] API Error fetching favorites: {e}{OFF}")
@@ -820,7 +837,9 @@ class Client:
     async def cfg_setup(self):
         for secret in self.secrets:
             try:
-                await self.api_call("track/getFileUrl", id=5966783, fmt_id=5, sec=secret)
+                await self.api_call(
+                    "track/getFileUrl", id=5966783, fmt_id=5, sec=secret
+                )
                 self.sec = secret
                 break
             except Exception:

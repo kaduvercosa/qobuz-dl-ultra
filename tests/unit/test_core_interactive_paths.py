@@ -51,12 +51,14 @@ async def test_interactive_track_seleciona_e_nao_baixa(monkeypatch):
     app = _app()
     calls = []
     options = [{"meta": {"title": "Track", "id": "1"}, "url": "track-url"}]
-    selections = iter([
-        ("🎵 Tracks", 0),
-        [(options[0], 0)],
-        ("❌ Não", 1),
-        ("🎚️ Lossless", 1),
-    ])
+    selections = iter(
+        [
+            ("🎵 Tracks", 0),
+            [(options[0], 0)],
+            ("❌ Não", 1),
+            ("🎚️ Lossless", 1),
+        ]
+    )
 
     async def tui(*args, **kwargs):
         return next(selections)
@@ -82,12 +84,14 @@ async def test_interactive_track_seleciona_e_nao_baixa(monkeypatch):
 async def test_interactive_track_seleciona_sem_download(monkeypatch):
     app = _app()
     options = [{"meta": {"title": "Track", "id": "1"}, "url": "track-url"}]
-    selections = iter([
-        ("🎵 Tracks", 0),
-        [(options[0], 0)],
-        ("❌ Não", 1),
-        ("🎚️ MP3", 0),
-    ])
+    selections = iter(
+        [
+            ("🎵 Tracks", 0),
+            [(options[0], 0)],
+            ("❌ Não", 1),
+            ("🎚️ MP3", 0),
+        ]
+    )
 
     async def tui(*args, **kwargs):
         return next(selections)
@@ -108,13 +112,15 @@ async def test_interactive_track_seleciona_sem_download(monkeypatch):
 async def test_interactive_artista_discografia(monkeypatch):
     app = _app()
     options = [{"meta": {"name": "Artista", "id": "a1"}, "url": "artist-url"}]
-    selections = iter([
-        ("🎤 Artists", 0),
-        (options[0], 0),
-        ("📥 Baixar Toda a Discografia", 3),
-        ("❌ Não", 1),
-        ("🎚️ Lossless", 1),
-    ])
+    selections = iter(
+        [
+            ("🎤 Artists", 0),
+            (options[0], 0),
+            ("📥 Baixar Toda a Discografia", 3),
+            ("❌ Não", 1),
+            ("🎚️ Lossless", 1),
+        ]
+    )
 
     async def tui(*args, **kwargs):
         return next(selections)
@@ -142,13 +148,15 @@ async def test_interactive_artista_discografia(monkeypatch):
 async def test_interactive_artista_top_tracks(monkeypatch):
     app = _app()
     options = [{"meta": {"name": "Artista", "id": "a1"}, "url": "artist-url"}]
-    selections = iter([
-        ("🎤 Artists", 0),
-        (options[0], 0),
-        ("🔥 Explorar Top Tracks", 2),
-        ("❌ Não", 1),
-        ("🎚️ Lossless", 1),
-    ])
+    selections = iter(
+        [
+            ("🎤 Artists", 0),
+            (options[0], 0),
+            ("🔥 Explorar Top Tracks", 2),
+            ("❌ Não", 1),
+            ("🎚️ Lossless", 1),
+        ]
+    )
 
     async def tui(title, values, **kwargs):
         if "Faixas" in title:

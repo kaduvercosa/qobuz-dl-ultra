@@ -54,9 +54,7 @@ async def test_download_track_amostra(monkeypatch, tmp_path):
     assert obj.settings.pl_skipped == 1
 
 
-async def test_download_track_falha_no_download_and_tag(
-    monkeypatch, tmp_path
-):
+async def test_download_track_falha_no_download_and_tag(monkeypatch, tmp_path):
     obj = make_obj(tmp_path, monkeypatch)
     track_meta = {
         "id": "track-1",

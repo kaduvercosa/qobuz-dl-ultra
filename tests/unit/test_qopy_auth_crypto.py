@@ -129,8 +129,7 @@ class TestUnwrapTrackKey:
         wrapped = encryptor.update(dados_com_padding) + encryptor.finalize()
 
         key_token = (
-            f"algumcoisa.{_b64url_encode_nopad(wrapped)}."
-            f"{_b64url_encode_nopad(iv)}"
+            f"algumcoisa.{_b64url_encode_nopad(wrapped)}.{_b64url_encode_nopad(iv)}"
         )
 
         self = SimpleNamespace(
@@ -202,9 +201,7 @@ class TestAuth:
             return {
                 "user": {
                     "id": "u9",
-                    "credential": {
-                        "parameters": {"short_label": "Studio Premier"}
-                    },
+                    "credential": {"parameters": {"short_label": "Studio Premier"}},
                     "subscription": {},
                 }
             }

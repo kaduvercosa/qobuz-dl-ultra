@@ -1,7 +1,5 @@
 """Testes unitários para os caminhos interativos de core.py."""
 
-from types import SimpleNamespace
-
 import os
 import shutil
 
@@ -57,7 +55,9 @@ async def test_tui_select_lista_vazia_retorna_none(monkeypatch):
     FakeApplication.result = None
     monkeypatch.setattr(core, "Application", FakeApplication)
 
-    result = await core._tui_select("Título", [], is_multi=False, item_category="filter")
+    result = await core._tui_select(
+        "Título", [], is_multi=False, item_category="filter"
+    )
 
     assert result is None
 
@@ -105,7 +105,16 @@ async def test_tui_renderiza_cabecalho_lista_e_rodape(monkeypatch):
     await core._tui_select(
         "Álbuns",
         [
-            {"meta": {"title": "Disco", "artist": "Artista", "type": "Album", "year": "2024", "tracks_count": 10, "quality": "24b/96kHz"}},
+            {
+                "meta": {
+                    "title": "Disco",
+                    "artist": "Artista",
+                    "type": "Album",
+                    "year": "2024",
+                    "tracks_count": 10,
+                    "quality": "24b/96kHz",
+                }
+            },
         ],
         is_multi=True,
         item_category="album",
@@ -122,9 +131,36 @@ async def test_tui_renderiza_categorias_de_cartao(monkeypatch):
     monkeypatch.setattr(core, "Application", FakeApplication)
 
     for category, option in [
-        ("album", {"meta": {"title": "A", "artist": "B", "type": "Album", "year": "2024", "tracks_count": 1, "quality": "16b/44.1kHz"}}),
-        ("track", {"meta": {"title": "T", "artist": "B", "album": "A", "type": "Track", "duration": "03:00", "quality": "16b/44.1kHz"}}),
-        ("playlist", {"meta": {"name": "P", "owner": "O", "count": 2, "duration": "04:00"}}),
+        (
+            "album",
+            {
+                "meta": {
+                    "title": "A",
+                    "artist": "B",
+                    "type": "Album",
+                    "year": "2024",
+                    "tracks_count": 1,
+                    "quality": "16b/44.1kHz",
+                }
+            },
+        ),
+        (
+            "track",
+            {
+                "meta": {
+                    "title": "T",
+                    "artist": "B",
+                    "album": "A",
+                    "type": "Track",
+                    "duration": "03:00",
+                    "quality": "16b/44.1kHz",
+                }
+            },
+        ),
+        (
+            "playlist",
+            {"meta": {"name": "P", "owner": "O", "count": 2, "duration": "04:00"}},
+        ),
         ("artist", {"meta": {"name": "Artista", "count": 3}}),
     ]:
         await core._tui_select(
@@ -151,8 +187,13 @@ async def test_tui_key_bindings_existem(monkeypatch):
 async def test_tui_header_fallback_terminal(monkeypatch):
     FakeApplication.result = None
     monkeypatch.setattr(core, "Application", FakeApplication)
-    monkeypatch.setattr(core, "get_app", lambda: (_ for _ in ()).throw(RuntimeError("sem app")))
-    monkeypatch.setattr(shutil, "get_terminal_size", lambda *args, **kwargs: os.terminal_size((80, 24)),)
-
+    monkeypatch.setattr(
+        core, "get_app", lambda: (_ for _ in ()).throw(RuntimeError("sem app"))
+    )
+    monkeypatch.setattr(
+        shutil,
+        "get_terminal_size",
+        lambda *args, **kwargs: os.terminal_size((80, 24)),
+    )
 
     await core._tui_select("Título", ["a"], item_category="filter")

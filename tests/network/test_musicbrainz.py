@@ -89,9 +89,7 @@ class TestSessaoExterna:
         httpx_mock.add_response(json=_resposta_com_recording())
 
         async with httpx.AsyncClient() as client:
-            resultado = await musicbrainz.lookup_by_isrc(
-                "GBAYE0000077", session=client
-            )
+            resultado = await musicbrainz.lookup_by_isrc("GBAYE0000077", session=client)
             assert resultado == ("track-mbid-123", "album-mbid-456", "artist-mbid-789")
             assert client.is_closed is False
 

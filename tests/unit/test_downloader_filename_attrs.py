@@ -103,8 +103,6 @@ async def test_get_format_restriction_marks_quality_unmet(monkeypatch):
     client.get_track_url = get_track_url
     obj = SimpleNamespace(client=client, quality=27)
 
-    result = await downloader.Download._get_format(
-        obj, {"id": "t1"}, is_track_id=True
-    )
+    result = await downloader.Download._get_format(obj, {"id": "t1"}, is_track_id=True)
 
     assert result == ("FLAC", False, 24, 96000)

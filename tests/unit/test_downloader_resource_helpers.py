@@ -36,7 +36,9 @@ async def test_close_session_sem_lyrics_engine(tmp_path, no_http_session):
     assert session is not None
 
 
-async def test_close_session_fecha_lyrics_engine(monkeypatch, tmp_path, no_http_session):
+async def test_close_session_fecha_lyrics_engine(
+    monkeypatch, tmp_path, no_http_session
+):
     class Engine:
         def __init__(self):
             self.closed = False

@@ -116,9 +116,7 @@ async def test_download_list_url_arquivo(monkeypatch, tmp_path):
 async def test_download_from_txt_file_ignora_linhas_invalidas(tmp_path):
     source = tmp_path / "urls.txt"
     source.write_text(
-        "# comentário\n\n"
-        "https://play.qobuz.com/album/1 [DONE]\n"
-        "não é url\n",
+        "# comentário\n\nhttps://play.qobuz.com/album/1 [DONE]\nnão é url\n",
         encoding="utf-8",
     )
 

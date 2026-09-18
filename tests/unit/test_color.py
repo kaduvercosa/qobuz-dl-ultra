@@ -286,9 +286,7 @@ class TestFindConfigFile:
 
         resultado = color._find_config_file()
 
-        assert resultado == os.path.join(
-            "/caminho/ios", "qobuz-dl", "config.ini"
-        )
+        assert resultado == os.path.join("/caminho/ios", "qobuz-dl", "config.ini")
 
     def test_sem_ios_home_usa_home_barra_ponto_config(self, monkeypatch):
         self._limpar_env(monkeypatch)

@@ -96,7 +96,9 @@ async def test_callbacks_navegacao_e_selecao_multipla(monkeypatch):
     App.result = None
     monkeypatch.setattr(core, "Application", App)
 
-    await core._tui_select("Título", ["a", "b", "c"], is_multi=True, item_category="filter")
+    await core._tui_select(
+        "Título", ["a", "b", "c"], is_multi=True, item_category="filter"
+    )
 
     for key in ("down", "up", "j", "k", "pageup", "pagedown", "g", "G", "r"):
         result = _handler(key)(Event())

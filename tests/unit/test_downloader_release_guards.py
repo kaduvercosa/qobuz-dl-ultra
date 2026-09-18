@@ -1,7 +1,5 @@
 """Branches iniciais de download_release(), sem rede nem filesystem real."""
 
-from types import SimpleNamespace
-
 import pytest
 
 from qobuz_dl import downloader
@@ -35,7 +33,9 @@ async def test_download_release_nao_streamable(tmp_path, no_http_session):
         await obj.download_release()
 
 
-async def test_download_release_albums_only_ignora_tipo(monkeypatch, tmp_path, no_http_session):
+async def test_download_release_albums_only_ignora_tipo(
+    monkeypatch, tmp_path, no_http_session
+):
     class AlbumClient:
         async def get_album_meta(self, item_id):
             return {

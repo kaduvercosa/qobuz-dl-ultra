@@ -43,7 +43,9 @@ async def test_playlist_importada_com_falha_e_pulo(monkeypatch, tmp_path):
         download_from_id=download,
     )
 
-    monkeypatch.setattr("qobuz_dl.playlist_import.parse_playlist_file", lambda path: ["a", "b"])
+    monkeypatch.setattr(
+        "qobuz_dl.playlist_import.parse_playlist_file", lambda path: ["a", "b"]
+    )
     monkeypatch.setattr(core.downloader, "print_download_header", lambda *a, **k: None)
     monkeypatch.setattr(core.downloader, "safe_print", lambda *a, **k: None)
     monkeypatch.setattr(core.postprocess, "finalize_report", finalize)

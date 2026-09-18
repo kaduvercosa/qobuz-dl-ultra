@@ -1,7 +1,5 @@
 """Exercita combinações adicionais dos renderizadores da TUI."""
 
-from types import SimpleNamespace
-
 import pytest
 
 from qobuz_dl import core
@@ -47,8 +45,26 @@ def _callbacks():
 async def test_album_table_checked_and_hovered(monkeypatch):
     monkeypatch.setattr(core, "Application", App)
     options = [
-        {"meta": {"title": "A", "artist": "B", "type": "Album", "year": "2024", "tracks_count": 4, "quality": "24b/96kHz"}},
-        {"meta": {"title": "C", "artist": "D", "type": "EP", "year": "2023", "tracks_count": 2, "quality": "16b/44.1kHz"}},
+        {
+            "meta": {
+                "title": "A",
+                "artist": "B",
+                "type": "Album",
+                "year": "2024",
+                "tracks_count": 4,
+                "quality": "24b/96kHz",
+            }
+        },
+        {
+            "meta": {
+                "title": "C",
+                "artist": "D",
+                "type": "EP",
+                "year": "2023",
+                "tracks_count": 2,
+                "quality": "16b/44.1kHz",
+            }
+        },
     ]
     await core._tui_select("Álbuns", options, is_multi=True, item_category="album")
     callbacks = _callbacks()
@@ -60,7 +76,16 @@ async def test_album_table_checked_and_hovered(monkeypatch):
 async def test_track_table_checked_and_hovered(monkeypatch):
     monkeypatch.setattr(core, "Application", App)
     options = [
-        {"meta": {"title": "Track", "artist": "Artist", "album": "Album", "type": "Track", "duration": "03:00", "quality": "24b/96kHz"}},
+        {
+            "meta": {
+                "title": "Track",
+                "artist": "Artist",
+                "album": "Album",
+                "type": "Track",
+                "duration": "03:00",
+                "quality": "24b/96kHz",
+            }
+        },
     ]
     await core._tui_select("Tracks", options, is_multi=True, item_category="track")
     for callback in _callbacks():
@@ -70,9 +95,18 @@ async def test_track_table_checked_and_hovered(monkeypatch):
 async def test_playlist_table_checked_and_hovered(monkeypatch):
     monkeypatch.setattr(core, "Application", App)
     options = [
-        {"meta": {"name": "Playlist", "owner": "Owner", "count": 10, "duration": "01:00:00"}},
+        {
+            "meta": {
+                "name": "Playlist",
+                "owner": "Owner",
+                "count": 10,
+                "duration": "01:00:00",
+            }
+        },
     ]
-    await core._tui_select("Playlists", options, is_multi=True, item_category="playlist")
+    await core._tui_select(
+        "Playlists", options, is_multi=True, item_category="playlist"
+    )
     for callback in _callbacks():
         assert isinstance(callback(), list)
 

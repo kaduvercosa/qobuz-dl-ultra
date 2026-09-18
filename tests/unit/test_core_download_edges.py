@@ -27,6 +27,7 @@ async def test_download_from_id_status_404_sem_playlist(monkeypatch):
 
         async def download_id_by_type(self, *args, **kwargs):
             import httpx
+
             raise httpx.HTTPStatusError(
                 "404",
                 request=SimpleNamespace(),
@@ -83,7 +84,9 @@ async def test_download_from_txt_file_sem_urls_validas(monkeypatch, tmp_path):
     path.write_text("# comentário\n\n", encoding="utf-8")
     called = []
 
-    app = SimpleNamespace(download_list_of_urls=lambda *args, **kwargs: called.append(True))
+    app = SimpleNamespace(
+        download_list_of_urls=lambda *args, **kwargs: called.append(True)
+    )
     await core.QobuzDL.download_from_txt_file(app, str(path))
 
     assert called == []
