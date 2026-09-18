@@ -65,4 +65,4 @@ def test_atributo_desconhecido_levanta_attribute_error(sem_qobuz_dl_no_cache):
     import qobuz_dl
 
     with pytest.raises(AttributeError, match="nao_existe"):
-        qobuz_dl.nao_existe
+        _ = qobuz_dl.nao_existe
