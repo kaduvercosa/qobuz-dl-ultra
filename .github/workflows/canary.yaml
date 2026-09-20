@@ -1,0 +1,93 @@
+name: Canário -- API do Qobuz
+
+# Roda sozinho, num horário fixo, sem precisar de push/PR nenhum. Ajuste
+# o cron como quiser -- "0 9 * * *" = todo dia às 9h UTC (~6h em
+# horário de Brasília). Sintaxe: minuto hora dia mês dia-da-semana.
+on:
+  schedule:
+    - cron: "0 9 * * *"
+  workflow_dispatch:  # botão manual, pra testar sem esperar o horário
+
+permissions:
+  contents: read
+
+jobs:
+  canario:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v7
+
+      - name: Setup Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Instala só o necessário (httpx) -- sem precisar do projeto inteiro
+        run: pip install httpx
+
+      - name: Roda o health-check da extração de app_id/secrets
+        id: canario
+        run: PYTHONPATH=. python tools/canary_check.py
+
+      - name: Instala o projeto (necessário pra login real na Qobuz)
+        if: always() && steps.canario.outcome != 'cancelled'
+        run: pip install -e .
+
+      - name: Roda o health-check de login + busca + metadata
+        id: canario_busca
+        if: always() && steps.canario.outcome != 'cancelled'
+        env:
+          QOBUZ_EMAIL: ${{ secrets.QOBUZ_EMAIL }}
+          QOBUZ_TOKEN: ${{ secrets.QOBUZ_TOKEN }}
+        run: PYTHONPATH=. python tools/canary_check_busca.py
+
+      # -----------------------------------------------------------------
+      # NOTIFICAÇÃO POR E-MAIL -- duas camadas, redundantes de propósito:
+      #
+      # 1) GitHub já manda e-mail sozinho quando um workflow agendado
+      #    falha, SE a notificação de "Actions" estiver ligada nas suas
+      #    configurações pessoais do GitHub (Settings -> Notifications ->
+      #    Actions -> "Send notifications for failed workflows only" ou
+      #    "all"). Isso não exige NENHUM secret nem passo extra -- só
+      #    conferir se está marcado.
+      #
+      # 2) O passo abaixo manda um e-mail explícito via SMTP, que funciona
+      #    independente da configuração de notificação do GitHub (útil se
+      #    você silenciou notificações de Actions, ou quer o aviso
+      #    garantido em outra caixa de entrada). `if: failure()` dispara
+      #    se QUALQUER passo anterior do job falhar -- canario (bundle) OU
+      #    canario_busca (login+busca) -- então em dia normal (tudo ok)
+      #    não gera e-mail nenhum, sem spam diário.
+      #
+      #    Exige 5 secrets no repo (Settings -> Secrets and variables ->
+      #    Actions): EMAIL_USERNAME, EMAIL_PASSWORD (senha de app, não a
+      #    senha normal da conta -- Gmail/Outlook exigem isso pra SMTP de
+      #    terceiros), EMAIL_TO (pra onde mandar o aviso), e agora também
+      #    QOBUZ_EMAIL/QOBUZ_TOKEN (usados pelo canario_busca acima --
+      #    recomendo uma conta separada só pra isso). Se você já confiou
+      #    na camada 1, pode simplesmente apagar este passo.
+      - name: Envia e-mail de alerta (só se algum canário falhou)
+        if: failure()
+        uses: dawidd6/action-send-mail@v21
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          username: ${{ secrets.EMAIL_USERNAME }}
+          password: ${{ secrets.EMAIL_PASSWORD }}
+          subject: "🚨 qobuz-dl-ultra: possível mudança na API do Qobuz"
+          to: ${{ secrets.EMAIL_TO }}
+          from: Canário qobuz-dl-ultra
+          body: |
+            Um dos health-checks agendados contra a API da Qobuz falhou:
+
+              - tools/canary_check.py         (extração de app_id/secrets do bundle.js)
+              - tools/canary_check_busca.py   (login real + busca + metadata de álbum)
+
+            Isso normalmente significa que o Qobuz mudou algo do lado de
+            fora -- formato do HTML de login/bundle.js, ou o formato da
+            resposta de busca/metadata.
+
+            Ver o log completo (com a mensagem de erro exata de qual dos
+            dois falhou) em:
+            ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

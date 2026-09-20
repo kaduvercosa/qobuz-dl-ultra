@@ -1,0 +1,113 @@
+name: Changelog automático
+
+on:
+  push:
+    tags:
+      - "**"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag para gerar ou regerar o changelog"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  gerar-changelog:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout com histórico completo
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Configurar Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Definir tag da release
+        id: release
+        shell: bash
+        env:
+          EVENTO: ${{ github.event_name }}
+          TAG_PUSH: ${{ github.ref_name }}
+          TAG_MANUAL: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$EVENTO" == "workflow_dispatch" ]]; then
+            TAG="$TAG_MANUAL"
+          else
+            TAG="$TAG_PUSH"
+          fi
+
+          if [[ -z "$TAG" ]]; then
+            echo "A tag da release não foi definida."
+            exit 1
+          fi
+
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Release selecionada: $TAG"
+
+      - name: Encontrar tag anterior
+        id: previous
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          TAG_PREVIOUS="$(git describe --tags --abbrev=0 "$TAG^" 2>/dev/null || true)"
+
+          if [[ -z "$TAG_PREVIOUS" ]]; then
+            echo "Não foi possível encontrar a tag anterior a $TAG."
+            echo "Para a primeira release, defina uma tag inicial ou trate esse caso no workflow."
+            exit 1
+          fi
+
+          echo "tag=$TAG_PREVIOUS" >> "$GITHUB_OUTPUT"
+          echo "Tag anterior: $TAG_PREVIOUS"
+
+      - name: Gerar changelog
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+          TAG_PREVIOUS: ${{ steps.previous.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python tools/gerar_changelog.py \
+            --de "$TAG_PREVIOUS" \
+            --para "$TAG" \
+            --versao "$TAG" \
+            --data "$(date -u +%F)" \
+            --output /tmp/changelog.md
+
+          test -s /tmp/changelog.md
+          cat /tmp/changelog.md
+
+      - name: Criar release rascunho
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG já existe; não será sobrescrita."
+            echo "Se ela já foi publicada ou ficou imutável, não será alterada."
+            exit 0
+          fi
+
+          gh release create "$TAG" \
+            --title "$TAG" \
+            --notes-file /tmp/changelog.md \
+            --draft

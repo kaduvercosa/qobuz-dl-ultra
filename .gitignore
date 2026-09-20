@@ -1,0 +1,37 @@
+# Download folders
+QobuzDownloads/
+
+# Python cache and virtual environments
+__pycache__/
+*.pyc
+.venv/
+venv/
+env/
+build_env/
+
+# IDE and OS specific files
+/.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# PyPI build and distribution files
+build/
+dist/
+*.egg-info/
+
+# Windows executables
+*.exe
+*.spec
+
+# User configuration and local testing files
+blacklist.txt
+
+.coverage
+.coverage.*
+coverage.xml
+coverage-downloader.xml
+junit.xml
+test-results.xml
+htmlcov/
+.pytest_cache/

@@ -1,0 +1,64 @@
+# Configuração completa do Codecov.
+#
+# O status project acompanha a cobertura total do repositório.
+# O status patch acompanha apenas as linhas alteradas e é informativo,
+# portanto não bloqueia o merge.
+#
+# Este arquivo deve ficar na raiz do repositório:
+# codecov.yml
+
+coverage:
+  precision: 2
+  round: down
+  range: "60...100"
+  status:
+    project:
+      default:
+        enabled: true
+        target: 60%
+        threshold: 0%
+        if_ci_failed: error
+        informational: false
+        only_pulls: false
+    patch:
+      default:
+        enabled: true
+        target: 60%
+        threshold: 0%
+        if_ci_failed: error
+        informational: false
+        only_pulls: false
+
+comment:
+  layout: "header, diff, flags, components, footer"
+  behavior: default
+  require_changes: false
+  require_base: false
+  require_head: true
+  hide_project_coverage: false
+
+github_checks:
+  annotations: true
+
+codecov:
+  branch: master
+  require_ci_to_pass: true
+  notify:
+    wait_for_ci: true
+    after_n_builds: 1
+  max_report_age: off
+  slug: "${{ github.repository }}"
+
+ignore:
+  - "**/__pycache__/**"
+  - "**/.pytest_cache/**"
+  - "**/.mypy_cache/**"
+  - "**/.ruff_cache/**"
+  - "**/htmlcov/**"
+  - "**/site-packages/**"
+  - "**/dist/**"
+  - "**/build/**"
+  - "**/*.egg-info/**"
+  - "tests/**"
+  - "setup.py"
+  - "conftest.py"

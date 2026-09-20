@@ -1,0 +1,64 @@
+name: Build and Publish Docker Image
+
+on:
+  push:
+    branches: [ "master", "main" ]
+  # Antes só reconstruía em push pra main/master -- a imagem "latest"
+  # podia ficar dias sem bater com nenhuma release de verdade (só com o
+  # commit mais recente de dev). Agora também publica em toda release,
+  # com uma tag de versão própria (ver "Extract metadata" abaixo), além
+  # de continuar atualizando "latest" a cada push pra main/master.
+  release:
+    types: [published]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  # Mesmo gate de qualidade do pypi.yml -- nunca publicar uma imagem sem
+  # a suíte de testes passar primeiro.
+  testes:
+    uses: ./.github/workflows/tests.yml
+
+  build-and-push-image:
+    needs: testes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Log in to the Container registry
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          # "latest" só quando o gatilho for push pra main/master;
+          # a tag de versão (nome literal da tag git, ex.: "2.6.0" ou
+          # "v2.5.4" -- este repo não segue semver estrito, então usamos
+          # o valor cru em vez de tentar casar um padrão) só quando o
+          # gatilho for uma release publicada -- pra imagem sempre ter
+          # um jeito de apontar pra uma versão exata, não só a mais
+          # recente.
+          tags: |
+            type=raw,value=latest,enable=${{ github.event_name == 'push' }}
+            type=raw,value=${{ github.ref_name }},enable=${{ github.event_name == 'release' }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}

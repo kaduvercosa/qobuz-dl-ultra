@@ -1,0 +1,30 @@
+# ARQUIVO GERADO -- NAO EDITE A MAO.
+#
+# A fonte de verdade das dependencias e' o pyproject.toml. Este arquivo e'
+# gerado por `python tools/gerar_requirements.py` e existe apenas para
+# `pip install -r` em ambientes de dev/Docker.
+#
+# Contem SOMENTE o nucleo. As features opcionais sao extras:
+#   pip install "qobuz-dl-ultra[all]"          # tudo
+#   pip install "qobuz-dl-ultra[speed]"        # rapidfuzz + brotli
+#   pip install "qobuz-dl-ultra[covers]"       # Pillow
+#   pip install "qobuz-dl-ultra[watch]"        # watchdog (--watch)
+#   pip install "qobuz-dl-ultra[duplicates]"   # pyacoustid (--find-duplicates)
+#   pip install "qobuz-dl-ultra[genius]"       # lyricsgenius
+#   pip install "qobuz-dl-ultra[dev]"          # pytest, ruff
+pathvalidate
+httpx
+aiosqlite
+send2trash
+humanize
+aiofiles
+tenacity
+platformdirs
+charset_normalizer
+mutagen
+tqdm
+prompt_toolkit
+packaging
+colorama>=0.4.6
+cryptography
+keyring

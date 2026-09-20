@@ -1,0 +1,38 @@
+# Arquivo: .github/workflows/ruff.yml
+#
+# Lint e formatacao com Ruff (substituto moderno do Flake8 + isort + outros)
+# Roda em todo push/PR nas branches principais e pode ser disparado manualmente.
+#
+# O Ruff e' muito mais rapido que o Flake8 e cobre as mesmas regras
+# (E, F, W, B, C, T) configuradas no .flake8 atual.
+
+name: Ruff
+
+on:
+  push:
+    branches: ["master", "main"]
+  pull_request:
+    branches: ["master", "main"]
+  workflow_dispatch:
+
+jobs:
+  ruff:
+    name: Ruff lint + format
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do codigo
+        uses: actions/checkout@v7
+
+      - name: Setup Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Instala o Ruff
+        run: pip install ruff
+
+      - name: Ruff check (lint)
+        run: ruff check qobuz_dl/
+
+      - name: Ruff format --check (formatacao)
+        run: ruff format --check qobuz_dl/

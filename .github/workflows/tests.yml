@@ -1,0 +1,282 @@
+name: CI
+
+on:
+  push:
+    branches: ["master", "main"]
+  pull_request:
+    branches: ["master", "main"]
+  workflow_dispatch:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: Testes (pytest) - ${{ matrix.os }} / py${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        include:
+          - os: windows-latest
+            python-version: "3.13"
+          - os: macos-latest
+            python-version: "3.13"
+
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v7
+
+      - name: Setup Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: "pip"
+
+      - name: Instala o projeto com as dependências de dev
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[all, dev]"
+
+      - name: Roda a suíte de testes
+        id: pytest
+        continue-on-error: true
+        if: matrix.os != 'ubuntu-latest' || matrix.python-version != '3.12'
+        shell: bash
+        run: |
+          pytest -m "not slow" -q > pytest_saida.log 2>&1
+
+      - name: Roda a suíte de testes com cobertura
+        id: pytest_cov
+        continue-on-error: true
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
+        shell: bash
+        run: |
+          pytest -m "not slow" -q \
+            --cov=qobuz_dl \
+            --cov-fail-under=60 \
+            --cov-report=xml \
+            --cov-report=term-missing \
+            --junitxml=test-results.xml \
+            > pytest_saida.log 2>&1
+
+      - name: Mostra a saída do pytest
+        if: always()
+        shell: bash
+        run: |
+          if [ -f pytest_saida.log ]; then
+            cat pytest_saida.log
+            {
+              echo "## Saída do pytest"
+              echo
+              echo '```text'
+              cat pytest_saida.log
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload test results to Codecov
+        if: ${{ !cancelled() && matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12' }}
+        uses: codecov/test-results-action@v1
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./test-results.xml
+
+      - name: Envia cobertura para o Codecov
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage.xml
+          fail_ci_if_error: false
+
+      - name: Monta o resumo do que falhou
+        id: resumo
+        if: steps.pytest.outcome == 'failure' || steps.pytest_cov.outcome == 'failure'
+        shell: bash
+        run: |
+          assunto="🚨 qobuz-dl-ultra: testes falharam (${{ matrix.os }} / py${{ matrix.python-version }})"
+          echo "assunto=$assunto" >> "$GITHUB_OUTPUT"
+          {
+            echo 'corpo<<EOF'
+            echo "Falha nos testes em ${{ matrix.os }} / Python ${{ matrix.python-version }}"
+            echo
+            cat pytest_saida.log
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Envia e-mail com o erro exato
+        if: steps.resumo.outcome == 'success'
+        uses: dawidd6/action-send-mail@v21
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          username: ${{ secrets.EMAIL_USERNAME }}
+          password: ${{ secrets.EMAIL_PASSWORD }}
+          subject: ${{ steps.resumo.outputs.assunto }}
+          to: ${{ secrets.EMAIL_TO }}
+          from: ${{ secrets.EMAIL_USERNAME }}
+          secure: true
+          body: ${{ steps.resumo.outputs.corpo }}
+          attachments: pytest_saida.log
+
+      - name: Marca o job como falho
+        if: steps.pytest.outcome == 'failure' || steps.pytest_cov.outcome == 'failure'
+        shell: bash
+        run: exit 1
+
+  auditoria-dependencias:
+    name: Auditoria de segurança das dependências (pip-audit)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v7
+
+      - name: Setup Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Instala somente as dependências externas e o pip-audit
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install \
+            pathvalidate httpx aiosqlite send2trash humanize aiofiles \
+            tenacity platformdirs charset_normalizer mutagen tqdm \
+            prompt_toolkit packaging "colorama>=0.4.6" cryptography keyring \
+            rapidfuzz brotli "Pillow>=10.0.0" watchdog pyacoustid \
+            "lyricsgenius>=3.0" numpy pip-audit
+
+      - name: Audita somente as dependências externas
+        id: audit
+        continue-on-error: true
+        shell: bash
+        run: |
+          pip-audit --strict --progress-spinner off > pip_audit_saida.log 2>&1
+
+      - name: Mostra o resultado do pip-audit
+        if: always()
+        shell: bash
+        run: |
+          cat pip_audit_saida.log
+          {
+            echo "## Resultado do pip-audit"
+            echo
+            echo '```text'
+            cat pip_audit_saida.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Sobe o relatório da auditoria
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: pip-audit-report
+          path: pip_audit_saida.log
+          if-no-files-found: warn
+
+      - name: Monta o resumo do que falhou
+        id: resumo
+        if: steps.audit.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "assunto=🔒 qobuz-dl-ultra: vulnerabilidade encontrada numa dependência" >> "$GITHUB_OUTPUT"
+          {
+            echo 'corpo<<EOF'
+            cat pip_audit_saida.log
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Envia e-mail com a vulnerabilidade exata
+        if: steps.resumo.outcome == 'success'
+        uses: dawidd6/action-send-mail@v21
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          username: ${{ secrets.EMAIL_USERNAME }}
+          password: ${{ secrets.EMAIL_PASSWORD }}
+          subject: ${{ steps.resumo.outputs.assunto }}
+          to: ${{ secrets.EMAIL_TO }}
+          from: ${{ secrets.EMAIL_USERNAME }}
+          secure: true
+          body: ${{ steps.resumo.outputs.corpo }}
+          attachments: pip_audit_saida.log
+
+      - name: Marca o job como falho
+        if: steps.audit.outcome == 'failure'
+        shell: bash
+        run: exit 1
+
+  verificacao-de-tipos:
+    name: Verificação estática de tipos (mypy)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v7
+
+      - name: Setup Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Instala o projeto, mypy e mypy-baseline
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[all]" mypy mypy-baseline
+
+      - name: Roda o mypy
+        shell: bash
+        run: |
+          mypy --python-version 3.12 qobuz_dl > mypy_saida.log 2>&1 || true
+
+      - name: Mostra a saída completa do mypy
+        if: always()
+        shell: bash
+        run: |
+          cat mypy_saida.log
+          {
+            echo "## Saída do mypy"
+            echo
+            echo '```text'
+            cat mypy_saida.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Sem baseline ainda -- gera um novo
+        id: gera_baseline
+        if: hashFiles('mypy-baseline.txt') == ''
+        shell: bash
+        run: |
+          cat mypy_saida.log | mypy-baseline sync || true
+          echo "::warning::mypy-baseline.txt não existia -- gerei um novo com os apontamentos atuais do mypy."
+
+      - name: Sobe o baseline gerado como artefato
+        if: steps.gera_baseline.outcome == 'success'
+        uses: actions/upload-artifact@v7
+        with:
+          name: mypy-baseline
+          path: mypy-baseline.txt
+          if-no-files-found: warn
+
+      - name: Compara contra o baseline existente
+        id: mypy_filter
+        if: hashFiles('mypy-baseline.txt') != ''
+        continue-on-error: true
+        shell: bash
+        run: |
+          cat mypy_saida.log | mypy-baseline filter
+
+      - name: Marca o job como falho se houver erro novo
+        if: hashFiles('mypy-baseline.txt') != '' && steps.mypy_filter.outcome == 'failure'
+        shell: bash
+        run: exit 1
