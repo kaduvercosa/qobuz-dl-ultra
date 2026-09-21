@@ -203,3 +203,37 @@ def test_sync_favorites_every_repete(lib):
     with pytest.raises(KeyboardInterrupt):
         asyncio.run(lc.cmd_sync_favorites(_sf(every=5), q, lib=lib, sleep=sleep))
     assert esperas == [300, 300] and len(lib.get_sync_history("qobuz")) == 2
+
+
+def test_sync_favorites_interactive_prompt_opcao_1(lib, monkeypatch):
+    q = FakeQobuz([{"id": "1", "title": "T", "artist": {"name": "A"}}])
+    monkeypatch.setattr(lc, "_interactive", lambda: True)
+
+    responses = iter(["1", "s"])
+
+    async def fake_ask(prompt):
+        return next(responses)
+
+    monkeypatch.setattr(lc, "_ask", fake_ask)
+    assert asyncio.run(lc.cmd_sync_favorites(_sf(), q, lib=lib)) == 0
+    assert q.baixados == ["1"]
+
+
+def test_sync_favorites_interactive_prompt_opcao_2(lib, monkeypatch):
+    lib.upsert_album("qobuz", "2", "Title2", "Artist2")
+    q = FakeQobuz(
+        [
+            {"id": "1", "title": "T", "artist": {"name": "A"}},
+            {"id": "2", "title": "Title2", "artist": {"name": "Artist2"}},
+        ]
+    )
+    monkeypatch.setattr(lc, "_interactive", lambda: True)
+
+    responses = iter(["2", "s"])
+
+    async def fake_ask(prompt):
+        return next(responses)
+
+    monkeypatch.setattr(lc, "_ask", fake_ask)
+    assert asyncio.run(lc.cmd_sync_favorites(_sf(), q, lib=lib)) == 0
+    assert "2" in q.baixados and "1" in q.baixados
