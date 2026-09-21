@@ -2009,6 +2009,7 @@ class QobuzDL:
 
             if "Sync Favorites" in scelta_raw_visual:
                 from qobuz_dl.library_cmd import cmd_sync_favorites
+
                 class _Args:
                     download_new = False
                     download_missing = False
@@ -2016,6 +2017,7 @@ class QobuzDL:
                     yes = False
                     every = None
                     limit = getattr(self, "interactive_limit", 50)
+
                 await cmd_sync_favorites(_Args(), self)
                 return
 

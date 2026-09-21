@@ -411,7 +411,10 @@ async def cmd_sync_favorites(
                 lib, source=SOURCE, missing=True, limit=getattr(args, "limit", None)
             )
             new_targets = pick_download_targets(
-                lib, source=SOURCE, only_ids=r["new_ids"], limit=getattr(args, "limit", None)
+                lib,
+                source=SOURCE,
+                only_ids=r["new_ids"],
+                limit=getattr(args, "limit", None),
             )
 
             if missing_targets or new_targets:
@@ -424,7 +427,9 @@ async def cmd_sync_favorites(
                     ui.emit("   [1] (Nenhum álbum novo para baixar)")
 
                 if missing_targets:
-                    ui.emit(f"   [2] Baixar TODOS os {len(missing_targets)} álbuns FALTANTES no disco")
+                    ui.emit(
+                        f"   [2] Baixar TODOS os {len(missing_targets)} álbuns FALTANTES no disco"
+                    )
                 else:
                     ui.emit("   [2] (Todos os favoritos já estão completos no disco)")
 
