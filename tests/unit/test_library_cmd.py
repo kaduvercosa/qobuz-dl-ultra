@@ -22,8 +22,17 @@ def lib(tmp_path):
 
 
 def _args(**kw):
-    base = dict(DIR=None, dry_run=False, no_sentinel=False, no_adopt=False, no_review=True,
-                rescan=False, max_depth=4, fuzzy_threshold=0.85, json=None)
+    base = dict(
+        DIR=None,
+        dry_run=False,
+        no_sentinel=False,
+        no_adopt=False,
+        no_review=True,
+        rescan=False,
+        max_depth=4,
+        fuzzy_threshold=0.85,
+        json=None,
+    )
     base.update(kw)
     return SimpleNamespace(**base)
 
@@ -41,14 +50,22 @@ def test_scan_escreve_json_e_retorna_zero(tmp_path, lib):
     _pasta(tmp_path / "m", "A - B")
     _pasta(tmp_path / "m", "Sem - Match")
     out = tmp_path / "r.json"
-    rc = asyncio.run(lc.cmd_scan(_args(DIR=str(tmp_path / "m"), json=str(out)),
-                                 directory="x", downloads_db=None, lib=lib))
+    rc = asyncio.run(
+        lc.cmd_scan(
+            _args(DIR=str(tmp_path / "m"), json=str(out)),
+            directory="x",
+            downloads_db=None,
+            lib=lib,
+        )
+    )
     assert rc == 0 and out.exists()
     assert lib.get_album_by_source_id("qobuz", "1")["download_status"] == "complete"
 
 
 def test_scan_pasta_inexistente(tmp_path, lib):
-    rc = asyncio.run(lc.cmd_scan(_args(DIR=str(tmp_path / "nada")), directory="x", lib=lib))
+    rc = asyncio.run(
+        lc.cmd_scan(_args(DIR=str(tmp_path / "nada")), directory="x", lib=lib)
+    )
     assert rc == 1
 
 
@@ -61,15 +78,24 @@ def test_scan_dedup_writer_chamado(tmp_path, lib, monkeypatch):
     monkeypatch.setattr(lc, "_make_dedup_writer", lambda db, q: fake_writer)
     lib.upsert_album("qobuz", "1", "B", "A")
     _pasta(tmp_path / "m", "A - B")
-    asyncio.run(lc.cmd_scan(_args(DIR=str(tmp_path / "m")), directory="x", downloads_db="db", lib=lib))
+    asyncio.run(
+        lc.cmd_scan(
+            _args(DIR=str(tmp_path / "m")), directory="x", downloads_db="db", lib=lib
+        )
+    )
     assert chamadas == ["1"]
 
 
 def test_library_acoes(tmp_path, lib, capsys):
     a = lib.upsert_album("qobuz", "1", "B", "A")
     lib.update_status(a, "downloading")
-    run = lambda **kw: asyncio.run(lc.cmd_library(SimpleNamespace(TARGET=None, limit=None, fix=False,
-                                                                 dry_run=False, **kw), directory=str(tmp_path), lib=lib))
+    run = lambda **kw: asyncio.run(
+        lc.cmd_library(
+            SimpleNamespace(TARGET=None, limit=None, fix=False, dry_run=False, **kw),
+            directory=str(tmp_path),
+            lib=lib,
+        )
+    )
     assert run(action="status") == 0
     assert run(action="missing") == 0
     assert run(action="history") == 0
@@ -83,10 +109,27 @@ def test_library_unmark_e_reconcile(tmp_path, lib):
     pasta = _pasta(tmp_path, "A - B")
     ls.mark_album_downloaded(lib, a, folder=pasta)
     ns = lambda **kw: SimpleNamespace(limit=None, fix=False, dry_run=False, **kw)
-    assert asyncio.run(lc.cmd_library(ns(action="unmark", TARGET="1"), directory="x", lib=lib)) == 0
+    assert (
+        asyncio.run(
+            lc.cmd_library(ns(action="unmark", TARGET="1"), directory="x", lib=lib)
+        )
+        == 0
+    )
     assert not sn.has_sentinel(pasta)
-    assert asyncio.run(lc.cmd_library(ns(action="unmark", TARGET="999"), directory="x", lib=lib)) == 1
-    assert asyncio.run(lc.cmd_library(ns(action="reconcile", TARGET=str(tmp_path)), directory="x", lib=lib)) == 0
+    assert (
+        asyncio.run(
+            lc.cmd_library(ns(action="unmark", TARGET="999"), directory="x", lib=lib)
+        )
+        == 1
+    )
+    assert (
+        asyncio.run(
+            lc.cmd_library(
+                ns(action="reconcile", TARGET=str(tmp_path)), directory="x", lib=lib
+            )
+        )
+        == 0
+    )
 
 
 class FakeQobuz:
@@ -99,7 +142,12 @@ class FakeQobuz:
 
         class C:
             async def api_call(self, endpoint, **kw):
-                return {"albums": {"items": items[kw["offset"]:kw["offset"] + kw["limit"]], "total": len(items)}}
+                return {
+                    "albums": {
+                        "items": items[kw["offset"] : kw["offset"] + kw["limit"]],
+                        "total": len(items),
+                    }
+                }
 
         self.client = C()
 
@@ -109,7 +157,14 @@ class FakeQobuz:
 
 
 def _sf(**kw):
-    base = dict(download_new=False, download_missing=False, dry_run=False, yes=True, every=None, limit=None)
+    base = dict(
+        download_new=False,
+        download_missing=False,
+        dry_run=False,
+        yes=True,
+        every=None,
+        limit=None,
+    )
     base.update(kw)
     return SimpleNamespace(**base)
 
@@ -127,7 +182,12 @@ def test_sync_favorites_falha_de_download_retorna_1(lib):
 
 def test_sync_favorites_dry_run(lib):
     q = FakeQobuz([{"id": "1", "title": "T", "artist": {"name": "A"}}])
-    assert asyncio.run(lc.cmd_sync_favorites(_sf(dry_run=True, download_new=True), q, lib=lib)) == 0
+    assert (
+        asyncio.run(
+            lc.cmd_sync_favorites(_sf(dry_run=True, download_new=True), q, lib=lib)
+        )
+        == 0
+    )
     assert q.baixados == [] and lib.get_albums() == []
 
 

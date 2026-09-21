@@ -154,8 +154,15 @@ async def cmd_scan(
     for f in report["failed"]:
         ui.error(f"{f['folder']}: {f['error']}")
 
-    if report["review"] and not dry and _interactive() and not getattr(args, "no_review", False):
-        await _review_loop(lib, report, sentinel=not getattr(args, "no_sentinel", False))
+    if (
+        report["review"]
+        and not dry
+        and _interactive()
+        and not getattr(args, "no_review", False)
+    ):
+        await _review_loop(
+            lib, report, sentinel=not getattr(args, "no_sentinel", False)
+        )
 
     json_path = getattr(args, "json", None)
     if json_path:
@@ -189,7 +196,11 @@ async def _review_loop(lib: LibraryDB, report: dict, *, sentinel: bool) -> None:
             if ans.isdigit() and 1 <= int(ans) <= len(item["candidates"]):
                 cand = item["candidates"][int(ans) - 1]
                 await asyncio.to_thread(
-                    apply_review_choice, lib, item, cand["album_id"], sentinel_enabled=sentinel
+                    apply_review_choice,
+                    lib,
+                    item,
+                    cand["album_id"],
+                    sentinel_enabled=sentinel,
                 )
                 ui.ok(f"Marcado: {cand['artist']} - {cand['title']}")
                 break
@@ -246,7 +257,9 @@ async def cmd_library(
         return 0
 
     if action == "history":
-        hist = lib.get_sync_history(SOURCE, limit=int(getattr(args, "limit", None) or 10))
+        hist = lib.get_sync_history(
+            SOURCE, limit=int(getattr(args, "limit", None) or 10)
+        )
         if not hist:
             ui.info("Nenhuma sincronização registrada.")
         for h in hist:
@@ -279,7 +292,9 @@ async def cmd_library(
         for i in rep["invalid"]:
             ui.warn(f"{i['folder']}: {i['error']}")
         for m in rep["missing_on_disk"]:
-            ui.warn(f"Sumiu do disco: {m['artist']} - {m['title']} ({m['folder'] or 'sem pasta'})")
+            ui.warn(
+                f"Sumiu do disco: {m['artist']} - {m['title']} ({m['folder'] or 'sem pasta'})"
+            )
         if rep["missing_on_disk"] and not getattr(args, "fix", False):
             ui.info("Use --fix para devolvê-los a not_downloaded.")
         return 1 if rep["invalid"] else 0
@@ -354,7 +369,10 @@ async def cmd_sync_favorites(
         ui.banner("QOBUZ-DL-ULTRA  ·  SYNC DE FAVORITOS")
         ui.kv("Favoritos na conta", r["total"])
         ui.kv("Novos", r["new"])
-        ui.kv("Removidos da conta", r["removed"] if r["complete"] else "n/d (paginação incompleta)")
+        ui.kv(
+            "Removidos da conta",
+            r["removed"] if r["complete"] else "n/d (paginação incompleta)",
+        )
         if res["targets"]:
             ui.kv("Baixados", res["download"]["downloaded"])
             ui.kv("Falhas", res["download"]["failed"])
@@ -370,7 +388,9 @@ async def cmd_sync_favorites(
         return await once()
 
     minutes = max(1, int(watch))
-    ui.info(f"Modo contínuo (--every): sincronizando a cada {minutes} min. CTRL+C para sair.")
+    ui.info(
+        f"Modo contínuo (--every): sincronizando a cada {minutes} min. CTRL+C para sair."
+    )
     while True:
         await once()
         await sleep(minutes * 60)

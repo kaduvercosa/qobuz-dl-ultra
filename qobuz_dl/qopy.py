@@ -52,6 +52,7 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+
 def _resolve_user_auth_token(client, token=None):
     """Resolve token de múltiplas fontes para evitar AttributeError em testes."""
     for value in (
@@ -318,7 +319,6 @@ class Client:
         else:
             status = "Ativa" if is_active else "Inativa"
 
-
         return {
             "is_active": is_active,
             "status": status,
@@ -384,7 +384,9 @@ class Client:
     async def api_call(self, epoint, **kwargs):
         if epoint == "user/login":
             # Prioriza token do objeto (self) sobre kwargs
-            token = kwargs.get("user_auth_token") or getattr(self, "user_auth_token", None)
+            token = kwargs.get("user_auth_token") or getattr(
+                self, "user_auth_token", None
+            )
             if token:
                 params = {
                     "user_auth_token": token,
@@ -639,9 +641,7 @@ class Client:
                         f"\n{YELLOW}[?] Correspondencia limetrofe detectada "
                         f"({highest_ratio * 100:.0f}% de semelhanca){OFF}"
                     )
-                    ui.emit(
-                        f" Target (Last.fm): {item['artist']} - {item['title']}"
-                    )
+                    ui.emit(f" Target (Last.fm): {item['artist']} - {item['title']}")
                     ui.emit(f" Found (Qobuz) : {best_match_name}")
                     choice = (
                         input(

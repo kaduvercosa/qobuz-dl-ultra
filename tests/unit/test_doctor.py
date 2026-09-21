@@ -17,7 +17,9 @@ def test_config_ausente_e_falha(tmp_path):
 
 def test_config_completo_e_permissao(tmp_path):
     cfg = tmp_path / "config.ini"
-    cfg.write_text("[qobuz]\nemail=a\napp_id=1\nsecrets=x\ndefault_quality=27\ndisable_keyring=true\n")
+    cfg.write_text(
+        "[qobuz]\nemail=a\napp_id=1\nsecrets=x\ndefault_quality=27\ndisable_keyring=true\n"
+    )
     if os.name == "posix":
         os.chmod(cfg, 0o644)
     res = doctor.check_config(str(cfg))
@@ -35,8 +37,10 @@ def test_config_sem_campos_obrigatorios(tmp_path):
 
 def test_config_nao_vaza_segredo(tmp_path):
     cfg = tmp_path / "config.ini"
-    cfg.write_text("[qobuz]\nemail=a\napp_id=1\nsecrets=x\ndefault_quality=27\n"
-                   "disable_keyring=true\nauth_token=SEGREDO123\n")
+    cfg.write_text(
+        "[qobuz]\nemail=a\napp_id=1\nsecrets=x\ndefault_quality=27\n"
+        "disable_keyring=true\nauth_token=SEGREDO123\n"
+    )
     texto = " ".join(f"{r.name} {r.detail}" for r in doctor.check_config(str(cfg)))
     assert "SEGREDO123" not in texto
 

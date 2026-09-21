@@ -826,25 +826,77 @@ def scan_args(subparsers):
         ),
         help="reconcilia sua pasta de música com o catálogo de favoritos",
     )
-    scan.add_argument("DIR", nargs="?", default=None, help="pasta a varrer (padrão: diretório de downloads)")
-    scan.add_argument("--dry-run", action="store_true", default=False, help="classifica e reporta sem gravar nada")
-    scan.add_argument("--no-sentinel", action="store_true", default=False,
-                      help="não grava .streamrip.json (use em montagens somente-leitura)")
-    scan.add_argument("--no-adopt", action="store_true", default=False,
-                      help="não adiciona ao catálogo pastas com tag de ID que não estão nos favoritos")
-    scan.add_argument("--no-review", action="store_true", default=False, help="não pergunta sobre os casos duvidosos")
-    scan.add_argument("--rescan", action="store_true", default=False, help="reexamina também pastas que já têm sentinela")
-    scan.add_argument("--max-depth", type=int, default=4, metavar="N", help="profundidade máxima de pastas (padrão: 4)")
-    scan.add_argument("--fuzzy-threshold", type=float, default=0.85, metavar="0-1",
-                      help="similaridade mínima para sugerir um candidato (padrão: 0.85)")
-    scan.add_argument("--json", metavar="ARQUIVO", default=None, help="salva o relatório completo em JSON")
+    scan.add_argument(
+        "DIR",
+        nargs="?",
+        default=None,
+        help="pasta a varrer (padrão: diretório de downloads)",
+    )
+    scan.add_argument(
+        "--dry-run",
+        action="store_true",
+        default=False,
+        help="classifica e reporta sem gravar nada",
+    )
+    scan.add_argument(
+        "--no-sentinel",
+        action="store_true",
+        default=False,
+        help="não grava .streamrip.json (use em montagens somente-leitura)",
+    )
+    scan.add_argument(
+        "--no-adopt",
+        action="store_true",
+        default=False,
+        help="não adiciona ao catálogo pastas com tag de ID que não estão nos favoritos",
+    )
+    scan.add_argument(
+        "--no-review",
+        action="store_true",
+        default=False,
+        help="não pergunta sobre os casos duvidosos",
+    )
+    scan.add_argument(
+        "--rescan",
+        action="store_true",
+        default=False,
+        help="reexamina também pastas que já têm sentinela",
+    )
+    scan.add_argument(
+        "--max-depth",
+        type=int,
+        default=4,
+        metavar="N",
+        help="profundidade máxima de pastas (padrão: 4)",
+    )
+    scan.add_argument(
+        "--fuzzy-threshold",
+        type=float,
+        default=0.85,
+        metavar="0-1",
+        help="similaridade mínima para sugerir um candidato (padrão: 0.85)",
+    )
+    scan.add_argument(
+        "--json",
+        metavar="ARQUIVO",
+        default=None,
+        help="salva o relatório completo em JSON",
+    )
     return scan
 
 
 # ----------------------------------------------------------------------------
 # Subcomando: "library" (alias: "lib")
 # ----------------------------------------------------------------------------
-LIBRARY_ACTIONS = ["status", "missing", "list", "history", "reconcile", "reset-stuck", "unmark"]
+LIBRARY_ACTIONS = [
+    "status",
+    "missing",
+    "list",
+    "history",
+    "reconcile",
+    "reset-stuck",
+    "unmark",
+]
 
 
 def library_args(subparsers):
@@ -860,14 +912,32 @@ def library_args(subparsers):
         ),
         help="status e manutenção do catálogo local (library.db)",
     )
-    lib.add_argument("action", nargs="?", default="status", choices=LIBRARY_ACTIONS, metavar="ação",
-                     help="uma de: " + ", ".join(LIBRARY_ACTIONS))
-    lib.add_argument("TARGET", nargs="?", default=None,
-                     help="pasta (reconcile) ou ID do álbum (unmark)")
-    lib.add_argument("--limit", type=int, default=None, metavar="N", help="limita a listagem")
-    lib.add_argument("--fix", action="store_true", default=False,
-                     help="reconcile: devolve a not_downloaded o que sumiu do disco")
-    lib.add_argument("--dry-run", action="store_true", default=False, help="reconcile: só reporta")
+    lib.add_argument(
+        "action",
+        nargs="?",
+        default="status",
+        choices=LIBRARY_ACTIONS,
+        metavar="ação",
+        help="uma de: " + ", ".join(LIBRARY_ACTIONS),
+    )
+    lib.add_argument(
+        "TARGET",
+        nargs="?",
+        default=None,
+        help="pasta (reconcile) ou ID do álbum (unmark)",
+    )
+    lib.add_argument(
+        "--limit", type=int, default=None, metavar="N", help="limita a listagem"
+    )
+    lib.add_argument(
+        "--fix",
+        action="store_true",
+        default=False,
+        help="reconcile: devolve a not_downloaded o que sumiu do disco",
+    )
+    lib.add_argument(
+        "--dry-run", action="store_true", default=False, help="reconcile: só reporta"
+    )
     return lib
 
 

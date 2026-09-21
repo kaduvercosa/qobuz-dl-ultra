@@ -172,7 +172,9 @@ def _read_tags(path: Path) -> dict:
     if easy is not None:
         tags = getattr(easy, "tags", None)
         if tags is not None:
-            out["artist"] = _first(tags.get("albumartist")) or _first(tags.get("artist"))
+            out["artist"] = _first(tags.get("albumartist")) or _first(
+                tags.get("artist")
+            )
             out["album"] = _first(tags.get("album"))
         info = getattr(easy, "info", None)
         if info is not None:
@@ -293,7 +295,9 @@ def build_library_index(albums: list[dict]) -> LibraryIndex:
         upc = (a.get("upc") or "").strip().lstrip("0")
         if upc:
             by_upc[upc].append(a)
-    return LibraryIndex(dict(full), dict(by_album), dict(by_artist), by_id, dict(by_upc))
+    return LibraryIndex(
+        dict(full), dict(by_album), dict(by_artist), by_id, dict(by_upc)
+    )
 
 
 def _bit_depth_matches(local: Optional[int], library: Optional[int]) -> bool:
@@ -328,7 +332,9 @@ def _compat(meta: FolderMeta, album: dict) -> list[str]:
 
 
 def _cand(album: dict, score: float, reason: str) -> Candidate:
-    return Candidate(album["id"], album["source"], album["artist"], album["title"], score, reason)
+    return Candidate(
+        album["id"], album["source"], album["artist"], album["title"], score, reason
+    )
 
 
 def classify(
@@ -355,7 +361,8 @@ def classify(
             if not can_auto:
                 reasons.append(f"pasta_{meta.state}")
             return MatchResult(
-                "review", candidates=(_cand(album, 0.99, "; ".join(reasons) or "tag_id"),)
+                "review",
+                candidates=(_cand(album, 0.99, "; ".join(reasons) or "tag_id"),),
             )
 
     # 2) UPC (BARCODE).
@@ -407,11 +414,15 @@ def classify(
         for album in index.by_artist.get(na, []):
             r = fuzzy.ratio(nt, normalize(album["title"]))
             if r >= fuzzy_threshold:
-                fuzzy_hits[album["id"]] = _cand(album, round(r, 3), f"fuzzy: titulo={r:.2f}")
+                fuzzy_hits[album["id"]] = _cand(
+                    album, round(r, 3), f"fuzzy: titulo={r:.2f}"
+                )
     for album in index.by_album_only.get(nt, []):
         r = fuzzy.ratio(na, normalize(album["artist"])) if na else 0.0
         if r >= fuzzy_threshold and album["id"] not in fuzzy_hits:
-            fuzzy_hits[album["id"]] = _cand(album, round(r, 3), f"fuzzy: artista={r:.2f}")
+            fuzzy_hits[album["id"]] = _cand(
+                album, round(r, 3), f"fuzzy: artista={r:.2f}"
+            )
     if fuzzy_hits:
         ranked = sorted(fuzzy_hits.values(), key=lambda c: c.score, reverse=True)[:5]
         return MatchResult("review", candidates=tuple(ranked))
@@ -512,7 +523,9 @@ def mark_album_downloaded(
     return album
 
 
-def unmark_album_downloaded(lib: LibraryDB, album_id: int, *, remove_files: bool = True) -> dict:
+def unmark_album_downloaded(
+    lib: LibraryDB, album_id: int, *, remove_files: bool = True
+) -> dict:
     """Desmarca o álbum e remove a sentinela da pasta (se houver)."""
     old = lib.set_download_state(album_id, downloaded=False)
     if remove_files:
@@ -635,12 +648,21 @@ async def run_scan(
                 if meta.state != "ok" and len(result.candidates) == 1:
                     cand = result.candidates[0]
                     report["incomplete"].append(
-                        {"album_id": cand.album_id, "folder": str(folder),
-                         "state": meta.state, "title": cand.title, "artist": cand.artist}
+                        {
+                            "album_id": cand.album_id,
+                            "folder": str(folder),
+                            "state": meta.state,
+                            "title": cand.title,
+                            "artist": cand.artist,
+                        }
                     )
                     if apply:
-                        await asyncio.to_thread(lib.update_status, cand.album_id, STATUS_INCOMPLETE)
-                        await asyncio.to_thread(lib.set_local_folder, cand.album_id, str(folder))
+                        await asyncio.to_thread(
+                            lib.update_status, cand.album_id, STATUS_INCOMPLETE
+                        )
+                        await asyncio.to_thread(
+                            lib.set_local_folder, cand.album_id, str(folder)
+                        )
                 else:
                     report["review"].append(_review_item(meta, result))
 
@@ -741,8 +763,12 @@ def reconcile_sentinels(
             problemas = validate_folder(rec.folder, rec.payload)
             if problemas:
                 report["invalid"].append(
-                    {"folder": str(rec.folder), "source": source, "album_id": sid,
-                     "error": "; ".join(problemas)}
+                    {
+                        "folder": str(rec.folder),
+                        "source": source,
+                        "album_id": sid,
+                        "error": "; ".join(problemas),
+                    }
                 )
                 continue
             seen.add((source, sid))
@@ -751,8 +777,13 @@ def reconcile_sentinels(
                 artist = str(rec.payload.get("artist") or "").strip() or "Unknown"
                 count = rec.payload.get("tracks_count")
                 album_id = lib.upsert_album(
-                    source, sid, title, artist,
-                    track_count=int(count) if isinstance(count, int) and count > 0 else None,
+                    source,
+                    sid,
+                    title,
+                    artist,
+                    track_count=int(count)
+                    if isinstance(count, int) and count > 0
+                    else None,
                     release_date=rec.payload.get("release_date"),
                 )
                 lib.set_download_state(
@@ -761,7 +792,9 @@ def reconcile_sentinels(
                     downloaded_at=sentinel_downloaded_at(rec.payload),
                     local_folder_path=str(rec.folder),
                 )
-            report["reconciled"].append({"source": source, "album_id": sid, "folder": str(rec.folder)})
+            report["reconciled"].append(
+                {"source": source, "album_id": sid, "folder": str(rec.folder)}
+            )
         except (SentinelValidationError, ValueError) as exc:
             report["invalid"].append({"folder": str(rec.folder), "error": str(exc)})
 
@@ -772,8 +805,13 @@ def reconcile_sentinels(
         if (a["source"], str(a["source_album_id"])) in seen:
             continue
         report["missing_on_disk"].append(
-            {"album_id": a["id"], "source": a["source"], "artist": a["artist"],
-             "title": a["title"], "folder": folder or None}
+            {
+                "album_id": a["id"],
+                "source": a["source"],
+                "artist": a["artist"],
+                "title": a["title"],
+                "folder": folder or None,
+            }
         )
         if apply and fix_missing:
             lib.set_download_state(a["id"], downloaded=False)

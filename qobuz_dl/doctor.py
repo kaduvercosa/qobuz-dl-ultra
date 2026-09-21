@@ -30,9 +30,22 @@ from typing import Optional
 PASS, WARN, FAIL = "PASS", "WARN", "FAIL"
 
 REQUIRED_MODULES = [
-    "pathvalidate", "httpx", "aiosqlite", "send2trash", "humanize", "aiofiles",
-    "tenacity", "platformdirs", "charset_normalizer", "mutagen", "tqdm",
-    "prompt_toolkit", "packaging", "colorama", "cryptography", "keyring",
+    "pathvalidate",
+    "httpx",
+    "aiosqlite",
+    "send2trash",
+    "humanize",
+    "aiofiles",
+    "tenacity",
+    "platformdirs",
+    "charset_normalizer",
+    "mutagen",
+    "tqdm",
+    "prompt_toolkit",
+    "packaging",
+    "colorama",
+    "cryptography",
+    "keyring",
 ]
 OPTIONAL_MODULES = {
     "rapidfuzz": "match fuzzy mais rápido",
@@ -69,8 +82,13 @@ def check_modules() -> list[Check]:
         except Exception:
             missing.append(mod)
     if missing:
-        out.append(Check(FAIL, "Dependências", "faltando: " + ", ".join(missing)
-                         + " (pip install -U qobuz-dl-ultra)"))
+        out.append(
+            Check(
+                FAIL,
+                "Dependências",
+                "faltando: " + ", ".join(missing) + " (pip install -U qobuz-dl-ultra)",
+            )
+        )
     else:
         out.append(Check(PASS, "Dependências", "todas as obrigatórias importam"))
     for mod, why in OPTIONAL_MODULES.items():
@@ -90,19 +108,35 @@ def check_binaries() -> list[Check]:
         ("fpcalc", "--find-duplicates (Chromaprint)", WARN),
     ):
         path = shutil.which(name)
-        out.append(Check(PASS, name, path) if path else Check(level, name, f"não está no PATH ({why})"))
+        out.append(
+            Check(PASS, name, path)
+            if path
+            else Check(level, name, f"não está no PATH ({why})")
+        )
     return out
 
 
 def check_config(config_file: str) -> list[Check]:
     out: list[Check] = []
     if not os.path.isfile(config_file):
-        return [Check(FAIL, "config.ini", f"não encontrado: {config_file} (rode `qobuz-dl -r`)")]
+        return [
+            Check(
+                FAIL,
+                "config.ini",
+                f"não encontrado: {config_file} (rode `qobuz-dl -r`)",
+            )
+        ]
     out.append(Check(PASS, "config.ini", config_file))
     if os.name == "posix":
         mode = stat.S_IMODE(os.stat(config_file).st_mode)
         if mode & 0o077:
-            out.append(Check(WARN, "Permissão do config", f"{oct(mode)}: outros usuários podem ler (chmod 600)"))
+            out.append(
+                Check(
+                    WARN,
+                    "Permissão do config",
+                    f"{oct(mode)}: outros usuários podem ler (chmod 600)",
+                )
+            )
         else:
             out.append(Check(PASS, "Permissão do config", oct(mode)))
     cfg = configparser.ConfigParser(interpolation=None)
@@ -113,11 +147,20 @@ def check_config(config_file: str) -> list[Check]:
     section = "qobuz" if cfg.has_section("qobuz") else "DEFAULT"
     for key in ("email", "app_id", "secrets", "default_quality"):
         if not cfg.get(section, key, fallback=""):
-            out.append(Check(FAIL, f"config: {key}", "vazio ou ausente (rode `qobuz-dl -r`)"))
-    disable_kr = cfg.get(section, "disable_keyring", fallback="false").strip().lower() in ("true", "1", "yes", "y")
-    has_inline = bool(cfg.get(section, "auth_token", fallback="") or cfg.get(section, "password", fallback=""))
+            out.append(
+                Check(FAIL, f"config: {key}", "vazio ou ausente (rode `qobuz-dl -r`)")
+            )
+    disable_kr = cfg.get(
+        section, "disable_keyring", fallback="false"
+    ).strip().lower() in ("true", "1", "yes", "y")
+    has_inline = bool(
+        cfg.get(section, "auth_token", fallback="")
+        or cfg.get(section, "password", fallback="")
+    )
     if disable_kr and has_inline:
-        out.append(Check(WARN, "Token", "em texto puro no config.ini (disable_keyring=true)"))
+        out.append(
+            Check(WARN, "Token", "em texto puro no config.ini (disable_keyring=true)")
+        )
     elif not disable_kr:
         try:
             import keyring
@@ -125,7 +168,13 @@ def check_config(config_file: str) -> list[Check]:
             backend = keyring.get_keyring()
             name = f"{backend.__class__.__module__}.{backend.__class__.__name__}"
             if "fail" in name.lower() or "null" in name.lower():
-                out.append(Check(WARN, "Keyring", f"sem backend seguro ({name}); use disable_keyring=true em servidores"))
+                out.append(
+                    Check(
+                        WARN,
+                        "Keyring",
+                        f"sem backend seguro ({name}); use disable_keyring=true em servidores",
+                    )
+                )
             else:
                 out.append(Check(PASS, "Keyring", name))
         except Exception as exc:
@@ -147,9 +196,21 @@ def check_directory(directory: Optional[str]) -> list[Check]:
         leftovers += sum(1 for f in files if f.startswith("~tmp_"))
         stuck += sum(1 for d in dirs if d.startswith("[IN PROGRESS]"))
     if leftovers:
-        out.append(Check(WARN, "Temporários", f"{leftovers} arquivo(s) ~tmp_ de downloads interrompidos"))
+        out.append(
+            Check(
+                WARN,
+                "Temporários",
+                f"{leftovers} arquivo(s) ~tmp_ de downloads interrompidos",
+            )
+        )
     if stuck:
-        out.append(Check(WARN, "Pastas [IN PROGRESS]", f"{stuck} (execução interrompida; rode o download de novo)"))
+        out.append(
+            Check(
+                WARN,
+                "Pastas [IN PROGRESS]",
+                f"{stuck} (execução interrompida; rode o download de novo)",
+            )
+        )
     return out
 
 
@@ -159,7 +220,9 @@ def _ro(path: str) -> sqlite3.Connection:
 
 def check_downloads_db(db_path: str) -> list[Check]:
     if not os.path.isfile(db_path):
-        return [Check(WARN, "qobuz_dl.db", "ainda não existe (criado no primeiro download)")]
+        return [
+            Check(WARN, "qobuz_dl.db", "ainda não existe (criado no primeiro download)")
+        ]
     try:
         conn = _ro(db_path)
         try:
@@ -177,14 +240,24 @@ def check_downloads_db(db_path: str) -> list[Check]:
     out = [Check(PASS, "qobuz_dl.db", f"{n} registro(s), integridade ok")]
     stale = sum(1 for (p,) in paths if not os.path.exists(p))
     if stale:
-        out.append(Check(WARN, "Registros obsoletos", f"{stale} álbum(ns) apontam para pasta inexistente "
-                         "(o downloader os descarta sozinho ao tentar baixar)"))
+        out.append(
+            Check(
+                WARN,
+                "Registros obsoletos",
+                f"{stale} álbum(ns) apontam para pasta inexistente "
+                "(o downloader os descarta sozinho ao tentar baixar)",
+            )
+        )
     return out
 
 
 def check_library_db(lib_path: str) -> list[Check]:
     if not os.path.isfile(lib_path):
-        return [Check(WARN, "library.db", "ainda não existe (rode `qobuz-dl sync-favorites`)")]
+        return [
+            Check(
+                WARN, "library.db", "ainda não existe (rode `qobuz-dl sync-favorites`)"
+            )
+        ]
     try:
         conn = _ro(lib_path)
         conn.row_factory = sqlite3.Row
@@ -197,22 +270,43 @@ def check_library_db(lib_path: str) -> list[Check]:
                 "SELECT COUNT(*) FROM albums WHERE download_status='complete' "
                 "AND (local_folder_path IS NULL OR local_folder_path='')"
             ).fetchone()[0]
-            gone = [r["local_folder_path"] for r in conn.execute(
-                "SELECT local_folder_path FROM albums WHERE download_status='complete' "
-                "AND local_folder_path IS NOT NULL AND local_folder_path != ''"
-            )]
+            gone = [
+                r["local_folder_path"]
+                for r in conn.execute(
+                    "SELECT local_folder_path FROM albums WHERE download_status='complete' "
+                    "AND local_folder_path IS NOT NULL AND local_folder_path != ''"
+                )
+            ]
         finally:
             conn.close()
     except sqlite3.Error as exc:
         return [Check(FAIL, "library.db", str(exc))]
     out = [Check(PASS, "library.db", f"{total} álbum(ns)")]
     if stuck:
-        out.append(Check(WARN, "Álbuns presos", f"{stuck} em queued/downloading (`qobuz-dl library reset-stuck`)"))
+        out.append(
+            Check(
+                WARN,
+                "Álbuns presos",
+                f"{stuck} em queued/downloading (`qobuz-dl library reset-stuck`)",
+            )
+        )
     if nofolder:
-        out.append(Check(WARN, "Sem pasta registrada", f"{nofolder} 'complete' sem local_folder_path (`qobuz-dl scan`)"))
+        out.append(
+            Check(
+                WARN,
+                "Sem pasta registrada",
+                f"{nofolder} 'complete' sem local_folder_path (`qobuz-dl scan`)",
+            )
+        )
     missing = sum(1 for p in gone if not os.path.isdir(p))
     if missing:
-        out.append(Check(WARN, "Pasta sumiu", f"{missing} álbum(ns) 'complete' sem pasta (`qobuz-dl library reconcile --fix`)"))
+        out.append(
+            Check(
+                WARN,
+                "Pasta sumiu",
+                f"{missing} álbum(ns) 'complete' sem pasta (`qobuz-dl library reconcile --fix`)",
+            )
+        )
     return out
 
 
@@ -231,8 +325,16 @@ def check_sentinels(directory: Optional[str]) -> list[Check]:
         except ValueError:
             bad += 1
     if bad:
-        return [Check(WARN, "Sentinelas", f"{len(records)} válida(s) lidas, {bad} com problema (`qobuz-dl library reconcile`)")]
-    return [Check(PASS, "Sentinelas", f"{len(records)} álbum(ns) com sentinela consistente")]
+        return [
+            Check(
+                WARN,
+                "Sentinelas",
+                f"{len(records)} válida(s) lidas, {bad} com problema (`qobuz-dl library reconcile`)",
+            )
+        ]
+    return [
+        Check(PASS, "Sentinelas", f"{len(records)} álbum(ns) com sentinela consistente")
+    ]
 
 
 def run_checks(
@@ -257,7 +359,9 @@ def resolve_directory(config_file: str) -> Optional[str]:
     except configparser.Error:
         return None
     section = "qobuz" if cfg.has_section("qobuz") else "DEFAULT"
-    return cfg.get(section, "directory", fallback=None) or cfg.get(section, "default_folder", fallback=None)
+    return cfg.get(section, "directory", fallback=None) or cfg.get(
+        section, "default_folder", fallback=None
+    )
 
 
 def render(results: list[Check]) -> int:

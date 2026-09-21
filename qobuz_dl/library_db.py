@@ -156,7 +156,9 @@ class LibraryDB:
         """
         source_album_id = str(source_album_id)
         now = _now()
-        extras = {k: v for k, v in fields.items() if k in _ALBUM_COLUMNS and v is not None}
+        extras = {
+            k: v for k, v in fields.items() if k in _ALBUM_COLUMNS and v is not None
+        }
         added_at = fields.get("added_to_library_at")
         with self._conn() as c:
             row = c.execute(
@@ -164,10 +166,24 @@ class LibraryDB:
                 (source, source_album_id),
             ).fetchone()
             if row is None:
-                cols = ["source", "source_album_id", "title", "artist",
-                        "first_seen_at", "last_seen_at", "added_to_library_at"]
-                vals: list[Any] = [source, source_album_id, title or "", artist or "",
-                                   now, now, added_at or now]
+                cols = [
+                    "source",
+                    "source_album_id",
+                    "title",
+                    "artist",
+                    "first_seen_at",
+                    "last_seen_at",
+                    "added_to_library_at",
+                ]
+                vals: list[Any] = [
+                    source,
+                    source_album_id,
+                    title or "",
+                    artist or "",
+                    now,
+                    now,
+                    added_at or now,
+                ]
                 for k, v in extras.items():
                     if k in ("title", "artist"):
                         continue
@@ -200,7 +216,9 @@ class LibraryDB:
             row = c.execute("SELECT * FROM albums WHERE id=?", (album_id,)).fetchone()
         return dict(row) if row else None
 
-    def get_album_by_source_id(self, source: str, source_album_id: Any) -> Optional[dict]:
+    def get_album_by_source_id(
+        self, source: str, source_album_id: Any
+    ) -> Optional[dict]:
         with self._conn() as c:
             row = c.execute(
                 "SELECT * FROM albums WHERE source=? AND source_album_id=?",
@@ -241,7 +259,9 @@ class LibraryDB:
 
     def update_status(self, album_id: int, status: str) -> None:
         with self._conn() as c:
-            c.execute("UPDATE albums SET download_status=? WHERE id=?", (status, album_id))
+            c.execute(
+                "UPDATE albums SET download_status=? WHERE id=?", (status, album_id)
+            )
 
     def set_download_state(
         self,
@@ -265,8 +285,12 @@ class LibraryDB:
                 c.execute(
                     "UPDATE albums SET download_status=?, downloaded_at=?, "
                     "local_folder_path=COALESCE(?, local_folder_path) WHERE id=?",
-                    (status or STATUS_COMPLETE, downloaded_at or _now(),
-                     local_folder_path, album_id),
+                    (
+                        status or STATUS_COMPLETE,
+                        downloaded_at or _now(),
+                        local_folder_path,
+                        album_id,
+                    ),
                 )
             else:
                 c.execute(
@@ -279,7 +303,9 @@ class LibraryDB:
     def set_local_folder(self, album_id: int, path: Optional[str]) -> None:
         """Grava só o caminho local (sem mexer no status)."""
         with self._conn() as c:
-            c.execute("UPDATE albums SET local_folder_path=? WHERE id=?", (path, album_id))
+            c.execute(
+                "UPDATE albums SET local_folder_path=? WHERE id=?", (path, album_id)
+            )
 
     def reset_stuck(self, source: Optional[str] = None) -> int:
         """Devolve ``queued``/``downloading`` a ``not_downloaded`` (artefato de reinício)."""
@@ -307,7 +333,8 @@ class LibraryDB:
                 if r["source_album_id"] not in present:
                     removed.append(dict(r))
                     c.execute(
-                        "UPDATE albums SET removed_from_service=1 WHERE id=?", (r["id"],)
+                        "UPDATE albums SET removed_from_service=1 WHERE id=?",
+                        (r["id"],),
                     )
         return removed
 
@@ -361,7 +388,14 @@ class LibraryDB:
             c.execute(
                 "UPDATE sync_runs SET status='complete', completed_at=?, albums_found=?, "
                 "albums_new=?, albums_removed=?, albums_downloaded=? WHERE id=?",
-                (_now(), albums_found, albums_new, albums_removed, albums_downloaded, run_id),
+                (
+                    _now(),
+                    albums_found,
+                    albums_new,
+                    albums_removed,
+                    albums_downloaded,
+                    run_id,
+                ),
             )
 
     def _finish_run(self, run_id: int, status: str) -> None:
@@ -377,7 +411,9 @@ class LibraryDB:
     def interrupt_sync_run(self, run_id: int) -> None:
         self._finish_run(run_id, "interrupted")
 
-    def get_sync_history(self, source: Optional[str] = None, limit: int = 10) -> list[dict]:
+    def get_sync_history(
+        self, source: Optional[str] = None, limit: int = 10
+    ) -> list[dict]:
         sql = "SELECT * FROM sync_runs"
         args: list[Any] = []
         if source:

@@ -58,12 +58,16 @@ def _run(lib, root, **kw):
 
 
 def test_match_exato_marca_e_grava_sentinela(tmp_path, lib):
-    aid = lib.upsert_album("qobuz", "111", "Discovery", "Daft Punk", track_count=2, bit_depth=24)
+    aid = lib.upsert_album(
+        "qobuz", "111", "Discovery", "Daft Punk", track_count=2, bit_depth=24
+    )
     pasta = _mk(tmp_path / "m", "Album/Daft Punk - Discovery (2001) [FLAC 24]", 2)
     rep = _run(lib, tmp_path / "m")
     assert len(rep["auto_matched"]) == 1
     row = lib.get_album(aid)
-    assert row["download_status"] == "complete" and row["local_folder_path"] == str(pasta)
+    assert row["download_status"] == "complete" and row["local_folder_path"] == str(
+        pasta
+    )
     assert sn.read_sentinel(pasta)["album_id"] == "111"
     # segunda passada: já tem sentinela
     assert _run(lib, tmp_path / "m")["sentinel_skipped"] == 1
@@ -88,7 +92,11 @@ def test_contagem_divergente_vai_para_revisao(tmp_path, lib):
 
 def test_bit_depth_divergente_vai_para_revisao(tmp_path, lib, monkeypatch):
     lib.upsert_album("qobuz", "1", "Discovery", "Daft Punk", bit_depth=24)
-    monkeypatch.setattr(ls, "_read_tags", lambda p: {"artist": "Daft Punk", "album": "Discovery", "bit_depth": 16})
+    monkeypatch.setattr(
+        ls,
+        "_read_tags",
+        lambda p: {"artist": "Daft Punk", "album": "Discovery", "bit_depth": 16},
+    )
     _mk(tmp_path / "m", "x/y", 1)
     rep = _run(lib, tmp_path / "m")
     assert len(rep["review"]) == 1 and not rep["auto_matched"]
@@ -118,7 +126,11 @@ def test_sem_match(tmp_path, lib):
 
 def test_match_por_tag_de_id(tmp_path, lib, monkeypatch):
     aid = lib.upsert_album("qobuz", "abc", "Nome Diferente", "Outro", track_count=1)
-    monkeypatch.setattr(ls, "_read_tags", lambda p: {"artist": "X", "album": "Y", "service_album_id": "abc"})
+    monkeypatch.setattr(
+        ls,
+        "_read_tags",
+        lambda p: {"artist": "X", "album": "Y", "service_album_id": "abc"},
+    )
     _mk(tmp_path / "m", "q/w", 1)
     rep = _run(lib, tmp_path / "m")
     assert rep["auto_matched"][0]["reason"] == "tag_id"
@@ -126,7 +138,11 @@ def test_match_por_tag_de_id(tmp_path, lib, monkeypatch):
 
 
 def test_adocao_de_album_fora_dos_favoritos(tmp_path, lib, monkeypatch):
-    monkeypatch.setattr(ls, "_read_tags", lambda p: {"artist": "X", "album": "Y", "service_album_id": "zzz"})
+    monkeypatch.setattr(
+        ls,
+        "_read_tags",
+        lambda p: {"artist": "X", "album": "Y", "service_album_id": "zzz"},
+    )
     pasta = _mk(tmp_path / "m", "q/w", 2)
     rep = _run(lib, tmp_path / "m")
     assert len(rep["adopted"]) == 1
@@ -141,7 +157,11 @@ def test_adocao_de_album_fora_dos_favoritos(tmp_path, lib, monkeypatch):
 
 def test_pasta_incompleta_nao_vira_completa(tmp_path, lib, monkeypatch):
     aid = lib.upsert_album("qobuz", "abc", "Y", "X", track_count=5)
-    monkeypatch.setattr(ls, "_read_tags", lambda p: {"artist": "X", "album": "Y", "service_album_id": "abc"})
+    monkeypatch.setattr(
+        ls,
+        "_read_tags",
+        lambda p: {"artist": "X", "album": "Y", "service_album_id": "abc"},
+    )
     pasta = _mk(tmp_path / "m", "[INCOMPLETE] X - Y", 2)
     rep = _run(lib, tmp_path / "m")
     assert len(rep["incomplete"]) == 1 and not rep["auto_matched"]
@@ -183,7 +203,9 @@ def test_reconcile_sentinelas(tmp_path, lib):
     parcial = _mk(root, "b", 1)
     sn.write_sentinel(parcial, sn.build_payload("qobuz", "11", "T", "A", 3))
     sumido = lib.upsert_album("qobuz", "99", "Sumiu", "A")
-    lib.set_download_state(sumido, downloaded=True, local_folder_path=str(tmp_path / "nao"))
+    lib.set_download_state(
+        sumido, downloaded=True, local_folder_path=str(tmp_path / "nao")
+    )
     rep = ls.reconcile_sentinels(lib, root)
     assert len(rep["reconciled"]) == 1 and len(rep["invalid"]) == 1
     assert len(rep["missing_on_disk"]) == 1

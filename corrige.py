@@ -1,6 +1,5 @@
 import re
 import glob
-import os
 
 for filepath in glob.glob("qobuz_dl/**/*.py", recursive=True):
     with open(filepath, "r", encoding="utf-8") as f:

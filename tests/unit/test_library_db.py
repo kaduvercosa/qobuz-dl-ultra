@@ -3,8 +3,12 @@
 import pytest
 
 from qobuz_dl.library_db import (
-    STATUS_COMPLETE, STATUS_DOWNLOADING, STATUS_INCOMPLETE, STATUS_NOT_DOWNLOADED,
-    AlbumNotFoundError, LibraryDB,
+    STATUS_COMPLETE,
+    STATUS_DOWNLOADING,
+    STATUS_INCOMPLETE,
+    STATUS_NOT_DOWNLOADED,
+    AlbumNotFoundError,
+    LibraryDB,
 )
 
 
@@ -26,7 +30,9 @@ def test_upsert_preserva_estado_de_download(lib):
     lib.set_download_state(aid, downloaded=True, local_folder_path="/x")
     lib.upsert_album("qobuz", "1", "T", "A", track_count=5)
     row = lib.get_album(aid)
-    assert row["download_status"] == STATUS_COMPLETE and row["local_folder_path"] == "/x"
+    assert (
+        row["download_status"] == STATUS_COMPLETE and row["local_folder_path"] == "/x"
+    )
 
 
 def test_set_download_state_preserva_caminho_ao_marcar_e_limpa_ao_desmarcar(lib):
@@ -37,7 +43,10 @@ def test_set_download_state_preserva_caminho_ao_marcar_e_limpa_ao_desmarcar(lib)
     old = lib.set_download_state(aid, downloaded=False)
     assert old["local_folder_path"] == "/x"
     row = lib.get_album(aid)
-    assert row["local_folder_path"] is None and row["download_status"] == STATUS_NOT_DOWNLOADED
+    assert (
+        row["local_folder_path"] is None
+        and row["download_status"] == STATUS_NOT_DOWNLOADED
+    )
 
 
 def test_album_inexistente(lib):

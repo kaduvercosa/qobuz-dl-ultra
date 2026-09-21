@@ -19,12 +19,18 @@ class FakeClient:
             raise RuntimeError("rede caiu")
         off, lim = kw["offset"], kw["limit"]
         total = len(self.albums) if self.total is None else self.total
-        return {"albums": {"items": self.albums[off:off + lim], "total": total}}
+        return {"albums": {"items": self.albums[off : off + lim], "total": total}}
 
 
 def _item(i, **kw):
-    d = {"id": str(i), "title": f"T{i}", "artist": {"name": "A"}, "tracks_count": 10,
-         "maximum_bit_depth": 24, "maximum_sampling_rate": 96}
+    d = {
+        "id": str(i),
+        "title": f"T{i}",
+        "artist": {"name": "A"},
+        "tracks_count": 10,
+        "maximum_bit_depth": 24,
+        "maximum_sampling_rate": 96,
+    }
     d.update(kw)
     return d
 
@@ -35,8 +41,16 @@ def lib(tmp_path):
 
 
 def test_extract_versao_e_campos():
-    a = fs.extract_album_data(_item(1, title="X", version="Deluxe", upc="123",
-                                    label={"name": "L"}, image={"large": "u"}))
+    a = fs.extract_album_data(
+        _item(
+            1,
+            title="X",
+            version="Deluxe",
+            upc="123",
+            label={"name": "L"},
+            image={"large": "u"},
+        )
+    )
     assert a["title"] == "X (Deluxe)" and a["label"] == "L" and a["cover_url"] == "u"
     assert fs.extract_album_data({"title": "sem id"}) is None
 
@@ -96,8 +110,13 @@ def test_run_sync_baixa_novos_e_registra_historico(tmp_path, lib):
         return album_id == "1"
 
     async def _go():
-        return await fs.run_sync(lib, FakeClient([_item(1), _item(2)]), download_new=True,
-                                 download_fn=dl, downloads_db=None)
+        return await fs.run_sync(
+            lib,
+            FakeClient([_item(1), _item(2)]),
+            download_new=True,
+            download_fn=dl,
+            downloads_db=None,
+        )
 
     res = asyncio.run(_go())
     assert sorted(baixados) == ["1", "2"]
@@ -121,7 +140,11 @@ def test_confirmacao_negada_nao_baixa(lib):
     async def no(_):
         return False
 
-    res = asyncio.run(fs.run_sync(lib, FakeClient([_item(1)]), download_new=True, download_fn=dl, confirm=no))
+    res = asyncio.run(
+        fs.run_sync(
+            lib, FakeClient([_item(1)]), download_new=True, download_fn=dl, confirm=no
+        )
+    )
     assert res["targets"] == 0
 
 

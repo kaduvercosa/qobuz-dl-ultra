@@ -840,7 +840,11 @@ class Download:
                                 db_artist,
                                 album_meta.get("tracks_count") or len(_items),
                                 [
-                                    {"id": str(t.get("id")), "title": t.get("title", ""), "success": True}
+                                    {
+                                        "id": str(t.get("id")),
+                                        "title": t.get("title", ""),
+                                        "success": True,
+                                    }
                                     for t in _items
                                 ],
                                 release_date=release_date,

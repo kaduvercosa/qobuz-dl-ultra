@@ -293,7 +293,12 @@ def discover_sentinels(
                 payload = json.load(fh)
             if not isinstance(payload, dict):
                 raise SentinelValidationError("O JSON da sentinela deve ser um objeto")
-        except (OSError, UnicodeError, json.JSONDecodeError, SentinelValidationError) as exc:
+        except (
+            OSError,
+            UnicodeError,
+            json.JSONDecodeError,
+            SentinelValidationError,
+        ) as exc:
             failures.append(
                 {"folder": str(actual), "error": f"Sentinela inválida: {exc}"}
             )
@@ -318,9 +323,9 @@ def count_audio_files(folder: str | os.PathLike, *, max_depth: int = 2) -> int:
             depth = len(cur.relative_to(root).parts)
         except ValueError:
             continue
-        dirs[:] = [
-            d for d in dirs if not (cur / d).is_symlink()
-        ] if depth < max_depth else []
+        dirs[:] = (
+            [d for d in dirs if not (cur / d).is_symlink()] if depth < max_depth else []
+        )
         for name in names:
             p = cur / name
             if p.suffix.lower() in AUDIO_EXTENSIONS and not p.is_symlink():

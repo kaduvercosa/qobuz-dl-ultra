@@ -123,7 +123,10 @@ def extract_album_data(item: dict) -> Optional[dict]:
         "track_count": item.get("tracks_count") or None,
         "bit_depth": item.get("maximum_bit_depth") or None,
         "sample_rate": item.get("maximum_sampling_rate") or None,
-        "release_date": str(item.get("release_date_original") or item.get("release_date") or "") or None,
+        "release_date": str(
+            item.get("release_date_original") or item.get("release_date") or ""
+        )
+        or None,
         "label": _name(item.get("label")) or None,
         "genre": _name(item.get("genre")) or None,
         "upc": str(item.get("upc") or "") or None,
@@ -152,13 +155,24 @@ async def refresh_library(
 
     new_albums: list[dict] = []
     for p in parsed:
-        existing = await asyncio.to_thread(lib.get_album_by_source_id, source, p["source_album_id"])
+        existing = await asyncio.to_thread(
+            lib.get_album_by_source_id, source, p["source_album_id"]
+        )
         if existing is None:
             new_albums.append(p)
         if not dry_run:
-            fields = {k: v for k, v in p.items() if k not in ("source_album_id", "title", "artist")}
+            fields = {
+                k: v
+                for k, v in p.items()
+                if k not in ("source_album_id", "title", "artist")
+            }
             await asyncio.to_thread(
-                lib.upsert_album, source, p["source_album_id"], p["title"], p["artist"], **fields
+                lib.upsert_album,
+                source,
+                p["source_album_id"],
+                p["title"],
+                p["artist"],
+                **fields,
             )
 
     removed: list[dict] = []
@@ -166,7 +180,10 @@ async def refresh_library(
         if dry_run:
             present = set(ids)
             removed = [
-                a for a in await asyncio.to_thread(lib.get_albums, source, include_removed=False)
+                a
+                for a in await asyncio.to_thread(
+                    lib.get_albums, source, include_removed=False
+                )
                 if a["source_album_id"] not in present
             ]
         else:
@@ -217,11 +234,15 @@ def pick_download_targets(
     """Escolhe o que baixar: só ``only_ids`` (novos) ou todos os não completos."""
     if only_ids is not None:
         wanted = set(only_ids)
-        rows = [a for a in lib.get_albums(source, include_removed=False)
-                if a["source_album_id"] in wanted]
+        rows = [
+            a
+            for a in lib.get_albums(source, include_removed=False)
+            if a["source_album_id"] in wanted
+        ]
     elif missing:
         rows = [
-            a for a in lib.get_albums(source, include_removed=False)
+            a
+            for a in lib.get_albums(source, include_removed=False)
             if a["download_status"] != STATUS_COMPLETE
         ]
     else:
@@ -263,17 +284,28 @@ async def download_albums(
         except Exception as exc:
             logger.exception("sync: falha baixando %s", a["source_album_id"])
             ok = False
-            failures.append({"album_id": a["id"], "title": a["title"], "error": str(exc)})
+            failures.append(
+                {"album_id": a["id"], "title": a["title"], "error": str(exc)}
+            )
         if ok:
             folder = lookup_saved_path(downloads_db, a["source_album_id"])
             if folder and os.path.isdir(folder):
-                write_it = sentinel_enabled and not await asyncio.to_thread(has_sentinel, folder)
+                write_it = sentinel_enabled and not await asyncio.to_thread(
+                    has_sentinel, folder
+                )
                 await asyncio.to_thread(
-                    mark_album_downloaded, lib, a["id"], folder=folder, sentinel_enabled=write_it
+                    mark_album_downloaded,
+                    lib,
+                    a["id"],
+                    folder=folder,
+                    sentinel_enabled=write_it,
                 )
             else:
                 await asyncio.to_thread(
-                    lib.set_download_state, a["id"], downloaded=True, status=STATUS_COMPLETE
+                    lib.set_download_state,
+                    a["id"],
+                    downloaded=True,
+                    status=STATUS_COMPLETE,
                 )
             done += 1
         else:
@@ -308,7 +340,9 @@ async def run_sync(
         targets: list[dict] = []
         if not dry_run and download_fn is not None:
             if download_missing:
-                targets = pick_download_targets(lib, source=source, missing=True, limit=limit)
+                targets = pick_download_targets(
+                    lib, source=source, missing=True, limit=limit
+                )
             elif download_new:
                 targets = pick_download_targets(
                     lib, source=source, only_ids=refresh["new_ids"], limit=limit
@@ -320,9 +354,13 @@ async def run_sync(
                 targets = []
             else:
                 dl = await download_albums(
-                    lib, targets, download_fn,  # type: ignore[arg-type]
-                    downloads_db=downloads_db, sentinel_enabled=sentinel_enabled,
-                    progress=progress, stop_event=stop_event,
+                    lib,
+                    targets,
+                    download_fn,  # type: ignore[arg-type]
+                    downloads_db=downloads_db,
+                    sentinel_enabled=sentinel_enabled,
+                    progress=progress,
+                    stop_event=stop_event,
                 )
 
         if run_id is not None:
@@ -334,8 +372,14 @@ async def run_sync(
                 albums_removed=refresh["removed"],
                 albums_downloaded=dl["downloaded"],
             )
-        return {"status": "complete", "run_id": run_id, "dry_run": dry_run,
-                "refresh": refresh, "targets": len(targets), "download": dl}
+        return {
+            "status": "complete",
+            "run_id": run_id,
+            "dry_run": dry_run,
+            "refresh": refresh,
+            "targets": len(targets),
+            "download": dl,
+        }
     except asyncio.CancelledError:
         if run_id is not None:
             await asyncio.to_thread(lib.interrupt_sync_run, run_id)

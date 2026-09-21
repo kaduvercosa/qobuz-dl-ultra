@@ -1,6 +1,5 @@
 """Testes da sentinela .streamrip.json (dedup pelo disco)."""
 
-import json
 import os
 
 import pytest
@@ -18,8 +17,14 @@ def _album(tmp_path, name="A - B", n=2):
 
 def test_escrita_leitura_e_remocao(tmp_path):
     d = _album(tmp_path)
-    payload = sn.build_payload("qobuz", 123, "B", "A", 2, [
-        {"id": "1", "success": True}, {"id": "2", "success": True}])
+    payload = sn.build_payload(
+        "qobuz",
+        123,
+        "B",
+        "A",
+        2,
+        [{"id": "1", "success": True}, {"id": "2", "success": True}],
+    )
     assert sn.write_sentinel(d, payload) is True
     assert sn.has_sentinel(d)
     lido = sn.read_sentinel(d)
@@ -44,20 +49,26 @@ def test_identidade_sem_source_assume_qobuz():
     assert sn.sentinel_identity({"album_id": 9}) == ("qobuz", "9")
 
 
-@pytest.mark.parametrize("payload", [
-    {"source": "spotify", "album_id": "1"},
-    {"source": 3, "album_id": "1"},
-    {"album_id": ""},
-    {"album_id": True},
-    {"album_id": None},
-])
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"source": "spotify", "album_id": "1"},
+        {"source": 3, "album_id": "1"},
+        {"album_id": ""},
+        {"album_id": True},
+        {"album_id": None},
+    ],
+)
 def test_identidade_invalida(payload):
     with pytest.raises(sn.SentinelValidationError):
         sn.sentinel_identity(payload)
 
 
 def test_downloaded_at_preserva_valido_e_repoe_invalido():
-    assert sn.sentinel_downloaded_at({"downloaded_at": "2024-01-02T03:04:05+00:00"}) == "2024-01-02T03:04:05+00:00"
+    assert (
+        sn.sentinel_downloaded_at({"downloaded_at": "2024-01-02T03:04:05+00:00"})
+        == "2024-01-02T03:04:05+00:00"
+    )
     assert sn.sentinel_downloaded_at({"downloaded_at": "ontem"}).startswith("20")
 
 
@@ -86,19 +97,36 @@ def test_descoberta_raiz_inexistente(tmp_path):
 def test_validate_folder_consistente_e_parcial(tmp_path):
     d = _album(tmp_path, n=2)
     tracks = [{"id": "1", "success": True}, {"id": "2", "success": True}]
-    assert sn.validate_folder(d, sn.build_payload("qobuz", "1", "t", "a", 2, tracks)) == []
+    assert (
+        sn.validate_folder(d, sn.build_payload("qobuz", "1", "t", "a", 2, tracks)) == []
+    )
     # falta arquivo
     (d / "02.flac").unlink()
-    assert any("achou 1" in p for p in sn.validate_folder(d, sn.build_payload("qobuz", "1", "t", "a", 2, tracks)))
+    assert any(
+        "achou 1" in p
+        for p in sn.validate_folder(
+            d, sn.build_payload("qobuz", "1", "t", "a", 2, tracks)
+        )
+    )
     # faixa marcada como falha
-    parcial = sn.build_payload("qobuz", "1", "t", "a", 2, [
-        {"id": "1", "success": True}, {"id": "2", "success": False}])
+    parcial = sn.build_payload(
+        "qobuz",
+        "1",
+        "t",
+        "a",
+        2,
+        [{"id": "1", "success": True}, {"id": "2", "success": False}],
+    )
     assert any("parcial" in p for p in sn.validate_folder(d, parcial))
 
 
 def test_validate_folder_contagem_invalida(tmp_path):
-    assert sn.validate_folder(tmp_path, {"tracks_count": "abc"}) == ["tracks_count inválido"]
-    assert sn.validate_folder(tmp_path, {"tracks_count": True}) == ["tracks_count inválido"]
+    assert sn.validate_folder(tmp_path, {"tracks_count": "abc"}) == [
+        "tracks_count inválido"
+    ]
+    assert sn.validate_folder(tmp_path, {"tracks_count": True}) == [
+        "tracks_count inválido"
+    ]
 
 
 def test_count_audio_ignora_symlink_e_conta_discos(tmp_path):
