@@ -325,6 +325,7 @@ async def cmd_sync_favorites(
     lib: Optional[LibraryDB] = None,
     sleep=asyncio.sleep,
 ) -> int:
+    """Synchronize Qobuz favorites and optionally download pending albums."""
     lib = lib or LibraryDB(library_db_path())
     download_new = bool(getattr(args, "download_new", False))
     download_missing = bool(getattr(args, "download_missing", False))
@@ -333,21 +334,25 @@ async def cmd_sync_favorites(
     watch = getattr(args, "every", None)
 
     async def download_fn(album_id: str) -> bool:
+        """Download one favorite album through the active Qobuz client."""
         return bool(await qobuz.download_from_id(album_id, album=True))
 
     async def confirm(targets: list[dict]) -> bool:
+        """Confirm an album batch unless the current mode permits it automatically."""
         ui.warn(f"{len(targets)} álbum(ns) serão baixados.")
         if auto_yes or watch or not _interactive():
             return True
         return (await _ask("  Continuar? [s/N] ")) in ("s", "sim", "y", "yes")
 
     def progress(i, total, album):
+        """Display progress for the current favorite-album download."""
         ui.step(f"[{i}/{total}] {_label(album)}")
 
     downloads_db = getattr(qobuz, "downloads_db", None)
     sentinel_enabled = getattr(getattr(qobuz, "settings", None), "write_sentinel", True)
 
     async def once() -> int:
+        """Run and report one favorites synchronization cycle."""
         try:
             res = await run_sync(
                 lib,
