@@ -229,9 +229,16 @@ def pick_download_targets(
     source: str = SOURCE,
     only_ids: Optional[Iterable[str]] = None,
     missing: bool = False,
-    limit: Optional[int] = None,
+    limit: Any = None,
 ) -> list[dict]:
     """Escolhe o que baixar: só ``only_ids`` (novos) ou todos os não completos."""
+    limit_int: Optional[int] = None
+    if limit is not None:
+        try:
+            limit_int = int(limit)
+        except (ValueError, TypeError):
+            limit_int = None
+
     if only_ids is not None:
         wanted = set(only_ids)
         rows = [
@@ -247,7 +254,7 @@ def pick_download_targets(
         ]
     else:
         rows = []
-    return rows[:limit] if limit else rows
+    return rows[:limit_int] if limit_int is not None else rows
 
 
 async def download_albums(
