@@ -2011,6 +2011,8 @@ class QobuzDL:
                 from qobuz_dl.library_cmd import cmd_sync_favorites
 
                 class _Args:
+                    """Default arguments for favorites sync launched from the TUI."""
+
                     download_new = False
                     download_missing = False
                     dry_run = False
