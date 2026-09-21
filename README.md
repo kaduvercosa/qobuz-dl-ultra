@@ -326,6 +326,36 @@ A Edição Ultra inclui poderosos gerenciadores de biblioteca local para acompan
   python -m qobuz_dl stats
   ```
 
+### 🗂️ Catálogo Local, Scan e Sync de Favoritos (novo na 2.6)
+
+Inspirado no libsync, agora existe um catálogo local (`library.db`, ao lado do `config.ini`) que responde: *"o que eu tenho na conta vs. o que eu tenho no disco?"*.
+
+```bash
+qobuz-dl sync-favorites                  # mostra o diff (novos/removidos) e atualiza o catálogo
+qobuz-dl sync-favorites --download-new   # baixa o que foi favoritado desde a última vez
+qobuz-dl sync-favorites --download-missing --limit 20 -y
+qobuz-dl sync-favorites --download-new --every 60   # modo contínuo (NAS/servidor)
+qobuz-dl sync-favorites --dry-run        # só simula
+
+qobuz-dl scan "/musica"                  # casa pastas do disco com o catálogo (offline)
+qobuz-dl scan --dry-run --json rel.json  # classifica sem gravar e salva o relatório
+
+qobuz-dl library                         # status do catálogo
+qobuz-dl library missing                 # favoritos ainda não baixados
+qobuz-dl library history                 # últimas sincronizações
+qobuz-dl library reconcile [DIR] [--fix] # sentinelas do disco ⇄ catálogo
+qobuz-dl library reset-stuck             # destrava álbuns presos após um CTRL+C
+qobuz-dl library unmark <ID>             # desmarca um álbum (e remove a sentinela)
+
+qobuz-dl doctor [--json]                 # diagnóstico: ambiente, config, keyring, bancos
+```
+
+**Primeira vez com uma biblioteca grande:** rode `sync-favorites` (sem download) e depois `scan`, para marcar o que você já tem antes de usar `--download-missing`.
+
+**Como o scan decide.** Ordem: tag `QOBUZALBUMID` → UPC (`BARCODE`) → nome exato normalizado → fuzzy. Só marca sozinho quando o match é único e a profundidade de bits e o número de faixas batem; qualquer dúvida (2 candidatos, faixas faltando, pasta `[INCOMPLETE]`, fuzzy) vai para revisão manual. Álbuns multi-disco (`CD 01`, `CD 02`) contam como um só. Pastas com tag de ID que não estão nos favoritos são *adotadas* (`--no-adopt` desativa).
+
+**Sentinela.** Cada álbum baixado recebe um `.streamrip.json` (mesmo formato do libsync) com serviço, ID e faixas. Serve para reconstruir o estado após perder o banco e detectar pastas movidas. Desative com `--no-sentinel` ou `write_sentinel = false` no `config.ini` (útil em montagens somente-leitura).
+
 ### 🛠️ Principais Variáveis de Formatação
 
 Você pode personalizar profundamente seu `config.ini` ou usar as flags CLI `-ff` (Formato de Pasta) e `-tf` (Formato de Faixa) usando as variáveis abaixo. Você também pode usar o caractere `/` para criar subdiretórios aninhados automaticamente!

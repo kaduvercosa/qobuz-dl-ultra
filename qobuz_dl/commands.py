@@ -195,6 +195,12 @@ def dl_args(subparsers):
         help="Reaplica as tags nos arquivos já baixados sem baixar novamente. Pula ausentes.",
     )
     download.add_argument(
+        "--no-sentinel",
+        action="store_true",
+        default=False,
+        help="não grava o arquivo .streamrip.json (sentinela de dedup) nas pastas dos álbuns",
+    )
+    download.add_argument(
         "--musicbrainz",
         action="store_true",
         default=False,
@@ -740,6 +746,151 @@ def inspect_args(subparsers):
 
 
 # ----------------------------------------------------------------------------
+# Subcomando: "sync-favorites" (alias: "sf")  -- portado da ideia do libsync
+# ----------------------------------------------------------------------------
+def sync_favorites_args(subparsers):
+    """Define the 'sync-favorites' subcommand and its arguments."""
+    sf = subparsers.add_parser(
+        "sync-favorites",
+        aliases=["sf"],
+        usage="qobuz-dl sync-favorites [opções]",
+        description=(
+            "Sincroniza seus álbuns favoritos do Qobuz com o catálogo local "
+            "(library.db): mostra o que é novo/removido e, opcionalmente, baixa "
+            "o que falta. Dica: rode `qobuz-dl scan` antes na primeira vez para "
+            "marcar o que você já tem no disco."
+        ),
+        help="sincroniza favoritos da conta com o catálogo local",
+    )
+    sf.add_argument(
+        "--download-new",
+        action="store_true",
+        default=False,
+        help="baixa os álbuns favoritados desde a última sincronização",
+    )
+    sf.add_argument(
+        "--download-missing",
+        action="store_true",
+        default=False,
+        help="baixa TODOS os favoritos que ainda não estão completos no disco",
+    )
+    sf.add_argument(
+        "--limit",
+        metavar="N",
+        type=int,
+        default=None,
+        help="máximo de álbuns baixados por execução",
+    )
+    sf.add_argument(
+        "--every",
+        metavar="MIN",
+        type=int,
+        default=None,
+        help="repete a sincronização a cada MIN minutos (modo contínuo/NAS)",
+    )
+    sf.add_argument(
+        "--dry-run",
+        action="store_true",
+        default=False,
+        help="só mostra o diff (novos/removidos); não grava nem baixa",
+    )
+    sf.add_argument(
+        "--yes",
+        "-y",
+        action="store_true",
+        default=False,
+        help="não pede confirmação antes de baixar",
+    )
+    sf.add_argument(
+        "--no-sentinel",
+        action="store_true",
+        default=False,
+        help="não grava o arquivo .streamrip.json nas pastas dos álbuns",
+    )
+    return sf
+
+
+# ----------------------------------------------------------------------------
+# Subcomando: "scan"  -- casa pastas do disco com o catálogo (ideia do libsync)
+# ----------------------------------------------------------------------------
+def scan_args(subparsers):
+    """Define the 'scan' subcommand and its arguments."""
+    scan = subparsers.add_parser(
+        "scan",
+        aliases=["library-scan"],
+        usage="qobuz-dl scan [opções] [DIR]",
+        description=(
+            "Varre uma pasta de música e casa cada álbum com o catálogo local "
+            "(por tag QOBUZALBUMID, UPC, nome e fuzzy), marcando como baixado o "
+            "que for certo e perguntando sobre os duvidosos. Funciona offline."
+        ),
+        help="reconcilia sua pasta de música com o catálogo de favoritos",
+    )
+    scan.add_argument("DIR", nargs="?", default=None, help="pasta a varrer (padrão: diretório de downloads)")
+    scan.add_argument("--dry-run", action="store_true", default=False, help="classifica e reporta sem gravar nada")
+    scan.add_argument("--no-sentinel", action="store_true", default=False,
+                      help="não grava .streamrip.json (use em montagens somente-leitura)")
+    scan.add_argument("--no-adopt", action="store_true", default=False,
+                      help="não adiciona ao catálogo pastas com tag de ID que não estão nos favoritos")
+    scan.add_argument("--no-review", action="store_true", default=False, help="não pergunta sobre os casos duvidosos")
+    scan.add_argument("--rescan", action="store_true", default=False, help="reexamina também pastas que já têm sentinela")
+    scan.add_argument("--max-depth", type=int, default=4, metavar="N", help="profundidade máxima de pastas (padrão: 4)")
+    scan.add_argument("--fuzzy-threshold", type=float, default=0.85, metavar="0-1",
+                      help="similaridade mínima para sugerir um candidato (padrão: 0.85)")
+    scan.add_argument("--json", metavar="ARQUIVO", default=None, help="salva o relatório completo em JSON")
+    return scan
+
+
+# ----------------------------------------------------------------------------
+# Subcomando: "library" (alias: "lib")
+# ----------------------------------------------------------------------------
+LIBRARY_ACTIONS = ["status", "missing", "list", "history", "reconcile", "reset-stuck", "unmark"]
+
+
+def library_args(subparsers):
+    """Define the 'library' subcommand and its arguments."""
+    lib = subparsers.add_parser(
+        "library",
+        aliases=["lib"],
+        usage="qobuz-dl library [ação] [opções]",
+        description=(
+            "Consulta e mantém o catálogo local. Ações: status (padrão), missing "
+            "(favoritos não baixados), list, history (sincronizações), reconcile "
+            "(sentinelas do disco ⇄ catálogo), reset-stuck, unmark <ID>."
+        ),
+        help="status e manutenção do catálogo local (library.db)",
+    )
+    lib.add_argument("action", nargs="?", default="status", choices=LIBRARY_ACTIONS, metavar="ação",
+                     help="uma de: " + ", ".join(LIBRARY_ACTIONS))
+    lib.add_argument("TARGET", nargs="?", default=None,
+                     help="pasta (reconcile) ou ID do álbum (unmark)")
+    lib.add_argument("--limit", type=int, default=None, metavar="N", help="limita a listagem")
+    lib.add_argument("--fix", action="store_true", default=False,
+                     help="reconcile: devolve a not_downloaded o que sumiu do disco")
+    lib.add_argument("--dry-run", action="store_true", default=False, help="reconcile: só reporta")
+    return lib
+
+
+# ----------------------------------------------------------------------------
+# Subcomando: "doctor" (alias: "check")  -- diagnóstico (ideia do libsync)
+# ----------------------------------------------------------------------------
+def doctor_args(subparsers):
+    """Define the 'doctor' subcommand and its arguments."""
+    doc = subparsers.add_parser(
+        "doctor",
+        aliases=["check"],
+        usage="qobuz-dl doctor [--json]",
+        description=(
+            "Diagnostica ambiente, config, keyring, bancos e sentinelas. Somente "
+            "leitura, sem rede, e nunca mostra segredos."
+        ),
+        help="verifica a saúde da instalação e da biblioteca",
+    )
+    doc.add_argument("--json", action="store_true", default=False, help="saída em JSON")
+    return doc
+
+
+# ----------------------------------------------------------------------------
 # Montagem do parser principal
 # ----------------------------------------------------------------------------
 def qobuz_dl_args(default_quality=6, default_limit=20, default_folder=None):
@@ -817,8 +968,12 @@ def qobuz_dl_args(default_quality=6, default_limit=20, default_folder=None):
     inspect_cmd = inspect_args(subparsers)
     auth_cmd = auth_args(subparsers)
     user_cmd = user_args(subparsers)
+    sync_fav_cmd = sync_favorites_args(subparsers)
+    scan_cmd = scan_args(subparsers)
+    library_cmd = library_args(subparsers)
+    doctor_cmd = doctor_args(subparsers)
 
-    for subparser in (interactive, download, lucky, sync_pl_cmd):
+    for subparser in (interactive, download, lucky, sync_pl_cmd, sync_fav_cmd):
         add_common_arg(subparser, default_folder, default_quality)
 
     for subparser in (
@@ -832,6 +987,10 @@ def qobuz_dl_args(default_quality=6, default_limit=20, default_folder=None):
         inspect_cmd,
         auth_cmd,
         user_cmd,
+        sync_fav_cmd,
+        scan_cmd,
+        library_cmd,
+        doctor_cmd,
     ):
         add_output_args(subparser, suppress=True)
 

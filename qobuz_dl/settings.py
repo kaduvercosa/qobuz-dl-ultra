@@ -145,6 +145,9 @@ class QobuzDLSettings:
 
         self.user_auth_token = kwargs.get("user_auth_token", "")
 
+        # # Sentinela .streamrip.json por álbum (dedup pelo disco; ver sentinel.py).
+        self.write_sentinel = kwargs.get("write_sentinel", True)
+
     # # Converte argparse + ConfigParser em kwargs normalizados para QobuzDLSettings.
     @staticmethod
     def from_arguments_configparser(arguments, config):
@@ -265,6 +268,12 @@ class QobuzDLSettings:
             "segment_workers": getattr(arguments, "segment_workers", None)
             or config.get(section, "segment_workers", fallback="0"),
             "user_auth_token": config.get(section, "user_auth_token", fallback=""),
+            # # --no-sentinel força False; senão vale write_sentinel do config.ini (padrão True).
+            "write_sentinel": (
+                False
+                if getattr(arguments, "no_sentinel", False)
+                else config.getboolean(section, "write_sentinel", fallback=True)
+            ),
             # # Compatibilidade entre o nome positivo lrc_files e a opção negativa no_lrc_files.
             "lrc_files": _merge_bool_opt_out(
                 arguments,

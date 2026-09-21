@@ -824,6 +824,36 @@ class Download:
                     album=db_album,
                 )
 
+                # # Sentinela .streamrip.json (dedup pelo disco). Best-effort: nunca derruba o download.
+                if getattr(self.settings, "write_sentinel", True):
+                    try:
+                        from qobuz_dl import sentinel as _sentinel
+
+                        _items = (album_meta.get("tracks") or {}).get("items") or []
+                        await asyncio.to_thread(
+                            _sentinel.write_sentinel,
+                            final_dirn,
+                            _sentinel.build_payload(
+                                "qobuz",
+                                self.item_id,
+                                db_album,
+                                db_artist,
+                                album_meta.get("tracks_count") or len(_items),
+                                [
+                                    {"id": str(t.get("id")), "title": t.get("title", ""), "success": True}
+                                    for t in _items
+                                ],
+                                release_date=release_date,
+                                quality={
+                                    "format": file_format,
+                                    "bit_depth": bit_depth,
+                                    "sampling_rate": sampling_rate,
+                                },
+                            ),
+                        )
+                    except Exception as _exc:
+                        logger.debug(f"Sentinela nao gravada: {_exc}")
+
                 await postprocess.finalize_report(
                     final_dirn,
                     completo=(failed_tracks == 0 and not aborted_by_user),

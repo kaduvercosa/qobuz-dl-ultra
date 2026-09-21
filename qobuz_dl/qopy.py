@@ -52,6 +52,17 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+def _resolve_user_auth_token(client, token=None):
+    """Resolve token de múltiplas fontes para evitar AttributeError em testes."""
+    for value in (
+        token,
+        getattr(client, "uat", None),
+        getattr(client, "user_auth_token", None),
+    ):
+        if value:
+            return str(value).strip()
+    return ""
+
 
 class Client:
     """
@@ -64,6 +75,7 @@ class Client:
         self.user_id = None
         self.label = "Studio"
         self.uat = None
+        self.user_auth_token = None
 
     @classmethod
     async def create(
@@ -135,7 +147,6 @@ class Client:
         self.session = httpx.AsyncClient(
             headers=headers, timeout=client_timeout, limits=limits
         )
-
         self.base = "https://www.qobuz.com/api.json/0.2/"
         self.sec = None
         self.session_id = None
@@ -143,6 +154,7 @@ class Client:
         self.session_infos = None
         self.session_key = None
         self.uat = None
+        self.user_auth_token = None
 
         try:
             await self.auth(email, pwd, user_auth_token)
@@ -174,13 +186,25 @@ class Client:
         else:
             return obj
 
+    def _token_candidates(self, user_auth_token=None):
+        """Retorna o token efetivo, aceitando os nomes usados pelo projeto."""
+        candidates = (
+            user_auth_token,
+            getattr(self, "uat", None),
+            getattr(self, "user_auth_token", None),
+        )
+        return next((str(token).strip() for token in candidates if token), "")
+
     async def auth(self, email, pwd, user_auth_token=None):
-        if user_auth_token:
-            self.uat = user_auth_token
+        token = _resolve_user_auth_token(self, user_auth_token)
+        if token:
+            self.uat = token
+            self.user_auth_token = token
             if self.session is not None:
-                self.session.headers.update({"X-User-Auth-Token": self.uat})
-        elif len(pwd) > 60:
-            self.uat = pwd
+                self.session.headers.update({"X-User-Auth-Token": token})
+        elif len(pwd or "") > 60:
+            self.uat = str(pwd).strip()
+            self.user_auth_token = self.uat
             if self.session is not None:
                 self.session.headers.update({"X-User-Auth-Token": self.uat})
         else:
@@ -190,36 +214,47 @@ class Client:
                     f"{YELLOW}[!] Conta gratuita detectada ou validacao ignorada.{OFF}"
                 )
             self.uat = usr_info["user_auth_token"]
-
+            self.user_auth_token = self.uat
             if self.session is not None:
                 self.session.headers.update({"X-User-Auth-Token": self.uat})
 
-            try:
-                raw_user_info = await self.api_call("user/get")
-                self.user_info = raw_user_info.get("user", raw_user_info)
-                cred = self.user_info.get("credential") or {}
-                self.label = cred.get("parameters", {}).get("short_label") or cred.get(
-                    "description", "Membro Qobuz"
-                )
-                self.user_id = self.user_info.get("id")
+        try:
+            raw_user_info = await self.api_call("user/get")
+            self.user_info = raw_user_info.get("user", raw_user_info) or {}
+            cred = self.user_info.get("credential") or {}
+            self.label = cred.get("parameters", {}).get("short_label") or cred.get(
+                "description", "Membro Qobuz"
+            )
+            self.user_id = self.user_info.get("id")
 
-                sub = self.check_subscription()
-                if sub["is_active"]:
-                    logger.info(f"{GREEN}Logado: OK (Assinatura: {self.label}){OFF}")
-                else:
-                    logger.warning(
-                        f"{YELLOW}[!] Logado: OK, mas a assinatura esta {RED}INATIVA{RESET} ({sub['status']}){OFF}"
-                    )
-            except Exception:
-                logger.info(f"{YELLOW}[!] Validacao do perfil ignorada.{OFF}")
-                self.label = "Studio"
-                self.user_id = None
+            sub = self.check_subscription()
+            if sub["is_active"]:
+                logger.info(f"{GREEN}Logado: OK (Assinatura: {self.label}){OFF}")
+            else:
+                logger.warning(
+                    f"{YELLOW}[!] Logado: OK, mas a assinatura esta {RED}INATIVA{RESET} ({sub['status']}){OFF}"
+                )
+        except Exception:
+            logger.info(f"{YELLOW}[!] Validacao do perfil ignorada.{OFF}")
+            self.label = "Studio"
+            self.user_id = None
+
+    def _find_subscription(self, value):
+        """Procura somente dados reais de assinatura no JSON, sem inferencia falsa."""
+        if isinstance(value, dict):
+            direct = value.get("subscription")
+            if isinstance(direct, dict):
+                return direct
+            for key in ("user", "account", "profile", "credential"):
+                found = self._find_subscription(value.get(key))
+                if found is not None:
+                    return found
+        return None
 
     def check_subscription(self) -> dict[str, Any]:
         user_info = self.user_info or {}
-        sub = user_info.get("subscription")
-
-        if not sub or not isinstance(sub, dict):
+        sub = self._find_subscription(user_info)
+        if not isinstance(sub, dict):
             return {
                 "is_active": False,
                 "status": "Inativa / Sem Assinatura",
@@ -232,56 +267,64 @@ class Client:
                 "raw": {},
             }
 
-        offer = (sub.get("offer") or "N/A").capitalize()
-        start_date = sub.get("start_date")
-        end_date = sub.get("end_date")
+        offer_raw = sub.get("offer") or "n/a"
+        offer = str(offer_raw).capitalize()
+        start_date = sub.get("start_date") or sub.get("start")
+        end_date = sub.get("end_date") or sub.get("end")
         is_canceled = bool(sub.get("is_canceled", False))
         periodicity = sub.get("periodicity") or "N/A"
         household_size_max = sub.get("household_size_max", 1)
 
-        is_active = False
-        status = "Inativa"
+        is_free = offer.lower() in {"free", "gratuita", "gratuito", "none", "na"}
+        is_active = not is_free
 
-        start_date_br = start_date
-        if start_date:
-            try:
-                start_date_br = datetime.strptime(
-                    str(start_date)[:10], "%Y-%m-%d"
-                ).strftime("%d/%m/%Y")
-            except ValueError:
-                pass
-
-        end_date_br = end_date
         if end_date:
             try:
                 end_dt = datetime.strptime(str(end_date)[:10], "%Y-%m-%d").date()
-                end_date_br = end_dt.strftime("%d/%m/%Y")
-                today = date.today()
-
-                if end_dt >= today:
-                    is_active = True
-                    status = (
-                        f"Cancelada (Ativa até {end_date_br})"
-                        if is_canceled
-                        else f"Ativa (Renovação em {end_date_br})"
-                    )
+                if end_dt >= date.today():
+                    is_active = is_active
                 else:
                     is_active = False
-                    status = f"Expirada em {end_date_br}"
-            except Exception:
-                is_active = not is_canceled
-                status = "Cancelada" if is_canceled else "Ativa"
+            except (TypeError, ValueError):
+                logger.debug("Não foi possível interpretar end_date=%r", end_date)
+                end_date = None
+
+        if is_canceled:
+            if end_date:
+                try:
+                    end_dt = datetime.strptime(str(end_date)[:10], "%Y-%m-%d").date()
+                    if end_dt >= date.today():
+                        status = f"Cancelada (Ativa até {end_date})"
+                        is_active = True
+                    else:
+                        status = f"Expirada em {end_date}"
+                        is_active = False
+                except (TypeError, ValueError):
+                    status = "Cancelada"
+                    is_active = False
+            else:
+                status = "Cancelada"
+                is_active = False
+        elif end_date:
+            try:
+                end_dt = datetime.strptime(str(end_date)[:10], "%Y-%m-%d").date()
+                if end_dt >= date.today():
+                    status = f"Ativa (Renovação em {end_date})"
+                else:
+                    status = f"Expirada em {end_date}"
+                    is_active = False
+            except (TypeError, ValueError):
+                status = "Ativa"
         else:
-            is_active = bool(offer and offer.lower() != "free" and not is_canceled)
             status = "Ativa" if is_active else "Inativa"
-            end_date_br = None
+
 
         return {
             "is_active": is_active,
             "status": status,
             "offer": offer,
-            "start_date": start_date_br,
-            "end_date": end_date_br,
+            "start_date": start_date,
+            "end_date": end_date,
             "is_canceled": is_canceled,
             "periodicity": periodicity,
             "household_size_max": household_size_max,
@@ -313,7 +356,7 @@ class Client:
         """Derive session key from Qobuz API response."""
         if not _CRYPTO_AVAILABLE:
             raise RuntimeError(
-                "cryptography não está disponivel. HKDF requer extensoes nativas."
+                "cryptography nao esta disponivel. HKDF requer extensoes nativas."
             )
         salt, info = self.session_infos.split(".")
         hkdf = HKDF(
@@ -340,23 +383,24 @@ class Client:
 
     async def api_call(self, epoint, **kwargs):
         if epoint == "user/login":
-            if "user_auth_token" in kwargs and kwargs["user_auth_token"]:
+            # Prioriza token do objeto (self) sobre kwargs
+            token = kwargs.get("user_auth_token") or getattr(self, "user_auth_token", None)
+            if token:
                 params = {
-                    "user_auth_token": kwargs["user_auth_token"],
+                    "user_auth_token": token,
                     "app_id": self.id,
                 }
             else:
                 params = {
-                    "email": kwargs["email"],
-                    "password": kwargs["pwd"],
+                    "email": kwargs.get("email", ""),
+                    "password": kwargs.get("pwd", ""),
                     "app_id": self.id,
                 }
         elif epoint == "user/get":
+            token = _resolve_user_auth_token(self, kwargs.get("user_auth_token"))
             params = {
                 "app_id": self.id,
-                "user_auth_token": getattr(
-                    self, "uat", kwargs.get("user_auth_token", "")
-                ),
+                "user_auth_token": token,
             }
         elif epoint == "track/getFileUrl":
             track_id = kwargs["id"]
@@ -588,37 +632,33 @@ class Client:
                             highest_ratio = ratio
                             best_match_id = q_track["id"]
                             best_match_name = f"{q_artist_raw} - {q_title_raw}"
-                    if highest_ratio >= AUTO_ACCEPT_THRESHOLD and best_match_id:
+                if highest_ratio >= AUTO_ACCEPT_THRESHOLD and best_match_id:
+                    valid_track_ids.append(best_match_id)
+                elif highest_ratio >= PROMPT_THRESHOLD and best_match_id:
+                    ui.emit(
+                        f"\n{YELLOW}[?] Correspondencia limetrofe detectada "
+                        f"({highest_ratio * 100:.0f}% de semelhanca){OFF}"
+                    )
+                    ui.emit(
+                        f" Target (Last.fm): {item['artist']} - {item['title']}"
+                    )
+                    ui.emit(f" Found (Qobuz) : {best_match_name}")
+                    choice = (
+                        input(
+                            f"{CYAN} Voce quer baixar esta faixa de qualquer maneira? [y/n]: {OFF}"
+                        )
+                        .strip()
+                        .lower()
+                    )
+                    if choice == "y":
                         valid_track_ids.append(best_match_id)
-                    elif highest_ratio >= PROMPT_THRESHOLD and best_match_id:
-                        ui.emit(
-                            f"\n{YELLOW}[?] Correspondencia limetrofe detectada "
-                            f"({highest_ratio * 100:.0f}% de semelhanca){OFF}"
-                        )
-                        ui.emit(
-                            f" Target (Last.fm): {item['artist']} - {item['title']}"
-                        )
-                        ui.emit(f" Found (Qobuz) : {best_match_name}")
-                        choice = (
-                            input(
-                                f"{CYAN} Voce quer baixar esta faixa de qualquer maneira? [y/n]: {OFF}"
-                            )
-                            .strip()
-                            .lower()
-                        )
-                        if choice == "y":
-                            valid_track_ids.append(best_match_id)
-                            ui.emit(f"{GREEN} [+] Faixa aceita manualmente.{OFF}")
-                        else:
-                            ui.emit(f"{RED} [-] Faixa ignorada manualmente.{OFF}")
+                        ui.emit(f"{GREEN} [+] Faixa aceita manualmente.{OFF}")
                     else:
-                        ui.emit(
-                            f"{YELLOW}[!] Pulando: '{query}' (A melhor combinacao foi apenas "
-                            f"{highest_ratio * 100:.0f}% similar){OFF}"
-                        )
+                        ui.emit(f"{RED} [-] Faixa ignorada manualmente.{OFF}")
                 else:
                     ui.emit(
-                        f"{YELLOW}[!] Pulando (Sem resultados no Qobuz para): '{query}'{OFF}"
+                        f"{YELLOW}[!] Pulando: '{query}' (A melhor combinacao foi apenas "
+                        f"{highest_ratio * 100:.0f}% similar){OFF}"
                     )
             except Exception as e:
                 ui.emit(f"{RED}[!] Erro ao procurar por '{query}': {e}{OFF}")
@@ -640,7 +680,7 @@ class Client:
                 return items[0].get("id")
         except Exception as e:
             logger.debug(f"Falha na pesquisa ISRC para {isrc}: {e}")
-            return None
+        return None
 
     async def search_by_upc(self, upc: str):
         if not upc:
@@ -654,7 +694,7 @@ class Client:
                 return items[0].get("id")
         except Exception as e:
             logger.debug(f"Falha na pesquisa UPC para {upc}: {e}")
-            return None
+        return None
 
     async def match_external_tracks(self, tracks: list, auto: bool = False) -> list:
         matched_ids = []
