@@ -12,7 +12,6 @@ import logging
 import os
 import shutil
 import sys
-import time
 import re
 from typing import Any, Optional
 
@@ -1773,13 +1772,9 @@ class QobuzDL:
         certo do client (search_albums/search_artists/etc.).
 
         Caso especial `item_type == "favorites"` com `fav_subtype ==
-        "playlists"`: a API pública não tem um endpoint direto e
-        documentado pra "minhas playlists", então esse bloco tenta 2
-        chamadas internas da API (playlist/getUserPlaylists, com fallback
-        pra getUserPlaylistIds + busca individual de cada playlist) -- é a
-        parte mais frágil desta função porque depende de endpoints não
-        oficiais; se "favoritos > playlists" parar de funcionar, é aqui
-        que revisar primeiro.
+        "playlists"`: delega ao cliente da API, que encapsula o endpoint
+        assinado e seu fallback por IDs. O controlador interativo só transforma
+        a resposta em opções de menu.
 
         Retorna: lista de {"meta": ..., "url": ...} (ou lista de URLs puras
         se lucky=True, usado direto por download_list_of_urls)."""
@@ -1829,82 +1824,12 @@ class QobuzDL:
 
             if item_type == "favorites":
                 if fav_subtype == "playlists":
-                    iterable = []
-                    user_id = getattr(self.client, "user_id", None)
-                    if (
-                        not user_id
-                        and hasattr(self.client, "user")
-                        and isinstance(self.client.user, dict)
-                    ):
-                        user_id = self.client.user.get("id")
-
-                    params = {"limit": fetch_limit}
-                    if user_id:
-                        params["user_id"] = user_id
-
-                    try:
-                        p1 = params.copy()
-                        p1["request_ts"] = int(time.time())
-                        sig = self.client._modern_sig(
-                            "playlist/getUserPlaylists", p1, self.client.sec
-                        )
-                        p1["request_sig"] = sig
-
-                        r1 = await self.client.session.request(
-                            "get",
-                            self.client.base + "playlist/getUserPlaylists",
-                            params=p1,
-                        )
-                        res1 = r1.json()
-
-                        if "playlists" in res1 and "items" in res1["playlists"]:
-                            iterable = res1["playlists"]["items"]
-                        else:
-                            p2 = params.copy()
-                            p2["request_ts"] = int(time.time())
-                            sig2 = self.client._modern_sig(
-                                "playlist/getUserPlaylistIds", p2, self.client.sec
-                            )
-                            p2["request_sig"] = sig2
-
-                            r2 = await self.client.session.request(
-                                "get",
-                                self.client.base + "playlist/getUserPlaylistIds",
-                                params=p2,
-                            )
-                            res2 = r2.json()
-
-                            ids = (
-                                res2.get("playlist_ids", [])
-                                if isinstance(res2, dict)
-                                else []
-                            )
-                            for p_id in ids:
-                                try:
-                                    p_params = {"playlist_id": p_id, "extra": "tracks"}
-                                    p_params["request_ts"] = int(time.time())
-                                    p_sig = self.client._modern_sig(
-                                        "playlist/get", p_params, self.client.sec
-                                    )
-                                    p_params["request_sig"] = p_sig
-
-                                    rp = await self.client.session.request(
-                                        "get",
-                                        self.client.base + "playlist/get",
-                                        params=p_params,
-                                    )
-                                    p_data = rp.json()
-                                    if "id" in p_data:
-                                        iterable.append(p_data)
-                                except Exception as e:
-                                    # Uma playlist individual falhando não
-                                    # deve interromper a busca das outras.
-                                    logger.debug(
-                                        f"Falha ao buscar playlist individual: {e}"
-                                    )
-                    except Exception as e:
-                        logger.error(f"{RED}Erro ao buscar playlists: {e}{OFF}")
-
+                    results = await self.client.get_user_playlists(limit=fetch_limit)
+                    iterable = (
+                        results.get("playlists", {}).get("items", [])
+                        if isinstance(results, dict)
+                        else []
+                    )
                     mode_dict["requires_extra"] = False
                 else:
                     results = await mode_dict["func"](

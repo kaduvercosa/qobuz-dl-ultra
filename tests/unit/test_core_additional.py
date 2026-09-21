@@ -192,28 +192,21 @@ async def test_initialize_client_fecha_cliente_anterior(monkeypatch):
     assert closed == [True]
 
 
-async def test_search_favoritos_playlists_usa_fallback(monkeypatch):
-    class Response:
-        def __init__(self, data):
-            self.data = data
-
-        def json(self):
-            return self.data
-
-    responses = iter(
-        [
-            Response({}),
-            Response({"playlist_ids": ["p1", "p2"]}),
-            Response({"id": "p1", "name": "P1", "owner": {}}),
-            Response({}),
-        ],
-    )
-
-    async def request(*args, **kwargs):
-        return next(responses)
+async def test_search_favoritos_playlists_consume_gateway_do_cliente():
+    """The controller consumes playlists already resolved by the API client."""
 
     async def unused_method(*args, **kwargs):
         return None
+
+    async def get_user_playlists(limit):
+        """Represent the client's direct-or-ID-fallback normalized response."""
+        assert limit == 10
+        return {
+            "playlists": {
+                "items": [{"id": "p1", "name": "P1", "owner": {}}],
+                "total": 1,
+            }
+        }
 
     client = SimpleNamespace(
         search_albums=unused_method,
@@ -221,11 +214,7 @@ async def test_search_favoritos_playlists_usa_fallback(monkeypatch):
         search_tracks=unused_method,
         search_playlists=unused_method,
         get_favorites=unused_method,
-        session=SimpleNamespace(request=request),
-        base="https://api/",
-        sec="secret",
-        user_id="u1",
-        _modern_sig=lambda *args: "sig",
+        get_user_playlists=get_user_playlists,
     )
 
     def extract_rich_metadata(item, item_type, mode_dict, fav_subtype=None):

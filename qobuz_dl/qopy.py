@@ -382,6 +382,7 @@ class Client:
         return unpadder.update(padded) + unpadder.finalize()
 
     async def api_call(self, epoint, **kwargs):
+        """Build, sign, execute, and normalize one Qobuz API request."""
         if epoint == "user/login":
             # Prioriza token do objeto (self) sobre kwargs
             token = kwargs.get("user_auth_token") or getattr(
@@ -464,6 +465,18 @@ class Client:
                 "request_ts": unix,
                 "request_sig": r_sig_hashed,
             }
+        elif epoint in (
+            "playlist/getUserPlaylists",
+            "playlist/getUserPlaylistIds",
+        ):
+            params = {"limit": kwargs.get("limit", 100)}
+            user_id = kwargs.get("user_id") or getattr(self, "user_id", None)
+            if user_id:
+                params["user_id"] = user_id
+            params["request_ts"] = int(time.time())
+            params["request_sig"] = self._modern_sig(
+                epoint, params, kwargs.get("sec", self.sec)
+            )
         else:
             params = {"app_id": self.id}
             if getattr(self, "force_english", True):
@@ -800,7 +813,15 @@ class Client:
         except Exception:
             return {}
 
-    async def get_favorites(self, fav_type="albums", limit=100, offset=0):
+    async def get_favorites(
+        self, fav_type="albums", limit=100, offset=0, *, strict=False
+    ):
+        """Return one page of favorites.
+
+        Interactive browsing keeps the historical best-effort behavior. Sync
+        callers can pass ``strict=True`` so a provider failure is never
+        mistaken for an empty account.
+        """
         try:
             return await self.api_call(
                 "favorite/getUserFavorites",
@@ -809,8 +830,83 @@ class Client:
                 offset=offset,
             )
         except Exception as e:
+            if strict:
+                raise
             logger.error(f"{RED}[!] API Error fetching favorites: {e}{OFF}")
             return {}
+
+    async def get_all_favorites(
+        self,
+        fav_type="albums",
+        *,
+        page_size=500,
+        max_pages=400,
+    ):
+        """Fetch every favorites page and return ``(items, reported_total)``.
+
+        This is intentionally strict: malformed responses and network errors
+        propagate so catalog synchronization cannot interpret them as mass
+        removals.
+        """
+        items = []
+        total = None
+        offset = 0
+        for _ in range(max_pages):
+            response = await self.get_favorites(
+                fav_type=fav_type,
+                limit=page_size,
+                offset=offset,
+                strict=True,
+            )
+            block = response.get(fav_type) if isinstance(response, dict) else None
+            if not isinstance(block, dict):
+                raise ValueError(f"resposta sem o bloco {fav_type!r}")
+            page = block.get("items") or []
+            if not isinstance(page, list):
+                raise ValueError(f"itens de favoritos inválidos em {fav_type!r}")
+            if total is None and block.get("total") is not None:
+                try:
+                    total = int(block["total"])
+                except (TypeError, ValueError):
+                    total = None
+            items.extend(page)
+            if not page or (total is not None and len(items) >= total):
+                return items, total
+            offset += len(page)
+        raise RuntimeError("paginação de favoritos excedeu o limite de segurança")
+
+    async def get_user_playlists(self, limit=100):
+        """List the authenticated user's playlists through public client APIs."""
+        user_id = getattr(self, "user_id", None)
+        if not user_id and isinstance(getattr(self, "user", None), dict):
+            user_id = self.user.get("id")
+
+        try:
+            response = await self.api_call(
+                "playlist/getUserPlaylists", limit=limit, user_id=user_id
+            )
+            block = response.get("playlists") if isinstance(response, dict) else None
+            if isinstance(block, dict) and isinstance(block.get("items"), list):
+                return response
+        except Exception as exc:
+            logger.debug("Falha ao listar playlists diretamente: %s", exc)
+
+        id_response = await self.api_call(
+            "playlist/getUserPlaylistIds", limit=limit, user_id=user_id
+        )
+        playlist_ids = (
+            id_response.get("playlist_ids", []) if isinstance(id_response, dict) else []
+        )
+        items = []
+        for playlist_id in playlist_ids[:limit]:
+            try:
+                playlist = await self.api_call("playlist/get", id=playlist_id)
+            except Exception as exc:
+                logger.debug("Falha ao buscar playlist %s: %s", playlist_id, exc)
+                continue
+            if isinstance(playlist, dict) and playlist.get("id") is not None:
+                items.append(playlist)
+        return {"playlists": {"items": items, "total": len(items)}}
 
     async def add_favorite_album(self, album_id):
         return await self.api_call(

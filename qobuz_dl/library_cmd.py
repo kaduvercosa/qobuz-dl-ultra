@@ -14,6 +14,8 @@ import os
 import sys
 from typing import Any, Optional
 
+from prompt_toolkit import PromptSession
+
 from qobuz_dl import ui
 from qobuz_dl.favorites_sync import SOURCE, FavoritesFetchError, run_sync
 from qobuz_dl.library_db import LibraryDB
@@ -53,8 +55,10 @@ def _interactive() -> bool:
 
 
 async def _ask(prompt: str) -> str:
+    """Read a response through the async terminal UI, returning ``q`` on cancel."""
+
     try:
-        return (await asyncio.to_thread(input, prompt)).strip().lower()
+        return (await PromptSession().prompt_async(prompt)).strip().lower()
     except (EOFError, KeyboardInterrupt):
         return "q"
 

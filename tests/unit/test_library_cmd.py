@@ -4,6 +4,8 @@ import asyncio
 from types import SimpleNamespace
 
 import pytest
+from prompt_toolkit.input import create_pipe_input
+from prompt_toolkit.output import DummyOutput
 
 from qobuz_dl import library_cmd as lc
 from qobuz_dl import library_scan as ls
@@ -134,6 +136,7 @@ def test_library_unmark_e_reconcile(tmp_path, lib):
 
 class FakeQobuz:
     def __init__(self, items, ok=True):
+        """Build a Qobuz facade backed by deterministic favorite items."""
         self.downloads_db = None
         self.settings = SimpleNamespace(write_sentinel=True)
         self.baixados = []
@@ -141,13 +144,10 @@ class FakeQobuz:
         outer = self
 
         class C:
-            async def api_call(self, endpoint, **kw):
-                return {
-                    "albums": {
-                        "items": items[kw["offset"] : kw["offset"] + kw["limit"]],
-                        "total": len(items),
-                    }
-                }
+            async def get_all_favorites(self, fav_type, *, page_size, max_pages):
+                """Return all fixture favorites through the shared gateway API."""
+                assert fav_type == "albums"
+                return items, len(items)
 
         self.client = C()
 
@@ -167,6 +167,25 @@ def _sf(**kw):
     )
     base.update(kw)
     return SimpleNamespace(**base)
+
+
+def test_ask_accepts_async_input_and_handles_ctrl_c(monkeypatch):
+    """The terminal prompt accepts typed input and treats Ctrl+C as quit."""
+
+    async def exercise_prompt():
+        """Exercise prompt_toolkit with terminal input bytes and Ctrl+C."""
+
+        with create_pipe_input() as pipe_input:
+            session = lc.PromptSession(input=pipe_input, output=DummyOutput())
+            monkeypatch.setattr(lc, "PromptSession", lambda: session)
+
+            pipe_input.send_text(" 2 \n")
+            assert await lc._ask("Escolha: ") == "2"
+
+            pipe_input.send_bytes(b"\x03")
+            assert await lc._ask("Escolha: ") == "q"
+
+    asyncio.run(exercise_prompt())
 
 
 def test_sync_favorites_diff_e_download(lib):

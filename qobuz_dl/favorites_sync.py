@@ -11,11 +11,10 @@ loop num NAS/servidor.
 
 PONTO DE SEGURANÇA (aprendido do libsync)
 -----------------------------------------
-``qopy.Client.get_favorites`` engole exceções e devolve ``{}``. Se o diff
-usasse isso, uma queda de rede viraria "você removeu todos os favoritos" e o
-catálogo marcaria tudo como removido. Por isso este módulo chama
-``api_call`` diretamente (exceção PROPAGA) e só marca remoções quando a
-paginação foi *comprovadamente completa* (itens coletados == ``total`` da API).
+A leitura paginada e estrita vive em ``qopy.Client.get_all_favorites``. Uma
+queda de rede nunca pode virar "você removeu todos os favoritos": este módulo
+só marca remoções quando a paginação foi *comprovadamente completa* (itens
+coletados == ``total`` da API).
 
 Este módulo não imprime nada: devolve dicts. A camada de terminal é
 ``qobuz_dl.library_cmd``.
@@ -38,7 +37,6 @@ from qobuz_dl.library_db import (
     LibraryDB,
 )
 from qobuz_dl.library_scan import mark_album_downloaded
-from qobuz_dl.sentinel import has_sentinel
 
 logger = logging.getLogger(__name__)
 
@@ -64,35 +62,12 @@ async def fetch_all_favorite_albums(
     Levanta ``FavoritesFetchError`` em qualquer falha -- NUNCA devolve lista
     parcial disfarçada de completa.
     """
-    items: list[dict] = []
-    total: Optional[int] = None
-    offset = 0
-    for _ in range(MAX_PAGES):
-        try:
-            resp = await client.api_call(
-                "favorite/getUserFavorites",
-                fav_type="albums",
-                limit=page_size,
-                offset=offset,
-            )
-        except Exception as exc:
-            raise FavoritesFetchError(f"falha ao listar favoritos: {exc}") from exc
-        block = (resp or {}).get("albums") if isinstance(resp, dict) else None
-        if not isinstance(block, dict):
-            raise FavoritesFetchError("resposta sem o bloco 'albums'")
-        page = block.get("items") or []
-        if total is None and block.get("total") is not None:
-            try:
-                total = int(block["total"])
-            except (TypeError, ValueError):
-                total = None
-        items.extend(page)
-        if not page:
-            break
-        if total is not None and len(items) >= total:
-            break
-        offset += len(page)
-    return items, total
+    try:
+        return await client.get_all_favorites(
+            "albums", page_size=page_size, max_pages=MAX_PAGES
+        )
+    except Exception as exc:
+        raise FavoritesFetchError(f"falha ao listar favoritos: {exc}") from exc
 
 
 def _name(value: Any) -> str:
@@ -297,17 +272,20 @@ async def download_albums(
                 {"album_id": a["id"], "title": a["title"], "error": str(exc)}
             )
         if ok:
+            current = await asyncio.to_thread(lib.get_album, a["id"])
+            if current and current["download_status"] == STATUS_COMPLETE:
+                # O downloader normal já finalizou o mesmo library.db.
+                # Não repita escrita de estado/sentinela aqui.
+                done += 1
+                continue
             folder = lookup_saved_path(downloads_db, a["source_album_id"])
             if folder and os.path.isdir(folder):
-                write_it = sentinel_enabled and not await asyncio.to_thread(
-                    has_sentinel, folder
-                )
                 await asyncio.to_thread(
                     mark_album_downloaded,
                     lib,
                     a["id"],
                     folder=folder,
-                    sentinel_enabled=write_it,
+                    sentinel_enabled=sentinel_enabled,
                 )
             else:
                 await asyncio.to_thread(

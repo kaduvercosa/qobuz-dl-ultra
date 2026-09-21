@@ -13,13 +13,22 @@ class FakeClient:
         self.albums, self.total, self.fail_on_page = albums, total, fail_on_page
         self.calls = 0
 
-    async def api_call(self, endpoint, **kw):
-        self.calls += 1
-        if self.fail_on_page == self.calls:
-            raise RuntimeError("rede caiu")
-        off, lim = kw["offset"], kw["limit"]
+    async def get_all_favorites(self, fav_type, *, page_size, max_pages):
+        """Emulate the strict client paginator used by favorites sync."""
+        assert fav_type == "albums"
+        items = []
         total = len(self.albums) if self.total is None else self.total
-        return {"albums": {"items": self.albums[off : off + lim], "total": total}}
+        for offset in range(0, len(self.albums) or 1, page_size):
+            self.calls += 1
+            if self.fail_on_page == self.calls:
+                raise RuntimeError("rede caiu")
+            page = self.albums[offset : offset + page_size]
+            items.extend(page)
+            if not page or len(items) >= total:
+                break
+            if self.calls >= max_pages:
+                raise RuntimeError("paginação excedida")
+        return items, total
 
 
 def _item(i, **kw):
@@ -69,9 +78,12 @@ def test_erro_de_rede_propaga():
 
 
 def test_resposta_sem_bloco_albums_e_erro():
+    """Translate malformed provider data into a synchronization error."""
+
     class Vazio:
-        async def api_call(self, *a, **k):
-            return {}
+        async def get_all_favorites(self, *a, **k):
+            """Simulate a malformed response detected by the client gateway."""
+            raise ValueError("resposta sem o bloco 'albums'")
 
     with pytest.raises(fs.FavoritesFetchError):
         asyncio.run(fs.fetch_all_favorite_albums(Vazio()))
@@ -125,6 +137,25 @@ def test_run_sync_baixa_novos_e_registra_historico(tmp_path, lib):
     assert lib.get_album_by_source_id("qobuz", "2")["download_status"] == "failed"
     h = lib.get_sync_history("qobuz")
     assert h[0]["status"] == "complete" and h[0]["albums_new"] == 2
+
+
+def test_download_nao_refinaliza_album_ja_concluido(monkeypatch, lib):
+    """Do not duplicate catalog or sentinel writes done by the downloader."""
+    album_id = lib.upsert_album("qobuz", "1", "T1", "A")
+
+    async def dl(_):
+        """Simulate the normal downloader finalizing the shared catalog."""
+        lib.set_download_state(album_id, downloaded=True)
+        return True
+
+    def repeated_finalize(*args, **kwargs):
+        """Fail if the synchronization layer attempts a second finalization."""
+        raise AssertionError("finalização repetida")
+
+    monkeypatch.setattr(fs, "mark_album_downloaded", repeated_finalize)
+    result = asyncio.run(fs.download_albums(lib, [lib.get_album(album_id)], dl))
+
+    assert result == {"downloaded": 1, "failed": 0, "failures": []}
 
 
 def test_run_sync_falha_de_rede_marca_run_failed(lib):

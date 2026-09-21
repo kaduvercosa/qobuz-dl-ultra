@@ -206,6 +206,19 @@ async def test_playlist_get_inclui_extra_tracks():
     assert params["extra"] == "tracks"
 
 
+async def test_get_user_playlists_monta_assinatura_no_cliente():
+    """Signed playlist transport belongs to qopy rather than core.py."""
+    self, captured = _client()
+
+    await qopy.Client.api_call(self, "playlist/getUserPlaylists", limit=25)
+
+    params = captured["kwargs"]["params"]
+    assert params["limit"] == 25
+    assert params["user_id"] == "u1"
+    assert params["request_sig"] == "assinatura-fake"
+    assert "request_ts" in params
+
+
 async def test_playlist_create_usa_uat_e_campos_de_criacao():
     self, captured = _client()
 

@@ -7,6 +7,51 @@ from qobuz_dl.qopy import Client
 
 
 @pytest.mark.asyncio
+async def test_get_all_favorites_pagina_em_modo_estrito(monkeypatch):
+    """The shared gateway returns every page and never swallows failures."""
+    client = Client()
+    calls = []
+
+    async def get_favorites(fav_type, limit, offset, *, strict):
+        """Return deterministic pages while recording strict-mode usage."""
+        calls.append((fav_type, limit, offset, strict))
+        albums = [{"id": str(i)} for i in range(5)]
+        return {"albums": {"items": albums[offset : offset + limit], "total": 5}}
+
+    monkeypatch.setattr(client, "get_favorites", get_favorites)
+
+    items, total = await client.get_all_favorites("albums", page_size=2)
+
+    assert [item["id"] for item in items] == ["0", "1", "2", "3", "4"]
+    assert total == 5
+    assert calls == [
+        ("albums", 2, 0, True),
+        ("albums", 2, 2, True),
+        ("albums", 2, 4, True),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_get_user_playlists_fallback_busca_ids_individuais(monkeypatch):
+    """Use the ID fallback without exposing HTTP internals to callers."""
+    client = Client()
+
+    async def api_call(endpoint, **kwargs):
+        """Simulate the two provider playlist discovery endpoints."""
+        if endpoint == "playlist/getUserPlaylists":
+            return {}
+        if endpoint == "playlist/getUserPlaylistIds":
+            return {"playlist_ids": ["7", "8"]}
+        return {"id": kwargs["id"], "name": f"P{kwargs['id']}"}
+
+    monkeypatch.setattr(client, "api_call", api_call)
+
+    result = await client.get_user_playlists(limit=10)
+
+    assert [item["id"] for item in result["playlists"]["items"]] == ["7", "8"]
+
+
+@pytest.mark.asyncio
 async def test_qopy_get_track_url_retries_and_parses():
     client = Client()
     client.id = "user123"

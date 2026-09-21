@@ -14,12 +14,14 @@ async def _placeholder(*args, **kwargs):
 
 
 def _client(**overrides):
+    """Build the minimal public client contract required by search tests."""
     methods = {
         "search_albums": _placeholder,
         "search_artists": _placeholder,
         "search_tracks": _placeholder,
         "search_playlists": _placeholder,
         "get_favorites": _placeholder,
+        "get_user_playlists": _placeholder,
     }
     methods.update(overrides)
     return SimpleNamespace(**methods)
@@ -196,32 +198,21 @@ async def test_favoritos_com_subtype_generico_usa_get_favorites():
     assert result[0]["url"] == "https://play.qobuz.com/artist/1"
 
 
-async def test_favoritos_playlists_usa_endpoint_interno_getuserplaylists():
-    class FakeResp:
-        def __init__(self, data):
-            self._data = data
+async def test_favoritos_playlists_usa_api_publica_do_cliente():
+    """Keep transport and signature details out of the interactive controller."""
 
-        def json(self):
-            return self._data
+    async def get_user_playlists(limit):
+        """Return the public client response expected by the controller."""
+        assert limit == 10
+        return {
+            "playlists": {
+                "items": [
+                    {"id": "77", "name": "P", "owner": {}},
+                ],
+            }
+        }
 
-    async def request(method, url, params):
-        return FakeResp(
-            {
-                "playlists": {
-                    "items": [
-                        {"id": "77", "name": "P", "owner": {}},
-                    ],
-                },
-            },
-        )
-
-    client = _client()
-    client.session = SimpleNamespace(request=request)
-    client.base = "https://www.qobuz.com/api.json/0.2/"
-    client.sec = "segredo"
-    client._modern_sig = lambda endpoint, params, sec: "assinatura-fake"
-    client.user_id = "u1"
-    app = _build_app(client)
+    app = _build_app(_client(get_user_playlists=get_user_playlists))
 
     result = await core.QobuzDL.search_by_type(
         app,

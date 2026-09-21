@@ -61,6 +61,13 @@ from tenacity import (
 FALLBACK_TIERS = [27, 7, 6, 5]
 
 
+def _flatten_artists(artist_data):
+    """Flatten an artist value to the string used by download metadata."""
+    if isinstance(artist_data, list) and artist_data:
+        return str(artist_data[0])
+    return str(artist_data) if artist_data else ""
+
+
 from qobuz_dl.download_utils import (
     is_track_streamable,
     create_missing_placeholder,
@@ -847,7 +854,8 @@ class Download:
                         lib_db,
                         lib_id,
                         folder=final_dirn,
-                        sentinel_enabled=getattr(self.settings, "write_sentinel", True),
+                        # A sentinela rica é gravada uma única vez abaixo.
+                        sentinel_enabled=False,
                     )
                 except Exception as _lib_exc:
                     logger.debug(f"Falha ao registrar no library.db: {_lib_exc}")
@@ -1676,12 +1684,6 @@ class Download:
     def _get_filename_attr(track_artist, track_metadata: dict, album_metadata: dict):
         """Get a filename attribute with fallback chain."""
 
-        def _flatten_artists(artist_data):
-            """Flatten artist list to a single string."""
-            if isinstance(artist_data, list) and artist_data:
-                return str(artist_data[0])
-            return str(artist_data) if artist_data else ""
-
         album_artist_raw = get_album_artist(album_metadata)
         album_artist_str = (
             _flatten_artists(album_artist_raw) if album_artist_raw else track_artist
@@ -1715,12 +1717,6 @@ class Download:
     def _get_track_attr(meta, track_title, bit_depth, sampling_rate, file_format):
         """Get a track attribute with fallback chain."""
         album_meta = meta.get("album", {})
-
-        def _flatten_artists(artist_data):
-            """Flatten artist list to a single string."""
-            if isinstance(artist_data, list) and artist_data:
-                return str(artist_data[0])
-            return str(artist_data) if artist_data else ""
 
         album_artist_raw = get_album_artist(album_meta)
         album_artist_str = (
@@ -1792,12 +1788,6 @@ class Download:
     @staticmethod
     def _get_album_attr(meta, album_title, file_format, bit_depth, sampling_rate):
         """Get an album attribute with fallback chain."""
-
-        def _flatten_artists(artist_data):
-            """Flatten artist list to a single string."""
-            if isinstance(artist_data, list) and artist_data:
-                return str(artist_data[0])
-            return str(artist_data) if artist_data else ""
 
         album_artist_raw = get_album_artist(meta)
         album_artist_str = _flatten_artists(album_artist_raw)

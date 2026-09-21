@@ -3,6 +3,13 @@ from types import SimpleNamespace
 from qobuz_dl import downloader
 
 
+def test_flatten_artists_is_shared_by_metadata_builders():
+    """A single helper handles list, scalar, and empty artist values."""
+    assert downloader._flatten_artists(["Artist", "Guest"]) == "Artist"
+    assert downloader._flatten_artists("Artist") == "Artist"
+    assert downloader._flatten_artists(None) == ""
+
+
 def test_get_filename_attr_formats_numbers_and_fallbacks():
     track = {
         "id": "t1",
