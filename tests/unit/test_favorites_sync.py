@@ -152,4 +152,5 @@ def test_limit_e_missing(lib):
     for i in range(3):
         lib.upsert_album("qobuz", str(i), f"T{i}", "A")
     assert len(fs.pick_download_targets(lib, missing=True, limit=2)) == 2
+    assert len(fs.pick_download_targets(lib, missing=True, limit="-1")) == 3
     assert fs.pick_download_targets(lib) == []

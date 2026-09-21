@@ -236,6 +236,8 @@ def pick_download_targets(
     if limit is not None:
         try:
             limit_int = int(limit)
+            if limit_int < 0:
+                limit_int = None
         except (ValueError, TypeError):
             limit_int = None
 
