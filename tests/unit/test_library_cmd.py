@@ -217,6 +217,7 @@ def test_sync_favorites_interactive_prompt_opcao_1(lib, monkeypatch):
     monkeypatch.setattr(lc, "_ask", fake_ask)
     assert asyncio.run(lc.cmd_sync_favorites(_sf(), q, lib=lib)) == 0
     assert q.baixados == ["1"]
+    assert lib.get_sync_history("qobuz")[0]["albums_downloaded"] == 1
 
 
 def test_sync_favorites_interactive_prompt_opcao_2(lib, monkeypatch):

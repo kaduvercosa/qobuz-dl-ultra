@@ -452,6 +452,12 @@ async def cmd_sync_favorites(
                             sentinel_enabled=sentinel_enabled,
                             progress=progress,
                         )
+                        if res["run_id"] is not None:
+                            await asyncio.to_thread(
+                                lib.update_sync_run_downloaded,
+                                res["run_id"],
+                                dl_res["downloaded"],
+                            )
                         ui.blank()
                         ui.section("RESUMO DO DOWNLOAD")
                         ui.kv("Baixados com sucesso", dl_res["downloaded"])
