@@ -1992,6 +1992,7 @@ class QobuzDL:
                 "🎤 Artists",
                 "📋 Playlists",
                 "⭐ Favorites",
+                "🔄 Sync Favorites (Catálogo Local)",
             ]
 
             scelta_res = await _tui_select(
@@ -2005,6 +2006,18 @@ class QobuzDL:
 
             scelta_raw_visual, _ = scelta_res
             scelta_raw = scelta_raw_visual.split(" ", 1)[1]
+
+            if "Sync Favorites" in scelta_raw_visual:
+                from qobuz_dl.library_cmd import cmd_sync_favorites
+                class _Args:
+                    download_new = False
+                    download_missing = False
+                    dry_run = False
+                    yes = False
+                    every = None
+                    limit = getattr(self, "interactive_limit", 50)
+                await cmd_sync_favorites(_Args(), self)
+                return
 
             sub_filter = None
             if scelta_raw == "Favorites":
