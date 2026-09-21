@@ -69,7 +69,7 @@ jobs:
       #    na camada 1, pode simplesmente apagar este passo.
       - name: Envia e-mail de alerta (só se algum canário falhou)
         if: failure()
-        uses: dawidd6/action-send-mail@v21
+        uses: dawidd6/action-send-mail@v22
         with:
           server_address: smtp.gmail.com
           server_port: 465

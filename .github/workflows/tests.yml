@@ -112,7 +112,7 @@ jobs:
 
       - name: Envia e-mail com o erro exato
         if: steps.resumo.outcome == 'success'
-        uses: dawidd6/action-send-mail@v21
+        uses: dawidd6/action-send-mail@v22
         with:
           server_address: smtp.gmail.com
           server_port: 465
@@ -197,7 +197,7 @@ jobs:
 
       - name: Envia e-mail com a vulnerabilidade exata
         if: steps.resumo.outcome == 'success'
-        uses: dawidd6/action-send-mail@v21
+        uses: dawidd6/action-send-mail@v22
         with:
           server_address: smtp.gmail.com
           server_port: 465
