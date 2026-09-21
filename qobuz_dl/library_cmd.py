@@ -325,6 +325,7 @@ async def cmd_sync_favorites(
     lib: Optional[LibraryDB] = None,
     sleep=asyncio.sleep,
 ) -> int:
+    """Synchronize Qobuz favorites and optionally download pending albums."""
     lib = lib or LibraryDB(library_db_path())
     download_new = bool(getattr(args, "download_new", False))
     download_missing = bool(getattr(args, "download_missing", False))
@@ -333,21 +334,25 @@ async def cmd_sync_favorites(
     watch = getattr(args, "every", None)
 
     async def download_fn(album_id: str) -> bool:
+        """Download one favorite album through the active Qobuz client."""
         return bool(await qobuz.download_from_id(album_id, album=True))
 
     async def confirm(targets: list[dict]) -> bool:
+        """Confirm an album batch unless the current mode permits it automatically."""
         ui.warn(f"{len(targets)} álbum(ns) serão baixados.")
         if auto_yes or watch or not _interactive():
             return True
         return (await _ask("  Continuar? [s/N] ")) in ("s", "sim", "y", "yes")
 
     def progress(i, total, album):
+        """Display progress for the current favorite-album download."""
         ui.step(f"[{i}/{total}] {_label(album)}")
 
     downloads_db = getattr(qobuz, "downloads_db", None)
     sentinel_enabled = getattr(getattr(qobuz, "settings", None), "write_sentinel", True)
 
     async def once() -> int:
+        """Run and report one favorites synchronization cycle."""
         try:
             res = await run_sync(
                 lib,
@@ -365,23 +370,105 @@ async def cmd_sync_favorites(
         except FavoritesFetchError as exc:
             ui.error(str(exc))
             return 1
+
         r = res["refresh"]
-        ui.banner("QOBUZ-DL-ULTRA  ·  SYNC DE FAVORITOS")
-        ui.kv("Favoritos na conta", r["total"])
-        ui.kv("Novos", r["new"])
+        ui.banner("QOBUZ-DL-ULTRA  ·  SINCRONIZAÇÃO DE FAVORITOS")
+        ui.kv("Total de favoritos na conta", r["total"])
+        ui.kv("Novos adicionados nesta sync", r["new"])
         ui.kv(
-            "Removidos da conta",
+            "Removidos da conta Qobuz",
             r["removed"] if r["complete"] else "n/d (paginação incompleta)",
         )
+
+        if r["new_albums"]:
+            ui.blank()
+            ui.section(f"✨ ÁLBUNS NOVOS ADICIONADOS ({len(r['new_albums'])})")
+            for a in r["new_albums"][:20]:
+                ui.ok(f"  + {_label(a)}")
+            if len(r["new_albums"]) > 20:
+                ui.detail(f"  ... e mais {len(r['new_albums']) - 20} álbuns.")
+
+        if r["removed_albums"]:
+            ui.blank()
+            ui.section(f"🗑️  ÁLBUNS REMOVIDOS DA CONTA ({len(r['removed_albums'])})")
+            for a in r["removed_albums"][:20]:
+                ui.warn(f"  - {_label(a)}")
+            if len(r["removed_albums"]) > 20:
+                ui.detail(f"  ... e mais {len(r['removed_albums']) - 20} álbuns.")
+
         if res["targets"]:
-            ui.kv("Baixados", res["download"]["downloaded"])
+            ui.blank()
+            ui.section("RESUMO DO DOWNLOAD")
+            ui.kv("Baixados com sucesso", res["download"]["downloaded"])
             ui.kv("Falhas", res["download"]["failed"])
-        for a in r["new_albums"][:20]:
-            ui.detail(f"+ {_label(a)}")
-        for a in r["removed_albums"][:20]:
-            ui.detail(f"- {_label(a)}")
+
         if dry:
-            ui.info("Simulação: nada foi gravado.")
+            ui.blank()
+            ui.info("Modo simulação: nenhuma alteração foi gravada.")
+            return 0
+
+        # Se o usuário NÃO especificou nenhuma flag de download (--download-new / --download-missing)
+        # e estamos em um terminal interativo, perguntar o que fazer.
+        if not download_new and not download_missing and _interactive() and not watch:
+            from qobuz_dl.favorites_sync import pick_download_targets, download_albums
+
+            missing_targets = pick_download_targets(
+                lib, source=SOURCE, missing=True, limit=getattr(args, "limit", None)
+            )
+            new_targets = pick_download_targets(
+                lib,
+                source=SOURCE,
+                only_ids=r["new_ids"],
+                limit=getattr(args, "limit", None),
+            )
+
+            if missing_targets or new_targets:
+                ui.blank()
+                ui.section("OPÇÕES DE DOWNLOAD DOS FAVORITOS")
+                ui.emit("  Deseja realizar o download agora?")
+                if new_targets:
+                    ui.emit(f"   [1] Baixar apenas os {len(new_targets)} álbuns NOVOS")
+                else:
+                    ui.emit("   [1] (Nenhum álbum novo para baixar)")
+
+                if missing_targets:
+                    ui.emit(
+                        f"   [2] Baixar TODOS os {len(missing_targets)} álbuns FALTANTES no disco"
+                    )
+                else:
+                    ui.emit("   [2] (Todos os favoritos já estão completos no disco)")
+
+                ui.emit("   [3] Apenas sincronizar o catálogo e sair [Padrão]")
+
+                ans = await _ask("  Escolha uma opção (1-3): ")
+                chosen_targets = []
+                if ans == "1" and new_targets:
+                    chosen_targets = new_targets
+                elif ans == "2" and missing_targets:
+                    chosen_targets = missing_targets
+
+                if chosen_targets:
+                    if await confirm(chosen_targets):
+                        dl_res = await download_albums(
+                            lib,
+                            chosen_targets,
+                            download_fn,
+                            downloads_db=downloads_db,
+                            sentinel_enabled=sentinel_enabled,
+                            progress=progress,
+                        )
+                        if res["run_id"] is not None:
+                            await asyncio.to_thread(
+                                lib.update_sync_run_downloaded,
+                                res["run_id"],
+                                dl_res["downloaded"],
+                            )
+                        ui.blank()
+                        ui.section("RESUMO DO DOWNLOAD")
+                        ui.kv("Baixados com sucesso", dl_res["downloaded"])
+                        ui.kv("Falhas", dl_res["failed"])
+                        return 1 if dl_res["failed"] else 0
+
         return 1 if res["download"]["failed"] else 0
 
     if not watch:

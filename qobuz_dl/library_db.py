@@ -398,6 +398,14 @@ class LibraryDB:
                 ),
             )
 
+    def update_sync_run_downloaded(self, run_id: int, albums_downloaded: int) -> None:
+        """Update the downloaded-album count for a synchronization run."""
+        with self._conn() as c:
+            c.execute(
+                "UPDATE sync_runs SET albums_downloaded=? WHERE id=?",
+                (albums_downloaded, run_id),
+            )
+
     def _finish_run(self, run_id: int, status: str) -> None:
         with self._conn() as c:
             c.execute(

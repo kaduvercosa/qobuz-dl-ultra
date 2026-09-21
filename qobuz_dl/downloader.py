@@ -824,6 +824,34 @@ class Download:
                     album=db_album,
                 )
 
+                # Registrar/Atualizar também no library.db para que qualquer download seja mantido no catálogo local
+                try:
+                    from qobuz_dl.library_cmd import library_db_path
+                    from qobuz_dl.library_db import LibraryDB
+                    from qobuz_dl.library_scan import mark_album_downloaded
+
+                    lib_db = LibraryDB(library_db_path())
+                    lib_id = await asyncio.to_thread(
+                        lib_db.upsert_album,
+                        "qobuz",
+                        self.item_id,
+                        db_album,
+                        db_artist,
+                        track_count=track_count,
+                        bit_depth=bit_depth,
+                        sample_rate=sampling_rate,
+                        release_date=release_date,
+                    )
+                    await asyncio.to_thread(
+                        mark_album_downloaded,
+                        lib_db,
+                        lib_id,
+                        folder=final_dirn,
+                        sentinel_enabled=getattr(self.settings, "write_sentinel", True),
+                    )
+                except Exception as _lib_exc:
+                    logger.debug(f"Falha ao registrar no library.db: {_lib_exc}")
+
                 # # Sentinela .streamrip.json (dedup pelo disco). Best-effort: nunca derruba o download.
                 if getattr(self.settings, "write_sentinel", True):
                     try:
