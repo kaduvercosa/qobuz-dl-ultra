@@ -444,3 +444,35 @@ python check_audio.py
 ## ⚠️ Isenção de Responsabilidade (Aviso Legal)
 * Esta ferramenta foi desenvolvida para fins educacionais.
 * O `qobuz-dl` não é afiliado ao Qobuz.
+
+
+## 🖥️ Qobuz-DL Studio — interface web local
+
+O Qobuz-DL Ultra inclui uma interface visual local inspirada em interfaces de áudio industrial monocromáticas: matriz de glifos, alto contraste e vermelho pontual. Ela cobre navegação e busca, reprodução direta compatível, downloads, favoritos, biblioteca, e também sincronização, scan, diagnóstico, estatísticas, playlists, letras, inspeção e manutenção do catálogo pela seção **Ferramentas**. A configuração de conta pode ser feita em **Preferências**; e-mail/token são validados antes de serem salvos localmente e não são enviados a nenhum serviço intermediário.
+
+### Instalação e inicialização
+
+Instale o extra da interface e inicie o servidor local:
+
+```bash
+python -m pip install -e '.[gui]'
+qobuz-dl-studio
+```
+
+O navegador abre em `http://127.0.0.1:8787`. Por padrão, o servidor escuta **somente no loopback**, não na rede local. Na primeira utilização, abra **Preferências → Conectar ou configurar conta** e informe e-mail e token Qobuz. O token é validado antes de ser armazenado no cofre do sistema (recomendado) ou, por escolha explícita, no `config.ini` com permissões restritas. Pasta, qualidade, letras, capas, tags, paralelismo, padrões de nomes e outras opções ficam em `gui.json`, sem sobrescrever o restante do `config.ini`.
+
+Operações em **Ferramentas** usam a mesma CLI interna com argumentos validados, sem shell arbitrário; saídas e processos ficam na página e tarefas longas (como monitoramento) podem ser paradas pelo próprio painel. Downloads e alterações de arquivos começam bloqueados até a confirmação explícita no controle correspondente. A simulação vem ligada onde o comando a suporta.
+
+Para explorar a aparência sem conectar uma conta (busca demonstrativa; não toca nem baixa conteúdo):
+
+```bash
+qobuz-dl-studio --demo
+```
+
+### Notas
+
+- Downloads passam pelo `QobuzDL.download_from_id` existente e são bloqueados até conectar a conta local.
+- O player do navegador solicita URLs de reprodução somente ao cliente Qobuz existente, que valida a disponibilidade/assinatura. Ele tenta reproduzir formatos diretos MP3/FLAC; áudio Hi-Res segmentado que exija decodificação proprietária não é reproduzido pela GUI. Nesse caso, use a fila de download no formato escolhido.
+- As preferências escolhidas na GUI são salvas em `gui.json` no diretório de configuração do aplicativo, com permissões restritas quando suportadas pelo sistema.
+- A interface lê até 500 arquivos locais compatíveis com Mutagen. Escolher uma pasta pelo navegador do sistema não é possível por uma limitação de segurança do browser; informe o caminho local em Preferências.
+- Não exponha a porta para a internet nem execute a interface em computador compartilhado. Os downloads seguem os termos da conta/serviço Qobuz.

@@ -74,8 +74,12 @@ genius = [
 analyze = [
     "numpy",
 ]
+gui = [
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+]
 all = [
-    "qobuz-dl-ultra[speed,covers,watch,duplicates,genius,analyze]",
+    "qobuz-dl-ultra[speed,covers,watch,duplicates,genius,analyze,gui]",
 ]
 dev = [
     "pytest>=8",
@@ -95,12 +99,16 @@ Issues = "https://github.com/kaduvercosa/qobuz-dl-ultra/issues"
 [project.scripts]
 qobuz-dl = "qobuz_dl:main"
 qdl = "qobuz_dl:main"
+qobuz-dl-studio = "qobuz_dl.webapp:main"
 
 [tool.setuptools.dynamic]
 version = { attr = "qobuz_dl.__version__" }
 
 [tool.setuptools.packages.find]
 include = ["qobuz_dl*"]
+
+[tool.setuptools.package-data]
+qobuz_dl = ["web_ui/*.html", "web_ui/*.css", "web_ui/*.js", "gui_assets/*.jpg"]
 
 [tool.pytest.ini_options]
 minversion = "8.0"

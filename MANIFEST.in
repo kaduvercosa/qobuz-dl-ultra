@@ -1,3 +1,5 @@
 include README.md
 include LICENSE
 include requirements.txt
+recursive-include qobuz_dl/web_ui *.html *.css *.js
+recursive-include qobuz_dl/gui_assets *.jpg

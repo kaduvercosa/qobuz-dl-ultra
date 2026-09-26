@@ -1308,7 +1308,8 @@ async def async_main():
             os.remove(QOBUZ_DB)
         except FileNotFoundError:
             pass
-        sys.exit(f"{GREEN}O banco de dados foi deletado com sucesso.{OFF}")
+        ui.ok("O banco de dados foi deletado com sucesso.")
+        sys.exit(0)
 
     if arguments.command in (
         "auth",
