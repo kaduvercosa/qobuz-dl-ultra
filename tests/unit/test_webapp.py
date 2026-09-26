@@ -9,7 +9,12 @@ def test_demo_home_and_assets_are_served():
     assert "Qobuz Studio" in client.get("/", headers={"host": "localhost"}).text
     assert client.get("/app.css", headers={"host": "localhost"}).status_code == 200
     assert client.get("/app.js", headers={"host": "localhost"}).status_code == 200
-    assert client.get("/assets/cover-nebula.jpg", headers={"host": "localhost"}).status_code == 200
+    assert (
+        client.get(
+            "/assets/cover-nebula.jpg", headers={"host": "localhost"}
+        ).status_code
+        == 200
+    )
 
 
 def test_demo_catalog_and_album_are_searchable():
@@ -35,8 +40,18 @@ def test_demo_blocks_actions_that_would_access_account_or_download():
     headers = {"host": "localhost"}
     assert client.post("/api/connect", json={}, headers=headers).json()["demo"] is True
     assert client.get("/api/stream/demo-track-1", headers=headers).status_code == 409
-    assert client.post("/api/download", json={"id": "123", "kind": "track"}, headers=headers).status_code == 409
-    assert client.post("/api/favorites", json={"id": "123", "kind": "track"}, headers=headers).status_code == 409
+    assert (
+        client.post(
+            "/api/download", json={"id": "123", "kind": "track"}, headers=headers
+        ).status_code
+        == 409
+    )
+    assert (
+        client.post(
+            "/api/favorites", json={"id": "123", "kind": "track"}, headers=headers
+        ).status_code
+        == 409
+    )
 
 
 def test_normal_app_is_loopback_only_and_rejects_cross_site_posts():
@@ -45,7 +60,11 @@ def test_normal_app_is_loopback_only_and_rejects_cross_site_posts():
     blocked = client.post(
         "/api/connect",
         json={},
-        headers={"host": "localhost", "origin": "https://example.com", "sec-fetch-site": "cross-site"},
+        headers={
+            "host": "localhost",
+            "origin": "https://example.com",
+            "sec-fetch-site": "cross-site",
+        },
     )
     assert blocked.status_code == 403
     assert client.get("/api/status", headers={"host": "localhost"}).status_code == 200
@@ -69,9 +88,7 @@ def test_gui_settings_returns_defaults_and_demo_disables_tool_runner():
     assert settings.json()["max_workers"] == 1
     assert settings.json()["fetch_lyrics"] is True
     assert client.get("/api/tools", headers=headers).status_code == 200
-    response = client.post(
-        "/api/tools/run", json={"action": "doctor"}, headers=headers
-    )
+    response = client.post("/api/tools/run", json={"action": "doctor"}, headers=headers)
     assert response.status_code == 409
     account = client.post(
         "/api/account/configure",
@@ -89,7 +106,9 @@ def test_tool_argv_uses_allowlisted_arguments_without_shell_expansion():
         "segment_workers": 4,
         "playlist_as_albums": False,
     }
-    payload = ToolRequest(action="dl", target="https://qobuz.com/album/a; touch /tmp/bad", dry_run=True)
+    payload = ToolRequest(
+        action="dl", target="https://qobuz.com/album/a; touch /tmp/bad", dry_run=True
+    )
     argv = build_tool_argv(payload, settings)
     assert "--dry-run" in argv
     assert argv[-1] == "https://qobuz.com/album/a; touch /tmp/bad"
@@ -198,8 +217,14 @@ def test_status_detects_keyring_account_without_exposing_the_token(monkeypatch):
             "default_quality": "6",
         },
     )
-    monkeypatch.setattr(webapp, "get_config_paths", lambda: {"config_path": "/tmp/qobuz", "config_file": "/tmp/qobuz/config.ini"})
-    monkeypatch.setitem(sys.modules, "keyring", SimpleNamespace(get_password=lambda *_: "secret-token"))
+    monkeypatch.setattr(
+        webapp,
+        "get_config_paths",
+        lambda: {"config_path": "/tmp/qobuz", "config_file": "/tmp/qobuz/config.ini"},
+    )
+    monkeypatch.setitem(
+        sys.modules, "keyring", SimpleNamespace(get_password=lambda *_: "secret-token")
+    )
 
     status = service.config_status()
 

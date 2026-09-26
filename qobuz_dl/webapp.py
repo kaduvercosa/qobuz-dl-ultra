@@ -3,6 +3,7 @@
 By default, the server binds only to loopback. Existing credentials are read
 from the user's local config/keyring and are never returned to the browser.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -35,7 +36,12 @@ PACKAGE_DIR = Path(__file__).resolve().parent
 ASSET_DIR = PACKAGE_DIR / "gui_assets"
 WEB_DIR = PACKAGE_DIR / "web_ui"
 AUDIO_SUFFIXES = {".flac", ".mp3", ".m4a", ".aac", ".wav", ".ogg", ".opus", ".aiff"}
-QUALITY_LABELS = {5: "MP3", 6: "FLAC · CD", 7: "Hi-Res · até 96 kHz", 27: "Hi-Res · acima de 96 kHz"}
+QUALITY_LABELS = {
+    5: "MP3",
+    6: "FLAC · CD",
+    7: "Hi-Res · até 96 kHz",
+    27: "Hi-Res · acima de 96 kHz",
+}
 
 
 class DownloadRequest(BaseModel):
@@ -61,7 +67,9 @@ class SettingsRequest(BaseModel):
     multi_value_tags: bool = False
     max_workers: int = Field(default=1, ge=1, le=16)
     segment_workers: int = Field(default=4, ge=2, le=16)
-    embedded_art_size: str = Field(default="org", pattern="^(50|100|150|300|600|max|org)$")
+    embedded_art_size: str = Field(
+        default="org", pattern="^(50|100|150|300|600|max|org)$"
+    )
     saved_art_size: str = Field(default="org", pattern="^(50|100|150|300|600|max|org)$")
     folder_format: str = Field(default=DEFAULT_FOLDER, max_length=500)
     track_format: str = Field(default=DEFAULT_TRACK, max_length=500)
@@ -92,14 +100,22 @@ class AccountSetupRequest(BaseModel):
 
 
 TOOL_LABELS = {
-    "doctor": "Diagnóstico do sistema", "stats": "Estatísticas da biblioteca",
-    "library": "Catálogo local", "scan": "Examinar pasta de música",
-    "sync-favorites": "Sincronizar favoritos", "sync-db": "Reconstruir banco de downloads",
-    "find-duplicates": "Encontrar faixas duplicadas", "lyrics": "Preencher letras nos arquivos",
-    "inspect": "Inspecionar áudio e tags", "import-playlist": "Importar playlist externa",
-    "sync-playlist": "Sincronizar pasta com playlist", "dl": "Baixar por URL do Qobuz",
-    "lucky": "Buscar e baixar automaticamente", "user": "Perfil e assinatura",
-    "show-config": "Ver configuração", "purge": "Apagar banco de downloads",
+    "doctor": "Diagnóstico do sistema",
+    "stats": "Estatísticas da biblioteca",
+    "library": "Catálogo local",
+    "scan": "Examinar pasta de música",
+    "sync-favorites": "Sincronizar favoritos",
+    "sync-db": "Reconstruir banco de downloads",
+    "find-duplicates": "Encontrar faixas duplicadas",
+    "lyrics": "Preencher letras nos arquivos",
+    "inspect": "Inspecionar áudio e tags",
+    "import-playlist": "Importar playlist externa",
+    "sync-playlist": "Sincronizar pasta com playlist",
+    "dl": "Baixar por URL do Qobuz",
+    "lucky": "Buscar e baixar automaticamente",
+    "user": "Perfil e assinatura",
+    "show-config": "Ver configuração",
+    "purge": "Apagar banco de downloads",
     "watch": "Monitorar pasta para novas faixas",
 }
 TOOL_ACTIONS = set(TOOL_LABELS)
@@ -120,7 +136,9 @@ def build_tool_argv(payload: ToolRequest, settings: dict[str, Any]) -> list[str]
         if not target:
             raise ValueError("Informe a pasta que será monitorada.")
         if not payload.confirm_file_changes:
-            raise ValueError("Confirme que o monitoramento poderá editar arquivos de áudio.")
+            raise ValueError(
+                "Confirme que o monitoramento poderá editar arquivos de áudio."
+            )
         return ["--watch", os.path.expanduser(target)]
     if action == "sync-db":
         if not payload.confirm_file_changes:
@@ -138,7 +156,15 @@ def build_tool_argv(payload: ToolRequest, settings: dict[str, Any]) -> list[str]
         return ["user", "--json"]
     if action == "library":
         sub = payload.subaction or "status"
-        if sub not in {"status", "missing", "list", "history", "reconcile", "reset-stuck", "unmark"}:
+        if sub not in {
+            "status",
+            "missing",
+            "list",
+            "history",
+            "reconcile",
+            "reset-stuck",
+            "unmark",
+        }:
             raise ValueError("Ação de catálogo inválida")
         argv = ["library", sub]
         if sub in {"missing", "list", "history"}:
@@ -153,7 +179,9 @@ def build_tool_argv(payload: ToolRequest, settings: dict[str, Any]) -> list[str]
             raise ValueError("Confirme a alteração do catálogo antes de continuar.")
         if sub == "reconcile":
             if not payload.confirm_file_changes and not payload.dry_run:
-                raise ValueError("Confirme as alterações no catálogo antes de reconciliar.")
+                raise ValueError(
+                    "Confirme as alterações no catálogo antes de reconciliar."
+                )
             if target:
                 argv.append(os.path.expanduser(target))
             if payload.dry_run:
@@ -161,19 +189,45 @@ def build_tool_argv(payload: ToolRequest, settings: dict[str, Any]) -> list[str]
             if payload.fix:
                 argv.append("--fix")
         return argv
-    if action in {"dl", "lucky"} and not payload.dry_run and not payload.confirm_downloads:
+    if (
+        action in {"dl", "lucky"}
+        and not payload.dry_run
+        and not payload.confirm_downloads
+    ):
         raise ValueError("Confirme que deseja iniciar downloads antes de continuar.")
-    if action == "sync-favorites" and not payload.dry_run and (payload.download_new or payload.download_missing) and not payload.confirm_downloads:
+    if (
+        action == "sync-favorites"
+        and not payload.dry_run
+        and (payload.download_new or payload.download_missing)
+        and not payload.confirm_downloads
+    ):
         raise ValueError("Confirme os downloads de favoritos antes de continuar.")
     if action == "import-playlist" and not payload.confirm_downloads:
-        raise ValueError("A importação pode pesquisar e baixar faixas; confirme essa ação.")
-    if action == "sync-playlist" and (not payload.confirm_file_changes or not payload.confirm_downloads):
-        raise ValueError("Confirme os downloads e alterações de arquivos antes de sincronizar.")
+        raise ValueError(
+            "A importação pode pesquisar e baixar faixas; confirme essa ação."
+        )
+    if action == "sync-playlist" and (
+        not payload.confirm_file_changes or not payload.confirm_downloads
+    ):
+        raise ValueError(
+            "Confirme os downloads e alterações de arquivos antes de sincronizar."
+        )
     if action == "lyrics" and not payload.confirm_file_changes:
-        raise ValueError("Confirme as alterações nos arquivos locais antes de continuar.")
+        raise ValueError(
+            "Confirme as alterações nos arquivos locais antes de continuar."
+        )
     argv: list[str] = [action]
     if action in {"dl", "sync-favorites", "lucky"}:
-        argv += ["--directory", os.path.expanduser(str(settings["directory"])), "--quality", str(settings["quality"]), "--max-workers", str(settings["max_workers"]), "--segment-workers", str(settings["segment_workers"])]
+        argv += [
+            "--directory",
+            os.path.expanduser(str(settings["directory"])),
+            "--quality",
+            str(settings["quality"]),
+            "--max-workers",
+            str(settings["max_workers"]),
+            "--segment-workers",
+            str(settings["segment_workers"]),
+        ]
     if action in {"dl", "sync-favorites"} and payload.dry_run:
         argv.append("--dry-run")
     if action == "dl":
@@ -207,7 +261,9 @@ def build_tool_argv(payload: ToolRequest, settings: dict[str, Any]) -> list[str]
     elif action == "scan":
         target = target or str(settings["directory"])
         if not payload.dry_run and not payload.confirm_file_changes:
-            raise ValueError("Confirme que deseja atualizar o catálogo com o resultado do scan.")
+            raise ValueError(
+                "Confirme que deseja atualizar o catálogo com o resultado do scan."
+            )
         argv += [target, "--max-depth", str(payload.max_depth), "--no-review"]
         if payload.dry_run:
             argv.append("--dry-run")
@@ -215,7 +271,9 @@ def build_tool_argv(payload: ToolRequest, settings: dict[str, Any]) -> list[str]
         argv.append(os.path.expanduser(target or str(settings["directory"])))
     elif action == "inspect":
         if not target:
-            raise ValueError("Informe o caminho de um arquivo de áudio para inspecionar.")
+            raise ValueError(
+                "Informe o caminho de um arquivo de áudio para inspecionar."
+            )
         argv.append(os.path.expanduser(target))
     return argv
 
@@ -244,7 +302,27 @@ class GuiService:
         self.local_settings = self._load_local_settings()
 
     def _load_local_settings(self) -> dict[str, Any]:
-        defaults = {"directory": "", "quality": None, "embed_art": True, "fetch_lyrics": True, "lrc_files": True, "credits": True, "m3u": False, "quality_fallback": True, "playlist_as_albums": False, "verify_after_download": False, "no_cover": False, "smart_discography": False, "multi_value_tags": False, "max_workers": 1, "segment_workers": 4, "embedded_art_size": "org", "saved_art_size": "org", "folder_format": DEFAULT_FOLDER, "track_format": DEFAULT_TRACK}
+        defaults = {
+            "directory": "",
+            "quality": None,
+            "embed_art": True,
+            "fetch_lyrics": True,
+            "lrc_files": True,
+            "credits": True,
+            "m3u": False,
+            "quality_fallback": True,
+            "playlist_as_albums": False,
+            "verify_after_download": False,
+            "no_cover": False,
+            "smart_discography": False,
+            "multi_value_tags": False,
+            "max_workers": 1,
+            "segment_workers": 4,
+            "embedded_art_size": "org",
+            "saved_art_size": "org",
+            "folder_format": DEFAULT_FOLDER,
+            "track_format": DEFAULT_TRACK,
+        }
         try:
             data = json.loads(self.settings_path.read_text(encoding="utf-8"))
             if not isinstance(data, dict):
@@ -253,10 +331,24 @@ class GuiService:
             if quality not in QUALITY_LABELS:
                 quality = 6
             parsed = {**defaults, **data, "quality": quality}
-            for key in ("embed_art", "fetch_lyrics", "lrc_files", "credits", "m3u", "quality_fallback", "playlist_as_albums", "verify_after_download", "no_cover", "smart_discography", "multi_value_tags"):
+            for key in (
+                "embed_art",
+                "fetch_lyrics",
+                "lrc_files",
+                "credits",
+                "m3u",
+                "quality_fallback",
+                "playlist_as_albums",
+                "verify_after_download",
+                "no_cover",
+                "smart_discography",
+                "multi_value_tags",
+            ):
                 parsed[key] = bool(parsed[key])
             parsed["max_workers"] = max(1, min(16, int(parsed.get("max_workers", 1))))
-            parsed["segment_workers"] = max(2, min(16, int(parsed.get("segment_workers", 4))))
+            parsed["segment_workers"] = max(
+                2, min(16, int(parsed.get("segment_workers", 4)))
+            )
             for key in ("folder_format", "track_format"):
                 if not isinstance(parsed[key], str) or not parsed[key].strip():
                     parsed[key] = defaults[key]
@@ -268,60 +360,126 @@ class GuiService:
         config_file = get_config_paths()["config_file"]
         parser = configparser.ConfigParser(interpolation=None)
         if not os.path.isfile(config_file):
-            raise RuntimeError("Ainda não há uma conta Qobuz configurada. Abra Preferências → Conectar ou configurar conta.")
+            raise RuntimeError(
+                "Ainda não há uma conta Qobuz configurada. Abra Preferências → Conectar ou configurar conta."
+            )
         parser.read(config_file, encoding="utf-8")
         section = "qobuz" if parser.has_section("qobuz") else "DEFAULT"
-        names = ("email", "password", "auth_token", "user_auth_token", "user_token", "app_id", "secrets", "disable_keyring", "directory", "default_folder", "default_quality")
-        return parser, section, {key: parser.get(section, key, fallback="") for key in names}
+        names = (
+            "email",
+            "password",
+            "auth_token",
+            "user_auth_token",
+            "user_token",
+            "app_id",
+            "secrets",
+            "disable_keyring",
+            "directory",
+            "default_folder",
+            "default_quality",
+        )
+        return (
+            parser,
+            section,
+            {key: parser.get(section, key, fallback="") for key in names},
+        )
 
     def config_status(self) -> dict[str, Any]:
         try:
             _, _, values = self._read_config()
-            token_present = bool(values["password"] or values["auth_token"] or values["user_auth_token"] or values["user_token"])
-            if not token_present and values.get("disable_keyring", "").strip().lower() not in {"1", "true", "yes", "on"}:
+            token_present = bool(
+                values["password"]
+                or values["auth_token"]
+                or values["user_auth_token"]
+                or values["user_token"]
+            )
+            if not token_present and values.get(
+                "disable_keyring", ""
+            ).strip().lower() not in {"1", "true", "yes", "on"}:
                 try:
                     import keyring
+
                     token_present = bool(keyring.get_password("qobuz-dl", "auth_token"))
                 except Exception:
                     pass
             configured = bool(values["email"] and token_present)
         except (RuntimeError, configparser.Error, OSError):
             configured, values = False, {}
-        directory = self.local_settings["directory"] or values.get("directory") or values.get("default_folder") or str(Path.home() / "Music")
+        directory = (
+            self.local_settings["directory"]
+            or values.get("directory")
+            or values.get("default_folder")
+            or str(Path.home() / "Music")
+        )
         try:
             configured_quality = int(values.get("default_quality", 6))
         except (TypeError, ValueError):
             configured_quality = 6
-        quality = self.local_settings["quality"] or (configured_quality if configured_quality in QUALITY_LABELS else 6)
-        return {"demo": self.demo, "configured": configured and not self.demo, "connected": bool(self.client), "directory": directory, "quality": quality, "qualityLabel": QUALITY_LABELS[quality], "configDir": get_config_paths()["config_path"], "accountLabel": "Conta Qobuz" if self.client else "Desconectado"}
+        quality = self.local_settings["quality"] or (
+            configured_quality if configured_quality in QUALITY_LABELS else 6
+        )
+        return {
+            "demo": self.demo,
+            "configured": configured and not self.demo,
+            "connected": bool(self.client),
+            "directory": directory,
+            "quality": quality,
+            "qualityLabel": QUALITY_LABELS[quality],
+            "configDir": get_config_paths()["config_path"],
+            "accountLabel": "Conta Qobuz" if self.client else "Desconectado",
+        }
 
     async def connect(self) -> dict[str, Any]:
         if self.demo:
-            return {"connected": False, "demo": True, "message": "Modo de demonstração: nenhuma conta foi acessada."}
+            return {
+                "connected": False,
+                "demo": True,
+                "message": "Modo de demonstração: nenhuma conta foi acessada.",
+            }
         async with self.auth_lock:
             if self.client:
                 return {"connected": True, "account": "Qobuz"}
             parser, section, values = self._read_config()
             token = ""
-            if values["disable_keyring"].strip().lower() not in {"1", "true", "yes", "on"}:
+            if values["disable_keyring"].strip().lower() not in {
+                "1",
+                "true",
+                "yes",
+                "on",
+            }:
                 try:
                     import keyring
+
                     token = keyring.get_password("qobuz-dl", "auth_token") or ""
                 except Exception:
                     pass
-            token = (token or values["auth_token"] or values["user_auth_token"] or values["user_token"]).strip()
-            settings = QobuzDLSettings.from_arguments_configparser(SimpleNamespace(), parser)
+            token = (
+                token
+                or values["auth_token"]
+                or values["user_auth_token"]
+                or values["user_token"]
+            ).strip()
+            settings = QobuzDLSettings.from_arguments_configparser(
+                SimpleNamespace(), parser
+            )
             settings.user_auth_token = token
             quality = self.local_settings["quality"] or int(settings.default_quality)
             if quality not in QUALITY_LABELS:
                 quality = 6
-            directory = self.local_settings["directory"] or values["directory"] or values["default_folder"] or str(Path.home() / "Music")
+            directory = (
+                self.local_settings["directory"]
+                or values["directory"]
+                or values["default_folder"]
+                or str(Path.home() / "Music")
+            )
             settings.default_folder, settings.default_quality = directory, quality
             settings.embed_art = self.local_settings["embed_art"]
             settings.fetch_translation = self.local_settings["fetch_lyrics"]
             settings.lrc_files = self.local_settings["lrc_files"]
             settings.embed_lyrics = self.local_settings["fetch_lyrics"]
-            settings.verify_after_download = self.local_settings["verify_after_download"]
+            settings.verify_after_download = self.local_settings[
+                "verify_after_download"
+            ]
             settings.max_workers = self.local_settings["max_workers"]
             settings.segment_workers = self.local_settings["segment_workers"]
             settings.multi_value_tags = self.local_settings["multi_value_tags"]
@@ -331,40 +489,81 @@ class GuiService:
             settings.folder_format = self.local_settings["folder_format"]
             settings.track_format = self.local_settings["track_format"]
             no_db = parser.getboolean(section, "no_database", fallback=False)
-            self.engine = QobuzDL(directory=directory, quality=quality, embed_art=settings.embed_art, no_m3u_for_playlists=not self.local_settings["m3u"], quality_fallback=self.local_settings["quality_fallback"], cover_og_quality=settings.cover_og_quality, no_cover=self.local_settings["no_cover"], downloads_db=None if no_db else get_config_paths()["qobuz_db"], folder_format=settings.folder_format, track_format=settings.track_format, smart_discography=settings.smart_discography, fetch_lyrics=self.local_settings["fetch_lyrics"], no_lrc_files=not self.local_settings["lrc_files"], force_english=True, no_credits=not self.local_settings["credits"], playlist_as_albums=self.local_settings["playlist_as_albums"], settings=settings)
-            secret_list = [part.strip() for part in values["secrets"].split(",") if part.strip()]
+            self.engine = QobuzDL(
+                directory=directory,
+                quality=quality,
+                embed_art=settings.embed_art,
+                no_m3u_for_playlists=not self.local_settings["m3u"],
+                quality_fallback=self.local_settings["quality_fallback"],
+                cover_og_quality=settings.cover_og_quality,
+                no_cover=self.local_settings["no_cover"],
+                downloads_db=None if no_db else get_config_paths()["qobuz_db"],
+                folder_format=settings.folder_format,
+                track_format=settings.track_format,
+                smart_discography=settings.smart_discography,
+                fetch_lyrics=self.local_settings["fetch_lyrics"],
+                no_lrc_files=not self.local_settings["lrc_files"],
+                force_english=True,
+                no_credits=not self.local_settings["credits"],
+                playlist_as_albums=self.local_settings["playlist_as_albums"],
+                settings=settings,
+            )
+            secret_list = [
+                part.strip() for part in values["secrets"].split(",") if part.strip()
+            ]
             try:
-                await self.engine.initialize_client(values["email"], values["password"], values["app_id"], secret_list)
+                await self.engine.initialize_client(
+                    values["email"], values["password"], values["app_id"], secret_list
+                )
             except Exception as exc:
                 self.engine = None
                 logger.warning("Qobuz connection failed (%s)", type(exc).__name__)
-                raise RuntimeError("Não foi possível conectar. Confira o login e a assinatura na configuração local do Qobuz-DL.") from None
+                raise RuntimeError(
+                    "Não foi possível conectar. Confira o login e a assinatura na configuração local do Qobuz-DL."
+                ) from None
             self.client = self.engine.client
             return {"connected": True, "account": "Qobuz"}
 
     async def configure_account(self, request: AccountSetupRequest) -> dict[str, Any]:
         if self.demo:
-            raise HTTPException(status_code=409, detail="Configuração de conta desativada na prévia demonstrativa.")
+            raise HTTPException(
+                status_code=409,
+                detail="Configuração de conta desativada na prévia demonstrativa.",
+            )
         email, token = request.email.strip(), request.token.strip()
         if "@" not in email or any(ch.isspace() for ch in email):
-            raise HTTPException(status_code=400, detail="Informe um endereço de e-mail válido.")
+            raise HTTPException(
+                status_code=400, detail="Informe um endereço de e-mail válido."
+            )
         from qobuz_dl.bundle import Bundle
         from qobuz_dl.qopy import Client
 
         try:
             bundle = await Bundle.create()
             app_id = str(bundle.get_app_id())
-            secrets_list = [str(value) for value in bundle.get_secrets().values() if value]
+            secrets_list = [
+                str(value) for value in bundle.get_secrets().values() if value
+            ]
             if not app_id or not secrets_list:
                 raise RuntimeError("As chaves de API não puderam ser obtidas.")
-            verifier = await Client.create(email, "", app_id, secrets_list, user_auth_token=token, force_english=True)
+            verifier = await Client.create(
+                email,
+                "",
+                app_id,
+                secrets_list,
+                user_auth_token=token,
+                force_english=True,
+            )
             try:
                 await verifier.get_user_profile()
             finally:
                 await verifier.close()
         except Exception as exc:
             logger.warning("Qobuz account setup failed (%s)", type(exc).__name__)
-            raise HTTPException(status_code=400, detail="Não foi possível validar e-mail/token com o Qobuz. As credenciais não foram salvas.") from None
+            raise HTTPException(
+                status_code=400,
+                detail="Não foi possível validar e-mail/token com o Qobuz. As credenciais não foram salvas.",
+            ) from None
 
         config_file = get_config_paths()["config_file"]
         parser = configparser.ConfigParser(interpolation=None)
@@ -377,16 +576,24 @@ class GuiService:
         parser.set(section, "password", "")
         parser.set(section, "app_id", app_id)
         parser.set(section, "secrets", ",".join(secrets_list))
-        parser.set(section, "directory", self.local_settings["directory"] or str(Path.home() / "Music"))
+        parser.set(
+            section,
+            "directory",
+            self.local_settings["directory"] or str(Path.home() / "Music"),
+        )
         parser.set(section, "default_quality", str(self.local_settings["quality"] or 6))
         stored = False
         if request.store_in_keyring:
             try:
                 import keyring
+
                 keyring.set_password("qobuz-dl", "auth_token", token)
                 stored = True
             except Exception:
-                raise HTTPException(status_code=400, detail="O cofre de senhas do sistema não está disponível. Ative a opção de salvar o token protegido ou desmarque-a para usar config.ini.") from None
+                raise HTTPException(
+                    status_code=400,
+                    detail="O cofre de senhas do sistema não está disponível. Ative a opção de salvar o token protegido ou desmarque-a para usar config.ini.",
+                ) from None
         parser.set(section, "disable_keyring", "false" if stored else "true")
         parser.set(section, "auth_token", "" if stored else token)
         parser.set(section, "user_auth_token", "" if stored else token)
@@ -414,13 +621,21 @@ class GuiService:
             except FileNotFoundError:
                 pass
             raise
-        return {"configured": True, "connected": False, "email": email, "storedInKeyring": stored}
+        return {
+            "configured": True,
+            "connected": False,
+            "email": email,
+            "storedInKeyring": stored,
+        }
 
     async def ensure_connected(self):
         if self.demo:
             return None
         if not self.client:
-            raise HTTPException(status_code=409, detail="Conecte sua conta Qobuz para acessar o catálogo.")
+            raise HTTPException(
+                status_code=409,
+                detail="Conecte sua conta Qobuz para acessar o catálogo.",
+            )
         return self.client
 
     def save_settings(self, request: SettingsRequest) -> dict[str, Any]:
@@ -438,7 +653,10 @@ class GuiService:
         except OSError:
             pass
         temporary = self.settings_path.with_suffix(".tmp")
-        temporary.write_text(json.dumps(self.local_settings, ensure_ascii=False, indent=2), encoding="utf-8")
+        temporary.write_text(
+            json.dumps(self.local_settings, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
         try:
             temporary.chmod(0o600)
         except OSError:
@@ -446,7 +664,10 @@ class GuiService:
         temporary.replace(self.settings_path)
         if self.engine:
             self.engine.directory, self.engine.quality = str(expanded), quality
-            self.engine.settings.default_folder, self.engine.settings.default_quality = str(expanded), quality
+            (
+                self.engine.settings.default_folder,
+                self.engine.settings.default_quality,
+            ) = str(expanded), quality
             self.engine.embed_art = request.embed_art
             self.engine.fetch_lyrics = request.fetch_lyrics
             self.engine.no_lrc_files = not request.lrc_files
@@ -468,9 +689,22 @@ class GuiService:
 
     async def enqueue(self, request: DownloadRequest) -> dict[str, Any]:
         if self.demo:
-            raise HTTPException(status_code=409, detail="Downloads ficam desativados no modo de demonstração.")
+            raise HTTPException(
+                status_code=409,
+                detail="Downloads ficam desativados no modo de demonstração.",
+            )
         await self.ensure_connected()
-        entry = {"id": secrets.token_urlsafe(12), "itemId": request.id, "kind": request.kind, "title": request.title or "Item sem título", "artist": request.artist or "", "status": "aguardando", "createdAt": time.time(), "message": "Na fila", "cover": None}
+        entry = {
+            "id": secrets.token_urlsafe(12),
+            "itemId": request.id,
+            "kind": request.kind,
+            "title": request.title or "Item sem título",
+            "artist": request.artist or "",
+            "status": "aguardando",
+            "createdAt": time.time(),
+            "message": "Na fila",
+            "cover": None,
+        }
         async with self.queue_lock:
             self.queue.append(entry)
             if not self.worker_task or self.worker_task.done():
@@ -485,20 +719,43 @@ class GuiService:
                     return
                 item = self.queue.pop(0)
                 self.current = item
-                item["status"], item["message"] = "baixando", "O downloader está processando este item"
+                item["status"], item["message"] = (
+                    "baixando",
+                    "O downloader está processando este item",
+                )
             try:
-                self.engine.directory = self.local_settings["directory"] or self.engine.directory
-                self.engine.quality = self.local_settings["quality"] or self.engine.settings.default_quality
-                self.engine.settings.default_folder, self.engine.settings.default_quality = self.engine.directory, self.engine.quality
-                success = await self.engine.download_from_id(item["itemId"], album=item["kind"] == "album")
+                self.engine.directory = (
+                    self.local_settings["directory"] or self.engine.directory
+                )
+                self.engine.quality = (
+                    self.local_settings["quality"]
+                    or self.engine.settings.default_quality
+                )
+                (
+                    self.engine.settings.default_folder,
+                    self.engine.settings.default_quality,
+                ) = self.engine.directory, self.engine.quality
+                success = await self.engine.download_from_id(
+                    item["itemId"], album=item["kind"] == "album"
+                )
                 item["status"] = "concluído" if success else "falhou"
-                item["message"] = "Download concluído" if success else "O downloader não concluiu este item; consulte o log local."
+                item["message"] = (
+                    "Download concluído"
+                    if success
+                    else "O downloader não concluiu este item; consulte o log local."
+                )
             except asyncio.CancelledError:
-                item["status"], item["message"] = "interrompido", "Download interrompido"
+                item["status"], item["message"] = (
+                    "interrompido",
+                    "Download interrompido",
+                )
                 raise
             except Exception as exc:
                 logger.exception("Queue download failed")
-                item["status"], item["message"] = "falhou", f"Falha no download ({type(exc).__name__})"
+                item["status"], item["message"] = (
+                    "falhou",
+                    f"Falha no download ({type(exc).__name__})",
+                )
             finally:
                 item["finishedAt"] = time.time()
                 async with self.queue_lock:
@@ -508,7 +765,11 @@ class GuiService:
                     self.history = self.history[-80:]
 
     def library(self) -> list[dict[str, Any]]:
-        root = Path(self.local_settings["directory"] or self.config_status()["directory"]).expanduser().resolve()
+        root = (
+            Path(self.local_settings["directory"] or self.config_status()["directory"])
+            .expanduser()
+            .resolve()
+        )
         if not root.is_dir():
             self.local_files.clear()
             return []
@@ -519,7 +780,11 @@ class GuiService:
         rows: list[dict[str, Any]] = []
         self.local_files.clear()
         try:
-            files = (p for p in root.rglob("*") if p.is_file() and p.suffix.lower() in AUDIO_SUFFIXES)
+            files = (
+                p
+                for p in root.rglob("*")
+                if p.is_file() and p.suffix.lower() in AUDIO_SUFFIXES
+            )
             ordered = sorted(files, key=lambda p: p.stat().st_mtime, reverse=True)
         except OSError:
             return []
@@ -529,54 +794,114 @@ class GuiService:
                 if audio is None:
                     continue
                 tags = audio.tags or {}
-                get = lambda name, default="", _tags=tags: str((_tags.get(name) or [default])[0])
+                get = lambda name, default="", _tags=tags: str(
+                    (_tags.get(name) or [default])[0]
+                )
                 info = getattr(audio, "info", None)
                 key = secrets.token_urlsafe(16)
                 self.local_files[key] = path.resolve()
-                rows.append({"key": key, "title": get("title", path.stem), "artist": get("artist", "Artista desconhecido"), "album": get("album", ""), "duration": int(getattr(info, "length", 0) or 0), "format": path.suffix.lower().lstrip("."), "size": path.stat().st_size, "pathLabel": path.parent.name, "cover": None})
+                rows.append(
+                    {
+                        "key": key,
+                        "title": get("title", path.stem),
+                        "artist": get("artist", "Artista desconhecido"),
+                        "album": get("album", ""),
+                        "duration": int(getattr(info, "length", 0) or 0),
+                        "format": path.suffix.lower().lstrip("."),
+                        "size": path.stat().st_size,
+                        "pathLabel": path.parent.name,
+                        "cover": None,
+                    }
+                )
             except (OSError, ValueError, TypeError):
                 continue
         return rows
 
     async def start_tool(self, payload: ToolRequest) -> dict[str, Any]:
         if self.demo:
-            raise HTTPException(status_code=409, detail="Ferramentas do programa real são desativadas na prévia demonstrativa.")
-        if sum(1 for proc in self.tool_processes.values() if proc.returncode is None) >= 3:
-            raise HTTPException(status_code=429, detail="Limite de três processos simultâneos atingido.")
+            raise HTTPException(
+                status_code=409,
+                detail="Ferramentas do programa real são desativadas na prévia demonstrativa.",
+            )
+        if (
+            sum(1 for proc in self.tool_processes.values() if proc.returncode is None)
+            >= 3
+        ):
+            raise HTTPException(
+                status_code=429, detail="Limite de três processos simultâneos atingido."
+            )
         try:
-            argv = build_tool_argv(payload, self.local_settings | {"directory": self.config_status()["directory"], "quality": self.config_status()["quality"]})
+            argv = build_tool_argv(
+                payload,
+                self.local_settings
+                | {
+                    "directory": self.config_status()["directory"],
+                    "quality": self.config_status()["quality"],
+                },
+            )
         except (ValueError, KeyError) as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from None
-        account_actions = {"sync-favorites", "lyrics", "import-playlist", "sync-playlist", "dl", "lucky", "user", "watch"}
+        account_actions = {
+            "sync-favorites",
+            "lyrics",
+            "import-playlist",
+            "sync-playlist",
+            "dl",
+            "lucky",
+            "user",
+            "watch",
+        }
         if payload.action in account_actions:
             await self.connect()
         job_id = secrets.token_urlsafe(12)
-        job = {"id": job_id, "action": payload.action, "label": TOOL_LABELS[payload.action], "status": "running", "output": "", "startedAt": time.time(), "returncode": None}
+        job = {
+            "id": job_id,
+            "action": payload.action,
+            "label": TOOL_LABELS[payload.action],
+            "status": "running",
+            "output": "",
+            "startedAt": time.time(),
+            "returncode": None,
+        }
         self.tool_jobs[job_id] = job
         argv = ["--no-color", *argv]
         try:
             process = await asyncio.create_subprocess_exec(
-                os.sys.executable, "-m", "qobuz_dl", *argv,
-                cwd=str(Path.home()), stdin=asyncio.subprocess.DEVNULL,
-                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+                os.sys.executable,
+                "-m",
+                "qobuz_dl",
+                *argv,
+                cwd=str(Path.home()),
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
                 start_new_session=(os.name != "nt"),
             )
         except OSError as exc:
             self.tool_jobs.pop(job_id, None)
-            raise HTTPException(status_code=500, detail=f"Não foi possível iniciar o comando ({type(exc).__name__}).") from None
+            raise HTTPException(
+                status_code=500,
+                detail=f"Não foi possível iniciar o comando ({type(exc).__name__}).",
+            ) from None
         self.tool_processes[job_id] = process
         task = asyncio.create_task(self._collect_tool_output(job_id, process))
         self.tool_tasks.add(task)
         task.add_done_callback(self.tool_tasks.discard)
         self.tool_jobs = dict(list(self.tool_jobs.items())[-40:])
-        return {key: job[key] for key in ("id", "action", "label", "status", "startedAt")}
+        return {
+            key: job[key] for key in ("id", "action", "label", "status", "startedAt")
+        }
 
-    async def _collect_tool_output(self, job_id: str, process: asyncio.subprocess.Process) -> None:
+    async def _collect_tool_output(
+        self, job_id: str, process: asyncio.subprocess.Process
+    ) -> None:
         job = self.tool_jobs[job_id]
         try:
             if process.stdout:
                 while line := await process.stdout.readline():
-                    job["output"] = (job["output"] + line.decode("utf-8", errors="replace"))[-40000:]
+                    job["output"] = (
+                        job["output"] + line.decode("utf-8", errors="replace")
+                    )[-40000:]
             job["returncode"] = await asyncio.wait_for(process.wait(), timeout=86400)
             if job.pop("stopRequested", False) or job["returncode"] < 0:
                 job["status"] = "interrompido"
@@ -585,7 +910,9 @@ class GuiService:
         except asyncio.TimeoutError:
             process.terminate()
             job["status"] = "tempo esgotado"
-            job["output"] = (job["output"] + "\nProcesso encerrado após 24 horas.\n")[-40000:]
+            job["output"] = (job["output"] + "\nProcesso encerrado após 24 horas.\n")[
+                -40000:
+            ]
         except asyncio.CancelledError:
             if process.returncode is None:
                 process.terminate()
@@ -616,17 +943,102 @@ class GuiService:
 
 
 DEMO_ALBUMS = [
-    {"id":"demo-album-1","title":"Blue Hour","artist":"Mira Sol","year":"2025","genre":"Alternative","tracks_count":11,"quality":"24b/96kHz","cover":"/assets/cover-nebula.jpg","duration":"42 min"},
-    {"id":"demo-album-2","title":"Quiet Geometry","artist":"Aster Vale","year":"2024","genre":"Modern Classical","tracks_count":9,"quality":"24b/88.2kHz","cover":"/assets/cover-lilac.jpg","duration":"37 min"},
-    {"id":"demo-album-3","title":"Afterglow Studies","artist":"The North Lines","year":"2025","genre":"Indie","tracks_count":10,"quality":"24b/96kHz","cover":"/assets/cover-amber.jpg","duration":"39 min"},
-    {"id":"demo-album-4","title":"Fern & Velvet","artist":"Lena Mor","year":"2023","genre":"Jazz","tracks_count":12,"quality":"16b/44.1kHz","cover":"/assets/cover-forest.jpg","duration":"48 min"},
+    {
+        "id": "demo-album-1",
+        "title": "Blue Hour",
+        "artist": "Mira Sol",
+        "year": "2025",
+        "genre": "Alternative",
+        "tracks_count": 11,
+        "quality": "24b/96kHz",
+        "cover": "/assets/cover-nebula.jpg",
+        "duration": "42 min",
+    },
+    {
+        "id": "demo-album-2",
+        "title": "Quiet Geometry",
+        "artist": "Aster Vale",
+        "year": "2024",
+        "genre": "Modern Classical",
+        "tracks_count": 9,
+        "quality": "24b/88.2kHz",
+        "cover": "/assets/cover-lilac.jpg",
+        "duration": "37 min",
+    },
+    {
+        "id": "demo-album-3",
+        "title": "Afterglow Studies",
+        "artist": "The North Lines",
+        "year": "2025",
+        "genre": "Indie",
+        "tracks_count": 10,
+        "quality": "24b/96kHz",
+        "cover": "/assets/cover-amber.jpg",
+        "duration": "39 min",
+    },
+    {
+        "id": "demo-album-4",
+        "title": "Fern & Velvet",
+        "artist": "Lena Mor",
+        "year": "2023",
+        "genre": "Jazz",
+        "tracks_count": 12,
+        "quality": "16b/44.1kHz",
+        "cover": "/assets/cover-forest.jpg",
+        "duration": "48 min",
+    },
 ]
 DEMO_TRACKS = [
-    {"id":"demo-track-1","title":"The Blue Between","artist":"Mira Sol","album":"Blue Hour","duration":224,"cover":"/assets/cover-nebula.jpg","quality":"24b/96kHz","isrc":""},
-    {"id":"demo-track-2","title":"A Map of Quiet","artist":"Aster Vale","album":"Quiet Geometry","duration":198,"cover":"/assets/cover-lilac.jpg","quality":"24b/88.2kHz","isrc":""},
-    {"id":"demo-track-3","title":"Copper Sun","artist":"The North Lines","album":"Afterglow Studies","duration":241,"cover":"/assets/cover-amber.jpg","quality":"24b/96kHz","isrc":""},
-    {"id":"demo-track-4","title":"Mosslight","artist":"Lena Mor","album":"Fern & Velvet","duration":213,"cover":"/assets/cover-forest.jpg","quality":"16b/44.1kHz","isrc":""},
-    {"id":"demo-track-5","title":"Last Train Home","artist":"Mira Sol","album":"Blue Hour","duration":255,"cover":"/assets/cover-nebula.jpg","quality":"24b/96kHz","isrc":""},
+    {
+        "id": "demo-track-1",
+        "title": "The Blue Between",
+        "artist": "Mira Sol",
+        "album": "Blue Hour",
+        "duration": 224,
+        "cover": "/assets/cover-nebula.jpg",
+        "quality": "24b/96kHz",
+        "isrc": "",
+    },
+    {
+        "id": "demo-track-2",
+        "title": "A Map of Quiet",
+        "artist": "Aster Vale",
+        "album": "Quiet Geometry",
+        "duration": 198,
+        "cover": "/assets/cover-lilac.jpg",
+        "quality": "24b/88.2kHz",
+        "isrc": "",
+    },
+    {
+        "id": "demo-track-3",
+        "title": "Copper Sun",
+        "artist": "The North Lines",
+        "album": "Afterglow Studies",
+        "duration": 241,
+        "cover": "/assets/cover-amber.jpg",
+        "quality": "24b/96kHz",
+        "isrc": "",
+    },
+    {
+        "id": "demo-track-4",
+        "title": "Mosslight",
+        "artist": "Lena Mor",
+        "album": "Fern & Velvet",
+        "duration": 213,
+        "cover": "/assets/cover-forest.jpg",
+        "quality": "16b/44.1kHz",
+        "isrc": "",
+    },
+    {
+        "id": "demo-track-5",
+        "title": "Last Train Home",
+        "artist": "Mira Sol",
+        "album": "Blue Hour",
+        "duration": 255,
+        "cover": "/assets/cover-nebula.jpg",
+        "quality": "24b/96kHz",
+        "isrc": "",
+    },
 ]
 
 
@@ -644,19 +1056,48 @@ def _cover(item: dict[str, Any]) -> str | None:
 def _track_result(item: dict[str, Any]) -> dict[str, Any]:
     album = item.get("album") or {}
     performer = item.get("performer") or item.get("artist") or {}
-    return {"id": str(item.get("id", "")), "title": item.get("title") or "Faixa sem título", "artist": performer.get("name", "Artista desconhecido") if isinstance(performer, dict) else str(performer), "album": album.get("title", "") if isinstance(album, dict) else str(album), "duration": int(item.get("duration") or 0), "cover": _cover(album if isinstance(album, dict) else item) or _cover(item), "quality": f"{item.get('maximum_bit_depth',16)}b/{item.get('maximum_sampling_rate',44.1)}kHz" if item.get("hires_streamable") else "16b/44.1kHz", "isrc": item.get("isrc", "")}
+    return {
+        "id": str(item.get("id", "")),
+        "title": item.get("title") or "Faixa sem título",
+        "artist": performer.get("name", "Artista desconhecido")
+        if isinstance(performer, dict)
+        else str(performer),
+        "album": album.get("title", "") if isinstance(album, dict) else str(album),
+        "duration": int(item.get("duration") or 0),
+        "cover": _cover(album if isinstance(album, dict) else item) or _cover(item),
+        "quality": f"{item.get('maximum_bit_depth', 16)}b/{item.get('maximum_sampling_rate', 44.1)}kHz"
+        if item.get("hires_streamable")
+        else "16b/44.1kHz",
+        "isrc": item.get("isrc", ""),
+    }
 
 
 def _album_result(item: dict[str, Any]) -> dict[str, Any]:
     artist = item.get("artist") or item.get("artists") or item.get("performer") or {}
     if isinstance(artist, list):
-        artist_name = ", ".join(a.get("name", "") for a in artist if isinstance(a, dict))
+        artist_name = ", ".join(
+            a.get("name", "") for a in artist if isinstance(a, dict)
+        )
     elif isinstance(artist, dict):
         artist_name = artist.get("name", "Artista desconhecido")
     else:
         artist_name = str(artist)
     genre = item.get("genre") or ""
-    return {"id": str(item.get("id", "")), "title": item.get("title") or "Álbum sem título", "artist": artist_name or "Artista desconhecido", "year": str(item.get("release_date_original") or item.get("release_date") or "")[:4], "genre": genre.get("name", "") if isinstance(genre, dict) else genre, "tracks_count": int(item.get("tracks_count") or 0), "quality": f"{item.get('maximum_bit_depth',16)}b/{item.get('maximum_sampling_rate',44.1)}kHz" if item.get("hires_streamable") else "16b/44.1kHz", "cover": _cover(item), "duration": ""}
+    return {
+        "id": str(item.get("id", "")),
+        "title": item.get("title") or "Álbum sem título",
+        "artist": artist_name or "Artista desconhecido",
+        "year": str(
+            item.get("release_date_original") or item.get("release_date") or ""
+        )[:4],
+        "genre": genre.get("name", "") if isinstance(genre, dict) else genre,
+        "tracks_count": int(item.get("tracks_count") or 0),
+        "quality": f"{item.get('maximum_bit_depth', 16)}b/{item.get('maximum_sampling_rate', 44.1)}kHz"
+        if item.get("hires_streamable")
+        else "16b/44.1kHz",
+        "cover": _cover(item),
+        "duration": "",
+    }
 
 
 def create_app(*, demo: bool = False) -> FastAPI:
@@ -678,7 +1119,12 @@ def create_app(*, demo: bool = False) -> FastAPI:
         if service.client:
             await service.client.close()
 
-    app = FastAPI(title="Qobuz-DL Studio · Local", docs_url=None, redoc_url=None, lifespan=lifespan)
+    app = FastAPI(
+        title="Qobuz-DL Studio · Local",
+        docs_url=None,
+        redoc_url=None,
+        lifespan=lifespan,
+    )
     app.state.service = service
     app.mount("/assets", StaticFiles(directory=str(ASSET_DIR)), name="assets")
 
@@ -686,16 +1132,26 @@ def create_app(*, demo: bool = False) -> FastAPI:
     async def local_origin_guard(request: Request, call_next):
         host = request.headers.get("host", "").split(":", 1)[0].strip("[]").lower()
         if host not in {"localhost", "127.0.0.1", "::1"} and not demo:
-            return Response("A interface aceita apenas conexões locais.", status_code=403)
+            return Response(
+                "A interface aceita apenas conexões locais.", status_code=403
+            )
         origin = request.headers.get("origin")
         site = request.headers.get("sec-fetch-site")
-        if not demo and ((origin and urlparse(origin).hostname not in {"localhost", "127.0.0.1", "::1"}) or site in {"cross-site", "same-site"}):
+        if not demo and (
+            (
+                origin
+                and urlparse(origin).hostname not in {"localhost", "127.0.0.1", "::1"}
+            )
+            or site in {"cross-site", "same-site"}
+        ):
             return Response("Origem não permitida.", status_code=403)
         response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "no-referrer"
         response.headers["Cache-Control"] = "no-store"
-        response.headers["Content-Security-Policy"] = "default-src 'self' https: data:; media-src 'self' https:; img-src 'self' https: data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'"
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self' https: data:; media-src 'self' https:; img-src 'self' https: data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'"
+        )
         return response
 
     @app.get("/")
@@ -741,24 +1197,49 @@ def create_app(*, demo: bool = False) -> FastAPI:
         limit = max(1, min(limit, 50))
         if service.demo:
             query = q.casefold()
-            tracks = [t for t in DEMO_TRACKS if query in f"{t['title']} {t['artist']} {t['album']}".casefold()]
-            albums = [a for a in DEMO_ALBUMS if query in f"{a['title']} {a['artist']} {a['genre']}".casefold()]
-            return {"tracks": tracks[:limit] if kind in {"tracks","all"} else [], "albums": albums[:limit] if kind in {"albums","all"} else []}
+            tracks = [
+                t
+                for t in DEMO_TRACKS
+                if query in f"{t['title']} {t['artist']} {t['album']}".casefold()
+            ]
+            albums = [
+                a
+                for a in DEMO_ALBUMS
+                if query in f"{a['title']} {a['artist']} {a['genre']}".casefold()
+            ]
+            return {
+                "tracks": tracks[:limit] if kind in {"tracks", "all"} else [],
+                "albums": albums[:limit] if kind in {"albums", "all"} else [],
+            }
         client = await service.ensure_connected()
         try:
             data: dict[str, list[dict[str, Any]]] = {"tracks": [], "albums": []}
             if kind in {"tracks", "all"}:
                 raw = await client.search_tracks(q.strip(), limit=limit)
-                items = raw.get("tracks", {}).get("items", []) if isinstance(raw, dict) else []
-                data["tracks"] = [_track_result(x) for x in items if isinstance(x, dict)]
+                items = (
+                    raw.get("tracks", {}).get("items", [])
+                    if isinstance(raw, dict)
+                    else []
+                )
+                data["tracks"] = [
+                    _track_result(x) for x in items if isinstance(x, dict)
+                ]
             if kind in {"albums", "all"}:
                 raw = await client.search_albums(q.strip(), limit=limit)
-                items = raw.get("albums", {}).get("items", []) if isinstance(raw, dict) else []
-                data["albums"] = [_album_result(x) for x in items if isinstance(x, dict)]
+                items = (
+                    raw.get("albums", {}).get("items", [])
+                    if isinstance(raw, dict)
+                    else []
+                )
+                data["albums"] = [
+                    _album_result(x) for x in items if isinstance(x, dict)
+                ]
             return data
         except Exception:
             logger.exception("Catalog search failed")
-            raise HTTPException(status_code=502, detail="A busca no catálogo falhou. Tente novamente.") from None
+            raise HTTPException(
+                status_code=502, detail="A busca no catálogo falhou. Tente novamente."
+            ) from None
 
     @app.get("/api/album/{album_id}")
     async def album_details(album_id: str):
@@ -766,16 +1247,26 @@ def create_app(*, demo: bool = False) -> FastAPI:
             album = next((x for x in DEMO_ALBUMS if x["id"] == album_id), None)
             if album is None:
                 raise HTTPException(status_code=404, detail="Álbum não encontrado")
-            return {"album": album, "tracks": [dict(x) for x in DEMO_TRACKS if x["album"] == album["title"]]}
+            return {
+                "album": album,
+                "tracks": [
+                    dict(x) for x in DEMO_TRACKS if x["album"] == album["title"]
+                ],
+            }
         client = await service.ensure_connected()
         try:
             raw = await client.get_album_meta(album_id)
             block = raw.get("tracks", {}) if isinstance(raw, dict) else {}
             items = block.get("items", []) if isinstance(block, dict) else []
-            return {"album": _album_result(raw), "tracks": [_track_result(x) for x in items if isinstance(x, dict)]}
+            return {
+                "album": _album_result(raw),
+                "tracks": [_track_result(x) for x in items if isinstance(x, dict)],
+            }
         except Exception:
             logger.exception("Album metadata fetch failed")
-            raise HTTPException(status_code=502, detail="Não foi possível carregar este álbum.") from None
+            raise HTTPException(
+                status_code=502, detail="Não foi possível carregar este álbum."
+            ) from None
 
     @app.get("/api/favorites")
     async def favorites(kind: str = "albums", limit: int = 40):
@@ -783,39 +1274,76 @@ def create_app(*, demo: bool = False) -> FastAPI:
             raise HTTPException(status_code=400, detail="Tipo de favoritos inválido")
         limit = max(1, min(limit, 100))
         if service.demo:
-            return {"items": DEMO_ALBUMS[:limit] if kind == "albums" else DEMO_TRACKS[:limit]}
+            return {
+                "items": DEMO_ALBUMS[:limit]
+                if kind == "albums"
+                else DEMO_TRACKS[:limit]
+            }
         client = await service.ensure_connected()
         try:
             result = await client.get_favorites(fav_type=kind, limit=limit, offset=0)
-            items = result.get(kind, {}).get("items", []) if isinstance(result, dict) else []
-            return {"items": [_album_result(x) if kind == "albums" else _track_result(x) for x in items if isinstance(x, dict)]}
+            items = (
+                result.get(kind, {}).get("items", [])
+                if isinstance(result, dict)
+                else []
+            )
+            return {
+                "items": [
+                    _album_result(x) if kind == "albums" else _track_result(x)
+                    for x in items
+                    if isinstance(x, dict)
+                ]
+            }
         except Exception:
-            raise HTTPException(status_code=502, detail="Não foi possível carregar os favoritos.") from None
+            raise HTTPException(
+                status_code=502, detail="Não foi possível carregar os favoritos."
+            ) from None
 
     @app.post("/api/favorites")
     async def add_favorite(payload: FavoriteRequest):
         if service.demo:
-            raise HTTPException(status_code=409, detail="Favoritos ficam desativados na demonstração.")
+            raise HTTPException(
+                status_code=409, detail="Favoritos ficam desativados na demonstração."
+            )
         client = await service.ensure_connected()
         try:
-            return {"success": True, "result": await client.add_favorite(payload.id, payload.kind)}
+            return {
+                "success": True,
+                "result": await client.add_favorite(payload.id, payload.kind),
+            }
         except Exception:
             logger.exception("Adding Qobuz favorite failed")
-            raise HTTPException(status_code=502, detail="Não foi possível atualizar os favoritos.") from None
+            raise HTTPException(
+                status_code=502, detail="Não foi possível atualizar os favoritos."
+            ) from None
 
     @app.get("/api/library")
     async def library():
-        return {"items": service.library(), "directory": service.local_settings["directory"] or service.config_status()["directory"]}
+        return {
+            "items": service.library(),
+            "directory": service.local_settings["directory"]
+            or service.config_status()["directory"],
+        }
 
     @app.get("/api/library/play/{file_key}")
     async def local_audio(file_key: str):
         path = service.local_files.get(file_key)
         if not path or not path.is_file():
             raise HTTPException(status_code=404, detail="Arquivo não encontrado")
-        root = Path(service.local_settings["directory"] or service.config_status()["directory"]).expanduser().resolve()
+        root = (
+            Path(
+                service.local_settings["directory"]
+                or service.config_status()["directory"]
+            )
+            .expanduser()
+            .resolve()
+        )
         if root not in path.resolve().parents:
             raise HTTPException(status_code=403, detail="Caminho fora da biblioteca")
-        return FileResponse(path, media_type=mimetypes.guess_type(path.name)[0] or "application/octet-stream")
+        return FileResponse(
+            path,
+            media_type=mimetypes.guess_type(path.name)[0] or "application/octet-stream",
+        )
 
     @app.post("/api/settings")
     async def save_settings(payload: SettingsRequest):
@@ -826,7 +1354,11 @@ def create_app(*, demo: bool = False) -> FastAPI:
 
     @app.get("/api/tools")
     async def tools():
-        return {"items": [{"action": key, "label": label} for key, label in TOOL_LABELS.items()]}
+        return {
+            "items": [
+                {"action": key, "label": label} for key, label in TOOL_LABELS.items()
+            ]
+        }
 
     @app.post("/api/tools/run")
     async def run_tool(payload: ToolRequest):
@@ -853,7 +1385,9 @@ def create_app(*, demo: bool = False) -> FastAPI:
     @app.get("/api/queue")
     async def queue():
         async with service.queue_lock:
-            rows = [dict(item) for item in service.history] + [dict(item) for item in service.queue]
+            rows = [dict(item) for item in service.history] + [
+                dict(item) for item in service.queue
+            ]
             if service.current:
                 rows.append(dict(service.current))
             return {"items": rows[-80:], "busy": bool(service.current)}
@@ -864,28 +1398,49 @@ def create_app(*, demo: bool = False) -> FastAPI:
             original = len(service.queue)
             service.queue = [item for item in service.queue if item["id"] != queue_id]
             if len(service.queue) == original:
-                raise HTTPException(status_code=404, detail="Item pendente não encontrado")
+                raise HTTPException(
+                    status_code=404, detail="Item pendente não encontrado"
+                )
         return {"success": True}
 
     @app.get("/api/stream/{track_id}")
     async def stream(track_id: str, quality: int = 6):
         if quality not in {5, 6}:
-            raise HTTPException(status_code=400, detail="O player do navegador suporta MP3 ou FLAC de CD. Hi-Res segmentado não é reproduzido pelo navegador nesta versão.")
+            raise HTTPException(
+                status_code=400,
+                detail="O player do navegador suporta MP3 ou FLAC de CD. Hi-Res segmentado não é reproduzido pelo navegador nesta versão.",
+            )
         if service.demo:
-            raise HTTPException(status_code=409, detail="A reprodução fica desativada na demonstração.")
+            raise HTTPException(
+                status_code=409, detail="A reprodução fica desativada na demonstração."
+            )
         client = await service.ensure_connected()
         try:
             result = await client.get_track_url(track_id, quality)
         except Exception:
             logger.exception("Could not obtain authorized audio stream")
-            raise HTTPException(status_code=403, detail="A faixa não está disponível para reprodução nesta conta ou formato.") from None
+            raise HTTPException(
+                status_code=403,
+                detail="A faixa não está disponível para reprodução nesta conta ou formato.",
+            ) from None
         if result.get("raw_key") or result.get("key") or not result.get("url"):
-            raise HTTPException(status_code=415, detail="O fluxo exige decodificação proprietária e não pode ser reproduzido pelo player do navegador.")
+            raise HTTPException(
+                status_code=415,
+                detail="O fluxo exige decodificação proprietária e não pode ser reproduzido pelo player do navegador.",
+            )
         parsed = urlparse(result["url"])
         host = (parsed.hostname or "").lower()
-        allowed = host == "qobuz.com" or host.endswith(".qobuz.com") or host.endswith(".akamaized.net") or host.endswith(".akamaihd.net")
+        allowed = (
+            host == "qobuz.com"
+            or host.endswith(".qobuz.com")
+            or host.endswith(".akamaized.net")
+            or host.endswith(".akamaihd.net")
+        )
         if parsed.scheme != "https" or not allowed:
-            raise HTTPException(status_code=502, detail="A origem do fluxo retornado não foi reconhecida como CDN Qobuz.")
+            raise HTTPException(
+                status_code=502,
+                detail="A origem do fluxo retornado não foi reconhecida como CDN Qobuz.",
+            )
         return RedirectResponse(result["url"], status_code=307)
 
     return app
@@ -897,19 +1452,39 @@ def main() -> None:
     import webbrowser
     import uvicorn
 
-    parser = argparse.ArgumentParser(description="Qobuz-DL Studio — interface web local")
-    parser.add_argument("--host", default="127.0.0.1", help="Interface de rede (padrão: apenas este computador)")
-    parser.add_argument("--port", type=int, default=8787, help="Porta local (padrão: 8787)")
-    parser.add_argument("--demo", action="store_true", help="Abrir demonstração sem acesso a conta ou downloads")
-    parser.add_argument("--no-browser", action="store_true", help="Não abrir o navegador automaticamente")
+    parser = argparse.ArgumentParser(
+        description="Qobuz-DL Studio — interface web local"
+    )
+    parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="Interface de rede (padrão: apenas este computador)",
+    )
+    parser.add_argument(
+        "--port", type=int, default=8787, help="Porta local (padrão: 8787)"
+    )
+    parser.add_argument(
+        "--demo",
+        action="store_true",
+        help="Abrir demonstração sem acesso a conta ou downloads",
+    )
+    parser.add_argument(
+        "--no-browser",
+        action="store_true",
+        help="Não abrir o navegador automaticamente",
+    )
     args = parser.parse_args()
     if not 1 <= args.port <= 65535:
         parser.error("a porta precisa estar entre 1 e 65535")
     if args.host not in {"127.0.0.1", "localhost", "::1", "0.0.0.0"}:
-        parser.error("por segurança, o host deve ser loopback; 0.0.0.0 só é útil para um preview isolado")
+        parser.error(
+            "por segurança, o host deve ser loopback; 0.0.0.0 só é útil para um preview isolado"
+        )
     if not args.no_browser and not args.demo:
         webbrowser.open(f"http://127.0.0.1:{args.port}/")
-    uvicorn.run(create_app(demo=args.demo), host=args.host, port=args.port, log_level="info")
+    uvicorn.run(
+        create_app(demo=args.demo), host=args.host, port=args.port, log_level="info"
+    )
 
 
 if __name__ == "__main__":
