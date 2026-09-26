@@ -35,9 +35,12 @@ def create_db(db_path):
     # Conexao sincrona (sqlite3) porque essa funcao roda uma unica vez
     # na inicializacao do programa -- nao ha necessidade de async aqui,
     # diferente de handle_download_id() que roda por faixa/album.
-    with contextlib.closing(
-        sqlite3.connect(db_path, timeout=SQLITE_TIMEOUT_SECONDS)
-    ) as conn, conn:
+    with (
+        contextlib.closing(
+            sqlite3.connect(db_path, timeout=SQLITE_TIMEOUT_SECONDS)
+        ) as conn,
+        conn,
+    ):
         cursor = conn.cursor()
 
         # PASSO 1: verifica se a tabela "downloads" ja existe no banco
@@ -295,9 +298,12 @@ def get_stats(db_path):
     }
 
     try:
-        with contextlib.closing(
-            sqlite3.connect(db_path, timeout=SQLITE_TIMEOUT_SECONDS)
-        ) as conn, conn:
+        with (
+            contextlib.closing(
+                sqlite3.connect(db_path, timeout=SQLITE_TIMEOUT_SECONDS)
+            ) as conn,
+            conn,
+        ):
             c = conn.cursor()
 
             # --- totais gerais ---
