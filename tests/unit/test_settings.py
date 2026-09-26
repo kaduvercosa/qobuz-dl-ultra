@@ -265,6 +265,18 @@ class TestFromArgumentsConfigparser:
         s = QobuzDLSettings.from_arguments_configparser(_args(), _config())
         assert s.embed_art is True
 
+    def test_opcoes_de_arte_e_disco_respeitam_config_quando_cli_esta_ausente(self):
+        config = _config(
+            {"saved_art_size": "300", "multiple_disc_prefix": "Disco"}
+        )
+
+        s = QobuzDLSettings.from_arguments_configparser(
+            _args(saved_art_size=None, multiple_disc_prefix=None), config
+        )
+
+        assert s.saved_art_size == "300"
+        assert s.multiple_disc_prefix == "Disco"
+
 
 class TestBoundedWorkers:
     """_bounded_workers(value, default, maximum): normaliza valores de

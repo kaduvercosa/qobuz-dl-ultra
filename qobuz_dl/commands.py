@@ -656,8 +656,8 @@ def add_common_arg(custom_parser, default_folder, default_quality):
     artwork_group.add_argument(
         "--saved-art-size",
         choices=["50", "100", "150", "300", "600", "max", "org"],
-        default="org",
-        help="tamanho da capa salva no diretório (padrão: org)",
+        default=None,
+        help="tamanho da capa salva no diretório (padrão: org, ou o valor do config.ini)",
     )
 
     multiple_disc_group = custom_parser.add_argument_group(
@@ -665,9 +665,9 @@ def add_common_arg(custom_parser, default_folder, default_quality):
     )
     multiple_disc_group.add_argument(
         "--multiple-disc-prefix",
-        default="CD",
+        default=None,
         metavar="PREFIX",
-        help="Define o prefixo para álbuns com múltiplos discos (padrão: CD)",
+        help="Define o prefixo para álbuns com múltiplos discos (padrão: CD, ou o valor do config.ini)",
     )
     multiple_disc_group.add_argument(
         "--multiple-disc-one-dir",

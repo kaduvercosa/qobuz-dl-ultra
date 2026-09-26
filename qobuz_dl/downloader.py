@@ -309,9 +309,6 @@ class Download:
                 settings=self.settings,
             )
 
-        self.settings = settings or QobuzDLSettings()
-        self.download_db = download_db
-
         self.is_playlist = is_playlist
         self.playlist_track_number = playlist_track_number
         self.playlist_as_albums = playlist_as_albums
@@ -807,7 +804,11 @@ class Download:
                     )
 
             if aborted_by_user:
-                os._exit(1)
+                # Não use os._exit(): ele pula finally de chamadores, fecha o
+                # processo sem liberar recursos e torna a classe impossível de
+                # reutilizar como biblioteca. A CLI converte a interrupção em
+                # código de saída no entrypoint, depois que suas limpezas rodam.
+                raise KeyboardInterrupt
 
             # [FIX] handle_download_id() agora vive DENTRO deste 'if', junto com db_artist/db_album -- antes havia risco (sinalizado em revisao) de essas variaveis nao existirem quando failed_tracks>0/aborted_by_user e o handle_download_id ainda assim tentar rodar.
             if results and failed_tracks == 0 and not aborted_by_user:

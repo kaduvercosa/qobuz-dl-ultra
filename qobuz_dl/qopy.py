@@ -846,9 +846,20 @@ class Client:
 
         This is intentionally strict: malformed responses and network errors
         propagate so catalog synchronization cannot interpret them as mass
-        removals.
+        removals. The provider can occasionally return an overlapping page;
+        duplicate IDs are discarded and an incomplete result is rejected
+        instead of being mistaken for a complete synchronization.
         """
+        try:
+            page_size = int(page_size)
+            max_pages = int(max_pages)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("page_size e max_pages precisam ser inteiros") from exc
+        if page_size <= 0 or max_pages <= 0:
+            raise ValueError("page_size e max_pages precisam ser maiores que zero")
+
         items = []
+        seen_ids = set()
         total = None
         offset = 0
         for _ in range(max_pages):
@@ -869,10 +880,37 @@ class Client:
                     total = int(block["total"])
                 except (TypeError, ValueError):
                     total = None
-            items.extend(page)
-            if not page or (total is not None and len(items) >= total):
+
+            for item in page:
+                item_id = item.get("id") if isinstance(item, dict) else None
+                if item_id in (None, ""):
+                    items.append(item)
+                    continue
+                item_key = str(item_id)
+                if item_key not in seen_ids:
+                    seen_ids.add(item_key)
+                    items.append(item)
+
+            if not page:
+                if total is not None and len(items) < total:
+                    raise RuntimeError(
+                        f"paginação de favoritos incompleta: "
+                        f"{len(items)} de {total} itens coletados"
+                    )
                 return items, total
+
+            if total is not None and len(items) >= total:
+                return items[:total], total
+
             offset += len(page)
+
+            # Se o endpoint ignorou o offset ou devolveu páginas sobrepostas,
+            # não continue até o limite arbitrário retornando uma lista parcial.
+            if total is not None and offset >= total:
+                raise RuntimeError(
+                    f"paginação de favoritos incompleta: "
+                    f"{len(items)} de {total} itens únicos coletados"
+                )
         raise RuntimeError("paginação de favoritos excedeu o limite de segurança")
 
     async def get_user_playlists(self, limit=100):

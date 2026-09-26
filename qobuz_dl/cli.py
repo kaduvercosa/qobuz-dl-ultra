@@ -915,7 +915,10 @@ async def _handle_commands(qobuz: QobuzDL, arguments):
                 qobuz.interactive_limit = arguments.limit
             await qobuz.interactive()
     except KeyboardInterrupt:
-        pass
+        # O downloader marca a pasta como [INCOMPLETE] antes de propagar a
+        # interrupção. Repassar o sinal permite que main() devolva o código
+        # 1 sem usar os._exit(), preservando o fechamento dos clientes HTTP.
+        raise
     finally:
         _remove_leftovers(qobuz.directory)
 

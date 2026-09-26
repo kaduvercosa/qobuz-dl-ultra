@@ -108,6 +108,17 @@ class TestParserPrincipal:
         assert args.reset is True
         assert args.purge is False
 
+    def test_opcoes_com_default_no_config_nao_sobrescrevem_config_ini(self, parser):
+        """Arte salva e prefixo de disco precisam chegar como None sem flag.
+
+        Se o argparse preencher esses campos com ``org``/``CD``, a camada de
+        settings nunca consegue enxergar os valores personalizados do INI.
+        """
+        args = parser.parse_args(["dl", "URL"])
+
+        assert args.saved_art_size is None
+        assert args.multiple_disc_prefix is None
+
     def test_sync_db_aceita_valor_opcional_com_default_const(self, parser):
         # NOTA: --sync-db (nargs="?") consome avidamente o próximo token
         # como valor se ele não começar com "-" -- por isso o teste usa

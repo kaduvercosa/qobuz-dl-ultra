@@ -16,6 +16,8 @@ from qobuz_dl.color import WARNING as YELLOW
 
 logger = logging.getLogger(__name__)
 
+SQLITE_TIMEOUT_SECONDS = 30
+
 
 def create_db(db_path):
     """
@@ -33,7 +35,9 @@ def create_db(db_path):
     # Conexao sincrona (sqlite3) porque essa funcao roda uma unica vez
     # na inicializacao do programa -- nao ha necessidade de async aqui,
     # diferente de handle_download_id() que roda por faixa/album.
-    with contextlib.closing(sqlite3.connect(db_path)) as conn, conn:
+    with contextlib.closing(
+        sqlite3.connect(db_path, timeout=SQLITE_TIMEOUT_SECONDS)
+    ) as conn, conn:
         cursor = conn.cursor()
 
         # PASSO 1: verifica se a tabela "downloads" ja existe no banco
@@ -203,7 +207,7 @@ async def handle_download_id(
 
     # Chave PRIMARY KEY e' (id, quality) -> mesmo item_id pode existir
     # varias vezes com qualidades diferentes (ex: baixou em MP3 e depois em Hi-Res)
-    async with aiosqlite.connect(db_path) as conn:
+    async with aiosqlite.connect(db_path, timeout=SQLITE_TIMEOUT_SECONDS) as conn:
         if add_id:
             # MODO INSERT: grava um novo download concluido
             try:
@@ -291,7 +295,9 @@ def get_stats(db_path):
     }
 
     try:
-        with contextlib.closing(sqlite3.connect(db_path)) as conn, conn:
+        with contextlib.closing(
+            sqlite3.connect(db_path, timeout=SQLITE_TIMEOUT_SECONDS)
+        ) as conn, conn:
             c = conn.cursor()
 
             # --- totais gerais ---

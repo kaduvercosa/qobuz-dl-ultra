@@ -32,6 +32,41 @@ async def test_get_all_favorites_pagina_em_modo_estrito(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_get_all_favorites_remove_ids_duplicados_em_paginas_sobrepostas(
+    monkeypatch,
+):
+    client = Client()
+
+    async def get_favorites(fav_type, limit, offset, *, strict):
+        pages = {
+            0: [{"id": "0"}, {"id": "1"}],
+            2: [{"id": "1"}, {"id": "2"}],
+            4: [{"id": "3"}],
+        }
+        return {"albums": {"items": pages.get(offset, []), "total": None}}
+
+    monkeypatch.setattr(client, "get_favorites", get_favorites)
+
+    items, total = await client.get_all_favorites("albums", page_size=2)
+
+    assert [item["id"] for item in items] == ["0", "1", "2", "3"]
+    assert total is None
+
+
+@pytest.mark.asyncio
+async def test_get_all_favorites_rejeita_paginacao_incompleta(monkeypatch):
+    client = Client()
+
+    async def get_favorites(fav_type, limit, offset, *, strict):
+        return {"albums": {"items": [{"id": "0"}], "total": 3}}
+
+    monkeypatch.setattr(client, "get_favorites", get_favorites)
+
+    with pytest.raises(RuntimeError, match="incompleta"):
+        await client.get_all_favorites("albums", page_size=1, max_pages=4)
+
+
+@pytest.mark.asyncio
 async def test_get_user_playlists_fallback_busca_ids_individuais(monkeypatch):
     """Use the ID fallback without exposing HTTP internals to callers."""
     client = Client()
