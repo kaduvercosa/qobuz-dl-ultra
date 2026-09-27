@@ -210,7 +210,7 @@ class TestTagFlac:
             settings=QobuzDLSettings(multi_value_tags=True),
         )
 
-        assert fake["ARTIST"] == ["Artista Um ; Artista Dois"]
+        assert fake["ARTIST"] == ["Artista Um, Artista Dois"]
 
     def test_sem_multi_value_tags_mantem_virgula(self, monkeypatch, tmp_path):
         fake = FakeFLAC()
