@@ -1150,7 +1150,10 @@ def create_app(*, demo: bool = False) -> FastAPI:
         response.headers["Referrer-Policy"] = "no-referrer"
         response.headers["Cache-Control"] = "no-store"
         response.headers["Content-Security-Policy"] = (
-            "default-src 'self' https: data:; media-src 'self' https:; img-src 'self' https: data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'"
+            "default-src 'self' https: data:; media-src 'self' https:; img-src 'self' https: data:; "
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+            "font-src 'self' https://fonts.gstatic.com; "
+            "script-src 'self'; connect-src 'self'; frame-ancestors 'none'"
         )
         return response
 
@@ -1446,11 +1449,39 @@ def create_app(*, demo: bool = False) -> FastAPI:
     return app
 
 
-def main() -> None:
-    """Launch the browser UI; loopback is the default to keep it private."""
-    import argparse
+def run_gui(
+    host: str = "127.0.0.1",
+    port: int = 8787,
+    demo: bool = False,
+    open_browser: bool = True,
+) -> None:
+    """Sobe o servidor da GUI (bloqueante — roda em primeiro plano até Ctrl+C).
+
+    Função pura, sem argparse próprio: é o que tanto `qobuz-dl gui` (comando
+    principal, ver qobuz_dl/cli.py) quanto `main()` abaixo (uso direto via
+    `python -m qobuz_dl.webapp`) chamam por baixo. Loopback é o padrão do
+    host para manter a instalação privada por padrão.
+    """
     import webbrowser
+
     import uvicorn
+
+    if not 1 <= port <= 65535:
+        raise ValueError("a porta precisa estar entre 1 e 65535")
+    if host not in {"127.0.0.1", "localhost", "::1", "0.0.0.0"}:
+        raise ValueError(
+            "por segurança, o host deve ser loopback; 0.0.0.0 só é útil para um preview isolado"
+        )
+    if open_browser and not demo:
+        webbrowser.open(f"http://127.0.0.1:{port}/")
+    uvicorn.run(create_app(demo=demo), host=host, port=port, log_level="info")
+
+
+def main() -> None:
+    """Ponto de entrada para `python -m qobuz_dl.webapp` (uso direto, fora
+    do comando principal). O caminho documentado e recomendado é
+    `qobuz-dl gui` — ver qobuz_dl/cli.py e o README."""
+    import argparse
 
     parser = argparse.ArgumentParser(
         description="Qobuz-DL Studio — interface web local"
@@ -1474,17 +1505,15 @@ def main() -> None:
         help="Não abrir o navegador automaticamente",
     )
     args = parser.parse_args()
-    if not 1 <= args.port <= 65535:
-        parser.error("a porta precisa estar entre 1 e 65535")
-    if args.host not in {"127.0.0.1", "localhost", "::1", "0.0.0.0"}:
-        parser.error(
-            "por segurança, o host deve ser loopback; 0.0.0.0 só é útil para um preview isolado"
+    try:
+        run_gui(
+            host=args.host,
+            port=args.port,
+            demo=args.demo,
+            open_browser=not args.no_browser,
         )
-    if not args.no_browser and not args.demo:
-        webbrowser.open(f"http://127.0.0.1:{args.port}/")
-    uvicorn.run(
-        create_app(demo=args.demo), host=args.host, port=args.port, log_level="info"
-    )
+    except ValueError as error:
+        parser.error(str(error))
 
 
 if __name__ == "__main__":

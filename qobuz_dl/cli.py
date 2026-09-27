@@ -1139,6 +1139,27 @@ async def async_main():
 
         sys.exit(await run_inspector(getattr(offline_args, "caminho", None)))
 
+    if offline_command in ("gui", "studio", "web"):
+        try:
+            from qobuz_dl.webapp import run_gui
+        except ImportError:
+            sys.exit(
+                f"{RED}A GUI precisa do extra opcional 'gui' (FastAPI + Uvicorn).{RESET}\n"
+                f"{YELLOW}Instale com: pip install 'qobuz-dl-ultra[gui]'{RESET}"
+            )
+        try:
+            run_gui(
+                host=getattr(offline_args, "host", "127.0.0.1"),
+                port=getattr(offline_args, "port", 8787),
+                demo=getattr(offline_args, "demo", False),
+                open_browser=not getattr(offline_args, "no_browser", False),
+            )
+        except ValueError as error:
+            sys.exit(f"{RED}{error}{RESET}")
+        except KeyboardInterrupt:
+            pass
+        sys.exit(0)
+
     # Comandos que NÃO precisam de login: doctor, scan e library. Rodam mesmo
     # com token expirado ou config.ini quebrado (justamente quando se usa o doctor).
     if offline_command in ("doctor", "check", "scan", "library-scan", "library", "lib"):

@@ -28,10 +28,17 @@ COPY qobuz_dl ./qobuz_dl
 # (tools/gerar_requirements.py), instalar direto do pyproject elimina o
 # fallback e a possibilidade de build "com sucesso" a partir de
 # dependências erradas/desatualizadas.
-RUN pip install --no-cache-dir .
+# O extra [gui] entra por padrão na imagem pra 'qobuz-dl gui' funcionar
+# direto, sem rebuild -- é só FastAPI+Uvicorn, custo baixo de tamanho.
+RUN pip install --no-cache-dir '.[gui]'
 
 USER qobuz
 WORKDIR /home/qobuz
 
-# Declara o comando base (o usuário só passa os argumentos, tipo 'dl' ou '--sync-db')
+# Só documenta a porta padrão da GUI (qobuz-dl gui); não expõe nada
+# sozinho -- quem publica pra fora do host é o -p no `docker run`.
+EXPOSE 8787
+
+# Declara o comando base (o usuário só passa os argumentos, tipo 'dl',
+# '--sync-db' ou 'gui --host 0.0.0.0')
 ENTRYPOINT ["python", "-m", "qobuz_dl"]

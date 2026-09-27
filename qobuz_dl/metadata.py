@@ -23,6 +23,30 @@ from qobuz_dl.utils import (
 
 logger = logging.getLogger(__name__)
 
+# # Campos que podem conter vários créditos (ex.: "A, B") e que, com
+# # multi_value_tags, viram tags DE VERDADE multivaloradas (uma entrada por
+# # valor), em vez de um texto único com separador trocado.
+MULTI_VALUE_FIELDS = {
+    "ARTIST",
+    "ARTISTSORT",
+    "ALBUMARTIST",
+    "ALBUMARTISTSORT",
+    "COMPOSER",
+    "GENRE",
+}
+
+
+def _split_multi_value(value: str) -> list:
+    """Quebra um texto unido por ", " em uma lista de valores individuais.
+
+    Usado para gravar tags multivaloradas de verdade (FLAC: múltiplas
+    entradas VORBIS_COMMENT com a mesma chave; ID3v2.4: múltiplos valores
+    de texto no mesmo frame), em vez de apenas trocar o separador dentro de
+    uma única string -- que era o bug original (tudo virava "A ; B" num só
+    campo, sem nenhuma separação real).
+    """
+    return [part.strip() for part in value.split(", ") if part.strip()]
+
 
 COPYRIGHT, PHON_COPYRIGHT = "\u00a9", "\u2117"
 # ANTES: os dois valores estavam trocados ("\u2117", "\u00a9") -- COPYRIGHT
@@ -417,25 +441,22 @@ def tag_flac(
 
     tags["COMMENT"] = base_comment
 
-    # # Só grava valores preenchidos; multi_value_tags troca separadores por " ; ".
+    # # Só grava valores preenchidos. Com multi_value_tags, ARTIST/COMPOSER/
+    # # GENRE etc. viram tags multivaloradas de verdade -- uma entrada
+    # # VORBIS_COMMENT por valor, e não um texto único "A ; B". A maioria dos
+    # # players que entendem tags multivaloradas junta os valores com ", " ao
+    # # exibir; quem não entende, mostra só o primeiro valor.
     for k, v in tags.items():
         if v:
             if (
                 getattr(settings, "multi_value_tags", False)
-                and k
-                in [
-                    "ARTIST",
-                    "ARTISTSORT",
-                    "ALBUMARTIST",
-                    "ALBUMARTISTSORT",
-                    "COMPOSER",
-                    "GENRE",
-                ]
+                and k in MULTI_VALUE_FIELDS
                 and isinstance(v, str)
+                and ", " in v
             ):
-                if ", " in v:
-                    v = v.replace(", ", " ; ")
-            audio[k] = v
+                audio[k] = _split_multi_value(v)
+            else:
+                audio[k] = v
 
     if em_image:
         _embed_flac_img(root_dir, audio, cover_override=embed_cover_path)
@@ -536,24 +557,20 @@ def tag_mp3(
 
     tags["COMMENT"] = base_comment
 
-    # # Só grava valores preenchidos; multi_value_tags troca separadores por " ; ".
+    # # Só grava valores preenchidos. Com multi_value_tags, ARTIST/COMPOSER/
+    # # GENRE etc. viram frames ID3 com múltiplos valores de texto de
+    # # verdade (não mais "A ; B" num único texto). Isso exige ID3v2.4 --
+    # # v2.3 não tem suporte real a texto multivalor -- por isso o save()
+    # # abaixo usa v2_version=4 quando multi_value_tags está ativo.
     for k, v in tags.items():
         if v:
-            if (
+            is_multi = (
                 getattr(settings, "multi_value_tags", False)
-                and k
-                in [
-                    "ARTIST",
-                    "ARTISTSORT",
-                    "ALBUMARTIST",
-                    "ALBUMARTISTSORT",
-                    "COMPOSER",
-                    "GENRE",
-                ]
+                and k in MULTI_VALUE_FIELDS
                 and isinstance(v, str)
-            ):
-                if ", " in v:
-                    v = v.replace(", ", " ; ")
+                and ", " in v
+            )
+            write_values = _split_multi_value(v) if is_multi else [v]
 
             id3tag = ID3_LEGEND.get(k.lower()) or ID3_LEGEND.get(k)
             if id3tag:
@@ -562,7 +579,7 @@ def tag_mp3(
                 elif id3tag == id3.COMM:
                     audio.add(id3tag(encoding=3, lang="eng", desc="", text=[v]))
                 else:
-                    audio[id3tag.__name__] = id3tag(encoding=3, text=v)
+                    audio[id3tag.__name__] = id3tag(encoding=3, text=write_values)
 
     _trck_n = qobuz_item.get("track_number", "1")
     _trck_total = qobuz_album.get("tracks_count", "1")
@@ -579,7 +596,13 @@ def tag_mp3(
     audio.pop("TENC", None)
     audio.pop("TSSE", None)
 
-    audio.save(filename, v2_version=3)
+    # # v2.4 só quando multi_value_tags está ativo (precisa dele para
+    # # frames de texto multivalor de verdade). Sem essa opção, mantém
+    # # v2.3 para não mudar a compatibilidade padrão com players antigos.
+    audio.save(
+        filename,
+        v2_version=4 if getattr(settings, "multi_value_tags", False) else 3,
+    )
     os.rename(filename, final_name)
 
 

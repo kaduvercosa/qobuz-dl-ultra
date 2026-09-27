@@ -33,6 +33,13 @@ class LyricsEngine:
     em arquivos auxiliares e metadados FLAC/MP3.
     """
 
+    # # Deslocamento (ms) aplicado a uma linha de traducao que colide com um
+    # # timestamp ja usado no LRC bilingue. 20ms fica acima da resolucao de
+    # # centesimos de segundo (2 casas) usada por alguns parsers de LRC, mas
+    # # e' bem abaixo do limiar de ~100ms onde um atraso texto/audio comeca a
+    # # ser percebido. Ver docstring de _build_bilingual_lrc().
+    _BILINGUAL_TRANSLATION_OFFSET_MS = 20
+
     def __init__(self, genius_token=None, session=None, settings=None):
         """Initialize lyrics engine with optional Genius token and HTTP session."""
         self.genius_token = genius_token
@@ -164,27 +171,47 @@ class LyricsEngine:
 
     def _build_bilingual_lrc(self, original_lrc, translated_lrc):
         """
-        Combina letra original e traducao: DUAS linhas com o MESMO
-        timestamp [MM:SS.mmm] -- original primeiro, traducao logo depois
-        (prefixo " » ").
+        Combina letra original e traducao numa unica letra LRC, uma linha
+        por idioma para cada verso (traducao prefixada com " » ").
 
-        Ja tentei duas alternativas pra fugir da colisao de timestamp
-        (deslocar a traducao em 1ms; e uma linha de continuacao sem tag
-        propria), mas na pratica (testado no Flacbox real) nenhuma das
-        duas produz quebra de linha visual de verdade -- o player junta o
-        texto todo associado ao timestamp corrente num bloco continuo,
-        respeitando ou nao uma tag [tempo] separada. O que o Flacbox
-        realmente reconhece pra empilhar original/traducao como duas
-        linhas distintas e exatamente ESSE formato: duas entradas com o
-        MESMO timestamp exato.
+        Historico do bug: a primeira versao gravava original e traducao com
+        o MESMO timestamp [MM:SS.mmm] -- convencao usada por apps tipo
+        NetEase/QQ Music -- porque foi o unico formato que empilhou as duas
+        linhas corretamente num player especifico testado manualmente
+        (Flacbox). O problema: timestamp EXATAMENTE igual quebra em muitos
+        outros players de LRC. Dois sintomas relatados, e os dois vem da
+        MESMA causa (chave de tempo duplicada):
+          1. Players que guardam as linhas num dicionario indexado pelo
+             timestamp (ex.: lyricsByTime["00:12.340"] = texto) tem a
+             traducao sobrescrevendo a original nessa chave -- so a
+             traducao (a "2a linha") fica visivel.
+          2. Players que tratam duas entradas com o mesmo tempo como uma
+             unica "linha atual" concatenam o texto das duas num bloco so,
+             sem quebra visual entre original e traducao.
 
-        Tradeoff que isso reintroduz: players "ingenuos" que guardam as
-        linhas num dicionario indexado pelo timestamp (ex.:
-        lyricsByTime["00:12.340"] = texto) tem a traducao sobrescrevendo a
-        original nessa chave, e so ela fica destacada. Sem um exemplo
-        concreto desse comportamento (o unico caso real observado ate
-        agora, o Flacbox, funciona certo com timestamps identicos), fica
-        certo priorizar o formato que comprovadamente funciona.
+        Correcao: a linha de traducao so recebe o EXATO mesmo timestamp da
+        original quando esse tempo ainda nao foi usado; se colidir (que e'
+        sempre o caso aqui, ja que original/traducao vem alinhadas ponto a
+        ponto pela API), ela e' deslocada pra frente em incrementos de
+        _BILINGUAL_TRANSLATION_OFFSET_MS ate virar uma chave unica. Um
+        deslocamento de poucos milissegundos e' imperceptivel pra quem
+        esta ouvindo (bem abaixo do limiar de ~100ms onde um atraso
+        texto/audio comeca a ser notado), mas ja e' suficiente pra virar
+        uma chave diferente em qualquer parser -- resolve os dois sintomas
+        acima na grande maioria dos players. O valor usado (20ms) fica
+        acima da resolucao de centesimos de segundo (2 casas decimais) que
+        alguns parsers usam ao comparar tempos, o que 1ms nao garantia.
+
+        Tradeoff que isso reintroduz: um player que SO empilha duas linhas
+        quando o timestamp e' exatamente identico (como o Flacbox testado
+        originalmente) passa a tratar original e traducao como duas linhas
+        sequenciais normais, com a traducao "realcando" ~20ms depois da
+        original, em vez de uma dupla simultanea. Na pratica costuma ser
+        imperceptivel, ja que a maioria dos players mostra uma janela de
+        varias linhas ao redor da atual de qualquer forma -- e e' um
+        tradeoff bem melhor do que perder a linha original inteira ou
+        misturar as duas letras num bloco ilegivel, que e' o que acontecia
+        antes na maioria dos outros players.
         """
         if not original_lrc or not translated_lrc:
             return original_lrc or translated_lrc
@@ -207,7 +234,7 @@ class LyricsEngine:
                             int(m) * 60000 + int(s) * 1000 + int(ms.ljust(3, "0")[:3])
                         )
 
-                        parsed.append((time_ms, tag, text, is_translation))
+                        parsed.append((time_ms, text, is_translation))
                     except ValueError:
                         continue
             return parsed
@@ -216,11 +243,22 @@ class LyricsEngine:
         trans_parsed = parse_lrc(translated_lrc, True)
 
         combined = orig_parsed + trans_parsed
-        combined.sort(key=lambda x: (x[0], x[3]))
+        combined.sort(key=lambda x: (x[0], x[2]))
 
+        # # Garante timestamps unicos: quando a linha de traducao colide com
+        # # um tempo ja usado (pela original ou por outra traducao), ela e'
+        # # deslocada pra frente ate ficar unica -- nunca sobrescrevendo a
+        # # original, nunca virando um bloco so com a linha anterior.
+        used_times = set()
         final_lrc = []
-        for item in combined:
-            tag, text, is_trans = item[1], item[2], item[3]
+        for time_ms, text, is_trans in combined:
+            final_time = time_ms
+            if is_trans:
+                while final_time in used_times:
+                    final_time += self._BILINGUAL_TRANSLATION_OFFSET_MS
+            used_times.add(final_time)
+
+            tag = self._ms_to_lrc_timestamp(final_time)
             if is_trans:
                 final_lrc.append(f"{tag} » {text}")
             else:

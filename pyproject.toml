@@ -99,7 +99,6 @@ Issues = "https://github.com/kaduvercosa/qobuz-dl-ultra/issues"
 [project.scripts]
 qobuz-dl = "qobuz_dl:main"
 qdl = "qobuz_dl:main"
-qobuz-dl-studio = "qobuz_dl.webapp:main"
 
 [tool.setuptools.dynamic]
 version = { attr = "qobuz_dl.__version__" }

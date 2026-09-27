@@ -25,4 +25,4 @@
 
 - O player browser atende formatos diretos compatíveis; streams Hi-Res com decodificação proprietária devem ser baixados.
 - O browser não consegue escolher caminhos locais por picker de arquivo; informe o diretório local em Preferências.
-- A instalação do extra GUI acontece uma vez pelo instalador Python; depois, `qobuz-dl-studio` inicia a GUI local.
+- A instalação do extra GUI acontece uma vez pelo instalador Python; depois, `qobuz-dl gui` inicia a GUI local.

@@ -960,6 +960,41 @@ def doctor_args(subparsers):
     return doc
 
 
+def gui_args(subparsers):
+    """Define the 'gui' subcommand and its arguments."""
+    gui = subparsers.add_parser(
+        "gui",
+        aliases=["studio", "web"],
+        usage="qobuz-dl gui [--host HOST] [--port N] [--demo] [--no-browser]",
+        description=(
+            "Sobe a interface web local (Qobuz Studio) desta mesma instalação, "
+            "em primeiro plano. Ctrl+C encerra o servidor e devolve o terminal "
+            "normalmente -- os outros comandos (dl, lucky, doctor...) continuam "
+            "funcionando exatamente como antes, com ou sem a GUI instalada."
+        ),
+        help="abre a interface web local (Qobuz Studio)",
+    )
+    gui.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="interface de rede (padrão: só este computador; use 0.0.0.0 só se souber o que está fazendo)",
+    )
+    gui.add_argument(
+        "--port", type=int, default=8787, help="porta local (padrão: 8787)"
+    )
+    gui.add_argument(
+        "--demo",
+        action="store_true",
+        help="abre em modo demonstração, sem acessar conta nem baixar nada de verdade",
+    )
+    gui.add_argument(
+        "--no-browser",
+        action="store_true",
+        help="não abre o navegador automaticamente",
+    )
+    return gui
+
+
 # ----------------------------------------------------------------------------
 # Montagem do parser principal
 # ----------------------------------------------------------------------------
@@ -1042,6 +1077,7 @@ def qobuz_dl_args(default_quality=6, default_limit=20, default_folder=None):
     scan_cmd = scan_args(subparsers)
     library_cmd = library_args(subparsers)
     doctor_cmd = doctor_args(subparsers)
+    gui_cmd = gui_args(subparsers)
 
     for subparser in (interactive, download, lucky, sync_pl_cmd, sync_fav_cmd):
         add_common_arg(subparser, default_folder, default_quality)
