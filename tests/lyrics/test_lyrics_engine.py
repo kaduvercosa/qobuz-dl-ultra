@@ -128,9 +128,11 @@ class TestBuildBilingualLrc:
                 tag_atual = re.match(r"(\[\d{2,}:\d{2}\.\d{2,3}\])", linha)
                 tag_anterior = re.match(r"(\[\d{2,}:\d{2}\.\d{2,3}\])", linhas[i - 1])
                 if tag_atual and tag_anterior:
-                    assert tag_atual.group(1) == tag_anterior.group(1), (
-                        f"traducao em {tag_atual.group(1)} nao tem original "
-                        f"imediatamente antes (linha anterior: {linhas[i - 1]!r})"
+                    ms_atual = int(tag_atual.group(1)[-4:-1])
+                    ms_anterior = int(tag_anterior.group(1)[-4:-1])
+                    assert ms_atual == ms_anterior + 20, (
+                        f"traducao em {tag_atual.group(1)} não possui o offset "
+                        f"esperado de 20ms (linha anterior: {linhas[i - 1]!r})"
                     )
 
     def test_prefixo_de_traducao_presente(self, build_bilingual):

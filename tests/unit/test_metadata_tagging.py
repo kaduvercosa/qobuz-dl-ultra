@@ -186,7 +186,7 @@ class TestTagFlac:
 
         assert fake.tags.vendor == ""
 
-    def test_multi_value_tags_troca_virgula_por_ponto_e_virgula(
+    def test_multi_value_tags_cria_lista_para_mutagen(
         self, monkeypatch, tmp_path
     ):
         fake = FakeFLAC()
@@ -205,13 +205,12 @@ class TestTagFlac:
             str(tmp_path),
             str(tmp_path / "final.flac"),
             item,
-            _album(artist={}),  # idem: sem isso, fallback pro artist do
-            # álbum ainda entraria como artista extra
+            _album(artist={}),  # idem: sem isso, fallback pro artist do álbum ainda entraria como artista extra
             istrack=False,
             settings=QobuzDLSettings(multi_value_tags=True),
         )
 
-        assert fake["ARTIST"] == "Artista Um ; Artista Dois"
+        assert fake["ARTIST"] == ["Artista Um ; Artista Dois"]
 
     def test_sem_multi_value_tags_mantem_virgula(self, monkeypatch, tmp_path):
         fake = FakeFLAC()
