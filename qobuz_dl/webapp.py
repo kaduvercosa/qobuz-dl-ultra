@@ -1449,21 +1449,14 @@ def create_app(*, demo: bool = False) -> FastAPI:
     return app
 
 
-def run_gui(
+async def run_gui(
     host: str = "127.0.0.1",
     port: int = 8787,
     demo: bool = False,
     open_browser: bool = True,
 ) -> None:
-    """Sobe o servidor da GUI (bloqueante — roda em primeiro plano até Ctrl+C).
-
-    Função pura, sem argparse próprio: é o que tanto `qobuz-dl gui` (comando
-    principal, ver qobuz_dl/cli.py) quanto `main()` abaixo (uso direto via
-    `python -m qobuz_dl.webapp`) chamam por baixo. Loopback é o padrão do
-    host para manter a instalação privada por padrão.
-    """
+    """Sobe o servidor da GUI de forma assíncrona usando o event loop ativo."""
     import webbrowser
-
     import uvicorn
 
     if not 1 <= port <= 65535:
@@ -1474,7 +1467,11 @@ def run_gui(
         )
     if open_browser and not demo:
         webbrowser.open(f"http://127.0.0.1:{port}/")
-    uvicorn.run(create_app(demo=demo), host=host, port=port, log_level="info")
+        
+    # Inicializa o servidor Uvicorn para rodar no event loop existente
+    config = uvicorn.Config(create_app(demo=demo), host=host, port=port, log_level="info")
+    server = uvicorn.Server(config)
+    await server.serve()
 
 
 def main() -> None:
