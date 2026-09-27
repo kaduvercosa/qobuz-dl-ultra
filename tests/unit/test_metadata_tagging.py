@@ -186,7 +186,7 @@ class TestTagFlac:
 
         assert fake.tags.vendor == ""
 
-    def test_multi_value_tags_cria_lista_para_mutagen(
+    def test_multi_value_tags_troca_vírgula_por_ponto_e_virgula(
         self, monkeypatch, tmp_path
     ):
         fake = FakeFLAC()
