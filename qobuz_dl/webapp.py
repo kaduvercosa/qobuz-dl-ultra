@@ -1467,9 +1467,11 @@ async def run_gui(
         )
     if open_browser and not demo:
         webbrowser.open(f"http://127.0.0.1:{port}/")
-        
+
     # Inicializa o servidor Uvicorn para rodar no event loop existente
-    config = uvicorn.Config(create_app(demo=demo), host=host, port=port, log_level="info")
+    config = uvicorn.Config(
+        create_app(demo=demo), host=host, port=port, log_level="info"
+    )
     server = uvicorn.Server(config)
     await server.serve()
 

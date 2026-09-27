@@ -205,7 +205,9 @@ class TestTagFlac:
             str(tmp_path),
             str(tmp_path / "final.flac"),
             item,
-            _album(artist={}),  # idem: sem isso, fallback pro artist do álbum ainda entraria como artista extra
+            _album(
+                artist={}
+            ),  # idem: sem isso, fallback pro artist do álbum ainda entraria como artista extra
             istrack=False,
             settings=QobuzDLSettings(multi_value_tags=True),
         )
