@@ -965,19 +965,35 @@ def gui_args(subparsers):
     gui = subparsers.add_parser(
         "gui",
         aliases=["studio", "web"],
-        usage="qobuz-dl gui [--host HOST] [--port N] [--demo] [--no-browser]",
+        usage="qobuz-dl gui [start|stop|status|run] [--host HOST] [--port N] [--demo] [--no-browser]",
         description=(
-            "Sobe a interface web local (Qobuz Studio) desta mesma instalação, "
-            "em primeiro plano. Ctrl+C encerra o servidor e devolve o terminal "
-            "normalmente -- os outros comandos (dl, lucky, doctor...) continuam "
-            "funcionando exatamente como antes, com ou sem a GUI instalada."
+            "Controla a interface web local (Qobuz Studio) desta mesma "
+            "instalação. 'start' (padrão) sobe em segundo plano e devolve "
+            "o terminal na hora; 'stop' encerra; 'status' informa se está "
+            "rodando; 'run' sobe em primeiro plano (bloqueante, Ctrl+C "
+            "encerra) -- é o modo usado por trás de 'start' e também o "
+            "indicado para Docker. Os outros comandos (dl, lucky, "
+            "doctor...) continuam funcionando normalmente, com ou sem a "
+            "GUI ligada, com ou sem o extra opcional 'gui' instalado."
         ),
-        help="abre a interface web local (Qobuz Studio)",
+        help="controla a interface web local (Qobuz Studio): start/stop/status/run",
+    )
+    gui.add_argument(
+        "action",
+        nargs="?",
+        default="start",
+        choices=["start", "stop", "status", "run"],
+        help="start (padrão): sobe em segundo plano; stop: encerra; status: consulta; run: primeiro plano",
     )
     gui.add_argument(
         "--host",
-        default="127.0.0.1",
-        help="interface de rede (padrão: só este computador; use 0.0.0.0 só se souber o que está fazendo)",
+        default="0.0.0.0",
+        help=(
+            "interface de rede (padrão: só este computador). Aceita "
+            "'lan' para detectar e usar o IP desta máquina na rede "
+            "local, '0.0.0.0' para todas as interfaces (Docker/preview "
+            "isolado), ou um IP específico"
+        ),
     )
     gui.add_argument(
         "--port", type=int, default=8787, help="porta local (padrão: 8787)"

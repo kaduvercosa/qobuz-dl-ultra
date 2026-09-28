@@ -28,7 +28,7 @@ COPY qobuz_dl ./qobuz_dl
 # (tools/gerar_requirements.py), instalar direto do pyproject elimina o
 # fallback e a possibilidade de build "com sucesso" a partir de
 # dependências erradas/desatualizadas.
-# O extra [gui] entra por padrão na imagem pra 'qobuz-dl gui' funcionar
+# O extra [gui] entra por padrão na imagem pra 'qobuz-dl gui run' funcionar
 # direto, sem rebuild -- é só FastAPI+Uvicorn, custo baixo de tamanho.
 RUN pip install --no-cache-dir '.[gui]'
 
@@ -40,5 +40,10 @@ WORKDIR /home/qobuz
 EXPOSE 8787
 
 # Declara o comando base (o usuário só passa os argumentos, tipo 'dl',
-# '--sync-db' ou 'gui --host 0.0.0.0')
+# '--sync-db' ou 'gui run --host 0.0.0.0'). Dentro do container o
+# subcomando da GUI tem que ser 'gui run' (primeiro plano) e não o
+# padrão 'gui'/'gui start' (segundo plano): o container só continua de
+# pé enquanto o processo PID 1 estiver rodando em primeiro plano -- se
+# ele subisse em segundo plano e devolvesse o terminal, o container
+# encerraria na hora.
 ENTRYPOINT ["python", "-m", "qobuz_dl"]

@@ -28,6 +28,7 @@ from pydantic import BaseModel, Field
 
 from qobuz_dl.core import QobuzDL
 from qobuz_dl.constants import DEFAULT_FOLDER, DEFAULT_TRACK
+from qobuz_dl.paths import ensure_directory_ready
 from qobuz_dl.settings import QobuzDLSettings
 from qobuz_dl.utils import get_config_paths
 
@@ -632,6 +633,15 @@ class GuiService:
         if self.demo:
             return None
         if not self.client:
+            # Fallback preguiçoso: se o autoconnect do startup (ver
+            # lifespan() em create_app) não rolou por algum motivo
+            # transitório, tenta de novo aqui usando config.ini/keyring
+            # antes de desistir e pedir pra pessoa conectar manualmente.
+            try:
+                await self.connect()
+            except (RuntimeError, HTTPException):
+                pass
+        if not self.client:
             raise HTTPException(
                 status_code=409,
                 detail="Conecte sua conta Qobuz para acessar o catálogo.",
@@ -642,9 +652,11 @@ class GuiService:
         directory, quality = request.directory, request.quality
         if quality not in QUALITY_LABELS:
             raise ValueError("Qualidade inválida")
-        expanded = Path(os.path.expanduser(directory)).resolve()
-        if expanded.exists() and not expanded.is_dir():
-            raise ValueError("O destino informado existe e não é uma pasta")
+        # Testa (e cria, se preciso) a pasta de verdade antes de gravar
+        # qualquer coisa -- ver qobuz_dl/paths.py. DirectoryNotUsable é uma
+        # ValueError, então a rota /api/settings já converte pro toast
+        # certo sem precisar de mais nenhum tratamento aqui.
+        expanded = ensure_directory_ready(directory)
         self.local_settings = request.model_dump()
         self.local_settings["directory"] = str(expanded)
         self.settings_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1100,11 +1112,23 @@ def _album_result(item: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def create_app(*, demo: bool = False) -> FastAPI:
+def create_app(*, demo: bool = False, allow_network: bool = False) -> FastAPI:
     service = GuiService(demo=demo)
 
     @asynccontextmanager
     async def lifespan(_app):
+        if not service.demo:
+            # Tenta autenticar de cara usando o que já estiver no
+            # config.ini/keyring (a mesma fonte que a CLI usa) -- assim
+            # quem já rodou `qobuz-dl -r` antes não precisa "logar de
+            # novo" clicando em Conectar na GUI. Falha aqui é normal
+            # (config ainda não existe, token expirou etc.); a pessoa
+            # configura pela tela de Preferências nesse caso, e
+            # ensure_connected() tenta de novo puxo a puxo mais abaixo.
+            try:
+                await service.connect()
+            except Exception:
+                pass
         yield
         for job_id in list(service.tool_processes):
             await service.stop_tool(job_id)
@@ -1130,21 +1154,23 @@ def create_app(*, demo: bool = False) -> FastAPI:
 
     @app.middleware("http")
     async def local_origin_guard(request: Request, call_next):
-        host = request.headers.get("host", "").split(":", 1)[0].strip("[]").lower()
-        if host not in {"localhost", "127.0.0.1", "::1"} and not demo:
+        loopback = {"localhost", "127.0.0.1", "::1"}
+        host = (urlparse("//" + request.headers.get("host", "")).hostname or "").lower()
+        if not demo and not allow_network and host not in loopback:
             return Response(
                 "A interface aceita apenas conexões locais.", status_code=403
             )
         origin = request.headers.get("origin")
         site = request.headers.get("sec-fetch-site")
+        # Proteção CSRF: o Origin precisa ser o mesmo host acessado (em rede)
+        # ou loopback (local). Outro site nunca passa.
+        allowed_origins = {host} if allow_network else loopback
         if not demo and (
-            (
-                origin
-                and urlparse(origin).hostname not in {"localhost", "127.0.0.1", "::1"}
-            )
+            (origin and urlparse(origin).hostname not in allowed_origins)
             or site in {"cross-site", "same-site"}
         ):
             return Response("Origem não permitida.", status_code=403)
+
         response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "no-referrer"
@@ -1449,37 +1475,78 @@ def create_app(*, demo: bool = False) -> FastAPI:
     return app
 
 
-async def run_gui(
-    host: str = "127.0.0.1",
+def run_gui(
+    host: str = "0.0.0.0",
     port: int = 8787,
     demo: bool = False,
     open_browser: bool = True,
 ) -> None:
-    """Sobe o servidor da GUI de forma assíncrona usando o event loop ativo."""
+    """Sobe o servidor da GUI (bloqueante -- roda em primeiro plano até Ctrl+C).
+
+    Usado por `qobuz-dl gui run` e pelo processo filho que
+    `qobuz_dl.gui_daemon.start()` cria em segundo plano. `host` aceita
+    loopback, `0.0.0.0`, `lan` (IP desta máquina na rede local) ou um IP válido.
+    """
+    import asyncio
+    import threading
     import webbrowser
+
     import uvicorn
+
+    from qobuz_dl.gui_daemon import resolve_host, validate_host
 
     if not 1 <= port <= 65535:
         raise ValueError("a porta precisa estar entre 1 e 65535")
-    if host not in {"127.0.0.1", "localhost", "::1", "0.0.0.0"}:
-        raise ValueError(
-            "por segurança, o host deve ser loopback; 0.0.0.0 só é útil para um preview isolado"
-        )
-    if open_browser and not demo:
-        webbrowser.open(f"http://127.0.0.1:{port}/")
+    resolved_host = validate_host(resolve_host(host))
+    loopback = {"127.0.0.1", "localhost", "::1"}
+    if open_browser and not demo and (
+        resolved_host in loopback or resolved_host == "0.0.0.0"
+    ):
+        local = "127.0.0.1" if resolved_host == "0.0.0.0" else resolved_host
+        webbrowser.open(f"http://{local}:{port}/")
 
-    # Inicializa o servidor Uvicorn para rodar no event loop existente
-    config = uvicorn.Config(
-        create_app(demo=demo), host=host, port=port, log_level="info"
+    server = uvicorn.Server(
+        uvicorn.Config(
+            create_app(demo=demo, allow_network=resolved_host not in loopback),
+            host=resolved_host,
+            port=port,
+            log_level="info"
+        )
     )
-    server = uvicorn.Server(config)
-    await server.serve()
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        # Sem event loop rodando (ex.: `python -m qobuz_dl.webapp`): caminho normal.
+        server.run()
+        return
+
+    # Chamado de dentro de um event loop já ativo (é o caso de `qobuz-dl gui run`,
+    # que passa por async_main em cli.py): server.run() chamaria asyncio.run()
+    # de novo e estouraria. Roda o servidor numa thread com loop próprio e
+    # bloqueia aqui até ele terminar.
+    thread = threading.Thread(target=server.run, name="qobuz-gui-server", daemon=True)
+    thread.start()
+    try:
+        while thread.is_alive():
+            thread.join(0.5)
+    except KeyboardInterrupt:
+        server.should_exit = True
+        thread.join(5)
+        return
+
+    if not server.started:
+        raise ValueError(
+            f"o servidor não conseguiu subir em {resolved_host}:{port} "
+            "(a porta pode já estar em uso)"
+        )
 
 
 def main() -> None:
     """Ponto de entrada para `python -m qobuz_dl.webapp` (uso direto, fora
     do comando principal). O caminho documentado e recomendado é
-    `qobuz-dl gui` — ver qobuz_dl/cli.py e o README."""
+    `qobuz-dl gui` (ou `qobuz-dl gui run` para primeiro plano) — ver
+    qobuz_dl/cli.py e o README."""
     import argparse
 
     parser = argparse.ArgumentParser(
@@ -1487,7 +1554,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--host",
-        default="127.0.0.1",
+        default="0.0.0.0",
         help="Interface de rede (padrão: apenas este computador)",
     )
     parser.add_argument(

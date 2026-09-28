@@ -1,5 +1,5 @@
 /* ============================================================================
-   app.css — Qobuz Studio
+   app.css -- Qobuz Studio
    Sistema de design inspirado na linguagem visual da Nothing: matriz de
    pontos, vermelho de assinatura, tipografia técnica/mono, transparência e
    um único acento de cor sobre uma base monocromática. Duas fontes apenas
@@ -53,6 +53,12 @@ body {
 img {
   max-width: 100%;
   display: block;
+}
+
+/* O atributo hidden precisa sempre vencer: várias classes abaixo definem
+   display (flex/grid/inline-flex) e, sem isto, escondiam nada. */
+[hidden] {
+  display: none !important;
 }
 
 button,
@@ -289,7 +295,7 @@ p {
   position: relative;
   display: inline-flex;
   align-items: center;
-  height: 22px;
+  height: 30px;
 }
 
 .brand-logo img {
@@ -1631,10 +1637,8 @@ label.form-label + .path-input-row {
   margin-top: 0;
 }
 
-[id^="settings-"],
-.settings-modal label {
+.settings-modal .form-label {
   margin-top: var(--space-4);
-  display: block;
 }
 
 .modal-actions {
@@ -2214,6 +2218,13 @@ input[type="range"]::-moz-range-thumb {
   to { opacity: 1; transform: translateY(0); }
 }
 
+/* O scrim do menu mobile só existe no drawer (<=760px). Fora dele precisa
+   sumir: como filho direto do grid .app-shell, ocupava a coluna da sidebar
+   e empurrava sidebar e conteúdo pra lugares errados. */
+.sidebar-scrim {
+  display: none;
+}
+
 /* 16. Responsivo --------------------------------------------------------------- */
 
 /* Regras compartilhadas por rail (tablet) e drawer (celular): conteúdo que
@@ -2244,7 +2255,8 @@ input[type="range"]::-moz-range-thumb {
     align-items: center;
   }
 
-  .sidebar-scroll {
+  .sidebar-scroll,
+  .sidebar-bottom {
     width: 100%;
   }
 
@@ -2259,7 +2271,6 @@ input[type="range"]::-moz-range-thumb {
   }
 
   .nav-link span:not(.nav-icon):not(.nav-count),
-  .collection-link:not(.collection-dot),
   .settings-link span:not(.nav-icon),
   .nav-group-label,
   .sidebar-note,
@@ -2334,6 +2345,7 @@ input[type="range"]::-moz-range-thumb {
   }
 
   .sidebar-scrim {
+    display: block;
     position: fixed;
     inset: 0;
     z-index: 39;

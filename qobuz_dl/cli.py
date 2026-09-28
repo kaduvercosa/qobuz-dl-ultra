@@ -40,6 +40,7 @@ from qobuz_dl.color import accent_preview
 from qobuz_dl.commands import qobuz_dl_args
 from qobuz_dl.core import QobuzDL
 from qobuz_dl.downloader import DEFAULT_FOLDER, DEFAULT_TRACK
+from qobuz_dl.paths import DirectoryNotUsable, ensure_directory_ready
 from qobuz_dl.settings import QobuzDLSettings
 from qobuz_dl.utils import checar_binarios_externos, get_config_paths
 
@@ -412,10 +413,23 @@ async def _reset_config(config_file: str):
     else:
         config["qobuz"]["genius_token"] = genius_token
 
-    config["qobuz"]["directory"] = (
-        input("\nPasta de download (pressione Enter para 'Qobuz Downloads')\n- ")
-        or "Qobuz Downloads"
-    )
+    while True:
+        directory_input = (
+            input("\nPasta de download (pressione Enter para 'Qobuz Downloads')\n- ")
+            or "Qobuz Downloads"
+        )
+        try:
+            # Testa (e cria, se preciso) a pasta de verdade agora, não só
+            # na hora de baixar -- ver qobuz_dl/paths.py. Guarda o texto
+            # original (não o caminho resolvido) no config.ini: caminhos
+            # relativos e o `~` continuam sendo expandidos em tempo de
+            # uso, o que mantém o config.ini portátil entre máquinas.
+            ensure_directory_ready(directory_input)
+        except DirectoryNotUsable as error:
+            ui.warn(str(error))
+            continue
+        break
+    config["qobuz"]["directory"] = directory_input
     config["qobuz"]["folder_format"] = (
         input(f"\nFormato da pasta (pressione Enter para '{DEFAULT_FOLDER}')\n- ")
         or DEFAULT_FOLDER
@@ -1140,6 +1154,48 @@ async def async_main():
         sys.exit(await run_inspector(getattr(offline_args, "caminho", None)))
 
     if offline_command in ("gui", "studio", "web"):
+        action = getattr(offline_args, "action", "start")
+        host = getattr(offline_args, "host", "0.0.0.0")
+        port = getattr(offline_args, "port", 8787)
+        demo = getattr(offline_args, "demo", False)
+        open_browser = not getattr(offline_args, "no_browser", False)
+
+        if action in ("start", "stop", "status"):
+            # start/stop/status são só orquestração de processo (biblioteca
+            # padrão) -- não precisam do extra [gui] instalado, então nem
+            # tentam importar qobuz_dl.webapp (que puxa FastAPI/Uvicorn).
+            from qobuz_dl import gui_daemon
+
+            try:
+                if action == "start":
+                    info = gui_daemon.start(
+                        host=host, port=port, demo=demo, open_browser=open_browser
+                    )
+                    url = gui_daemon.display_url(info["host"], info["port"])
+                    if info.get("alreadyRunning"):
+                        ui.emit(f"{YELLOW}Qobuz-DL-Ultra GUI já estava rodando em {url}{RESET}")
+                    else:
+                        ui.emit(f"{GREEN}Qobuz-DL-Ultra GUI rodando em {url}{RESET}")
+                    ui.emit(f"{MUTED}PID {info['pid']} · log em {info.get('log', '')}{RESET}")
+                    ui.emit(f"{MUTED}Terminal livre -- pare com: qobuz-dl gui stop{RESET}")
+                elif action == "stop":
+                    stopped = gui_daemon.stop()
+                    if stopped:
+                        ui.emit(f"{GREEN}Qobuz-DL-Ultra GUI encerrado.{RESET}")
+                    else:
+                        ui.emit(f"{YELLOW}Qobuz-DL-Ultra GUI não estava rodando.{RESET}")
+                else:  # status
+                    info = gui_daemon.status()
+                    if info["running"]:
+                        url = gui_daemon.display_url(info["host"], info["port"])
+                        ui.emit(f"{GREEN}rodando{RESET} · PID {info['pid']} · {url}")
+                    else:
+                        ui.emit(f"{MUTED}Qobuz-DL-Ultra GUI não está rodando.{RESET}")
+            except (ValueError, RuntimeError) as error:
+                sys.exit(f"{RED}{error}{RESET}")
+            sys.exit(0)
+
+        # action == "run": primeiro plano, bloqueante -- precisa do extra [gui].
         try:
             from qobuz_dl.webapp import run_gui
         except ImportError:
@@ -1148,12 +1204,7 @@ async def async_main():
                 f"{YELLOW}Instale com: pip install 'qobuz-dl-ultra[gui]'{RESET}"
             )
         try:
-            run_gui(
-                host=getattr(offline_args, "host", "127.0.0.1"),
-                port=getattr(offline_args, "port", 8787),
-                demo=getattr(offline_args, "demo", False),
-                open_browser=not getattr(offline_args, "no_browser", False),
-            )
+            run_gui(host=host, port=port, demo=demo, open_browser=open_browser)
         except ValueError as error:
             sys.exit(f"{RED}{error}{RESET}")
         except KeyboardInterrupt:

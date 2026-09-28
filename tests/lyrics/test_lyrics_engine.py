@@ -124,7 +124,6 @@ class TestBuildBilingualLrc:
         linhas = r.splitlines()
         for i, linha in enumerate(linhas):
             if "»" in linha and i > 0:
-                # A linha anterior deve ter o timestamp base (20ms a menos)
                 tag_atual = re.match(r"(\[\d{2,}:\d{2}\.\d{2,3}\])", linha)
                 tag_anterior = re.match(r"(\[\d{2,}:\d{2}\.\d{2,3}\])", linhas[i - 1])
                 if tag_atual and tag_anterior:

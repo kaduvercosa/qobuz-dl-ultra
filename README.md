@@ -26,6 +26,8 @@
 * [🖥️ Qobuz-DL Studio — interface web local](#️-qobuz-dl-studio--interface-web-local)
   * [Requisitos](#requisitos)
   * [Instalação rápida](#instalação-rápida)
+  * [As quatro ações: start · stop · status · run](#as-quatro-ações-start--stop--status--run)
+  * [Acesso pela rede local](#acesso-pela-rede-local)
   * [Uso com Docker](#uso-com-docker)
   * [Primeiro uso](#primeiro-uso)
   * [🔒 Segurança e permissões](#-segurança-e-permissões)
@@ -454,9 +456,9 @@ python check_audio.py
 
 ## 🖥️ Qobuz-DL Studio — interface web local
 
-O Qobuz-DL Ultra inclui uma interface visual local inspirada em interfaces de áudio industrial monocromáticas: matriz de glifos, alto contraste e vermelho pontual. Ela cobre navegação e busca, reprodução direta compatível, downloads, favoritos, biblioteca, e também sincronização, scan, diagnóstico, estatísticas, playlists, letras, inspeção e manutenção do catálogo pela seção **Ferramentas**. A configuração de conta pode ser feita em **Preferências**; e-mail/token são validados antes de serem salvos localmente e não são enviados a nenhum serviço intermediário.
+O Qobuz-DL Ultra inclui uma interface visual local inspirada em interfaces de áudio industrial monocromáticas: matriz de glifos, alto contraste e vermelho pontual. Ela cobre navegação e busca, reprodução direta compatível, downloads, favoritos, biblioteca, e também sincronização, scan, diagnóstico, estatísticas, playlists, letras, inspeção e manutenção do catálogo pela seção **Ferramentas**.
 
-A GUI é **um comando do mesmo programa**, não um instalador ou executável à parte: `qobuz-dl gui`. Todo o resto da CLI (`dl`, `lucky`, `doctor`, `--sync-db`, etc.) continua funcionando normalmente, com ou sem esse comando, com ou sem o extra `[gui]` instalado — instalar a GUI nunca muda o comportamento do terminal.
+A GUI é **um submódulo do mesmo programa**, não um instalador ou executável à parte: `qobuz-dl gui`. Todo o resto da CLI (`dl`, `lucky`, `doctor`, `--sync-db`, etc.) continua funcionando normalmente, com ou sem esse comando, com ou sem o extra `[gui]` instalado — instalar a GUI nunca muda o comportamento do terminal. E como ela lê a conta pelo mesmo `config.ini`/cofre do sistema que a CLI usa, se você já rodou o assistente (`qobuz-dl -r`) alguma vez, a GUI conecta sozinha — não tem uma "conta da GUI" separada nem passo de login repetido.
 
 ### Requisitos
 
@@ -469,12 +471,17 @@ pip install 'qobuz-dl-ultra[gui]'
 qobuz-dl gui
 ```
 
-O navegador abre em `http://127.0.0.1:8787`. Ctrl+C no terminal encerra o servidor e devolve o prompt normalmente — como qualquer outro comando `qobuz-dl`.
-
-Se você já tem o `qobuz-dl-ultra` instalado sem o extra, rodar `qobuz-dl gui` diretamente avisa exatamente o que falta e o comando pra resolver, em vez de um erro Python cru:
+`qobuz-dl gui` (equivalente a `qobuz-dl gui start`) sobe o servidor **em segundo plano** e devolve o terminal imediatamente — livre pra rodar qualquer outro comando enquanto a interface fica no ar. O navegador abre sozinho em `http://127.0.0.1:8787`.
 
 ```bash
-qobuz-dl gui
+qobuz-dl gui status   # confere se está rodando, PID e URL
+qobuz-dl gui stop     # encerra
+```
+
+Se você já tem o `qobuz-dl-ultra` instalado sem o extra, `qobuz-dl gui run` (ver abaixo) avisa exatamente o que falta e o comando pra resolver, em vez de um erro Python cru — `start`/`stop`/`status` funcionam mesmo sem o extra instalado, já que só orquestram um processo e não abrem a interface em si:
+
+```bash
+qobuz-dl gui run
 # A GUI precisa do extra opcional 'gui' (FastAPI + Uvicorn).
 # Instale com: pip install 'qobuz-dl-ultra[gui]'
 ```
@@ -491,32 +498,59 @@ Para explorar a aparência sem conectar uma conta (busca demonstrativa; não toc
 qobuz-dl gui --demo
 ```
 
+### As quatro ações: `start` · `stop` · `status` · `run`
+
+| Comando | O que faz |
+| --- | --- |
+| `qobuz-dl gui` ou `qobuz-dl gui start` | Sobe em segundo plano e devolve o terminal na hora. Se já estiver rodando, só informa o estado — não abre uma segunda instância. |
+| `qobuz-dl gui stop` | Encerra a instância em segundo plano. |
+| `qobuz-dl gui status` | Diz se está rodando, PID, host:porta e onde fica o log. |
+| `qobuz-dl gui run` | Primeiro plano, bloqueante — Ctrl+C encerra. É o modo usado por trás de `start`, e também o indicado pra Docker (ver abaixo) ou pra quem prefere controlar na mão. |
+
+`start`/`stop`/`status` guardam o estado em `gui.pid` (dentro do diretório de configuração) e o log do processo em `gui.log`, no mesmo lugar.
+
+### Acesso pela rede local
+
+Por padrão `--host` é `127.0.0.1` (só este computador). Pra acessar de outro aparelho na mesma rede (celular, outro computador, etc.), três opções:
+
+```bash
+qobuz-dl gui start --host lan          # detecta e usa o IP desta máquina na rede local
+qobuz-dl gui start --host 192.168.1.50 # ou informe o IP manualmente
+qobuz-dl gui start --host 0.0.0.0      # todas as interfaces (Docker/preview isolado)
+```
+
+`--host lan` imprime o endereço detectado junto do restante do status. Isso expõe a interface (e, por tabela, o controle da sua conta Qobuz) pra qualquer aparelho na mesma rede — ver [🔒 Segurança e permissões](#-segurança-e-permissões) abaixo antes de usar fora de uma rede doméstica confiável.
+
 ### Uso com Docker
 
-A imagem oficial (ver [Opção C](#opção-c--uso-com-docker-nas-e-servidores-caseiros) acima) já inclui o extra `[gui]` — não precisa rebuildar nada. Publique a porta com `-p` e escute em `0.0.0.0` (dentro do container isso ainda fica restrito à rede que você mapear, não à internet):
+A imagem oficial (ver [Opção C](#opção-c--uso-com-docker-nas-e-servidores-caseiros) acima) já inclui o extra `[gui]` — não precisa rebuildar nada. Dentro do container, use sempre `gui run` (primeiro plano): é o que mantém o container de pé, já que o processo do subcomando precisa ser o PID 1 rodando em primeiro plano, não um processo em segundo plano que devolveria o controle na hora e encerraria o container.
 
 ```bash
 docker run -it --rm \
   -p 8787:8787 \
   -v /caminho/para/suas/musicas:/home/qobuz/QobuzDownloads \
   -v /caminho/para/config:/home/qobuz/.config/qobuz-dl \
-  ghcr.io/kaduvercosa/qobuz-dl-ultra:latest gui --host 0.0.0.0 --no-browser
+  ghcr.io/kaduvercosa/qobuz-dl-ultra:latest gui run --host 0.0.0.0 --no-browser
 ```
 
 `--no-browser` é necessário aqui: não existe navegador dentro do container. Abra `http://<ip-do-host>:8787` na máquina de onde você for acessar.
 
 ### Primeiro uso
 
-Na primeira abertura, vá em **Preferências → Conectar ou configurar conta** e informe e-mail e token Qobuz. O token é validado antes de ser armazenado no cofre do sistema (recomendado) ou, por escolha explícita, no `config.ini` com permissões restritas — o mesmo mecanismo de segurança usado pela CLI (ver [🔒 Nota de Segurança](#-configuração-e-caminhos-personalizados) acima). Pasta, qualidade, letras, capas, tags, paralelismo, padrões de nomes e outras opções ficam em `gui.json`, sem sobrescrever o restante do `config.ini`.
+Se o `config.ini` já tem uma conta configurada (via `qobuz-dl -r` ou já usando a CLI), a GUI conecta sozinha ao subir — nada pra fazer. Se ainda não configurou nenhuma conta, abra **Preferências → Conectar ou configurar conta** e informe e-mail e token Qobuz. O token é validado antes de ser armazenado no cofre do sistema (recomendado) ou, por escolha explícita, no `config.ini` com permissões restritas — o mesmo mecanismo de segurança usado pela CLI (ver [🔒 Nota de Segurança](#-configuração-e-caminhos-personalizados) acima). Pasta, qualidade, letras, capas, tags, paralelismo, padrões de nomes e outras opções ficam em `gui.json`, sem sobrescrever o restante do `config.ini`.
+
+Ao trocar a pasta da biblioteca em Preferências, o Qobuz-DL testa a permissão de leitura/escrita de verdade (grava e apaga um arquivo de prova, não só olha os bits do sistema de arquivos) e, se a pasta ainda não existir, cria ela antes de salvar — o mesmo comportamento vale pra CLI, ao configurar a pasta pelo assistente (`qobuz-dl -r`). Isso funciona do mesmo jeito não importa onde o programa esteja instalado (pip, pipx, venv ou dentro do Docker).
 
 Operações em **Ferramentas** usam a mesma CLI interna com argumentos validados, sem shell arbitrário; saídas e processos ficam na página e tarefas longas (como monitoramento) podem ser paradas pelo próprio painel. Downloads e alterações de arquivos começam bloqueados até a confirmação explícita no controle correspondente. A simulação (dry-run) vem ligada onde o comando a suporta.
 
 ### 🔒 Segurança e permissões
 
-- **Host padrão é loopback.** `qobuz-dl gui` só escuta em `127.0.0.1` a menos que você passe `--host` explicitamente; o comando recusa qualquer valor que não seja loopback ou `0.0.0.0` (esse último pensado só para Docker/preview isolado — não exponha a porta direto pra internet nem em rede compartilhada sem um proxy autenticado na frente).
+- **Host padrão é loopback.** `qobuz-dl gui` só escuta em `127.0.0.1` a menos que você passe `--host` explicitamente. Usar `lan`, um IP específico ou `0.0.0.0` é uma decisão deliberada sua — não exponha a porta direto pra internet nem em rede compartilhada/pública sem um proxy autenticado na frente.
 - **Sem instalação com privilégios.** `pip install 'qobuz-dl-ultra[gui]'` roda como usuário comum; nunca use `sudo pip install`. Prefira um ambiente virtual (`python -m venv`) ou `pipx install 'qobuz-dl-ultra[gui]'` para manter as dependências isoladas do resto do sistema.
 - **Docker já roda sem root.** A imagem oficial executa como usuário `qobuz` sem privilégios (não root), com `$HOME` gravável só para config, banco e downloads — mesma base de permissões do restante da CLI, nada especial pra GUI.
-- **Credenciais não passam pela rede local.** Preferências valida e-mail/token contra a API do Qobuz e grava no cofre do sistema (ou no `config.ini` com permissão `0600`, se você desativar o keyring); nada é enviado a servidores de terceiros.
+- **O processo em segundo plano é seu, sob seu usuário.** `gui start` sobe um processo comum (sem sudo, sem serviço de sistema) na sua própria sessão; `gui.pid`/`gui.log` ficam no diretório de configuração com permissão restrita (`0600`/`0700` quando o sistema de arquivos suporta).
+- **Credenciais não passam pela rede local.** A conta é lida do cofre do sistema (ou do `config.ini` com permissão `0600`, se você desativar o keyring) e validada direto contra a API do Qobuz; nada é enviado a servidores de terceiros, e o navegador nunca recebe o token de volta.
+- **Pasta da biblioteca sempre testada antes de usar.** Trocar a pasta (CLI ou GUI) testa leitura/escrita de verdade e cria a pasta se faltar, em vez de falhar silenciosamente no meio de um download.
 - **Leitura de biblioteca é local e limitada.** A interface lê até 500 arquivos locais compatíveis com Mutagen a partir da pasta configurada em Preferências — escolher a pasta pelo seletor nativo do navegador não é possível (limitação de segurança do próprio browser), então informe o caminho manualmente.
 
 ### Notas
