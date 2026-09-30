@@ -167,9 +167,11 @@ class TestComRapidfuzzFake:
 def test_cli_importa_sem_rapidfuzz(monkeypatch):
     """A regressao original, testada de verdade: com o rapidfuzz bloqueado no
     nivel do import, o CLI ainda tem que importar."""
+    # Remove modulos qobuz_dl e rapidfuzz de sys.modules de forma segura,
+    # usando monkeypatch para que o pytest restaure o estado original ao final.
     for mod in list(sys.modules):
         if mod.startswith(("rapidfuzz", "qobuz_dl")):
-            del sys.modules[mod]
+            monkeypatch.delitem(sys.modules, mod, raising=False)
 
     real_import = (
         __builtins__["__import__"]

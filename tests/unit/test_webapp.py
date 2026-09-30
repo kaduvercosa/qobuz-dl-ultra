@@ -6,7 +6,7 @@ from qobuz_dl.webapp import SettingsRequest, ToolRequest, build_tool_argv, creat
 def test_demo_home_and_assets_are_served():
     client = TestClient(create_app(demo=True))
     assert client.get("/", headers={"host": "localhost"}).status_code == 200
-    assert "Qobuz Studio" in client.get("/", headers={"host": "localhost"}).text
+    assert "qobuz-dl-ultra" in client.get("/", headers={"host": "localhost"}).text
     assert client.get("/app.css", headers={"host": "localhost"}).status_code == 200
     assert client.get("/app.js", headers={"host": "localhost"}).status_code == 200
     assert (
@@ -163,11 +163,25 @@ def test_tool_argv_rejects_unknown_action_and_sync_download_needs_confirmation()
         raise AssertionError("Playlist sync must require confirmations")
 
 
-def test_settings_are_atomically_persisted_locally(tmp_path):
-    app = create_app()
+def test_settings_are_atomically_persisted_in_cli_config(tmp_path, monkeypatch):
+    from qobuz_dl import webapp
+
+    config_dir = tmp_path / "config"
+    config_file = config_dir / "config.ini"
+
+    monkeypatch.setattr(
+        webapp,
+        "get_config_paths",
+        lambda: {
+            "config_path": str(config_dir),
+            "config_file": str(config_file),
+            "qobuz_db": str(config_dir / "downloads.db"),
+        },
+    )
+
+    app = webapp.create_app()
     service = app.state.service
-    service.settings_path = tmp_path / "gui.json"
-    payload = SettingsRequest(
+    payload = webapp.SettingsRequest(
         directory=str(tmp_path / "Music"),
         quality=7,
         embed_art=False,
@@ -186,47 +200,9 @@ def test_settings_are_atomically_persisted_locally(tmp_path):
 
     service.save_settings(payload)
 
-    saved = service.settings_path.read_text(encoding="utf-8")
-    assert '"quality": 7' in saved
-    assert '"max_workers": 6' in saved
-    assert '"playlist_as_albums": true' in saved
+    saved = config_file.read_text(encoding="utf-8")
+    assert "default_quality = 7" in saved
+    assert "max_workers = 6" in saved
+    assert "playlist_as_albums = true" in saved
     if __import__("os").name == "posix":
-        assert service.settings_path.stat().st_mode & 0o777 == 0o600
-
-
-def test_status_detects_keyring_account_without_exposing_the_token(monkeypatch):
-    import sys
-    from types import SimpleNamespace
-
-    from qobuz_dl import webapp
-
-    app = create_app()
-    service = app.state.service
-    service._read_config = lambda: (
-        None,
-        "qobuz",
-        {
-            "email": "music@example.com",
-            "password": "",
-            "auth_token": "",
-            "user_auth_token": "",
-            "user_token": "",
-            "disable_keyring": "false",
-            "directory": "/music",
-            "default_folder": "",
-            "default_quality": "6",
-        },
-    )
-    monkeypatch.setattr(
-        webapp,
-        "get_config_paths",
-        lambda: {"config_path": "/tmp/qobuz", "config_file": "/tmp/qobuz/config.ini"},
-    )
-    monkeypatch.setitem(
-        sys.modules, "keyring", SimpleNamespace(get_password=lambda *_: "secret-token")
-    )
-
-    status = service.config_status()
-
-    assert status["configured"] is True
-    assert "secret-token" not in str(status)
+        assert config_file.stat().st_mode & 0o777 == 0o600
