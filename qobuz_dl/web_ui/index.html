@@ -3,9 +3,15 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" id="theme-color-meta" content="#0a0a0a">
-  <meta name="description" content="Uma sala de escuta pessoal para sua biblioteca hi-fi.">
-  <title>Qobuz Studio · Sua sala de escuta</title>
+  <meta name="theme-color" id="theme-color-meta" content="#000000">
+  <meta name="color-scheme" content="dark light">
+  <meta name="description" content="Biblioteca musical, player e downloads Qobuz.">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="qobuz-dl">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>qobuz-dl-ultra</title>
+  <link rel="manifest" href="/manifest.webmanifest">
   <link rel="icon" type="image/png" href="/assets/favicon-dark.png">
   <link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon-light.png" media="(prefers-color-scheme: light)">
   <link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon-dark.png" media="(prefers-color-scheme: dark)">
@@ -15,372 +21,328 @@
   <link rel="apple-touch-icon" sizes="180x180" href="/assets/apple-touch-icon-light.png" media="(prefers-color-scheme: light)">
   <link rel="stylesheet" href="/app.css">
   <script>
-    /* Aplica o tema salvo antes do primeiro paint, pra não piscar. */
+    /* Tema e cor de destaque antes do primeiro paint (evita piscar). */
     (function () {
       try {
-        var saved = localStorage.getItem("qs-theme");
-        if (saved === "dark" || saved === "light") {
-          document.documentElement.setAttribute("data-theme", saved);
+        var t = localStorage.getItem("qs-theme");
+        if (t === "dark" || t === "light") document.documentElement.setAttribute("data-theme", t);
+        var a = localStorage.getItem("qs-accent");
+        if (a && /^#[0-9a-fA-F]{6}$/.test(a)) {
+          document.documentElement.style.setProperty("--accent", a);
+          var n = parseInt(a.slice(1), 16), l = (0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255;
+          document.documentElement.style.setProperty("--accent-ink", l > 0.6 ? "#000" : "#fff");
         }
-      } catch (err) { /* localStorage indisponível; segue com o padrão do sistema */ }
+      } catch (e) { /* sem localStorage: segue com o padrão */ }
     })();
   </script>
   <script defer src="/app.js"></script>
 </head>
 <body>
-  <a class="skip-link" href="#main-content">Pular para o conteúdo</a>
+  <!-- Ícones (traço simples, herdam currentColor) -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+    <defs>
+      <symbol id="i-home" viewBox="0 0 24 24"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h5v-6h4v6h5V10"/></symbol>
+      <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></symbol>
+      <symbol id="i-library" viewBox="0 0 24 24"><rect x="4" y="4" width="4" height="16"/><rect x="10" y="4" width="4" height="16"/><path d="M17 5.5l3.5 14"/></symbol>
+      <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v11"/><path d="M7 11l5 5 5-5"/><path d="M5 20h14"/></symbol>
+      <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h9M19 7h1M4 17h1M11 17h9"/><circle cx="16" cy="7" r="2.5"/><circle cx="8" cy="17" r="2.5"/></symbol>
+      <symbol id="i-terminal" viewBox="0 0 24 24"><path d="M5 8l4 4-4 4"/><path d="M12 17h7"/></symbol>
+      <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4.5v15l12-7.5z" fill="currentColor" stroke="none"/></symbol>
+      <symbol id="i-pause" viewBox="0 0 24 24"><rect x="6" y="5" width="4" height="14" fill="currentColor" stroke="none"/><rect x="14" y="5" width="4" height="14" fill="currentColor" stroke="none"/></symbol>
+      <symbol id="i-prev" viewBox="0 0 24 24"><path d="M6 5v14"/><path d="M19 5.5v13L9 12z" fill="currentColor"/></symbol>
+      <symbol id="i-next" viewBox="0 0 24 24"><path d="M18 5v14"/><path d="M5 5.5v13L15 12z" fill="currentColor"/></symbol>
+      <symbol id="i-shuffle" viewBox="0 0 24 24"><path d="M3 7h3c5 0 5 10 10 10h5"/><path d="M3 17h3c1.4 0 2.4-.8 3.3-2M14 9c.8-1.2 1.8-2 3-2h4"/><path d="M18 4l3 3-3 3M18 14l3 3-3 3"/></symbol>
+      <symbol id="i-repeat" viewBox="0 0 24 24"><path d="M4 11V9a3 3 0 013-3h13"/><path d="M17 3l3 3-3 3"/><path d="M20 13v2a3 3 0 01-3 3H4"/><path d="M7 21l-3-3 3-3"/></symbol>
+      <symbol id="i-volume" viewBox="0 0 24 24"><path d="M4 9v6h4l5 4V5L8 9z"/><path d="M16.5 9a4 4 0 010 6"/></symbol>
+      <symbol id="i-mute" viewBox="0 0 24 24"><path d="M4 9v6h4l5 4V5L8 9z"/><path d="M17 9l4 6M21 9l-4 6"/></symbol>
+      <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+      <symbol id="i-more" viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.4" fill="currentColor"/><circle cx="12" cy="12" r="1.4" fill="currentColor"/><circle cx="12" cy="19" r="1.4" fill="currentColor"/></symbol>
+      <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+      <symbol id="i-queue" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h9"/></symbol>
+      <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l5 5 9-10"/></symbol>
+      <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 10-2 6"/><path d="M20 4v7h-7"/></symbol>
+      <symbol id="i-trash" viewBox="0 0 24 24"><path d="M5 7h14M10 7V4h4v3M7 7l1 13h8l1-13"/></symbol>
+      <symbol id="i-down" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></symbol>
+      <symbol id="i-back" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></symbol>
+      <symbol id="i-music" viewBox="0 0 24 24"><path d="M9 18V6l10-2v12"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="16.5" cy="16" r="2.5"/></symbol>
+      <symbol id="i-contrast" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 010 16z" fill="currentColor"/></symbol>
+      <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 20c1-4 4-6 8-6s7 2 8 6"/></symbol>
+    </defs>
+  </svg>
 
-  <div class="app-shell">
-    <div class="sidebar-scrim" id="sidebar-scrim"></div>
+  <a class="skip-link" href="#view">Pular para o conteúdo</a>
 
-    <aside class="sidebar" id="sidebar">
-      <a class="brand" href="#" data-view="library" aria-label="Qobuz Studio — biblioteca">
+  <div class="app" id="app">
+    <!-- SIDEBAR (desktop e tablet) -->
+    <aside class="sidebar" id="sidebar" aria-label="Navegação">
+      <a class="brand" href="#/home" aria-label="qobuz-dl-ultra — início">
         <span class="brand-logo" id="brand-logo">
-          <img src="/assets/logo-light.png" alt="Qobuz Studio" class="logo-light">
-          <img src="/assets/logo-dark.png" alt="Qobuz Studio" class="logo-dark">
-          <img src="/assets/favicon-light.png" alt="Qobuz Studio" class="icon-light">
-          <img src="/assets/favicon-dark.png" alt="Qobuz Studio" class="icon-dark">
-          <i class="brand-live-dot" aria-hidden="true"></i>
+          <img src="/assets/logo-light.png" alt="qobuz-dl-ultra" class="logo-light">
+          <img src="/assets/logo-dark.png" alt="qobuz-dl-ultra" class="logo-dark">
+          <img src="/assets/favicon-light.png" alt="" class="icon-light">
+          <img src="/assets/favicon-dark.png" alt="" class="icon-dark">
         </span>
+        <i class="live-dot" id="live-dot" aria-hidden="true"></i>
       </a>
 
-      <div class="sidebar-scroll">
-        <div class="nav-group-label">SUA MÚSICA</div>
-        <nav class="primary-nav" aria-label="Navegação principal">
-          <button class="nav-link active" data-view="library" title="Biblioteca"><span class="nav-icon">▤</span><span>Biblioteca</span></button>
-          <button class="nav-link" data-view="explore" title="Explorar"><span class="nav-icon">⌕</span><span>Explorar</span></button>
-          <button class="nav-link" data-view="downloads" title="Downloads"><span class="nav-icon">↓</span><span>Downloads</span><span class="nav-count" id="queue-count">0</span></button>
-          <button class="nav-link" data-view="tools" title="Ferramentas"><span class="nav-icon">◉</span><span>Ferramentas</span></button>
-        </nav>
+      <nav class="side-nav" id="side-nav">
+        <a class="nav-item" href="#/home" data-route="home" title="Início"><svg class="ic"><use href="#i-home"/></svg><span>Início</span></a>
+        <a class="nav-item" href="#/search" data-route="search" title="Pesquisar"><svg class="ic"><use href="#i-search"/></svg><span>Pesquisar</span></a>
 
-        <div class="nav-divider"></div>
-        <div class="nav-group-head"><span class="nav-group-label">COLEÇÕES</span></div>
-        <nav class="collection-nav">
-          <button class="collection-link" data-view="library" data-library-tab="favorites" title="Álbuns favoritos"><span class="collection-dot dot-coral"></span>Álbuns favoritos</button>
-          <button class="collection-link" data-view="library" data-library-tab="local" title="Arquivos locais"><span class="collection-dot dot-gold"></span>Arquivos locais</button>
-        </nav>
+        <p class="side-label">Biblioteca</p>
+        <a class="nav-item sub" href="#/library/albums" data-route="library" data-sub="albums" title="Álbuns"><svg class="ic"><use href="#i-library"/></svg><span>Álbuns</span></a>
+        <a class="nav-item sub" href="#/library/artists" data-route="library" data-sub="artists" title="Artistas"><svg class="ic"><use href="#i-user"/></svg><span>Artistas</span></a>
+        <a class="nav-item sub" href="#/library/singles" data-route="library" data-sub="singles" title="Singles"><svg class="ic"><use href="#i-music"/></svg><span>Singles</span></a>
+        <a class="nav-item sub" href="#/library/playlists" data-route="library" data-sub="playlists" title="Playlists"><svg class="ic"><use href="#i-queue"/></svg><span>Playlists</span></a>
+        <a class="nav-item sub" href="#/library/tracks" data-route="library" data-sub="tracks" title="Faixas"><svg class="ic"><use href="#i-play"/></svg><span>Faixas</span></a>
 
-        <div class="sidebar-note">
-          <div class="note-symbol">◖</div>
-          <p>Feito para ouvir<br><em>até o último detalhe.</em></p>
-          <span>24-BIT · HI-RES · LOSSLESS</span>
-        </div>
-      </div>
+        <p class="side-label">Downloads</p>
+        <a class="nav-item sub" href="#/downloads/queue" data-route="downloads" data-sub="queue" title="Fila"><svg class="ic"><use href="#i-download"/></svg><span>Fila</span><b class="count" id="queue-count">0</b></a>
+        <a class="nav-item sub" href="#/downloads/history" data-route="downloads" data-sub="history" title="Histórico"><svg class="ic"><use href="#i-check"/></svg><span>Histórico</span></a>
 
-      <div class="sidebar-bottom">
-        <button class="settings-link" id="open-settings" title="Preferências"><span class="nav-icon">⚙</span><span>Preferências</span></button>
-        <div class="profile-row" id="open-settings-profile">
-          <div class="profile-avatar" id="profile-avatar">Q</div>
-          <div class="profile-copy"><strong id="profile-name">Sua sala</strong><span id="profile-subtitle">Biblioteca pessoal</span></div>
-        </div>
+        <p class="side-label">Configuração</p>
+        <button class="nav-item sub" id="open-settings" title="Preferências"><svg class="ic"><use href="#i-sliders"/></svg><span>Preferências</span></button>
+        <a class="nav-item sub" href="#/tools" data-route="tools" title="Ferramentas"><svg class="ic"><use href="#i-terminal"/></svg><span>Ferramentas</span></a>
+      </nav>
+
+      <div class="side-status" id="side-status">
+        <span class="status-dot" id="status-dot"></span>
+        <span class="status-text"><b id="status-label">Verificando…</b><small id="status-detail"></small></span>
       </div>
     </aside>
 
-    <main class="main-content" id="main-content">
+    <div class="main">
       <header class="topbar">
-        <button class="mobile-menu" id="mobile-menu" aria-label="Abrir menu">☰</button>
-        <label class="search-box" for="global-search">
-          <span class="search-symbol">⌕</span>
-          <input id="global-search" type="search" placeholder="Artistas, álbuns, faixas…" autocomplete="off">
-          <kbd>⌘ K</kbd>
+        <a class="phone-brand" href="#/home" aria-label="início">
+          <img src="/assets/logo-light.png" alt="qobuz-dl-ultra" class="logo-light">
+          <img src="/assets/logo-dark.png" alt="qobuz-dl-ultra" class="logo-dark">
+        </a>
+        <label class="search-box" for="top-search">
+          <svg class="ic"><use href="#i-search"/></svg>
+          <input id="top-search" type="search" placeholder="Pesquisar artistas, álbuns, faixas" autocomplete="off" enterkeyhint="search">
         </label>
         <div class="top-actions">
-          <button class="theme-toggle" id="theme-toggle" aria-label="Alternar tema claro/escuro" title="Alternar tema">◐</button>
-          <span class="connection-pill" id="connection-pill"><i></i><span id="connection-pill-label">Modo local</span></span>
-          <button class="connect-button" id="connect-button">Conectar Qobuz <span>↗</span></button>
-          <button class="avatar-top" aria-label="Preferências" id="avatar-top">Q</button>
+          <span class="pill" id="connection-pill"><i></i><span id="connection-pill-label">—</span></span>
+          <button class="icon-btn" id="theme-toggle" aria-label="Alternar tema claro/escuro" title="Alternar tema"><svg class="ic"><use href="#i-contrast"/></svg></button>
+          <button class="icon-btn phone-only" id="open-settings-phone" aria-label="Preferências"><svg class="ic"><use href="#i-more"/></svg></button>
         </div>
       </header>
 
-      <div class="demo-banner" id="demo-banner" hidden><span>PRÉVIA INTERATIVA</span> Os exemplos abaixo são demonstrativos. Conecte sua conta na versão local para buscar, reproduzir e baixar conteúdo.</div>
+      <div class="banner" id="demo-banner" hidden><b>PRÉVIA</b> Dados demonstrativos. Conecte a conta para buscar, reproduzir e baixar de verdade.</div>
 
-      <!-- BIBLIOTECA (favoritos do Qobuz + arquivos locais já baixados) -->
-      <section class="page-view" id="library-view">
-        <div class="view-heading">
-          <p class="eyebrow">SEU ACERVO, SEMPRE À MÃO</p>
-          <h1>Biblioteca<span class="period-dot">.</span></h1>
-          <p class="view-subtitle" id="library-location">Os seus álbuns favoritos e arquivos já baixados.</p>
-        </div>
-        <div class="tabs">
-          <button class="tab-button active" data-library-tab="favorites">Favoritos</button>
-          <button class="tab-button" data-library-tab="local">Arquivos locais</button>
-        </div>
-        <div class="album-grid" id="library-albums"></div>
-        <div class="empty-state" id="library-favorites-empty" hidden>
-          <span>♡</span>
-          <h3>Nenhum favorito ainda.</h3>
-          <p>Favorite álbuns pelo Qobuz para vê-los aqui.</p>
-        </div>
-        <div class="track-table-wrap" id="library-files-wrap" hidden>
-          <table class="track-table">
-            <thead><tr><th></th><th>FAIXA</th><th>ÁLBUM</th><th>FORMATO</th><th>TEMPO</th><th></th></tr></thead>
-            <tbody id="library-files"></tbody>
-          </table>
-          <div class="empty-state" id="library-empty" hidden>
-            <span>♫</span>
-            <h3>A sua pasta de música está esperando.</h3>
-            <p>Escolha a pasta da sua biblioteca em Preferências para encontrar os arquivos locais.</p>
-            <button class="button-secondary" id="empty-settings">Escolher pasta</button>
-          </div>
-        </div>
-      </section>
+      <main id="view" tabindex="-1">
+        <div id="view-dynamic"></div>
 
-      <!-- EXPLORAR (busca) -->
-      <section class="page-view alternate-view" id="explore-view" hidden>
-        <div class="view-heading">
-          <p class="eyebrow">A SUA PRÓXIMA DESCOBERTA</p>
-          <h1>Explorar<span class="period-dot">.</span></h1>
-          <p class="view-subtitle" id="search-query-title">Encontre sua próxima faixa favorita por artista, álbum ou gênero.</p>
-        </div>
-        <div class="tabs">
-          <button class="tab-button active" data-search-tab="all">Tudo</button>
-          <button class="tab-button" data-search-tab="tracks">Faixas</button>
-          <button class="tab-button" data-search-tab="albums">Álbuns</button>
-        </div>
-        <div class="empty-state" id="search-idle">
-          <span>⌕</span>
-          <h3>Comece digitando ali em cima.</h3>
-          <p>Busque por um artista, álbum ou faixa para explorar o catálogo do Qobuz.</p>
-        </div>
-        <div class="album-grid" id="search-albums"></div>
-        <div class="track-table-wrap" id="search-track-wrap" hidden>
-          <table class="track-table">
-            <thead><tr><th></th><th>FAIXA</th><th>ÁLBUM</th><th>QUALIDADE</th><th>TEMPO</th><th></th></tr></thead>
-            <tbody id="search-tracks"></tbody>
-          </table>
-        </div>
-        <div class="empty-state" id="search-empty" hidden>
-          <span>⌕</span>
-          <h3>Nada encontrado por aqui.</h3>
-          <p>Tente outro nome, artista ou álbum.</p>
-        </div>
-      </section>
-
-      <!-- DOWNLOADS -->
-      <section class="page-view alternate-view" id="downloads-view" hidden>
-        <div class="view-heading">
-          <p class="eyebrow">SEM PERDER O FIO DA MÚSICA</p>
-          <h1>Downloads<span class="period-dot">.</span></h1>
-          <p class="view-subtitle">Acompanhe a sua fila e o que já chegou à biblioteca.</p>
-        </div>
-        <div class="download-summary">
-          <div><span class="summary-label">NA FILA</span><strong id="pending-total">0</strong></div>
-          <div><span class="summary-label">CONCLUÍDOS</span><strong id="done-total">0</strong></div>
-          <div><span class="summary-label">DESTINO</span><strong id="download-path-summary">—</strong></div>
-          <button class="button-secondary" id="open-download-folder">Alterar pasta ↗</button>
-        </div>
-        <div class="track-table-wrap">
-          <table class="track-table">
-            <thead><tr><th></th><th>ITEM</th><th>ESTADO</th><th>ADICIONADO</th><th></th></tr></thead>
-            <tbody id="download-queue"></tbody>
-          </table>
-          <div class="empty-state" id="queue-empty">
-            <span>↓</span>
-            <h3>O próximo álbum pode começar aqui.</h3>
-            <p>Busque uma faixa ou álbum e escolha “Baixar” para criar sua fila.</p>
-            <button class="button-secondary" id="queue-search">Explorar música</button>
-          </div>
-        </div>
-      </section>
-
-      <!-- FERRAMENTAS -->
-      <section class="page-view alternate-view tools-view" id="tools-view" hidden>
-        <div class="view-heading">
-          <p class="eyebrow">O PROGRAMA INTEIRO, SOB SEU CONTROLE</p>
-          <h1>Ferramentas<span class="period-dot">.</span></h1>
-          <p class="view-subtitle">Atalhos visuais para os recursos de manutenção, biblioteca e importação do Qobuz-DL.</p>
-        </div>
-        <div class="tool-console">
-          <div class="tool-console-head">
-            <span class="console-light"></span><span class="console-light"></span><span class="console-light"></span>
-            <span class="console-caption">QOBUZ-DL / COMMAND CENTER</span>
-            <span class="console-status" id="tool-console-status">PRONTO</span>
-          </div>
-          <div class="tool-console-body">
-            <div class="tool-selector-wrap">
-              <label class="form-label" for="tool-select">ESCOLHA UMA FERRAMENTA</label>
-              <select id="tool-select">
-                <option value="doctor">Diagnóstico do sistema</option>
-                <option value="stats">Estatísticas da biblioteca</option>
-                <option value="library">Catálogo local</option>
-                <option value="scan">Examinar pasta de música</option>
-                <option value="sync-favorites">Sincronizar favoritos</option>
-                <option value="sync-db">Reconstruir banco de downloads</option>
-                <option value="find-duplicates">Encontrar faixas duplicadas</option>
-                <option value="lyrics">Preencher letras nos arquivos</option>
-                <option value="inspect">Inspecionar áudio e tags</option>
-                <option value="import-playlist">Importar playlist externa</option>
-                <option value="sync-playlist">Sincronizar pasta com playlist</option>
-                <option value="dl">Baixar por URL do Qobuz</option>
-                <option value="lucky">Buscar e baixar automaticamente</option>
-                <option value="watch">Monitorar pasta automaticamente</option>
-                <option value="user">Perfil e assinatura</option>
-                <option value="show-config">Ver configuração (segredos ocultos)</option>
-                <option value="purge">Apagar banco de downloads</option>
-              </select>
-              <p class="tool-description" id="tool-description">Verifica ambiente, configuração, bancos locais e dependências sem revelar credenciais.</p>
-              <div id="tool-dynamic-fields"></div>
-              <div class="tool-warning" id="tool-warning" hidden></div>
-              <div class="tool-actions">
-                <button class="button-primary" id="run-tool"><span>▶</span> Executar</button>
-                <button class="button-secondary" id="stop-tool" hidden>Parar</button>
+        <!-- FERRAMENTAS (mantida estática: os campos são montados por ferramenta) -->
+        <section class="page" id="view-tools" hidden>
+          <header class="page-head">
+            <p class="label">Manutenção</p>
+            <h1 class="page-title">Ferramentas</h1>
+            <p class="muted">Atalhos visuais para os recursos de manutenção, biblioteca e importação do Qobuz-DL.</p>
+          </header>
+          <div class="panel tool-console">
+            <div class="panel-head">
+              <span class="label">Command center</span>
+              <span class="chip" id="tool-console-status">PRONTO</span>
+            </div>
+            <div class="tool-body">
+              <div class="tool-form">
+                <label class="label" for="tool-select">Ferramenta</label>
+                <select id="tool-select">
+                  <option value="doctor">Diagnóstico do sistema</option>
+                  <option value="stats">Estatísticas da biblioteca</option>
+                  <option value="library">Catálogo local</option>
+                  <option value="scan">Examinar pasta de música</option>
+                  <option value="sync-favorites">Sincronizar favoritos</option>
+                  <option value="sync-db">Reconstruir banco de downloads</option>
+                  <option value="find-duplicates">Encontrar faixas duplicadas</option>
+                  <option value="lyrics">Preencher letras nos arquivos</option>
+                  <option value="inspect">Inspecionar áudio e tags</option>
+                  <option value="import-playlist">Importar playlist externa</option>
+                  <option value="sync-playlist">Sincronizar pasta com playlist</option>
+                  <option value="dl">Baixar por URL do Qobuz</option>
+                  <option value="lucky">Buscar e baixar automaticamente</option>
+                  <option value="watch">Monitorar pasta automaticamente</option>
+                  <option value="user">Perfil e assinatura</option>
+                  <option value="show-config">Ver configuração (segredos ocultos)</option>
+                  <option value="purge">Apagar banco de downloads</option>
+                </select>
+                <p class="muted small" id="tool-description">Verifica ambiente, configuração, bancos locais e dependências sem revelar credenciais.</p>
+                <div id="tool-dynamic-fields"></div>
+                <div class="notice" id="tool-warning" hidden></div>
+                <div class="row">
+                  <button class="btn primary" id="run-tool"><svg class="ic"><use href="#i-play"/></svg>Executar</button>
+                  <button class="btn" id="stop-tool" hidden>Parar</button>
+                </div>
               </div>
-            </div>
-            <div class="tool-terminal" id="tool-terminal">
-              <div class="terminal-empty"><span class="terminal-prompt">›</span><span>Selecione uma ferramenta e execute para ver a saída aqui.</span></div>
+              <div class="terminal" id="tool-terminal"><span class="prompt">›</span> Selecione uma ferramenta e execute para ver a saída aqui.</div>
             </div>
           </div>
-        </div>
-
-        <div class="section-heading">
-          <div><p class="eyebrow">PROCESSOS DESTA SESSÃO</p><h2>Atividades recentes</h2></div>
-          <button class="text-action" id="refresh-tool-jobs">Atualizar <span>↻</span></button>
-        </div>
-        <div class="tool-job-list" id="tool-job-list"></div>
-
-        <div class="tool-capabilities">
-          <article><span class="cap-index">01</span><strong>Biblioteca & arquivo</strong><p>Scan, reconciliação, importação e verificação de faixas e metadados.</p></article>
-          <article><span class="cap-index">02</span><strong>Sincronização</strong><p>Favoritos, playlists e recuperação dos registros locais de download.</p></article>
-          <article><span class="cap-index">03</span><strong>Manutenção</strong><p>Diagnósticos, estatísticas, letras, duplicatas e análise de áudio.</p></article>
-        </div>
-      </section>
-
-      <footer class="main-footer"><span>QOBUZ STUDIO <i>·</i> LOCAL HI-FI TERMINAL</span><span>INTERFACE INSPIRADA EM GLIFOS MONOCROMÁTICOS</span></footer>
-    </main>
+          <div class="section-head"><h2>Atividades recentes</h2><button class="btn ghost" id="refresh-tool-jobs"><svg class="ic"><use href="#i-refresh"/></svg>Atualizar</button></div>
+          <div class="list" id="tool-job-list"></div>
+        </section>
+      </main>
+    </div>
   </div>
 
-  <!-- Tab bar (mobile) -->
-  <nav class="tab-bar" aria-label="Navegação principal (compacta)">
-    <button class="active" data-view="library"><span class="nav-icon">▤</span><span>Biblioteca</span></button>
-    <button data-view="explore"><span class="nav-icon">⌕</span><span>Explorar</span></button>
-    <button data-view="downloads"><span class="nav-icon">↓</span><span>Downloads</span><span class="nav-count" id="queue-count-mobile">0</span></button>
-    <button data-view="tools"><span class="nav-icon">◉</span><span>Ferramentas</span></button>
+  <!-- Navegação inferior (celular) -->
+  <nav class="bottom-nav" id="bottom-nav" aria-label="Navegação principal">
+    <a href="#/home" data-route="home"><svg class="ic"><use href="#i-home"/></svg><span>Início</span></a>
+    <a href="#/search" data-route="search"><svg class="ic"><use href="#i-search"/></svg><span>Pesquisar</span></a>
+    <a href="#/library/albums" data-route="library"><svg class="ic"><use href="#i-library"/></svg><span>Biblioteca</span></a>
+    <a href="#/downloads/queue" data-route="downloads"><svg class="ic"><use href="#i-download"/></svg><span>Downloads</span><b class="count" id="queue-count-mobile">0</b></a>
+    <button id="open-settings-nav"><svg class="ic"><use href="#i-sliders"/></svg><span>Config.</span></button>
   </nav>
 
-  <aside class="now-playing" id="now-playing" hidden>
-    <div class="playing-track">
-      <div class="playing-cover" id="player-cover"><span>♫</span></div>
-      <div class="playing-copy"><strong id="player-title">Escolha uma faixa</strong><span id="player-artist">A música começa com você</span></div>
+  <!-- Player global (mini-player) -->
+  <div class="player" id="player" hidden>
+    <div class="player-bar" id="player-bar"><i id="player-bar-fill"></i></div>
+    <button class="player-track" id="player-open" aria-label="Abrir tocando agora">
+      <span class="cover sm" id="player-cover"><svg class="ic"><use href="#i-music"/></svg></span>
+      <span class="player-copy"><b id="player-title">—</b><small id="player-artist">—</small></span>
+    </button>
+    <div class="player-controls">
+      <button class="icon-btn hide-phone" id="previous-button" aria-label="Anterior"><svg class="ic"><use href="#i-prev"/></svg></button>
+      <button class="round" id="play-button" aria-label="Reproduzir"><svg class="ic"><use href="#i-play"/></svg></button>
+      <button class="icon-btn hide-phone" id="next-button" aria-label="Próxima"><svg class="ic"><use href="#i-next"/></svg></button>
     </div>
-    <div class="player-center">
-      <div class="player-controls">
-        <button class="icon-button" id="shuffle-button" title="Aleatório">⤨</button>
-        <button class="icon-button" id="previous-button" title="Anterior">◀|</button>
-        <button class="play-button" id="play-button" aria-label="Reproduzir">▶</button>
-        <button class="icon-button" id="next-button" title="Próxima">|▶</button>
-        <button class="icon-button" id="repeat-button" title="Repetir">↻</button>
-      </div>
-      <div class="progress-row">
-        <span id="current-time" class="mono">0:00</span>
-        <input class="progress-slider" id="progress-slider" type="range" min="0" max="1000" value="0" aria-label="Progresso da música">
-        <span id="total-time" class="mono">0:00</span>
-      </div>
+    <div class="player-seek hide-phone">
+      <span class="mono" id="current-time">0:00</span>
+      <input type="range" id="progress-slider" min="0" max="1000" value="0" aria-label="Progresso da faixa">
+      <span class="mono" id="total-time">0:00</span>
     </div>
-    <div class="player-options">
-      <span class="quality-control" id="player-quality"><span class="quality-icon eq-bars" id="player-eq"><i></i><i></i><i></i></span><span id="player-quality-label">—</span></span>
-      <button class="icon-button volume-icon" id="volume-button" aria-label="Volume">◖</button>
-      <input id="volume-slider" class="volume-slider" type="range" min="0" max="100" value="75" aria-label="Volume">
+    <div class="player-extra hide-phone">
+      <span class="chip mono" id="player-quality">—</span>
+      <button class="icon-btn" id="volume-button" aria-label="Silenciar"><svg class="ic"><use href="#i-volume"/></svg></button>
+      <input type="range" id="volume-slider" class="volume" min="0" max="100" value="80" aria-label="Volume">
+      <button class="icon-btn" id="player-queue-open" aria-label="Fila"><svg class="ic"><use href="#i-queue"/></svg></button>
     </div>
-  </aside>
+  </div>
   <audio id="audio-element" preload="none"></audio>
 
-  <!-- MODAL: Preferências -->
-  <div class="modal-backdrop" id="modal-backdrop" hidden>
-    <section class="modal-card settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
-      <button class="modal-close" data-close-modal aria-label="Fechar">×</button>
-      <p class="eyebrow">TUDO NO SEU COMPUTADOR</p>
-      <h2 id="settings-title">Preferências<span class="period-dot">.</span></h2>
-      <p class="modal-description">As credenciais são validadas e armazenadas localmente; a senha da conta nunca é solicitada.</p>
-
-      <div class="settings-status" id="settings-account-status">
-        <span class="connection-orb"></span>
-        <div><strong>Conta Qobuz</strong><span id="settings-account-status-note">Use a configuração já existente do aplicativo.</span></div>
-        <button class="button-secondary" id="settings-connect">Conectar</button>
-      </div>
-
-      <details class="account-setup">
-        <summary>Conectar ou configurar conta Qobuz</summary>
-        <p class="field-note">Use o e-mail e o token de autenticação que você já obtém no navegador do Qobuz. A GUI valida antes de gravar, não exibe o segredo e não envia credenciais a terceiros.</p>
-        <label class="form-label" for="account-email">E-MAIL DA CONTA</label>
-        <input class="settings-text-input" id="account-email" type="email" autocomplete="username" placeholder="voce@exemplo.com">
-        <label class="form-label" for="account-token">TOKEN QOBUZ</label>
-        <input class="settings-text-input" id="account-token" type="password" autocomplete="new-password" placeholder="Cole seu token de sessão">
-        <label class="toggle-row keyring-choice"><span><strong>Guardar no cofre do sistema</strong><small>Recomendado; se indisponível, você pode optar pelo arquivo de configuração local</small></span><input id="account-keyring" type="checkbox" checked><i></i></label>
-        <button class="button-secondary account-save" id="save-account">Validar e salvar acesso</button>
-      </details>
-
-      <label class="form-label" for="settings-directory">PASTA DA BIBLIOTECA</label>
-      <div class="path-input-row"><input id="settings-directory" type="text" placeholder="~/Music/Qobuz"><button class="button-secondary" id="browse-directory" title="A pasta é definida digitando o caminho">⌖</button></div>
-      <small class="field-note">Informe um caminho local, por exemplo: ~/Music/Qobuz</small>
-
-      <label class="form-label" for="settings-quality">QUALIDADE MÁXIMA PARA DOWNLOAD</label>
-      <select id="settings-quality">
-        <option value="5">MP3 · 320 kbps</option>
-        <option value="6">FLAC · 16-bit / 44.1 kHz</option>
-        <option value="7">Hi-Res · até 24-bit / 96 kHz</option>
-        <option value="27">Hi-Res · acima de 24-bit / 96 kHz</option>
-      </select>
-      <small class="field-note">A disponibilidade depende da faixa, do território e da sua assinatura.</small>
-
-      <div class="settings-section-label">TRATAMENTO DOS ARQUIVOS</div>
-      <div class="settings-toggle-grid">
-        <label class="toggle-row"><span><strong>Incorporar capa</strong><small>Adicionar artwork aos arquivos de áudio</small></span><input id="setting-embed-art" type="checkbox"><i></i></label>
-        <label class="toggle-row"><span><strong>Buscar letras</strong><small>Usar fontes de letras disponíveis</small></span><input id="setting-lyrics" type="checkbox"><i></i></label>
-        <label class="toggle-row"><span><strong>Arquivos .LRC</strong><small>Salvar letras sincronizadas em arquivo</small></span><input id="setting-lrc" type="checkbox"><i></i></label>
-        <label class="toggle-row"><span><strong>Créditos detalhados</strong><small>Incluir compositor, selo e equipe</small></span><input id="setting-credits" type="checkbox"><i></i></label>
-        <label class="toggle-row"><span><strong>Criar playlist .M3U</strong><small>Gerar playlist ao terminar um álbum</small></span><input id="setting-m3u" type="checkbox"><i></i></label>
-        <label class="toggle-row"><span><strong>Fallback de qualidade</strong><small>Aceitar qualidade inferior quando necessário</small></span><input id="setting-fallback" type="checkbox"><i></i></label>
-        <label class="toggle-row"><span><strong>Playlist por álbum</strong><small>Agrupar faixas pela pasta do álbum original</small></span><input id="setting-playlist-albums" type="checkbox"><i></i></label>
-        <label class="toggle-row"><span><strong>Validar downloads</strong><small>Verificar integridade após baixar</small></span><input id="setting-verify" type="checkbox"><i></i></label>
-        <label class="toggle-row"><span><strong>Não baixar capas</strong><small>Omitir artwork separado</small></span><input id="setting-no-cover" type="checkbox"><i></i></label>
-        <label class="toggle-row"><span><strong>Discografia inteligente</strong><small>Ignorar singles e compilações sem contexto</small></span><input id="setting-smart-discography" type="checkbox"><i></i></label>
-        <label class="toggle-row"><span><strong>Tags multivalor</strong><small>Separar créditos (artista, compositor…) em campos individuais de verdade</small></span><input id="setting-multi-tags" type="checkbox"><i></i></label>
-      </div>
-
-      <div class="settings-number-grid">
-        <label><span class="form-label">DOWNLOADS PARALELOS</span><input class="settings-text-input" id="settings-max-workers" type="number" min="1" max="16" value="1"><small class="field-note">1 = sequencial</small></label>
-        <label><span class="form-label">SEGMENTOS DE ÁUDIO</span><input class="settings-text-input" id="settings-segment-workers" type="number" min="2" max="16" value="4"><small class="field-note">2–16 conexões</small></label>
-        <label><span class="form-label">CAPA INCORPORADA</span><select id="settings-embedded-size" class="settings-text-input"><option value="org">Original</option><option value="600">600 px</option><option value="300">300 px</option><option value="150">150 px</option></select></label>
-        <label><span class="form-label">CAPA SALVA EM ARQUIVO</span><select id="settings-saved-size" class="settings-text-input"><option value="org">Original</option><option value="600">600 px</option><option value="300">300 px</option><option value="150">150 px</option></select></label>
-      </div>
-
-      <label class="form-label" for="settings-folder-format">PADRÃO DE PASTA DO ÁLBUM</label>
-      <input class="settings-text-input" id="settings-folder-format" type="text" placeholder="{release_type}/{album_artist} - {album_title} ({year}) [{format} {bit_depth}]">
-      <small class="field-note">Variáveis disponíveis no CLI: {artist}, {album}, {year}, {bit_depth}, {sampling_rate}.</small>
-
-      <label class="form-label" for="settings-track-format">PADRÃO DE NOME DA FAIXA</label>
-      <input class="settings-text-input" id="settings-track-format" type="text" placeholder="{track_number}. {track_title_base} {explicit}">
-      <small class="field-note">As alterações valem para downloads iniciados após salvar.</small>
-
-      <div class="modal-actions">
-        <button class="button-ghost" data-close-modal>Cancelar</button>
-        <button class="button-primary" id="save-settings">Salvar preferências</button>
-      </div>
-      <p class="config-footnote" id="config-footnote"></p>
-    </section>
-  </div>
-
-  <!-- MODAL: Álbum -->
-  <div class="modal-backdrop" id="album-backdrop" hidden>
-    <section class="modal-card album-modal" role="dialog" aria-modal="true" aria-labelledby="album-modal-title">
-      <button class="modal-close" data-close-album aria-label="Fechar">×</button>
-      <div class="album-modal-top">
-        <img id="album-modal-cover" src="" alt="Capa do álbum">
-        <div>
-          <p class="eyebrow">ÁLBUM · QUALIDADE ORIGINAL</p>
-          <h2 id="album-modal-title"></h2>
-          <p id="album-modal-artist"></p>
-          <div class="album-modal-meta" id="album-modal-meta"></div>
-          <div class="album-modal-actions">
-            <button class="button-primary" id="album-play-all"><span class="play-triangle">▶</span> Reproduzir</button>
-            <button class="button-secondary" id="album-download-all">↓ Baixar álbum</button>
-          </div>
+  <!-- Tocando agora -->
+  <section class="np" id="now-playing" role="dialog" aria-modal="true" aria-label="Tocando agora" hidden>
+    <header class="np-head">
+      <button class="icon-btn" id="np-close" aria-label="Fechar"><svg class="ic"><use href="#i-down"/></svg></button>
+      <span class="label">Tocando agora</span>
+      <span class="np-head-spacer"></span>
+    </header>
+    <div class="np-body">
+      <div class="np-main">
+        <div class="cover xl" id="np-cover"><svg class="ic"><use href="#i-music"/></svg></div>
+        <div class="np-meta">
+          <h2 id="np-title">—</h2>
+          <p id="np-artist">—</p>
+          <p class="muted" id="np-album"></p>
+        </div>
+        <p class="np-tech mono" id="np-quality"></p>
+        <div class="np-seek">
+          <span class="mono" id="np-current">0:00</span>
+          <input type="range" id="np-seek" min="0" max="1000" value="0" aria-label="Progresso da faixa">
+          <span class="mono" id="np-total">0:00</span>
+        </div>
+        <div class="np-controls">
+          <button class="icon-btn" id="shuffle-button" aria-label="Aleatório" aria-pressed="false"><svg class="ic"><use href="#i-shuffle"/></svg></button>
+          <button class="icon-btn lg" id="np-prev" aria-label="Anterior"><svg class="ic"><use href="#i-prev"/></svg></button>
+          <button class="round lg" id="np-play" aria-label="Reproduzir"><svg class="ic"><use href="#i-play"/></svg></button>
+          <button class="icon-btn lg" id="np-next" aria-label="Próxima"><svg class="ic"><use href="#i-next"/></svg></button>
+          <button class="icon-btn" id="repeat-button" aria-label="Repetir" aria-pressed="false"><svg class="ic"><use href="#i-repeat"/></svg><em id="repeat-one" hidden>1</em></button>
         </div>
       </div>
-      <div class="album-track-list" id="album-track-list"></div>
+      <div class="np-side">
+        <div class="tabs" role="tablist">
+          <button class="tab active" role="tab" data-np-tab="queue">Fila</button>
+          <button class="tab" role="tab" data-np-tab="lyrics">Letras</button>
+        </div>
+        <ol class="queue-list" id="np-queue"></ol>
+        <div class="lyrics" id="np-lyrics" hidden></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Preferências -->
+  <div class="modal-backdrop" id="modal-backdrop" hidden>
+    <section class="modal sheet" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+      <header class="modal-head">
+        <div><p class="label">Configuração</p><h2 id="settings-title">Preferências</h2></div>
+        <button class="icon-btn" data-close-modal aria-label="Fechar"><svg class="ic"><use href="#i-x"/></svg></button>
+      </header>
+      <div class="modal-scroll">
+        <p class="muted small">As credenciais são lidas do mesmo config.ini/cofre usado pela CLI. Nada é enviado a terceiros.</p>
+
+        <div class="panel status-row" id="settings-account-status">
+          <span class="status-dot"></span>
+          <div><b>Conta Qobuz</b><small id="settings-account-status-note">—</small></div>
+          <button class="btn" id="settings-connect">Conectar</button>
+        </div>
+
+        <details class="disclosure">
+          <summary>Conectar ou configurar conta Qobuz</summary>
+          <label class="label" for="account-email">E-mail da conta</label>
+          <input id="account-email" type="email" autocomplete="username" placeholder="voce@exemplo.com">
+          <label class="label" for="account-token">Token Qobuz</label>
+          <input id="account-token" type="password" autocomplete="new-password" placeholder="Cole seu token de sessão">
+          <label class="switch-row"><span><b>Guardar no cofre do sistema</b><small>Recomendado</small></span><input id="account-keyring" type="checkbox" checked><i></i></label>
+          <button class="btn" id="save-account">Validar e salvar acesso</button>
+        </details>
+
+        <h3 class="group-title">Aparência</h3>
+        <label class="label" for="pref-theme">Tema</label>
+        <select id="pref-theme">
+          <option value="system">Seguir o sistema</option>
+          <option value="dark">Escuro</option>
+          <option value="light">Claro</option>
+        </select>
+        <p class="label">Cor de destaque</p>
+        <div class="swatches" id="accent-swatches" role="radiogroup" aria-label="Cor de destaque"></div>
+
+        <h3 class="group-title">Biblioteca e downloads</h3>
+        <label class="label" for="settings-directory">Pasta da biblioteca</label>
+        <input id="settings-directory" type="text" placeholder="~/Music/Qobuz">
+        <small class="hint">A pasta é criada se não existir e testada para leitura/escrita ao salvar.</small>
+        <label class="label" for="settings-quality">Qualidade máxima para download</label>
+        <select id="settings-quality">
+          <option value="5">MP3 · 320 kbps</option>
+          <option value="6">FLAC · 16-bit / 44.1 kHz</option>
+          <option value="7">Hi-Res · até 24-bit / 96 kHz</option>
+          <option value="27">Hi-Res · acima de 24-bit / 96 kHz</option>
+        </select>
+
+        <h3 class="group-title">Tratamento dos arquivos</h3>
+        <div class="switches">
+          <label class="switch-row"><span><b>Incorporar capa</b><small>Artwork dentro do arquivo</small></span><input id="setting-embed-art" type="checkbox"><i></i></label>
+          <label class="switch-row"><span><b>Buscar letras</b><small>Fontes de letras disponíveis</small></span><input id="setting-lyrics" type="checkbox"><i></i></label>
+          <label class="switch-row"><span><b>Arquivos .LRC</b><small>Letras sincronizadas em arquivo</small></span><input id="setting-lrc" type="checkbox"><i></i></label>
+          <label class="switch-row"><span><b>Créditos detalhados</b><small>Compositor, selo e equipe</small></span><input id="setting-credits" type="checkbox"><i></i></label>
+          <label class="switch-row"><span><b>Criar playlist .M3U</b><small>Ao terminar um álbum</small></span><input id="setting-m3u" type="checkbox"><i></i></label>
+          <label class="switch-row"><span><b>Fallback de qualidade</b><small>Aceitar qualidade inferior</small></span><input id="setting-fallback" type="checkbox"><i></i></label>
+          <label class="switch-row"><span><b>Playlist por álbum</b><small>Agrupar pela pasta do álbum</small></span><input id="setting-playlist-albums" type="checkbox"><i></i></label>
+          <label class="switch-row"><span><b>Validar downloads</b><small>Verificar integridade</small></span><input id="setting-verify" type="checkbox"><i></i></label>
+          <label class="switch-row"><span><b>Não baixar capas</b><small>Omitir artwork separado</small></span><input id="setting-no-cover" type="checkbox"><i></i></label>
+          <label class="switch-row"><span><b>Discografia inteligente</b><small>Ignorar singles e compilações sem contexto</small></span><input id="setting-smart-discography" type="checkbox"><i></i></label>
+          <label class="switch-row"><span><b>Tags multivalor</b><small>Separar créditos em campos individuais</small></span><input id="setting-multi-tags" type="checkbox"><i></i></label>
+        </div>
+
+        <div class="grid-2">
+          <div><label class="label" for="settings-max-workers">Downloads paralelos</label><input id="settings-max-workers" type="number" min="1" max="16" value="1"></div>
+          <div><label class="label" for="settings-segment-workers">Segmentos de áudio</label><input id="settings-segment-workers" type="number" min="2" max="16" value="4"></div>
+          <div><label class="label" for="settings-embedded-size">Capa incorporada</label><select id="settings-embedded-size"><option value="org">Original</option><option value="600">600 px</option><option value="300">300 px</option><option value="150">150 px</option></select></div>
+          <div><label class="label" for="settings-saved-size">Capa salva em arquivo</label><select id="settings-saved-size"><option value="org">Original</option><option value="600">600 px</option><option value="300">300 px</option><option value="150">150 px</option></select></div>
+        </div>
+
+        <label class="label" for="settings-folder-format">Padrão de pasta do álbum</label>
+        <input id="settings-folder-format" type="text" placeholder="{release_type}/{album_artist} - {album_title} ({year})">
+        <label class="label" for="settings-track-format">Padrão de nome da faixa</label>
+        <input id="settings-track-format" type="text" placeholder="{track_number}. {track_title_base} {explicit}">
+        <p class="hint mono" id="config-footnote"></p>
+      </div>
+      <footer class="modal-foot">
+        <button class="btn ghost" data-close-modal>Cancelar</button>
+        <button class="btn primary" id="save-settings">Salvar preferências</button>
+      </footer>
     </section>
   </div>
 
-  <div class="toast-region" id="toast-region" aria-live="polite"></div>
+  <div class="toasts" id="toast-region" aria-live="polite"></div>
 </body>
 </html>

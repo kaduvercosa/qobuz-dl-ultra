@@ -471,7 +471,7 @@ pip install 'qobuz-dl-ultra[gui]'
 qobuz-dl gui
 ```
 
-`qobuz-dl gui` (equivalente a `qobuz-dl gui start`) sobe o servidor **em segundo plano** e devolve o terminal imediatamente — livre pra rodar qualquer outro comando enquanto a interface fica no ar. O navegador abre sozinho em `http://127.0.0.1:8787`.
+`qobuz-dl gui` (equivalente a `qobuz-dl gui start`) sobe o servidor **em segundo plano** e devolve o terminal imediatamente — livre pra rodar qualquer outro comando enquanto a interface fica no ar. O padrão é escutar em `0.0.0.0` (todas as interfaces), e o comando já mostra o endereço certo pra acessar -- o IP da rede local, ou o IP público quando detecta que está numa nuvem com NAT (AWS EC2 etc.), nunca `0.0.0.0` literal. Pra manter só neste computador, use `--host 127.0.0.1`.
 
 ```bash
 qobuz-dl gui status   # confere se está rodando, PID e URL
@@ -511,12 +511,12 @@ qobuz-dl gui --demo
 
 ### Acesso pela rede local
 
-Por padrão `--host` é `127.0.0.1` (só este computador). Pra acessar de outro aparelho na mesma rede (celular, outro computador, etc.), três opções:
+Por padrão `--host` é `0.0.0.0` (todas as interfaces -- acessível pelo IP desta máquina na rede). Outras opções:
 
 ```bash
-qobuz-dl gui start --host lan          # detecta e usa o IP desta máquina na rede local
-qobuz-dl gui start --host 192.168.1.50 # ou informe o IP manualmente
-qobuz-dl gui start --host 0.0.0.0      # todas as interfaces (Docker/preview isolado)
+qobuz-dl gui start --host 127.0.0.1    # só este computador
+qobuz-dl gui start --host lan          # mesma faixa de --host 0.0.0.0, mas fixando um único IP em vez de todas as interfaces
+qobuz-dl gui start --host 192.168.1.50 # um IP específico
 ```
 
 `--host lan` imprime o endereço detectado junto do restante do status. Isso expõe a interface (e, por tabela, o controle da sua conta Qobuz) pra qualquer aparelho na mesma rede — ver [🔒 Segurança e permissões](#-segurança-e-permissões) abaixo antes de usar fora de uma rede doméstica confiável.
@@ -527,13 +527,13 @@ A imagem oficial (ver [Opção C](#opção-c--uso-com-docker-nas-e-servidores-ca
 
 ```bash
 docker run -it --rm \
-  -p 8787:8787 \
+  -p 8060:8060 \
   -v /caminho/para/suas/musicas:/home/qobuz/QobuzDownloads \
   -v /caminho/para/config:/home/qobuz/.config/qobuz-dl \
   ghcr.io/kaduvercosa/qobuz-dl-ultra:latest gui run --host 0.0.0.0 --no-browser
 ```
 
-`--no-browser` é necessário aqui: não existe navegador dentro do container. Abra `http://<ip-do-host>:8787` na máquina de onde você for acessar.
+`--no-browser` é necessário aqui: não existe navegador dentro do container. Abra `http://<ip-do-host>:8060` na máquina de onde você for acessar.
 
 ### Primeiro uso
 
@@ -545,7 +545,7 @@ Operações em **Ferramentas** usam a mesma CLI interna com argumentos validados
 
 ### 🔒 Segurança e permissões
 
-- **Host padrão é loopback.** `qobuz-dl gui` só escuta em `127.0.0.1` a menos que você passe `--host` explicitamente. Usar `lan`, um IP específico ou `0.0.0.0` é uma decisão deliberada sua — não exponha a porta direto pra internet nem em rede compartilhada/pública sem um proxy autenticado na frente.
+- **Host padrão é `0.0.0.0` (todas as interfaces).** Pensado pra já funcionar em servidores/instâncias de nuvem sem configuração extra. Isso expõe a interface -- e por tabela o controle da sua conta Qobuz -- pra quem alcançar a porta 8060; use `--host 127.0.0.1` se quiser manter só neste computador, e libere a porta no firewall/security group apenas para os IPs que devem acessar, nunca `0.0.0.0/0`. A proteção contra origem cruzada (CSRF) continua ativa nos dois casos.
 - **Sem instalação com privilégios.** `pip install 'qobuz-dl-ultra[gui]'` roda como usuário comum; nunca use `sudo pip install`. Prefira um ambiente virtual (`python -m venv`) ou `pipx install 'qobuz-dl-ultra[gui]'` para manter as dependências isoladas do resto do sistema.
 - **Docker já roda sem root.** A imagem oficial executa como usuário `qobuz` sem privilégios (não root), com `$HOME` gravável só para config, banco e downloads — mesma base de permissões do restante da CLI, nada especial pra GUI.
 - **O processo em segundo plano é seu, sob seu usuário.** `gui start` sobe um processo comum (sem sudo, sem serviço de sistema) na sua própria sessão; `gui.pid`/`gui.log` ficam no diretório de configuração com permissão restrita (`0600`/`0700` quando o sistema de arquivos suporta).

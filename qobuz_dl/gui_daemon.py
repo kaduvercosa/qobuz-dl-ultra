@@ -199,9 +199,10 @@ def _wait_for_startup(
 
 
 def detect_public_ip() -> str | None:
-    """IP público em nuvem com NAT (ex.: AWS EC2), onde a interface só
-    enxerga o IP privado. Consulta o serviço de metadados local da
-    instância (169.254.169.254): não sai pra internet."""
+    """IP público quando a máquina está numa nuvem com NAT (ex.: AWS EC2),
+    onde a interface de rede só enxerga o IP privado (172.31.x.x). Pergunta
+    ao serviço de metadados da própria instância (169.254.169.254, link-local:
+    não sai pra internet). Fora de uma nuvem isso simplesmente falha rápido."""
     import urllib.request
 
     try:
@@ -223,8 +224,9 @@ def detect_public_ip() -> str | None:
 
 
 def display_url(host: str, port: int) -> str:
-    """URL que a pessoa digita no navegador: prefere o IP público quando
-    dá pra descobrir; 0.0.0.0 nunca é mostrado."""
+    """URL que a pessoa realmente digita no navegador. 0.0.0.0 não é um
+    endereço acessível; e num servidor em nuvem o IP da interface é o
+    privado, então prefere o IP público quando dá pra descobrir."""
     shown = host
     is_private = False
     try:
@@ -241,7 +243,7 @@ def display_url(host: str, port: int) -> str:
 
 def start(
     host: str = "0.0.0.0",
-    port: int = 8787,
+    port: int = 8060,
     demo: bool = False,
     open_browser: bool = True,
 ) -> dict[str, Any]:

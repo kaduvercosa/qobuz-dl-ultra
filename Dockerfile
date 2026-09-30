@@ -37,7 +37,7 @@ WORKDIR /home/qobuz
 
 # Só documenta a porta padrão da GUI (qobuz-dl gui); não expõe nada
 # sozinho -- quem publica pra fora do host é o -p no `docker run`.
-EXPOSE 8787
+EXPOSE 8060
 
 # Declara o comando base (o usuário só passa os argumentos, tipo 'dl',
 # '--sync-db' ou 'gui run --host 0.0.0.0'). Dentro do container o

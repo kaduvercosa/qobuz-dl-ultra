@@ -1156,7 +1156,7 @@ async def async_main():
     if offline_command in ("gui", "studio", "web"):
         action = getattr(offline_args, "action", "start")
         host = getattr(offline_args, "host", "0.0.0.0")
-        port = getattr(offline_args, "port", 8787)
+        port = getattr(offline_args, "port", 8060)
         demo = getattr(offline_args, "demo", False)
         open_browser = not getattr(offline_args, "no_browser", False)
 
@@ -1173,24 +1173,24 @@ async def async_main():
                     )
                     url = gui_daemon.display_url(info["host"], info["port"])
                     if info.get("alreadyRunning"):
-                        ui.emit(f"{YELLOW}Qobuz-DL-Ultra GUI já estava rodando em {url}{RESET}")
+                        ui.emit(f"{YELLOW}QOBUZ-DL-GUI já estava rodando em {url}{RESET}")
                     else:
-                        ui.emit(f"{GREEN}Qobuz-DL-Ultra GUI rodando em {url}{RESET}")
-                    ui.emit(f"{MUTED}PID {info['pid']} · log em {info.get('log', '')}{RESET}")
-                    ui.emit(f"{MUTED}Terminal livre -- pare com: qobuz-dl gui stop{RESET}")
+                        ui.emit(f"{GREEN}QOBUZ-DL-GUI rodando em {url}{RESET}")
+                        ui.emit(f"{MUTED}PID {info['pid']} · log em {info.get('log', '')}{RESET}")
+                        ui.emit(f"{MUTED}Terminal livre -- pare com: qobuz-dl gui stop{RESET}")
                 elif action == "stop":
                     stopped = gui_daemon.stop()
                     if stopped:
-                        ui.emit(f"{GREEN}Qobuz-DL-Ultra GUI encerrado.{RESET}")
+                        ui.emit(f"{GREEN}QOBUZ-DL-GUI encerrado.{RESET}")
                     else:
-                        ui.emit(f"{YELLOW}Qobuz-DL-Ultra GUI não estava rodando.{RESET}")
+                        ui.emit(f"{YELLOW}QOBUZ-DL-GUI não estava rodando.{RESET}")
                 else:  # status
                     info = gui_daemon.status()
                     if info["running"]:
                         url = gui_daemon.display_url(info["host"], info["port"])
                         ui.emit(f"{GREEN}rodando{RESET} · PID {info['pid']} · {url}")
                     else:
-                        ui.emit(f"{MUTED}Qobuz-DL-Ultra GUI não está rodando.{RESET}")
+                        ui.emit(f"{MUTED}QOBUZ-DL-GUI não está rodando.{RESET}")
             except (ValueError, RuntimeError) as error:
                 sys.exit(f"{RED}{error}{RESET}")
             sys.exit(0)
@@ -1204,7 +1204,7 @@ async def async_main():
                 f"{YELLOW}Instale com: pip install 'qobuz-dl-ultra[gui]'{RESET}"
             )
         try:
-            run_gui(host=host, port=port, demo=demo, open_browser=open_browser)
+            await run_gui(host=host, port=port, demo=demo, open_browser=open_browser)
         except ValueError as error:
             sys.exit(f"{RED}{error}{RESET}")
         except KeyboardInterrupt:

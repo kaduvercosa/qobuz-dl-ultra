@@ -989,14 +989,14 @@ def gui_args(subparsers):
         "--host",
         default="0.0.0.0",
         help=(
-            "interface de rede (padrão: só este computador). Aceita "
-            "'lan' para detectar e usar o IP desta máquina na rede "
-            "local, '0.0.0.0' para todas as interfaces (Docker/preview "
-            "isolado), ou um IP específico"
+            "interface de rede (padrão: 0.0.0.0, todas as interfaces, "
+            "acessível pelo IP da máquina). Aceita '127.0.0.1' para só "
+            "este computador, 'lan' para o IP da rede local, ou um IP "
+            "específico"
         ),
     )
     gui.add_argument(
-        "--port", type=int, default=8787, help="porta local (padrão: 8787)"
+        "--port", type=int, default=8060, help="porta local (padrão: 8060)"
     )
     gui.add_argument(
         "--demo",

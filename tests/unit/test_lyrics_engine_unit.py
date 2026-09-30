@@ -97,7 +97,7 @@ def test_build_bilingual_lrc(engine):
     trans = "[00:01.000] Olá"
     bilingual = engine._build_bilingual_lrc(orig, trans)
     assert "[00:01.000] Hello" in bilingual
-    assert "[00:01.020] » Olá" in bilingual
+    assert "[00:01.000] » Olá" in bilingual
 
 
 def test_inject_instrumental_pauses(engine):

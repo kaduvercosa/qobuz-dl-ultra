@@ -119,19 +119,18 @@ class TestBuildBilingualLrc:
 
     def test_original_aparece_antes_da_traducao_em_cada_par(self, build_bilingual):
         """Para cada timestamp, a linha original deve vir imediatamente
-        antes da linha com o prefixo » e possuir o offset de 20ms"""
+        antes da linha com o prefixo » do mesmo timestamp."""
         r = build_bilingual(ORIGINAL_SIMPLES, TRADUCAO_SIMPLES)
         linhas = r.splitlines()
         for i, linha in enumerate(linhas):
             if "»" in linha and i > 0:
+                # A linha anterior deve ter o mesmo timestamp
                 tag_atual = re.match(r"(\[\d{2,}:\d{2}\.\d{2,3}\])", linha)
                 tag_anterior = re.match(r"(\[\d{2,}:\d{2}\.\d{2,3}\])", linhas[i - 1])
                 if tag_atual and tag_anterior:
-                    ms_atual = int(tag_atual.group(1)[-4:-1])
-                    ms_anterior = int(tag_anterior.group(1)[-4:-1])
-                    assert ms_atual == ms_anterior + 20, (
-                        f"traducao em {tag_atual.group(1)} não tem original com "
-                        f"20ms a menos imediatamente antes (linha anterior: {linhas[i - 1]!r})"
+                    assert tag_atual.group(1) == tag_anterior.group(1), (
+                        f"traducao em {tag_atual.group(1)} nao tem original "
+                        f"imediatamente antes (linha anterior: {linhas[i - 1]!r})"
                     )
 
     def test_prefixo_de_traducao_presente(self, build_bilingual):

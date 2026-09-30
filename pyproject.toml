@@ -107,7 +107,7 @@ version = { attr = "qobuz_dl.__version__" }
 include = ["qobuz_dl*"]
 
 [tool.setuptools.package-data]
-qobuz_dl = ["web_ui/*.html", "web_ui/*.css", "web_ui/*.js", "gui_assets/*.jpg"]
+qobuz_dl = ["web_ui/*.html", "web_ui/*.css", "web_ui/*.js", "web_ui/*.webmanifest", "gui_assets/*.jpg", "gui_assets/*.png"]
 
 [tool.pytest.ini_options]
 minversion = "8.0"

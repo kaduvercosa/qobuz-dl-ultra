@@ -1109,6 +1109,10 @@ def _album_result(item: dict[str, Any]) -> dict[str, Any]:
         else "16b/44.1kHz",
         "cover": _cover(item),
         "duration": "",
+        # Tipo real informado pelo catálogo (album, ep, single, live,
+        # compilation...); vazio quando o Qobuz não informa -- a interface
+        # não inventa rótulo nesse caso.
+        "type": str(item.get("release_type") or item.get("product_type") or "").lower(),
     }
 
 
@@ -1156,21 +1160,22 @@ def create_app(*, demo: bool = False, allow_network: bool = False) -> FastAPI:
     async def local_origin_guard(request: Request, call_next):
         loopback = {"localhost", "127.0.0.1", "::1"}
         host = (urlparse("//" + request.headers.get("host", "")).hostname or "").lower()
+        # Com allow_network (servidor ligado em 0.0.0.0/IP da rede) qualquer
+        # Host é aceito; sem ele, só loopback (proteção contra DNS rebinding).
         if not demo and not allow_network and host not in loopback:
             return Response(
                 "A interface aceita apenas conexões locais.", status_code=403
             )
         origin = request.headers.get("origin")
         site = request.headers.get("sec-fetch-site")
-        # Proteção CSRF: o Origin precisa ser o mesmo host acessado (em rede)
-        # ou loopback (local). Outro site nunca passa.
+        # Proteção CSRF: o Origin precisa ser o mesmo host que foi acessado
+        # (em rede) ou loopback (local). Outro site nunca passa.
         allowed_origins = {host} if allow_network else loopback
         if not demo and (
             (origin and urlparse(origin).hostname not in allowed_origins)
             or site in {"cross-site", "same-site"}
         ):
             return Response("Origem não permitida.", status_code=403)
-
         response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "no-referrer"
@@ -1194,6 +1199,21 @@ def create_app(*, demo: bool = False, allow_network: bool = False) -> FastAPI:
     @app.get("/app.css")
     async def stylesheet():
         return FileResponse(WEB_DIR / "app.css", media_type="text/css")
+
+    @app.get("/manifest.webmanifest")
+    async def web_manifest():
+        return FileResponse(
+            WEB_DIR / "manifest.webmanifest", media_type="application/manifest+json"
+        )
+
+    @app.get("/sw.js")
+    async def service_worker():
+        # Na raiz para o service worker controlar o app inteiro.
+        return FileResponse(
+            WEB_DIR / "sw.js",
+            media_type="text/javascript",
+            headers={"Service-Worker-Allowed": "/"},
+        )
 
     @app.get("/api/status")
     async def status():
@@ -1374,6 +1394,55 @@ def create_app(*, demo: bool = False, allow_network: bool = False) -> FastAPI:
             media_type=mimetypes.guess_type(path.name)[0] or "application/octet-stream",
         )
 
+    @app.get("/api/library/lyrics/{file_key}")
+    async def local_lyrics(file_key: str):
+        """Letras de um arquivo local: .lrc ao lado do áudio ou tag embutida."""
+        import re
+
+        path = service.local_files.get(file_key)
+        if not path or not path.is_file():
+            raise HTTPException(status_code=404, detail="Arquivo não encontrado")
+        root = (
+            Path(
+                service.local_settings["directory"]
+                or service.config_status()["directory"]
+            )
+            .expanduser()
+            .resolve()
+        )
+        if root not in path.resolve().parents:
+            raise HTTPException(status_code=403, detail="Caminho fora da biblioteca")
+        text = ""
+        sidecar = path.with_suffix(".lrc")
+        try:
+            if sidecar.is_file() and sidecar.stat().st_size < 512_000:
+                text = sidecar.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            text = ""
+        if not text:
+            try:
+                from mutagen import File as AudioFile
+
+                audio = AudioFile(path)
+                tags = getattr(audio, "tags", None)
+                if tags is not None:
+                    if hasattr(tags, "getall"):
+                        frames = tags.getall("USLT")
+                        text = str(frames[0].text) if frames else ""
+                    else:
+                        for name in ("LYRICS", "lyrics", "UNSYNCEDLYRICS", "unsyncedlyrics"):
+                            value = tags.get(name)
+                            if value:
+                                text = str(value[0])
+                                break
+            except Exception:
+                text = ""
+        text = text[:512_000]
+        if not text.strip():
+            return {"kind": "none", "text": ""}
+        synced = bool(re.search(r"\[\d{1,3}:\d{2}(?:[.:]\d{1,3})?\]", text))
+        return {"kind": "synced" if synced else "plain", "text": text}
+
     @app.post("/api/settings")
     async def save_settings(payload: SettingsRequest):
         try:
@@ -1475,17 +1544,18 @@ def create_app(*, demo: bool = False, allow_network: bool = False) -> FastAPI:
     return app
 
 
-def run_gui(
+async def run_gui(
     host: str = "0.0.0.0",
-    port: int = 8787,
+    port: int = 8060,
     demo: bool = False,
     open_browser: bool = True,
 ) -> None:
-    """Sobe o servidor da GUI (bloqueante -- roda em primeiro plano até Ctrl+C).
+    """Sobe o servidor da GUI (bloqueante — roda em primeiro plano até Ctrl+C).
 
     Usado por `qobuz-dl gui run` e pelo processo filho que
     `qobuz_dl.gui_daemon.start()` cria em segundo plano. `host` aceita
-    loopback, `0.0.0.0`, `lan` (IP desta máquina na rede local) ou um IP válido.
+    loopback, `0.0.0.0` (padrão), `lan` (IP desta máquina na rede local)
+    ou um IP válido.
     """
     import asyncio
     import threading
@@ -1510,21 +1580,15 @@ def run_gui(
             create_app(demo=demo, allow_network=resolved_host not in loopback),
             host=resolved_host,
             port=port,
-            log_level="info"
+            log_level="info",
         )
     )
 
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        # Sem event loop rodando (ex.: `python -m qobuz_dl.webapp`): caminho normal.
-        server.run()
-        return
+    await server.serve()
 
-    # Chamado de dentro de um event loop já ativo (é o caso de `qobuz-dl gui run`,
-    # que passa por async_main em cli.py): server.run() chamaria asyncio.run()
-    # de novo e estouraria. Roda o servidor numa thread com loop próprio e
-    # bloqueia aqui até ele terminar.
+    # Já existe um event loop ativo (caso de `qobuz-dl gui run`, que passa por
+    # async_main em cli.py): server.run() chamaria asyncio.run() de novo e
+    # estouraria. Roda o servidor numa thread com loop próprio.
     thread = threading.Thread(target=server.run, name="qobuz-gui-server", daemon=True)
     thread.start()
     try:
@@ -1555,10 +1619,10 @@ def main() -> None:
     parser.add_argument(
         "--host",
         default="0.0.0.0",
-        help="Interface de rede (padrão: apenas este computador)",
+        help="Interface de rede (padrão: 0.0.0.0, todas as interfaces)",
     )
     parser.add_argument(
-        "--port", type=int, default=8787, help="Porta local (padrão: 8787)"
+        "--port", type=int, default=8060, help="Porta local (padrão: 8060)"
     )
     parser.add_argument(
         "--demo",
@@ -1572,12 +1636,12 @@ def main() -> None:
     )
     args = parser.parse_args()
     try:
-        run_gui(
+        asyncio.run(run_gui(
             host=args.host,
             port=args.port,
             demo=args.demo,
             open_browser=not args.no_browser,
-        )
+        ))
     except ValueError as error:
         parser.error(str(error))
 
