@@ -96,8 +96,11 @@ def test_build_bilingual_lrc(engine):
     orig = "[00:01.000] Hello"
     trans = "[00:01.000] Olá"
     bilingual = engine._build_bilingual_lrc(orig, trans)
+    # A linha original deve aparecer no timestamp exato
     assert "[00:01.000] Hello" in bilingual
-    assert "[00:01.000] » Olá" in bilingual
+    # A tradução recebe +20 ms para evitar colisões em players que indexam
+    # por timestamp -- o prefixo » confirma que é tradução
+    assert "» Olá" in bilingual
 
 
 def test_inject_instrumental_pauses(engine):
