@@ -186,9 +186,7 @@ class TestTagFlac:
 
         assert fake.tags.vendor == ""
 
-    def test_multi_value_tags_grava_lista_de_artistas(
-        self, monkeypatch, tmp_path
-    ):
+    def test_multi_value_tags_grava_lista_de_artistas(self, monkeypatch, tmp_path):
         """Com multi_value_tags=True, ARTIST deve ser uma lista real de
         valores (tags Vorbis multivaloradas), não uma string com separador.
         A implementação chama _split_multi_value() e grava audio[k] = lista."""

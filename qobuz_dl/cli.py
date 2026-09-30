@@ -1173,11 +1173,17 @@ async def async_main():
                     )
                     url = gui_daemon.display_url(info["host"], info["port"])
                     if info.get("alreadyRunning"):
-                        ui.emit(f"{YELLOW}QOBUZ-DL-GUI já estava rodando em {url}{RESET}")
+                        ui.emit(
+                            f"{YELLOW}QOBUZ-DL-GUI já estava rodando em {url}{RESET}"
+                        )
                     else:
                         ui.emit(f"{GREEN}QOBUZ-DL-GUI rodando em {url}{RESET}")
-                        ui.emit(f"{MUTED}PID {info['pid']} · log em {info.get('log', '')}{RESET}")
-                        ui.emit(f"{MUTED}Terminal livre -- pare com: qobuz-dl gui stop{RESET}")
+                        ui.emit(
+                            f"{MUTED}PID {info['pid']} · log em {info.get('log', '')}{RESET}"
+                        )
+                        ui.emit(
+                            f"{MUTED}Terminal livre -- pare com: qobuz-dl gui stop{RESET}"
+                        )
                 elif action == "stop":
                     stopped = gui_daemon.stop()
                     if stopped:

@@ -1,6 +1,6 @@
 from fastapi.testclient import TestClient
 
-from qobuz_dl.webapp import SettingsRequest, ToolRequest, build_tool_argv, create_app
+from qobuz_dl.webapp import ToolRequest, build_tool_argv, create_app
 
 
 def test_demo_home_and_assets_are_served():

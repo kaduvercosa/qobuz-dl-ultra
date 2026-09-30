@@ -9,7 +9,6 @@ from __future__ import annotations
 import asyncio
 import configparser
 from contextlib import asynccontextmanager
-import json
 import logging
 import mimetypes
 import os
@@ -345,7 +344,12 @@ class GuiService:
         "smart_discography": ("smart_discography", False),
         "multi_value_tags": ("multi_value_tags", False),
     }
-    _INI_STRINGS = ("embedded_art_size", "saved_art_size", "folder_format", "track_format")
+    _INI_STRINGS = (
+        "embedded_art_size",
+        "saved_art_size",
+        "folder_format",
+        "track_format",
+    )
     _INI_INTS = ("max_workers", "segment_workers")
 
     def _settings_from_ini(self, defaults: dict[str, Any]) -> dict[str, Any]:
@@ -1132,7 +1136,12 @@ def _cover(item: dict[str, Any]) -> str | None:
                     break
     if not url:
         return None
-    return _resolve_art_url(url.replace("_230.", "_600.").replace("_50.", "_600.").replace("_150.", "_600."), "org")
+    return _resolve_art_url(
+        url.replace("_230.", "_600.")
+        .replace("_50.", "_600.")
+        .replace("_150.", "_600."),
+        "org",
+    )
 
 
 def _track_result(item: dict[str, Any]) -> dict[str, Any]:
@@ -1485,11 +1494,21 @@ def create_app(*, demo: bool = False, allow_network: bool = False) -> FastAPI:
             elif tags is not None and "covr" in tags and tags["covr"]:
                 pic = tags["covr"][0]
                 data = bytes(pic)
-                mime = "image/png" if getattr(pic, "imageformat", 13) == 14 else "image/jpeg"
+                mime = (
+                    "image/png"
+                    if getattr(pic, "imageformat", 13) == 14
+                    else "image/jpeg"
+                )
         except Exception:
             data = b""
         if not data:
-            for name in ("cover.jpg", "folder.jpg", "cover.png", "folder.png", "front.jpg"):
+            for name in (
+                "cover.jpg",
+                "folder.jpg",
+                "cover.png",
+                "folder.png",
+                "front.jpg",
+            ):
                 candidate = path.parent / name
                 if candidate.is_file() and candidate.stat().st_size < 12_000_000:
                     data = candidate.read_bytes()
@@ -1497,12 +1516,13 @@ def create_app(*, demo: bool = False, allow_network: bool = False) -> FastAPI:
                     break
         if not data:
             raise HTTPException(status_code=404, detail="Sem capa")
-        return Response(data, media_type=mime, headers={"Cache-Control": "private, max-age=86400"})
+        return Response(
+            data, media_type=mime, headers={"Cache-Control": "private, max-age=86400"}
+        )
 
     @app.get("/api/lyrics/{track_id}")
     async def stream_lyrics(track_id: str):
         """Letra (sincronizada quando existir) de uma faixa do catálogo Qobuz."""
-        import re
 
         import httpx
 
@@ -1519,9 +1539,17 @@ def create_app(*, demo: bool = False, allow_network: bool = False) -> FastAPI:
         if not parsed:
             return {"kind": "none", "text": ""}
         if parsed.get("synced"):
-            return {"kind": "synced", "text": parsed["synced"], "lang": parsed.get("lang")}
+            return {
+                "kind": "synced",
+                "text": parsed["synced"],
+                "lang": parsed.get("lang"),
+            }
         if parsed.get("plain"):
-            return {"kind": "plain", "text": parsed["plain"], "lang": parsed.get("lang")}
+            return {
+                "kind": "plain",
+                "text": parsed["plain"],
+                "lang": parsed.get("lang"),
+            }
         return {"kind": "none", "text": ""}
 
     @app.get("/api/library/lyrics/{file_key}")
@@ -1560,7 +1588,12 @@ def create_app(*, demo: bool = False, allow_network: bool = False) -> FastAPI:
                         frames = tags.getall("USLT")
                         text = str(frames[0].text) if frames else ""
                     else:
-                        for name in ("LYRICS", "lyrics", "UNSYNCEDLYRICS", "unsyncedlyrics"):
+                        for name in (
+                            "LYRICS",
+                            "lyrics",
+                            "UNSYNCEDLYRICS",
+                            "unsyncedlyrics",
+                        ):
                             value = tags.get(name)
                             if value:
                                 text = str(value[0])
@@ -1699,8 +1732,10 @@ def run_gui(
         raise ValueError("a porta precisa estar entre 1 e 65535")
     resolved_host = validate_host(resolve_host(host))
     loopback = {"127.0.0.1", "localhost", "::1"}
-    if open_browser and not demo and (
-        resolved_host in loopback or resolved_host == "0.0.0.0"
+    if (
+        open_browser
+        and not demo
+        and (resolved_host in loopback or resolved_host == "0.0.0.0")
     ):
         local = "127.0.0.1" if resolved_host == "0.0.0.0" else resolved_host
         webbrowser.open(f"http://{local}:{port}/")

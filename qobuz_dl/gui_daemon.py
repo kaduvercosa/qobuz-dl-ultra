@@ -165,7 +165,11 @@ def _tail_log(log_path: Path, lines: int = 6) -> str:
 
 
 def _wait_for_startup(
-    process: subprocess.Popen, host: str, port: int, log_path: Path, timeout: float = 6.0
+    process: subprocess.Popen,
+    host: str,
+    port: int,
+    log_path: Path,
+    timeout: float = 6.0,
 ) -> None:
     """Espera o processo filho subir de verdade, em vez de só dar uma
     dormida fixa e torcer -- uma dormida curta pode confirmar "vivo"
@@ -182,7 +186,9 @@ def _wait_for_startup(
     nem morte, deixa rodando (processo ainda vivo, só mais lento que o
     normal pra subir -- ex.: primeira execução compilando bytecode)."""
     deadline = time.monotonic() + timeout
-    probe_host = "127.0.0.1" if host in LOOPBACK_HOSTS or host == _ANY_INTERFACE_HOST else host
+    probe_host = (
+        "127.0.0.1" if host in LOOPBACK_HOSTS or host == _ANY_INTERFACE_HOST else host
+    )
     while time.monotonic() < deadline:
         exit_code = process.poll()
         if exit_code is not None:
@@ -235,9 +241,11 @@ def display_url(host: str, port: int) -> str:
     except ValueError:
         pass
     if host == _ANY_INTERFACE_HOST or is_private:
-        shown = detect_public_ip() or (
-            detect_lan_ip() if host == _ANY_INTERFACE_HOST else host
-        ) or "127.0.0.1"
+        shown = (
+            detect_public_ip()
+            or (detect_lan_ip() if host == _ANY_INTERFACE_HOST else host)
+            or "127.0.0.1"
+        )
     return f"http://{shown}:{port}/"
 
 
@@ -316,8 +324,10 @@ def start(
         _state_path().unlink(missing_ok=True)
         raise
 
-    if open_browser and not demo and (
-        resolved_host in LOOPBACK_HOSTS or resolved_host == _ANY_INTERFACE_HOST
+    if (
+        open_browser
+        and not demo
+        and (resolved_host in LOOPBACK_HOSTS or resolved_host == _ANY_INTERFACE_HOST)
     ):
         import webbrowser
 
