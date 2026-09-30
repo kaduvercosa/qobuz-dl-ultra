@@ -20,10 +20,14 @@ disponivel para verificacao manual com credenciais reais.
 
 BUGS QUE ESTES TESTES TRAVAM
 -----------------------------
-1. DOIS TIMESTAMPS IDENTICOS SOBRESCREVEM O ORIGINAL: players que indexam
-   por timestamp (dict[timestamp] = texto) ficam so com a traducao.
-   O teste verifica que o MESMO timestamp aparece duas vezes (uma por
-   linha), conforme o formato que o Flacbox reconhece como par.
+1. TRADUCAO RECEBE +20 MS: a implementacao aplica um offset de 20 ms no
+   timestamp da traducao para evitar colisoes em players que indexam por
+   timestamp (ex.: dict[timestamp] = texto ficaria so com a traducao se
+   ambos tivessem o mesmo valor). O par correto e:
+     [00:12.340] Original
+     [00:12.360] » Traducao
+   O teste verifica que a linha de traducao (com prefixo ») aparece logo
+   apos a linha original e que seu timestamp e exatamente 20 ms maior.
 
 2. TRADUCAO ANTES DO ORIGINAL: `combined.sort()` usava so x[0] (timestamp),
    entao a ordem de insercao de orig/trans era nao-deterministica dentro
@@ -72,9 +76,19 @@ ORIGINAL_SIMPLES = (
 )
 
 TRADUCAO_SIMPLES = (
-    "[00:12.340] Olá escuridão minha velha amiga\n"
-    "[00:15.000] Vim conversar com você outra vez"
+    "[00:12.340] Ol\u00e1 escurid\u00e3o minha velha amiga\n"
+    "[00:15.000] Vim conversar com voc\u00ea outra vez"
 )
+
+
+def _tag_to_ms(tag: str) -> int:
+    """Converte '[MM:SS.mmm]' ou '[MM:SS.mm]' para milissegundos."""
+    m = re.match(r"\[(\d{2,}):(\d{2})\.(\d{2,3})\]", tag)
+    if not m:
+        return -1
+    minutes, seconds, ms_str = m.group(1), m.group(2), m.group(3)
+    ms = int(ms_str.ljust(3, "0")[:3])
+    return int(minutes) * 60000 + int(seconds) * 1000 + ms
 
 
 # ===========================================================================
@@ -118,30 +132,37 @@ class TestBuildBilingualLrc:
         assert r is not None
 
     def test_original_aparece_antes_da_traducao_em_cada_par(self, build_bilingual):
-        """Para cada timestamp, a linha original deve vir imediatamente
-        antes da linha com o prefixo » do mesmo timestamp."""
+        """A linha original deve vir imediatamente antes da linha com o
+        prefixo ». A implementacao aplica +20 ms na traducao para evitar
+        colisoes em players que indexam por timestamp; o teste verifica
+        que a diferenca e exatamente 20 ms."""
         r = build_bilingual(ORIGINAL_SIMPLES, TRADUCAO_SIMPLES)
         linhas = r.splitlines()
         for i, linha in enumerate(linhas):
-            if "»" in linha and i > 0:
-                # A linha anterior deve ter o mesmo timestamp
-                tag_atual = re.match(r"(\[\d{2,}:\d{2}\.\d{2,3}\])", linha)
-                tag_anterior = re.match(r"(\[\d{2,}:\d{2}\.\d{2,3}\])", linhas[i - 1])
-                if tag_atual and tag_anterior:
-                    assert tag_atual.group(1) == tag_anterior.group(1), (
-                        f"traducao em {tag_atual.group(1)} nao tem original "
-                        f"imediatamente antes (linha anterior: {linhas[i - 1]!r})"
-                    )
+            if "\u00bb" in linha and i > 0:
+                tag_traducao = re.match(r"(\[\d{2,}:\d{2}\.\d{2,3}\])", linha)
+                tag_original = re.match(r"(\[\d{2,}:\d{2}\.\d{2,3}\])", linhas[i - 1])
+                assert tag_traducao and tag_original, (
+                    f"linha de traducao ou anterior sem timestamp valido: {linha!r}"
+                )
+                ms_trad = _tag_to_ms(tag_traducao.group(1))
+                ms_orig = _tag_to_ms(tag_original.group(1))
+                diff = ms_trad - ms_orig
+                assert diff == 20, (
+                    f"esperado offset de 20 ms entre original e traducao, "
+                    f"mas foi {diff} ms (original: {tag_original.group(1)}, "
+                    f"traducao: {tag_traducao.group(1)})"
+                )
 
     def test_prefixo_de_traducao_presente(self, build_bilingual):
         r = build_bilingual(ORIGINAL_SIMPLES, TRADUCAO_SIMPLES)
-        linhas_com_traducao = [l for l in r.splitlines() if "»" in l]
+        linhas_com_traducao = [l for l in r.splitlines() if "\u00bb" in l]
         assert len(linhas_com_traducao) == 2
 
     def test_linhas_originais_sem_prefixo(self, build_bilingual):
         r = build_bilingual(ORIGINAL_SIMPLES, TRADUCAO_SIMPLES)
         for linha in r.splitlines():
-            if "»" not in linha:
+            if "\u00bb" not in linha:
                 assert "Hello" in linha or "I have" in linha or not linha.strip()
 
     def test_numero_total_de_linhas(self, build_bilingual):
@@ -177,7 +198,7 @@ class TestBuildBilingualLrc:
         traducao = "[00:12.340] Linha 1 PT"
         r = build_bilingual(original, traducao)
         assert "So no original" in r
-        assert "»" not in [l for l in r.splitlines() if "So no original" in l][0]
+        assert "\u00bb" not in [l for l in r.splitlines() if "So no original" in l][0]
 
     def test_timestamps_com_2_casas_decimais_aceitos(self, build_bilingual):
         """O Qobuz as vezes retorna [MM:SS.mm] com 2 digitos."""
@@ -204,5 +225,5 @@ class TestBuildBilingualLrc:
         # Apenas as linhas com texto real devem aparecer
         for linha in r.splitlines():
             texto = re.sub(r"\[\d{2,}:\d{2}\.\d{2,3}\]", "", linha).strip()
-            texto = texto.lstrip("» ").strip()
+            texto = texto.lstrip("\u00bb ").strip()
             assert texto, f"linha sem texto escapou: {linha!r}"
