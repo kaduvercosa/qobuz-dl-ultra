@@ -7,6 +7,7 @@ import os
 import signal
 import socket
 import subprocess
+import sys
 import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch, call
@@ -22,7 +23,7 @@ import qobuz_dl.gui_daemon as gd
 
 @pytest.fixture(autouse=True)
 def isolate_state_path(tmp_path, monkeypatch):
-    """Redireciona _state_path e _log_path para tmp_path."""
+    """Redireciona get_config_paths para tmp_path em todos os testes."""
     config_path = tmp_path / "config"
     config_path.mkdir()
     monkeypatch.setattr(
@@ -72,8 +73,7 @@ def test_read_state_valido(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_process_alive_pid_inexistente():
-    # PID 1 sempre existe em POSIX; numero muito alto provavelmente nao
-    assert not gd._process_alive(9999999)
+    assert not gd._process_alive(9_999_999)
 
 
 @pytest.mark.skipif(os.name == "nt", reason="sinal POSIX")
@@ -94,12 +94,9 @@ def test_process_alive_permission_error_retorna_true():
 
 
 @pytest.mark.skipif(os.name == "nt", reason="sinal POSIX")
-def test_process_alive_oserror_windows_fallback():
-    """Cobre o ramo Windows de _process_alive."""
-    with patch("os.name", "nt"):
-        resultado = gd._process_alive(os.getpid())
-        # so' verifica que retorna bool; valor depende do sistema
-        assert isinstance(resultado, bool)
+def test_process_alive_process_lookup_error_retorna_false():
+    with patch("os.kill", side_effect=ProcessLookupError):
+        assert gd._process_alive(1) is False
 
 
 # ---------------------------------------------------------------------------
@@ -112,14 +109,21 @@ def test_detect_lan_ip_retorna_string_ou_none():
 
 
 def test_detect_lan_ip_oserror_retorna_none():
-    with patch("socket.socket") as mock_sock:
-        mock_sock.return_value.__enter__ = lambda s: s
-        mock_sock.return_value.__exit__ = MagicMock(return_value=False)
-        mock_sock.return_value.connect.side_effect = OSError
+    """Mocka o socket real que detect_lan_ip cria internamente."""
+    fake_sock = MagicMock()
+    fake_sock.connect.side_effect = OSError
+    # socket.socket() retorna fake_sock
+    with patch("socket.socket", return_value=fake_sock):
         resultado = gd.detect_lan_ip()
-        # Nao podemos garantir None aqui porque o mock nao e' perfeito;
-        # so' verificamos que nao levanta excecao
-        assert resultado is None or isinstance(resultado, str)
+    assert resultado is None
+
+
+def test_detect_lan_ip_retorna_ip_quando_connect_ok():
+    fake_sock = MagicMock()
+    fake_sock.getsockname.return_value = ("192.168.1.10", 0)
+    with patch("socket.socket", return_value=fake_sock):
+        resultado = gd.detect_lan_ip()
+    assert resultado == "192.168.1.10"
 
 
 # ---------------------------------------------------------------------------
@@ -171,7 +175,7 @@ def test_status_sem_arquivo_retorna_nao_rodando():
 
 
 def test_status_processo_morto_retorna_nao_rodando():
-    with patch.object(gd, "_read_state", return_value={"pid": 9999999, "host": "127.0.0.1"}):
+    with patch.object(gd, "_read_state", return_value={"pid": 9_999_999, "host": "127.0.0.1"}):
         with patch.object(gd, "_process_alive", return_value=False):
             resultado = gd.status()
     assert resultado["running"] is False
@@ -196,7 +200,7 @@ def test_stop_sem_processo_retorna_false():
 
 
 def test_stop_processo_morto_retorna_false():
-    with patch.object(gd, "_read_state", return_value={"pid": 9999999}):
+    with patch.object(gd, "_read_state", return_value={"pid": 9_999_999}):
         with patch.object(gd, "_process_alive", return_value=False):
             assert gd.stop() is False
 
@@ -204,9 +208,10 @@ def test_stop_processo_morto_retorna_false():
 @pytest.mark.skipif(os.name == "nt", reason="SIGTERM POSIX")
 def test_stop_envia_sigterm_e_retorna_true():
     with patch.object(gd, "_read_state", return_value={"pid": 555}):
+        # [True] = entra no bloco stop; [True, False] = loop while
         with patch.object(gd, "_process_alive", side_effect=[True, True, False]):
-            with patch("os.kill") as mock_kill:
-                with patch("time.sleep"):
+            with patch("qobuz_dl.gui_daemon.os.kill") as mock_kill:
+                with patch("qobuz_dl.gui_daemon.time.sleep"):
                     resultado = gd.stop(timeout=0.5)
     assert resultado is True
     mock_kill.assert_any_call(555, signal.SIGTERM)
@@ -215,11 +220,13 @@ def test_stop_envia_sigterm_e_retorna_true():
 @pytest.mark.skipif(os.name == "nt", reason="SIGKILL POSIX")
 def test_stop_envia_sigkill_se_processo_nao_termina():
     with patch.object(gd, "_read_state", return_value={"pid": 666}):
-        # Sempre vivo: forca SIGKILL
         with patch.object(gd, "_process_alive", return_value=True):
-            with patch("os.kill") as mock_kill:
-                with patch("time.sleep"):
-                    with patch("time.monotonic", side_effect=[0.0, 0.0, 100.0, 100.0]):
+            with patch("qobuz_dl.gui_daemon.os.kill") as mock_kill:
+                with patch("qobuz_dl.gui_daemon.time.sleep"):
+                    with patch(
+                        "qobuz_dl.gui_daemon.time.monotonic",
+                        side_effect=[0.0, 0.0, 100.0, 100.0],
+                    ):
                         resultado = gd.stop(timeout=0.01)
     assert resultado is True
     kill_calls = [c.args[1] for c in mock_kill.call_args_list]
@@ -230,7 +237,7 @@ def test_stop_envia_sigkill_se_processo_nao_termina():
 def test_stop_process_lookup_error_ao_matar():
     with patch.object(gd, "_read_state", return_value={"pid": 777}):
         with patch.object(gd, "_process_alive", side_effect=[True, False]):
-            with patch("os.kill", side_effect=ProcessLookupError):
+            with patch("qobuz_dl.gui_daemon.os.kill", side_effect=ProcessLookupError):
                 resultado = gd.stop(timeout=0.1)
     assert resultado is True
 
@@ -261,11 +268,11 @@ def test_wait_for_startup_porta_respondendo(tmp_path):
     proc.poll.return_value = None  # processo vivo
     log = tmp_path / "gui.log"
     log.write_text("", encoding="utf-8")
-    # Simula porta respondendo imediatamente
-    with patch("socket.create_connection") as mock_conn:
-        mock_conn.return_value.__enter__ = lambda s: s
-        mock_conn.return_value.__exit__ = MagicMock(return_value=False)
-        # Nao deve levantar
+    # create_connection retorna context manager que não levanta
+    fake_conn = MagicMock()
+    fake_conn.__enter__ = lambda s: s
+    fake_conn.__exit__ = MagicMock(return_value=False)
+    with patch("qobuz_dl.gui_daemon.socket.create_connection", return_value=fake_conn):
         gd._wait_for_startup(proc, "127.0.0.1", 8060, log, timeout=2.0)
 
 
@@ -279,15 +286,14 @@ def test_wait_for_startup_processo_morreu(tmp_path):
 
 
 def test_wait_for_startup_timeout_sem_falha(tmp_path):
-    """Se o prazo esgota mas o processo esta' vivo, retorna sem levantar."""
+    """Prazo esgota com processo vivo — deve retornar sem levantar."""
     proc = MagicMock()
     proc.poll.return_value = None
     log = tmp_path / "gui.log"
     log.write_text("", encoding="utf-8")
-    # Porta nunca responde
-    with patch("socket.create_connection", side_effect=OSError):
-        with patch("time.sleep"):
-            with patch("time.monotonic", side_effect=[0.0, 100.0]):
+    with patch("qobuz_dl.gui_daemon.socket.create_connection", side_effect=OSError):
+        with patch("qobuz_dl.gui_daemon.time.sleep"):
+            with patch("qobuz_dl.gui_daemon.time.monotonic", side_effect=[0.0, 100.0]):
                 gd._wait_for_startup(proc, "127.0.0.1", 8060, log, timeout=0.0)
 
 
@@ -296,12 +302,12 @@ def test_wait_for_startup_host_0000_usa_loopback(tmp_path):
     proc.poll.return_value = None
     log = tmp_path / "gui.log"
     log.write_text("", encoding="utf-8")
-    with patch("socket.create_connection") as mock_conn:
-        mock_conn.return_value.__enter__ = lambda s: s
-        mock_conn.return_value.__exit__ = MagicMock(return_value=False)
+    fake_conn = MagicMock()
+    fake_conn.__enter__ = lambda s: s
+    fake_conn.__exit__ = MagicMock(return_value=False)
+    with patch("qobuz_dl.gui_daemon.socket.create_connection", return_value=fake_conn) as mock_cc:
         gd._wait_for_startup(proc, "0.0.0.0", 8060, log, timeout=2.0)
-        # Deve ter tentado conectar em 127.0.0.1, nao em 0.0.0.0
-        args = mock_conn.call_args[0][0]
+        args = mock_cc.call_args[0][0]
         assert args[0] == "127.0.0.1"
 
 
@@ -310,13 +316,13 @@ def test_wait_for_startup_host_0000_usa_loopback(tmp_path):
 # ---------------------------------------------------------------------------
 
 def test_detect_public_ip_retorna_none_fora_de_nuvem():
-    import urllib.error
     with patch("urllib.request.urlopen", side_effect=OSError):
         resultado = gd.detect_public_ip()
     assert resultado is None
 
 
 def test_detect_public_ip_ip_invalido_retorna_none():
+    """urlopen é chamado duas vezes: uma pro token, outra pro IP."""
     token_resp = MagicMock()
     token_resp.read.return_value = b"token123"
     ip_resp = MagicMock()
@@ -336,6 +342,15 @@ def test_detect_public_ip_retorna_ip_valido():
     assert resultado == "54.12.34.56"
 
 
+def test_detect_public_ip_segundo_urlopen_levanta_oserror():
+    """Erro na segunda chamada (leitura do IP) deve retornar None."""
+    token_resp = MagicMock()
+    token_resp.read.return_value = b"token123"
+    with patch("urllib.request.urlopen", side_effect=[token_resp, OSError]):
+        resultado = gd.detect_public_ip()
+    assert resultado is None
+
+
 # ---------------------------------------------------------------------------
 # display_url
 # ---------------------------------------------------------------------------
@@ -343,6 +358,13 @@ def test_detect_public_ip_retorna_ip_valido():
 def test_display_url_loopback():
     url = gd.display_url("127.0.0.1", 8060)
     assert url == "http://127.0.0.1:8060/"
+
+
+def test_display_url_localhost():
+    # localhost está em LOOPBACK_HOSTS mas não é um ip_address válido;
+    # validate_host aceita, display_url não deve tentar ip_address nele
+    url = gd.display_url("localhost", 8060)
+    assert "localhost" in url
 
 
 def test_display_url_0000_usa_lan_ou_loopback():
@@ -376,13 +398,13 @@ def test_start_ja_rodando_retorna_already_running():
 
 def test_start_porta_invalida_levanta():
     with patch.object(gd, "status", return_value={"running": False}):
-        with pytest.raises(ValueError, match="porta"):
+        with pytest.raises(ValueError, match="entre 1 e 65535"):
             gd.start(port=0)
 
 
 def test_start_porta_muito_alta_levanta():
     with patch.object(gd, "status", return_value={"running": False}):
-        with pytest.raises(ValueError, match="porta"):
+        with pytest.raises(ValueError, match="entre 1 e 65535"):
             gd.start(port=99999)
 
 
@@ -393,7 +415,7 @@ def test_start_sobe_processo_e_retorna_estado():
         patch.object(gd, "status", return_value={"running": False}),
         patch.object(gd, "resolve_host", return_value="127.0.0.1"),
         patch.object(gd, "validate_host", return_value="127.0.0.1"),
-        patch("subprocess.Popen", return_value=mock_proc),
+        patch("qobuz_dl.gui_daemon.subprocess.Popen", return_value=mock_proc),
         patch.object(gd, "_wait_for_startup"),
     ):
         resultado = gd.start(host="127.0.0.1", port=8060, open_browser=False)
@@ -409,7 +431,7 @@ def test_start_com_demo_adiciona_flag():
         patch.object(gd, "status", return_value={"running": False}),
         patch.object(gd, "resolve_host", return_value="127.0.0.1"),
         patch.object(gd, "validate_host", return_value="127.0.0.1"),
-        patch("subprocess.Popen", return_value=mock_proc) as mock_popen,
+        patch("qobuz_dl.gui_daemon.subprocess.Popen", return_value=mock_proc) as mock_popen,
         patch.object(gd, "_wait_for_startup"),
     ):
         gd.start(host="127.0.0.1", port=8060, demo=True, open_browser=False)
@@ -424,25 +446,40 @@ def test_start_wait_falha_apaga_state_e_relanca():
         patch.object(gd, "status", return_value={"running": False}),
         patch.object(gd, "resolve_host", return_value="127.0.0.1"),
         patch.object(gd, "validate_host", return_value="127.0.0.1"),
-        patch("subprocess.Popen", return_value=mock_proc),
+        patch("qobuz_dl.gui_daemon.subprocess.Popen", return_value=mock_proc),
         patch.object(gd, "_wait_for_startup", side_effect=RuntimeError("nao subiu")),
     ):
         with pytest.raises(RuntimeError, match="nao subiu"):
             gd.start(host="127.0.0.1", port=8060, open_browser=False)
-    # Arquivo de estado deve ter sido removido
     assert not gd._state_path().exists()
 
 
 def test_start_abre_browser_loopback():
     mock_proc = MagicMock()
     mock_proc.pid = 7070
+    # webbrowser é importado lazy dentro de start(); patch no módulo raiz
     with (
         patch.object(gd, "status", return_value={"running": False}),
         patch.object(gd, "resolve_host", return_value="127.0.0.1"),
         patch.object(gd, "validate_host", return_value="127.0.0.1"),
-        patch("subprocess.Popen", return_value=mock_proc),
+        patch("qobuz_dl.gui_daemon.subprocess.Popen", return_value=mock_proc),
         patch.object(gd, "_wait_for_startup"),
         patch("webbrowser.open") as mock_browser,
     ):
         gd.start(host="127.0.0.1", port=8060, demo=False, open_browser=True)
     mock_browser.assert_called_once()
+
+
+def test_start_nao_abre_browser_em_modo_demo():
+    mock_proc = MagicMock()
+    mock_proc.pid = 8080
+    with (
+        patch.object(gd, "status", return_value={"running": False}),
+        patch.object(gd, "resolve_host", return_value="127.0.0.1"),
+        patch.object(gd, "validate_host", return_value="127.0.0.1"),
+        patch("qobuz_dl.gui_daemon.subprocess.Popen", return_value=mock_proc),
+        patch.object(gd, "_wait_for_startup"),
+        patch("webbrowser.open") as mock_browser,
+    ):
+        gd.start(host="127.0.0.1", port=8060, demo=True, open_browser=True)
+    mock_browser.assert_not_called()
