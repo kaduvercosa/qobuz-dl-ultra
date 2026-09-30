@@ -36,3 +36,4 @@ test-results.xml
 htmlcov/
 .pytest_cache/
 .icloud
+/.git-old/**

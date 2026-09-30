@@ -51,7 +51,7 @@
     lib: { source: store.get("qs-src", "all"), sort: store.get("qs-sort", "recent") },
     pb: { list: [], order: null, index: -1, shuffle: false, repeat: "off" },
     lyrics: { key: null, kind: "none", lines: [], active: -1 },
-    npTab: "queue",
+    npPanel: null, albumCache: new Map(), routeKey: "",
     toolJobs: [], activeJob: null,
     token: 0,
   };
@@ -101,7 +101,8 @@
     const href = "#/album/" + encodeURIComponent(a.id);
     const t = typeLabel(a.type);
     const meta2 = [a.year, t && t !== "Álbum" ? t : "", a.source === "local" ? "Local" : "Qobuz"].filter(Boolean).join(" · ");
-    return '<a class="card" href="' + href + '">' + cover(a.cover, "") + '<div class="card-title">' + esc(a.title) + '</div><div class="card-meta"><span>' + esc(a.artist) + '</span></div><div class="card-meta"><span>' + esc(meta2) + "</span></div></a>";
+    return '<div class="card"><a class="card-link" href="' + href + '">' + cover(a.cover, "") + '<div class="card-title">' + esc(a.title) + '</div><div class="card-meta"><span>' + esc(a.artist) + '</span></div><div class="card-meta"><span>' + esc(meta2) + "</span></div></a>" +
+      '<button type="button" class="card-play" data-play-album="' + esc(a.id) + '" aria-label="Reproduzir ' + esc(a.title) + '">' + icon("play") + "</button></div>";
   }
   function artistCard(x) {
     return '<a class="card" href="#/artist/' + encodeURIComponent(x.name) + '">' + cover(x.cover, "round", "user") + '<div class="card-title">' + esc(x.name) + '</div><div class="card-meta"><span>' + x.count + (x.count === 1 ? " álbum" : " álbuns") + "</span></div></a>";
@@ -178,13 +179,16 @@
       if (on) el.setAttribute("aria-current", "page"); else el.removeAttribute("aria-current");
     });
   }
+  const bar = (on) => { const b = $("#route-bar"); if (b) b.classList.toggle("on", !!on); };
   async function render() {
     const r = parseRoute(); const token = ++S.token; markNav(r);
+    const key = r.name + "/" + r.parts.join("/"); const same = S.routeKey === key; S.routeKey = key;
     const dyn = $("#view-dynamic"), tools = $("#view-tools");
     tools.hidden = r.name !== "tools"; dyn.hidden = r.name === "tools";
     if (r.name !== "search") { const si = $("#top-search"); if (si && document.activeElement !== si) si.value = ""; }
-    if (r.name === "tools") { loadToolJobs(); scrollTop(); return; }
-    busy(true);
+    if (r.name === "tools") { loadToolJobs(); if (!same) scrollTop(); return; }
+    if (r.name === "search" && $("#search-results")) { await updateSearch(r, token); return; }
+    bar(true);
     try {
       let html = "";
       if (r.name === "search") html = await viewSearch(r);
@@ -194,10 +198,11 @@
       else if (r.name === "downloads") html = viewDownloads(r);
       else html = await viewHome();
       if (token !== S.token) return;
-      dyn.innerHTML = html; afterRender(r); scrollTop();
+      const y = window.scrollY; dyn.innerHTML = html; afterRender(r);
+      if (same) window.scrollTo(0, y); else scrollTop();
     } catch (e) {
       if (token === S.token) dyn.innerHTML = '<section class="page">' + emptyBox("x", "Não foi possível carregar", e.message) + "</section>";
-    } finally { if (token === S.token) busy(false); }
+    } finally { if (token === S.token) bar(false); }
   }
   const scrollTop = () => window.scrollTo(0, 0);
   function afterRender(r) {
@@ -213,13 +218,15 @@
     const st = S.status || {};
     const resume = last
       ? '<div class="resume">' + cover(last.cover, "", "music") + '<div class="resume-copy"><span class="label">Continuar ouvindo</span><b>' + esc(last.title) + '</b><span class="muted">' + esc(last.artist || "") + '</span><div class="row"><button class="btn accent sm" data-resume>' + icon("play") + "Continuar</button></div></div></div>"
-      : emptyBox("music", "Nada tocado ainda", "Escolha um álbum ou faixa para começar.");
+      : '<span class="label">Continuar ouvindo</span>' + emptyBox("music", "Nada tocado ainda", "Escolha um álbum ou faixa para começar.");
     const recent = allAlbums().slice(0, 14);
     const local = (S.local || []).slice(0, 6); const lid = registerList(local);
+    const nAlb = allAlbums().length, nTr = (S.local || []).length, nFav = (S.favAlbums || []).length;
     return '<section class="page"><header class="page-head"><p class="label">Início</p><h1 class="page-title">qobuz-dl</h1></header>' +
       '<div class="modules">' +
       '<div class="panel module m-resume">' + resume + "</div>" +
       '<div class="panel module m-dl"><span class="label">Downloads</span><div class="big-num">' + pending + '</div><div class="stat-line"><span><b>' + pending + '</b> na fila</span><span><b>' + done + '</b> concluídos</span></div><div class="row"><a class="btn sm" href="#/downloads/queue">Abrir fila</a></div></div>' +
+      '<div class="panel module m-stats"><div class="stat"><span class="label">Álbuns</span><b class="big-num">' + nAlb + '</b></div><div class="stat"><span class="label">Faixas locais</span><b class="big-num">' + nTr + '</b></div><div class="stat"><span class="label">Favoritos</span><b class="big-num">' + nFav + "</b></div></div>" +
       '<div class="panel module m-server"><span class="label">Servidor</span><div class="kv"><div><span class="label">Estado</span><b>' + (st.demo ? "Demonstração" : st.connected ? "Conectado ao Qobuz" : "Sem conta conectada") + '</b></div><div><span class="label">Endereço</span><b>' + esc(location.host) + '</b></div><div><span class="label">Pasta</span><b>' + esc(S.localDir || st.directory || "—") + '</b></div><div><span class="label">Qualidade</span><b>' + esc(qualityName(st.quality)) + "</b></div></div></div>" +
       "</div>" +
       (recent.length ? '<div class="section-head"><h2>Álbuns recentes</h2><a class="btn ghost sm" href="#/library/albums">Ver tudo</a></div><div class="strip">' + recent.map(albumCard).join("") + "</div>" : "") +
@@ -261,24 +268,31 @@
       '<nav class="tabs" aria-label="Seções da biblioteca">' + tabs.map(([k, l]) => '<a class="tab' + (k === sub ? " active" : "") + '" href="#/library/' + k + '">' + l + "</a>").join("") + "</nav>" + libToolbar(r) + body + "</section>";
   }
 
-  async function viewSearch(r) {
-    const q = (r.query.get("q") || "").trim();
-    const input = $("#top-search"); if (input && document.activeElement !== input) input.value = q;
-    let content = "";
-    if (q.length < 2) content = emptyBox("search", "Pesquise no catálogo", "Digite ao menos 2 letras para buscar artistas, álbuns e faixas do Qobuz.");
-    else {
-      if (S.search.q !== q || !S.search.loaded) {
-        const d = await api("/api/search?q=" + encodeURIComponent(q) + "&kind=all&limit=24");
-        S.search = { q, tracks: (d.tracks || []).map(normQ), albums: (d.albums || []).map((a) => Object.assign({}, a, { source: "qobuz", tracks: [] })), loaded: true, tab: S.search.tab };
-      }
-      const tab = S.search.tab; const showA = tab !== "tracks", showT = tab !== "albums";
-      const lid = registerList(S.search.tracks);
-      const a = showA && S.search.albums.length ? '<div class="section-head"><h2>Álbuns</h2></div><div class="grid">' + S.search.albums.map(albumCard).join("") + "</div>" : "";
-      const t = showT && S.search.tracks.length ? '<div class="section-head"><h2>Faixas</h2></div><ol class="list">' + S.search.tracks.map((x, i) => trackRow(x, i, lid, { showAlbum: true })).join("") + "</ol>" : "";
-      content = a + t || emptyBox("search", "Nada encontrado", "Tente outro nome de artista, álbum ou faixa.");
+  function searchTabs() {
+    return [["all", "Tudo"], ["tracks", "Faixas"], ["albums", "Álbuns"]].map(([k, l]) => '<button type="button" class="tab' + (S.search.tab === k ? " active" : "") + '" data-stab="' + k + '">' + l + "</button>").join("");
+  }
+  async function searchContent(q) {
+    if (q.length < 2) return emptyBox("search", "Pesquise no catálogo", "Digite ao menos 2 letras para buscar artistas, álbuns e faixas do Qobuz.");
+    if (S.search.q !== q || !S.search.loaded) {
+      const d = await api("/api/search?q=" + encodeURIComponent(q) + "&kind=all&limit=24");
+      S.search = { q, tracks: (d.tracks || []).map(normQ), albums: (d.albums || []).map((a) => Object.assign({}, a, { source: "qobuz", tracks: [] })), loaded: true, tab: S.search.tab };
     }
-    return '<section class="page"><header class="page-head"><p class="label">Pesquisar</p><h1 class="page-title">' + (q ? esc(q) : "Buscar") + "</h1></header>" +
-      '<nav class="tabs">' + [["all", "Tudo"], ["tracks", "Faixas"], ["albums", "Álbuns"]].map(([k, l]) => '<button type="button" class="tab' + (S.search.tab === k ? " active" : "") + '" data-stab="' + k + '">' + l + "</button>").join("") + "</nav>" + content + "</section>";
+    const tab = S.search.tab; const showA = tab !== "tracks", showT = tab !== "albums"; const lid = registerList(S.search.tracks);
+    const a = showA && S.search.albums.length ? '<div class="section-head"><h2>Álbuns</h2></div><div class="grid">' + S.search.albums.map(albumCard).join("") + "</div>" : "";
+    const t = showT && S.search.tracks.length ? '<div class="section-head"><h2>Faixas</h2></div><ol class="list">' + S.search.tracks.map((x, i) => trackRow(x, i, lid, { showAlbum: true })).join("") + "</ol>" : "";
+    return a + t || emptyBox("search", "Nada encontrado", "Tente outro nome de artista, álbum ou faixa.");
+  }
+  async function viewSearch(r) {
+    const q = (r.query.get("q") || "").trim(); const input = $("#top-search"); if (input && document.activeElement !== input) input.value = q;
+    const content = await searchContent(q);
+    return '<section class="page" id="search-page"><header class="page-head"><p class="label">Pesquisar</p><h1 class="page-title" id="search-title">' + (q ? esc(q) : "Buscar") + '</h1></header><nav class="tabs" id="search-tabs">' + searchTabs() + '</nav><div id="search-results">' + content + "</div></section>";
+  }
+  async function updateSearch(r, token) {
+    const q = (r.query.get("q") || "").trim(); bar(true);
+    try {
+      const content = await searchContent(q); if (token !== S.token) return;
+      $("#search-title").textContent = q || "Buscar"; $("#search-tabs").innerHTML = searchTabs(); $("#search-results").innerHTML = content;
+    } catch (e) { toast(e.message, "error"); } finally { if (token === S.token) bar(false); }
   }
 
   async function viewAlbum(r) {
@@ -288,13 +302,14 @@
       if (!album) return '<section class="page">' + emptyBox("x", "Álbum não encontrado", "Ele pode ter sido removido da pasta local.") + "</section>";
       tracks = album.tracks;
     } else {
-      const d = await api("/api/album/" + encodeURIComponent(id));
+      const d = S.albumCache.get(id) || await api("/api/album/" + encodeURIComponent(id));
+      S.albumCache.set(id, d);
       album = Object.assign({}, d.album, { source: "qobuz" });
       tracks = (d.tracks || []).map((t) => Object.assign(normQ(t), { album: t.album || album.title, cover: t.cover || album.cover }));
     }
     const lid = registerList(tracks); const total = tracks.reduce((s, t) => s + (Number(t.duration) || 0), 0);
     const qual = album.source === "qobuz" ? [album.quality, typeLabel(album.type)] : [(tracks[0] && tracks[0].format ? tracks[0].format.toUpperCase() : "LOCAL")];
-    return '<section class="page"><a class="back" href="javascript:history.back()">' + icon("back") + "Voltar</a>" +
+    return '<section class="page"><button type="button" class="back" data-back>' + icon("back") + "Voltar</button>" +
       '<div class="hero">' + cover(album.cover, "", "music") + '<div class="hero-copy"><span class="label">' + (album.source === "local" ? "Álbum local" : "Álbum") + '</span><h1 class="hero-title">' + esc(album.title) + '</h1><a class="hero-artist" href="#/artist/' + encodeURIComponent(album.artist.split(/,\s*/)[0]) + '">' + esc(album.artist) + "</a>" +
       '<div class="meta-line">' + [album.year, tracks.length + " faixas", total ? fmtTime(total) : "", album.genre].filter(Boolean).map((x) => "<span>" + esc(x) + "</span>").join("") + "</div>" +
       '<div class="tech">' + qual.filter(Boolean).map((x) => '<span class="chip hi">' + esc(x) + "</span>").join("") + "</div>" +
@@ -310,7 +325,7 @@
     const albums = allAlbums().filter((a) => a.artist.toLowerCase().includes(name.toLowerCase()));
     const tracks = (S.local || []).filter((t) => t.artist.toLowerCase().includes(name.toLowerCase()));
     const lid = registerList(tracks);
-    return '<section class="page"><a class="back" href="javascript:history.back()">' + icon("back") + "Voltar</a>" +
+    return '<section class="page"><button type="button" class="back" data-back>' + icon("back") + "Voltar</button>" +
       '<header class="page-head"><p class="label">Artista</p><h1 class="page-title">' + esc(name) + "</h1></header>" +
       (albums.length ? '<div class="section-head"><h2>Álbuns</h2></div><div class="grid">' + albums.map(albumCard).join("") + "</div>" : emptyBox("user", "Nada na sua biblioteca", "Use Pesquisar para encontrar a discografia no catálogo.", '<a class="btn sm" href="#/search?q=' + encodeURIComponent(name) + '">Pesquisar “' + esc(name) + "”</a>")) +
       (tracks.length ? '<div class="section-head"><h2>Faixas locais</h2></div><ol class="list">' + tracks.map((t, i) => trackRow(t, i, lid, { showAlbum: true })).join("") + "</ol>" : "") + "</section>";
@@ -447,6 +462,7 @@
     const use = audio.paused ? "#i-play" : "#i-pause";
     $$("#play-button use, #np-play use").forEach((u) => u.setAttribute("href", use));
     ["#play-button", "#np-play"].forEach((s) => $(s).setAttribute("aria-label", audio.paused ? "Reproduzir" : "Pausar"));
+    document.body.classList.toggle("is-playing", !audio.paused);
     if ("mediaSession" in navigator) navigator.mediaSession.playbackState = audio.paused ? "paused" : "playing";
   }
   function togglePlay() { if (!S.pb.list.length) return; if (audio.paused) audio.play().catch(() => {}); else audio.pause(); }
@@ -480,7 +496,11 @@
     const vol = $("#volume-slider"); const v = store.get("qs-vol", 80); vol.value = String(v); audio.volume = v / 100; fill(vol, v);
     vol.addEventListener("input", () => { audio.volume = Number(vol.value) / 100; fill(vol, Number(vol.value)); store.set("qs-vol", Number(vol.value)); audio.muted = false; syncMute(); });
     $("#volume-button").addEventListener("click", () => { audio.muted = !audio.muted; syncMute(); });
-    $("#player-open").addEventListener("click", openNP); $("#player-queue-open").addEventListener("click", () => { openNP(); setNpTab("queue"); });
+    $("#player-open").addEventListener("click", () => openNP());
+    $("#player-queue-open").addEventListener("click", () => openNP("queue")); $("#player-lyrics-open").addEventListener("click", () => openNP("lyrics"));
+    $("#np-btn-lyrics").addEventListener("click", () => setNpPanel(S.npPanel === "lyrics" ? null : "lyrics"));
+    $("#np-btn-queue").addEventListener("click", () => setNpPanel(S.npPanel === "queue" ? null : "queue"));
+    $("#np-panel-close").addEventListener("click", () => setNpPanel(null));
   }
   function syncMute() { $("#volume-button use").setAttribute("href", audio.muted || audio.volume === 0 ? "#i-mute" : "#i-volume"); }
 
@@ -506,10 +526,17 @@
     set("seekto", (d) => { if (d && typeof d.seekTime === "number") audio.currentTime = d.seekTime; });
   }
 
-  /* Tocando agora + letras */
-  function openNP() { if (!S.pb.list.length) return; $("#now-playing").hidden = false; document.body.style.overflow = "hidden"; $("#np-close").focus(); if (S.npTab === "lyrics") scrollLyrics(); }
+  /* Tocando agora + painéis (Letras / Fila) abertos por botões */
+  function openNP(panel) { if (!S.pb.list.length) return; $("#now-playing").hidden = false; document.body.style.overflow = "hidden"; setNpPanel(panel === undefined ? S.npPanel : panel); $("#np-close").focus({ preventScroll: true }); }
   function closeNP() { $("#now-playing").hidden = true; document.body.style.overflow = ""; }
-  function setNpTab(tab) { S.npTab = tab; $$("[data-np-tab]").forEach((b) => b.classList.toggle("active", b.dataset.npTab === tab)); $("#np-queue").hidden = tab !== "queue"; $("#np-lyrics").hidden = tab !== "lyrics"; if (tab === "lyrics") scrollLyrics(); }
+  function setNpPanel(name) {
+    S.npPanel = name || null; const open = !!name;
+    $("#np-panel").hidden = !open; $("#np-body").classList.toggle("panel-open", open);
+    $("#np-queue").hidden = name !== "queue"; $("#np-lyrics").hidden = name !== "lyrics";
+    $$("[data-np-switch]").forEach((b) => { const on = b.dataset.npSwitch === name; b.classList.toggle("on", on); b.setAttribute("aria-selected", String(on)); });
+    ["lyrics", "queue"].forEach((n) => $("#np-btn-" + n).setAttribute("aria-pressed", String(name === n)));
+    if (name === "lyrics") scrollLyrics(); if (name === "queue") { const cur = $("#np-queue li.playing"); if (cur) cur.scrollIntoView({ block: "center" }); }
+  }
   function parseLrc(text) {
     const out = [];
     text.split(/\r?\n/).forEach((line) => {
@@ -521,13 +548,13 @@
   }
   async function loadLyricsFor(t) {
     const box = $("#np-lyrics"); const key = trackKey(t); S.lyrics = { key, kind: "none", lines: [], active: -1 };
-    if (t.source !== "local") { box.className = "lyrics plain"; box.innerHTML = '<p class="muted">Letras ficam disponíveis para arquivos locais (.lrc ao lado do áudio ou letra embutida). Faixas transmitidas do Qobuz não trazem letra nesta versão.</p>'; return; }
     box.className = "lyrics plain"; box.innerHTML = '<p class="muted">Procurando letra…</p>';
+    const url = t.source === "local" ? "/api/library/lyrics/" + encodeURIComponent(t.key || t.id) : "/api/lyrics/" + encodeURIComponent(t.id);
     try {
-      const d = await api("/api/library/lyrics/" + encodeURIComponent(t.key || t.id)); if (S.lyrics.key !== key) return;
+      const d = await api(url); if (S.lyrics.key !== key) return;
       if (d.kind === "synced") { const lines = parseLrc(d.text); S.lyrics = { key, kind: "synced", lines, active: -1 }; box.className = "lyrics"; box.innerHTML = lines.map((l, i) => '<p class="jump" data-li="' + i + '">' + esc(l.text) + "</p>").join(""); }
       else if (d.kind === "plain") { S.lyrics.kind = "plain"; box.className = "lyrics plain"; box.innerHTML = d.text.split(/\r?\n/).map((l) => "<p>" + (esc(l) || "&nbsp;") + "</p>").join(""); }
-      else box.innerHTML = '<p class="muted">Este arquivo não tem letra.</p>';
+      else box.innerHTML = '<p class="muted">Sem letra disponível para esta faixa.</p>';
     } catch (e) { if (S.lyrics.key === key) box.innerHTML = '<p class="muted">Não foi possível carregar a letra.</p>'; }
   }
   function updateLyricsActive() {
@@ -536,8 +563,14 @@
     if (a === S.lyrics.active) return; S.lyrics.active = a;
     $$("#np-lyrics p").forEach((p, i) => p.classList.toggle("on", i === a)); scrollLyrics();
   }
-  function scrollLyrics() {
-    if (S.npTab !== "lyrics") return; const el = $("#np-lyrics p.on"); if (el) el.scrollIntoView({ block: "center", behavior: "smooth" });
+  function scrollLyrics() { if (S.npPanel !== "lyrics") return; const el = $("#np-lyrics p.on"); if (el) el.scrollIntoView({ block: "center", behavior: "smooth" }); }
+  async function playAlbumById(id) {
+    try {
+      let tracks;
+      if (id.startsWith("l:")) { await loadLocal(); const a = localAlbums().find((x) => x.id === id); tracks = a ? a.tracks : []; }
+      else { const d = S.albumCache.get(id) || await api("/api/album/" + encodeURIComponent(id)); S.albumCache.set(id, d); tracks = (d.tracks || []).map((t) => Object.assign(normQ(t), { album: t.album || d.album.title, cover: t.cover || d.album.cover })); }
+      if (tracks.length) playList(tracks, 0); else toast("Este álbum não tem faixas.", "info");
+    } catch (e) { toast(e.message, "error"); }
   }
 
   /* ------------------------------------------------------------ ferramentas */
@@ -730,11 +763,14 @@
       if (t.closest("[data-resume]")) { const l = store.get("qs-last", null); if (l) playList([l], 0); return; }
       if (t.closest("[data-select-toggle]")) { toggleSelect(); return; }
       if (t.closest("[data-dl-selected]")) { downloadSelected(); return; }
-      if ((el = t.closest("[data-np-tab]"))) { setNpTab(el.dataset.npTab); return; }
+      if ((el = t.closest("[data-np-switch]"))) { setNpPanel(el.dataset.npSwitch); return; }
+      if ((el = t.closest("[data-play-album]"))) { e.preventDefault(); playAlbumById(el.dataset.playAlbum); return; }
+      if (t.closest("[data-back]")) { if (history.length > 1) history.back(); else location.hash = "#/home"; return; }
       if ((el = t.closest("#np-queue li"))) { S.pb.index = Number(el.dataset.qi); loadCurrent(); return; }
       if ((el = t.closest("#np-lyrics p[data-li]"))) { const l = S.lyrics.lines[Number(el.dataset.li)]; if (l) audio.currentTime = l.t; return; }
     });
     document.addEventListener("change", (e) => { if (e.target.matches("[data-sel]")) updateSelectCount(); });
+    document.addEventListener("error", (e) => { const t = e.target; if (t && t.tagName === "IMG") { const c = t.closest(".cover"); if (c) { c.classList.add("dots"); c.innerHTML = icon("music"); } } }, true);
     ["#open-settings", "#open-settings-phone", "#open-settings-nav"].forEach((s) => $(s).addEventListener("click", openModal));
     $$("[data-close-modal]").forEach((b) => b.addEventListener("click", closeModal));
     $("#modal-backdrop").addEventListener("click", (e) => { if (e.target.id === "modal-backdrop") closeModal(); });

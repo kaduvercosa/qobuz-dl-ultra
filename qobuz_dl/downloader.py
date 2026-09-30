@@ -2078,43 +2078,9 @@ class Download:
 
     async def _fetch_qobuz_lyrics_json(self, track_id, language=None):
         """Fetch lyrics JSON from Qobuz API."""
-        try:
-            params = {"track_id": track_id}
-            if language:
-                params["language"] = language
-            params["request_ts"] = int(time.time())
-            params["request_sig"] = self.client._modern_sig(
-                "track/lyricsUrl", params, self.client.sec
-            )
-
-            r = await self.client.session.request(
-                "get", self.client.base + "track/lyricsUrl", params=params
-            )
-            if r.status_code != 200:
-                return None
-            lyrics_url_meta = r.json()
-
-            lyrics_json_url = None
-            if isinstance(lyrics_url_meta, dict):
-                lyrics_json_url = lyrics_url_meta.get("url") or lyrics_url_meta.get(
-                    "lyrics_url"
-                )
-                if not lyrics_json_url:
-                    for k, v in lyrics_url_meta.items():
-                        if "url" in k.lower() and isinstance(v, str):
-                            lyrics_json_url = v
-                            break
-
-            if not lyrics_json_url:
-                return None
-
-            resp = await self.http_session.get(lyrics_json_url, timeout=12)
-            if resp.status_code in (403, 404):
-                return None
-            resp.raise_for_status()
-            return resp.json()
-        except Exception:
-            return None
+        return await fetch_qobuz_lyrics_json(
+            self.client, self.http_session, track_id, language
+        )
 
     def _append_lyrics_to_booklet(self, dirn, album_title):
         """Append lyrics to digital booklet text file."""
@@ -2385,6 +2351,47 @@ async def tqdm_download(
                 logger.debug(f"Falha ao fechar client HTTP no finally: {e}")
         if is_parallel and position_pool:
             position_pool.release(position)
+
+
+async def fetch_qobuz_lyrics_json(client, http_session, track_id, language=None):
+    """Fetch lyrics JSON from Qobuz API."""
+    try:
+        params = {"track_id": track_id}
+        if language:
+            params["language"] = language
+        params["request_ts"] = int(time.time())
+        params["request_sig"] = client._modern_sig(
+            "track/lyricsUrl", params, client.sec
+        )
+
+        r = await client.session.request(
+            "get", client.base + "track/lyricsUrl", params=params
+        )
+        if r.status_code != 200:
+            return None
+        lyrics_url_meta = r.json()
+
+        lyrics_json_url = None
+        if isinstance(lyrics_url_meta, dict):
+            lyrics_json_url = lyrics_url_meta.get("url") or lyrics_url_meta.get(
+                "lyrics_url"
+            )
+            if not lyrics_json_url:
+                for k, v in lyrics_url_meta.items():
+                    if "url" in k.lower() and isinstance(v, str):
+                        lyrics_json_url = v
+                        break
+
+        if not lyrics_json_url:
+            return None
+
+        resp = await http_session.get(lyrics_json_url, timeout=12)
+        if resp.status_code in (403, 404):
+            return None
+        resp.raise_for_status()
+        return resp.json()
+    except Exception:
+        return None
 
 
 def _get_title(item_dict):

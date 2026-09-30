@@ -28,6 +28,7 @@ from pydantic import BaseModel, Field
 
 from qobuz_dl.core import QobuzDL
 from qobuz_dl.constants import DEFAULT_FOLDER, DEFAULT_TRACK
+from qobuz_dl.downloader import _resolve_art_url
 from qobuz_dl.paths import ensure_directory_ready
 from qobuz_dl.settings import QobuzDLSettings
 from qobuz_dl.utils import get_config_paths
@@ -324,38 +325,109 @@ class GuiService:
             "folder_format": DEFAULT_FOLDER,
             "track_format": DEFAULT_TRACK,
         }
+        # config.ini é a ÚNICA fonte das configurações de download: o que a CLI
+        # lê é exatamente o que a GUI mostra e usa. (O antigo gui.json paralelo
+        # divergia do config.ini e fazia a GUI baixar com regras que a pessoa
+        # nunca escolheu no terminal.)
+        return self._settings_from_ini(defaults)
+
+    # chave da GUI -> (chave no config.ini, invertida?)
+    _INI_BOOLS = {
+        "embed_art": ("embed_art", False),
+        "fetch_lyrics": ("fetch_lyrics", False),
+        "lrc_files": ("no_lrc_files", True),
+        "credits": ("no_credits", True),
+        "m3u": ("no_m3u", True),
+        "quality_fallback": ("no_fallback", True),
+        "playlist_as_albums": ("playlist_as_albums", False),
+        "verify_after_download": ("verify_after_download", False),
+        "no_cover": ("no_cover", False),
+        "smart_discography": ("smart_discography", False),
+        "multi_value_tags": ("multi_value_tags", False),
+    }
+    _INI_STRINGS = ("embedded_art_size", "saved_art_size", "folder_format", "track_format")
+    _INI_INTS = ("max_workers", "segment_workers")
+
+    def _settings_from_ini(self, defaults: dict[str, Any]) -> dict[str, Any]:
+        result = dict(defaults)
+        config_file = get_config_paths()["config_file"]
+        parser = configparser.ConfigParser(interpolation=None)
         try:
-            data = json.loads(self.settings_path.read_text(encoding="utf-8"))
-            if not isinstance(data, dict):
-                return defaults
-            quality = int(data.get("quality", 6))
-            if quality not in QUALITY_LABELS:
-                quality = 6
-            parsed = {**defaults, **data, "quality": quality}
-            for key in (
-                "embed_art",
-                "fetch_lyrics",
-                "lrc_files",
-                "credits",
-                "m3u",
-                "quality_fallback",
-                "playlist_as_albums",
-                "verify_after_download",
-                "no_cover",
-                "smart_discography",
-                "multi_value_tags",
-            ):
-                parsed[key] = bool(parsed[key])
-            parsed["max_workers"] = max(1, min(16, int(parsed.get("max_workers", 1))))
-            parsed["segment_workers"] = max(
-                2, min(16, int(parsed.get("segment_workers", 4)))
-            )
-            for key in ("folder_format", "track_format"):
-                if not isinstance(parsed[key], str) or not parsed[key].strip():
-                    parsed[key] = defaults[key]
-            return parsed
-        except (OSError, ValueError, TypeError, json.JSONDecodeError):
-            return defaults
+            parser.read(config_file, encoding="utf-8")
+        except (OSError, configparser.Error):
+            return result
+        section = "qobuz" if parser.has_section("qobuz") else "DEFAULT"
+
+        def raw(key):
+            return parser.get(section, key, fallback=None)
+
+        for gui_key, (ini_key, inverted) in self._INI_BOOLS.items():
+            value = raw(ini_key)
+            if value is None or value.strip() == "":
+                continue
+            flag = value.strip().lower() in ("1", "true", "yes", "on")
+            result[gui_key] = (not flag) if inverted else flag
+        # fetch_lyrics da GUI liga busca E incorporação (ver connect()).
+        embed = raw("embed_lyrics")
+        if raw("fetch_lyrics") is None and embed:
+            result["fetch_lyrics"] = embed.strip().lower() in ("1", "true", "yes", "on")
+        for key in self._INI_STRINGS:
+            value = raw(key)
+            if value and value.strip():
+                result[key] = value.strip()
+        for key in self._INI_INTS:
+            value = raw(key)
+            try:
+                if value:
+                    result[key] = int(value)
+            except ValueError:
+                pass
+        result["max_workers"] = max(1, min(16, int(result["max_workers"])))
+        result["segment_workers"] = max(2, min(16, int(result["segment_workers"])))
+        directory = raw("directory") or raw("default_folder")
+        if directory:
+            result["directory"] = directory
+        quality = raw("default_quality")
+        try:
+            if quality and int(quality) in QUALITY_LABELS:
+                result["quality"] = int(quality)
+        except ValueError:
+            pass
+        return result
+
+    def _write_settings_to_ini(self, data: dict[str, Any]) -> None:
+        """Grava as preferências da GUI no config.ini da CLI, preservando
+        todas as outras chaves (contas, tags, etc.)."""
+        config_file = get_config_paths()["config_file"]
+        parser = configparser.ConfigParser(interpolation=None)
+        parser.read(config_file, encoding="utf-8")
+        if not parser.has_section("qobuz"):
+            parser.add_section("qobuz")
+        section = "qobuz"
+
+        def put(key, value):
+            parser.set(section, key, str(value))
+
+        for gui_key, (ini_key, inverted) in self._INI_BOOLS.items():
+            flag = bool(data[gui_key])
+            put(ini_key, str((not flag) if inverted else flag).lower())
+        put("embed_lyrics", str(bool(data["fetch_lyrics"])).lower())
+        for key in self._INI_STRINGS:
+            put(key, data[key])
+        for key in self._INI_INTS:
+            put(key, int(data[key]))
+        put("directory", data["directory"])
+        put("default_quality", int(data["quality"]))
+        parent = os.path.dirname(config_file)
+        os.makedirs(parent, mode=0o700, exist_ok=True)
+        temporary = config_file + ".tmp"
+        with open(temporary, "w", encoding="utf-8") as handle:
+            parser.write(handle)
+        try:
+            os.chmod(temporary, 0o600)
+        except OSError:
+            pass
+        os.replace(temporary, config_file)
 
     def _read_config(self) -> tuple[configparser.ConfigParser, str, dict[str, str]]:
         config_file = get_config_paths()["config_file"]
@@ -659,21 +731,7 @@ class GuiService:
         expanded = ensure_directory_ready(directory)
         self.local_settings = request.model_dump()
         self.local_settings["directory"] = str(expanded)
-        self.settings_path.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            self.settings_path.parent.chmod(0o700)
-        except OSError:
-            pass
-        temporary = self.settings_path.with_suffix(".tmp")
-        temporary.write_text(
-            json.dumps(self.local_settings, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-        try:
-            temporary.chmod(0o600)
-        except OSError:
-            pass
-        temporary.replace(self.settings_path)
+        self._write_settings_to_ini(self.local_settings)
         if self.engine:
             self.engine.directory, self.engine.quality = str(expanded), quality
             (
@@ -822,7 +880,7 @@ class GuiService:
                         "format": path.suffix.lower().lstrip("."),
                         "size": path.stat().st_size,
                         "pathLabel": path.parent.name,
-                        "cover": None,
+                        "cover": f"/api/library/cover/{key}",
                     }
                 )
             except (OSError, ValueError, TypeError):
@@ -1055,14 +1113,26 @@ DEMO_TRACKS = [
 
 
 def _cover(item: dict[str, Any]) -> str | None:
+    """URL da capa em resolução original (_org), mesma troca de sufixo que a
+    CLI usa (`_resolve_art_url`). Prefere a maior variante que o Qobuz manda."""
     image = item.get("image") or item.get("cover")
+    url = None
     if isinstance(image, str) and image.startswith(("https://", "http://")):
-        return image
-    if isinstance(image, dict):
-        for value in image.values():
+        url = image
+    elif isinstance(image, dict):
+        for key in ("large", "extralarge", "mega", "org", "small", "thumbnail"):
+            value = image.get(key)
             if isinstance(value, str) and value.startswith(("https://", "http://")):
-                return value
-    return None
+                url = value
+                break
+        if not url:
+            for value in image.values():
+                if isinstance(value, str) and value.startswith(("https://", "http://")):
+                    url = value
+                    break
+    if not url:
+        return None
+    return _resolve_art_url(url.replace("_230.", "_600.").replace("_50.", "_600.").replace("_150.", "_600."), "org")
 
 
 def _track_result(item: dict[str, Any]) -> dict[str, Any]:
@@ -1394,6 +1464,66 @@ def create_app(*, demo: bool = False, allow_network: bool = False) -> FastAPI:
             media_type=mimetypes.guess_type(path.name)[0] or "application/octet-stream",
         )
 
+    @app.get("/api/library/cover/{file_key}")
+    async def local_cover(file_key: str):
+        """Capa embutida no arquivo de áudio (APIC/PICTURE/covr) ou cover.jpg ao lado."""
+        path = service.local_files.get(file_key)
+        if not path or not path.is_file():
+            raise HTTPException(status_code=404, detail="Arquivo não encontrado")
+        data, mime = b"", "image/jpeg"
+        try:
+            from mutagen import File as AudioFile
+
+            audio = AudioFile(path)
+            tags = getattr(audio, "tags", None)
+            if hasattr(audio, "pictures") and audio.pictures:
+                pic = audio.pictures[0]
+                data, mime = pic.data, pic.mime or mime
+            elif tags is not None and hasattr(tags, "getall") and tags.getall("APIC"):
+                pic = tags.getall("APIC")[0]
+                data, mime = pic.data, pic.mime or mime
+            elif tags is not None and "covr" in tags and tags["covr"]:
+                pic = tags["covr"][0]
+                data = bytes(pic)
+                mime = "image/png" if getattr(pic, "imageformat", 13) == 14 else "image/jpeg"
+        except Exception:
+            data = b""
+        if not data:
+            for name in ("cover.jpg", "folder.jpg", "cover.png", "folder.png", "front.jpg"):
+                candidate = path.parent / name
+                if candidate.is_file() and candidate.stat().st_size < 12_000_000:
+                    data = candidate.read_bytes()
+                    mime = "image/png" if name.endswith(".png") else "image/jpeg"
+                    break
+        if not data:
+            raise HTTPException(status_code=404, detail="Sem capa")
+        return Response(data, media_type=mime, headers={"Cache-Control": "private, max-age=86400"})
+
+    @app.get("/api/lyrics/{track_id}")
+    async def stream_lyrics(track_id: str):
+        """Letra (sincronizada quando existir) de uma faixa do catálogo Qobuz."""
+        import re
+
+        import httpx
+
+        from qobuz_dl.downloader import fetch_qobuz_lyrics_json
+        from qobuz_dl.lyrics_engine import LyricsEngine
+
+        client = await service.ensure_connected()
+        if client is None:
+            return {"kind": "none", "text": ""}
+        async with httpx.AsyncClient(follow_redirects=True) as http:
+            payload = await fetch_qobuz_lyrics_json(client, http, track_id)
+        engine = LyricsEngine.__new__(LyricsEngine)
+        parsed = engine.extract_qobuz_lyrics(payload)
+        if not parsed:
+            return {"kind": "none", "text": ""}
+        if parsed.get("synced"):
+            return {"kind": "synced", "text": parsed["synced"], "lang": parsed.get("lang")}
+        if parsed.get("plain"):
+            return {"kind": "plain", "text": parsed["plain"], "lang": parsed.get("lang")}
+        return {"kind": "none", "text": ""}
+
     @app.get("/api/library/lyrics/{file_key}")
     async def local_lyrics(file_key: str):
         """Letras de um arquivo local: .lrc ao lado do áudio ou tag embutida."""
@@ -1544,7 +1674,7 @@ def create_app(*, demo: bool = False, allow_network: bool = False) -> FastAPI:
     return app
 
 
-async def run_gui(
+def run_gui(
     host: str = "0.0.0.0",
     port: int = 8060,
     demo: bool = False,
@@ -1584,7 +1714,11 @@ async def run_gui(
         )
     )
 
-    await server.serve()
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        server.run()
+        return
 
     # Já existe um event loop ativo (caso de `qobuz-dl gui run`, que passa por
     # async_main em cli.py): server.run() chamaria asyncio.run() de novo e
@@ -1636,12 +1770,12 @@ def main() -> None:
     )
     args = parser.parse_args()
     try:
-        asyncio.run(run_gui(
+        run_gui(
             host=args.host,
             port=args.port,
             demo=args.demo,
             open_browser=not args.no_browser,
-        ))
+        )
     except ValueError as error:
         parser.error(str(error))
 
