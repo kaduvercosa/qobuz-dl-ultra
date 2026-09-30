@@ -186,9 +186,12 @@ class TestTagFlac:
 
         assert fake.tags.vendor == ""
 
-    def test_multi_value_tags_troca_virgula_por_ponto_e_virgula(
+    def test_multi_value_tags_grava_lista_de_artistas(
         self, monkeypatch, tmp_path
     ):
+        """Com multi_value_tags=True, ARTIST deve ser uma lista real de
+        valores (tags Vorbis multivaloradas), não uma string com separador.
+        A implementação chama _split_multi_value() e grava audio[k] = lista."""
         fake = FakeFLAC()
         monkeypatch.setattr(metadata, "FLAC", lambda path: fake)
 
@@ -211,7 +214,9 @@ class TestTagFlac:
             settings=QobuzDLSettings(multi_value_tags=True),
         )
 
-        assert fake["ARTIST"] == "Artista Um ; Artista Dois"
+        # Com multi_value_tags, a implementação grava uma lista real de
+        # valores Vorbis (um por artista), não uma string única com "; ".
+        assert fake["ARTIST"] == ["Artista Um", "Artista Dois"]
 
     def test_sem_multi_value_tags_mantem_virgula(self, monkeypatch, tmp_path):
         fake = FakeFLAC()
