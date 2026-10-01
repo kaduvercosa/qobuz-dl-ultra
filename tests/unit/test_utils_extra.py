@@ -529,9 +529,8 @@ def test_get_config_paths_ios(monkeypatch):
     assert utils.get_config_paths()["config_dir"] == "/ios"
     monkeypatch.delenv("QOBUZ_DL_IOS_HOME")
     monkeypatch.setenv("HOME", "/var/Containers/Data/Application/ABC")
-    assert (
-        utils.get_config_paths()["config_dir"]
-        == os.path.join("/var/Containers/Data/Application/ABC", "Documents")
+    assert utils.get_config_paths()["config_dir"] == os.path.join(
+        "/var/Containers/Data/Application/ABC", "Documents"
     )
 
 
