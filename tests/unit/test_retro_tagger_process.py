@@ -493,6 +493,7 @@ async def test_inject_pasta_inexistente_avisa_e_nao_processa(tmp_path, espiao):
 
 async def test_inject_expande_til_do_home(tmp_path, espiao, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
     (tmp_path / "Musicas").mkdir()
     await rt.inject_lyrics_retroactively(
         directory_path="~/Musicas", settings=SimpleNamespace()

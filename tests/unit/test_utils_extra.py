@@ -4,6 +4,7 @@ nomes de arquivo, capa Apple e caminhos de configuração.
 Sem rede, sem ffmpeg real e sem áudio real.
 """
 
+import os
 import subprocess
 from types import SimpleNamespace
 
@@ -295,6 +296,7 @@ def test_create_and_return_dir(tmp_path, monkeypatch):
     assert utils.create_and_return_dir(str(destino)) == str(destino)
     assert destino.is_dir()
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
     assert utils.create_and_return_dir("~/musica") == str(tmp_path / "musica")
 
 
@@ -529,7 +531,7 @@ def test_get_config_paths_ios(monkeypatch):
     monkeypatch.setenv("HOME", "/var/Containers/Data/Application/ABC")
     assert (
         utils.get_config_paths()["config_dir"]
-        == "/var/Containers/Data/Application/ABC/Documents"
+        == os.path.join("/var/Containers/Data/Application/ABC", "Documents")
     )
 
 
