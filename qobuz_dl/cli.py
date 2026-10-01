@@ -316,7 +316,7 @@ def _pick_accent_color() -> str:
             ui.emit(" Formato inválido. Use três números de 0 a 255, ex: 150;80;220")
 
     ui.emit("\n Preview da sua cor:")
-    ui.emit(accent_preview(escape, "━━ [FAIXA] ARTISTA The Weeknd\n"))
+    ui.emit(accent_preview(escape or "", "━━ [FAIXA] ARTISTA The Weeknd\n"))
     confirm = (
         input(" Confirmar esta cor? (Enter = sim, n = escolher outra): ")
         .strip()

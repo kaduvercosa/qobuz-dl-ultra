@@ -218,7 +218,7 @@ def build_tool_argv(payload: ToolRequest, settings: dict[str, Any]) -> list[str]
         raise ValueError(
             "Confirme as alterações nos arquivos locais antes de continuar."
         )
-    argv: list[str] = [action]
+    argv = [action]
     if action in {"dl", "sync-favorites", "lucky"}:
         argv += [
             "--directory",

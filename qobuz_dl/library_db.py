@@ -193,7 +193,7 @@ class LibraryDB:
                 cur = c.execute(
                     f"INSERT INTO albums ({','.join(cols)}) VALUES ({marks})", vals
                 )
-                return int(cur.lastrowid)
+                return int(cur.lastrowid or 0)
             sets = ["last_seen_at=?", "removed_from_service=0"]
             vals = [now]
             if title:
@@ -373,7 +373,7 @@ class LibraryDB:
                 "INSERT INTO sync_runs (source, started_at) VALUES (?, ?)",
                 (source, _now()),
             )
-            return int(cur.lastrowid)
+            return int(cur.lastrowid or 0)
 
     def complete_sync_run(
         self,

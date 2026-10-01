@@ -106,7 +106,7 @@ def extract_album_data(item: dict) -> Optional[dict]:
         "genre": _name(item.get("genre")) or None,
         "upc": str(item.get("upc") or "") or None,
         "duration_seconds": item.get("duration") or None,
-        "cover_url": image.get("large") or image.get("small") or None,
+        "cover_url": (image or {}).get("large") or (image or {}).get("small") or None,
     }
 
 
@@ -357,7 +357,7 @@ async def run_sync(
                 albums_found=refresh["total"],
                 albums_new=refresh["new"],
                 albums_removed=refresh["removed"],
-                albums_downloaded=dl["downloaded"],
+                albums_downloaded=int(dl["downloaded"]),  # type: ignore[call-overload]
             )
         return {
             "status": "complete",

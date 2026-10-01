@@ -27,7 +27,7 @@ try:
 
     _CRYPTO_AVAILABLE = True
 except ImportError:
-    hashes = padding = Cipher = algorithms = modes = HKDF = None
+    hashes = padding = Cipher = algorithms = modes = HKDF = None  # type: ignore[assignment,misc]
     _CRYPTO_AVAILABLE = False
 
 from qobuz_dl import ui
