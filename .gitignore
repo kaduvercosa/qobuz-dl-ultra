@@ -37,3 +37,5 @@ htmlcov/
 .pytest_cache/
 .icloud
 /.git-old/**
+/.mypy_cache/**
+/.ruff_cache/**
