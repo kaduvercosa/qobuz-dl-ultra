@@ -111,10 +111,6 @@ def test_detect_lan_ip_retorna_string_ou_none():
 def test_detect_lan_ip_oserror_retorna_none():
     fake_sock = MagicMock()
     fake_sock.connect.side_effect = OSError
-    """Mocka o socket real que detect_lan_ip cria internamente."""
-    fake_sock = MagicMock()
-    fake_sock.connect.side_effect = OSError
-    # socket.socket() retorna fake_sock
     with patch("socket.socket", return_value=fake_sock):
         resultado = gd.detect_lan_ip()
     assert resultado is None
@@ -164,7 +160,6 @@ def test_validate_host_ip_valido(host):
 
 def test_validate_host_invalido_levanta():
     with pytest.raises(ValueError, match="host inv"):
-    with pytest.raises(ValueError, match="host inválido"):
         gd.validate_host("nao-e-um-host")
 
 
@@ -224,12 +219,6 @@ def test_stop_envia_sigterm_e_retorna_true():
                         side_effect=[0.0, 0.0, 0.1, 0.1],
                     ):
                         resultado = gd.stop(timeout=0.5)
-    with patch.object(gd, "_read_state", return_value={"pid": 555}):
-        # [True] = entra no bloco stop; [True, False] = loop while
-        with patch.object(gd, "_process_alive", side_effect=[True, True, False]):
-            with patch("qobuz_dl.gui_daemon.os.kill") as mock_kill:
-                with patch("qobuz_dl.gui_daemon.time.sleep"):
-                    resultado = gd.stop(timeout=0.5)
     assert resultado is True
     mock_kill.assert_any_call(555, signal.SIGTERM)
 
@@ -265,10 +254,6 @@ def test_stop_process_lookup_error_ao_matar():
                     side_effect=[0.0, 0.0],
                 ):
                     resultado = gd.stop(timeout=0.1)
-    with patch.object(gd, "_read_state", return_value={"pid": 777}):
-        with patch.object(gd, "_process_alive", side_effect=[True, False]):
-            with patch("qobuz_dl.gui_daemon.os.kill", side_effect=ProcessLookupError):
-                resultado = gd.stop(timeout=0.1)
     assert resultado is True
 
 
@@ -298,10 +283,6 @@ def test_wait_for_startup_porta_respondendo(tmp_path):
     proc.poll.return_value = None
     log = tmp_path / "gui.log"
     log.write_text("", encoding="utf-8")
-    proc.poll.return_value = None  # processo vivo
-    log = tmp_path / "gui.log"
-    log.write_text("", encoding="utf-8")
-    # create_connection retorna context manager que não levanta
     fake_conn = MagicMock()
     fake_conn.__enter__ = lambda s: s
     fake_conn.__exit__ = MagicMock(return_value=False)
@@ -315,15 +296,10 @@ def test_wait_for_startup_processo_morreu(tmp_path):
     log = tmp_path / "gui.log"
     log.write_text("Traceback...\nerro fatal", encoding="utf-8")
     with pytest.raises(RuntimeError, match="saiu com c"):
-    proc.poll.return_value = 1  # saiu com erro
-    log = tmp_path / "gui.log"
-    log.write_text("Traceback...\nerro fatal", encoding="utf-8")
-    with pytest.raises(RuntimeError, match="saiu com código 1"):
         gd._wait_for_startup(proc, "127.0.0.1", 8060, log, timeout=0.1)
 
 
 def test_wait_for_startup_timeout_sem_falha(tmp_path):
-    """Prazo esgota com processo vivo — deve retornar sem levantar."""
     proc = MagicMock()
     proc.poll.return_value = None
     log = tmp_path / "gui.log"
@@ -359,7 +335,6 @@ def test_detect_public_ip_retorna_none_fora_de_nuvem():
 
 
 def test_detect_public_ip_ip_invalido_retorna_none():
-    """urlopen é chamado duas vezes: uma pro token, outra pro IP."""
     token_resp = MagicMock()
     token_resp.read.return_value = b"token123"
     ip_resp = MagicMock()
@@ -380,7 +355,6 @@ def test_detect_public_ip_retorna_ip_valido():
 
 
 def test_detect_public_ip_segundo_urlopen_levanta_oserror():
-    """Erro na segunda chamada (leitura do IP) deve retornar None."""
     token_resp = MagicMock()
     token_resp.read.return_value = b"token123"
     with patch("urllib.request.urlopen", side_effect=[token_resp, OSError]):
@@ -398,8 +372,6 @@ def test_display_url_loopback():
 
 
 def test_display_url_localhost():
-    # localhost está em LOOPBACK_HOSTS mas não é um ip_address válido;
-    # validate_host aceita, display_url não deve tentar ip_address nele
     url = gd.display_url("localhost", 8060)
     assert "localhost" in url
 
@@ -494,7 +466,6 @@ def test_start_wait_falha_apaga_state_e_relanca():
 def test_start_abre_browser_loopback():
     mock_proc = MagicMock()
     mock_proc.pid = 7070
-    # webbrowser é importado lazy dentro de start(); patch no módulo raiz
     with (
         patch.object(gd, "status", return_value={"running": False}),
         patch.object(gd, "resolve_host", return_value="127.0.0.1"),
@@ -520,4 +491,3 @@ def test_start_nao_abre_browser_em_modo_demo():
     ):
         gd.start(host="127.0.0.1", port=8060, demo=True, open_browser=True)
     mock_browser.assert_not_called()
-
