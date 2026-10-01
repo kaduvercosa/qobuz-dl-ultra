@@ -14,10 +14,10 @@ from qobuz_dl.exceptions import (
     ResourceNotFoundError,
 )
 
-
 # ---------------------------------------------------------------------------
 # Hierarquia
 # ---------------------------------------------------------------------------
+
 
 def test_qobuz_dl_exception_herda_de_exception():
     assert issubclass(QobuzDLException, Exception)
@@ -61,6 +61,7 @@ def test_todas_herdam_de_exception(exc_cls):
 # Instanciação sem mensagem
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.parametrize(
     "exc_cls",
     [
@@ -84,6 +85,7 @@ def test_instancia_sem_mensagem(exc_cls):
 # Instanciação com mensagem
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.parametrize(
     "exc_cls, msg",
     [
@@ -106,6 +108,7 @@ def test_instancia_com_mensagem(exc_cls, msg):
 # ---------------------------------------------------------------------------
 # raise / catch
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.parametrize(
     "exc_cls",
@@ -149,6 +152,7 @@ def test_invalid_quality_capturada_diretamente():
 # ---------------------------------------------------------------------------
 # Encadeamento (chaining)
 # ---------------------------------------------------------------------------
+
 
 def test_excecao_encadeada():
     causa = ValueError("valor ruim")

@@ -22,7 +22,8 @@ import threading
 from pathvalidate import sanitize_filepath
 
 from qobuz_dl import ui
-from qobuz_dl.color import OFF, WARNING as YELLOW
+from qobuz_dl.color import OFF
+from qobuz_dl.color import WARNING as YELLOW
 from qobuz_dl.utils import classify_release_type, clean_filename, get_album_artist
 
 logger = logging.getLogger(__name__)

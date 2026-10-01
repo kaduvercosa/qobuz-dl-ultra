@@ -414,7 +414,7 @@ async def cmd_sync_favorites(
         # Se o usuário NÃO especificou nenhuma flag de download (--download-new / --download-missing)
         # e estamos em um terminal interativo, perguntar o que fazer.
         if not download_new and not download_missing and _interactive() and not watch:
-            from qobuz_dl.favorites_sync import pick_download_targets, download_albums
+            from qobuz_dl.favorites_sync import download_albums, pick_download_targets
 
             missing_targets = pick_download_targets(
                 lib, source=SOURCE, missing=True, limit=getattr(args, "limit", None)

@@ -9,9 +9,8 @@ from mutagen.flac import FLAC
 from mutagen.id3 import ID3
 from send2trash import send2trash
 
-from qobuz_dl.color import GREEN
+from qobuz_dl.color import GREEN, OFF, RED
 from qobuz_dl.color import INFO as CYAN
-from qobuz_dl.color import OFF, RED
 from qobuz_dl.color import WARNING as YELLOW
 
 logger = logging.getLogger(__name__)

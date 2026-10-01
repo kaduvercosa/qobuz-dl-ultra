@@ -8,7 +8,6 @@ real demais pra um teste unitário confiável numa passada só).
 
 import os
 
-
 from qobuz_dl.downloader import (
     _artist_label,
     _clean_format_str,

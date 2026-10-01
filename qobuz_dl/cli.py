@@ -31,12 +31,19 @@ from qobuz_dl import fuzzy, ui
 
 # Módulos internos do ecossistema QOBUZ-DL
 from qobuz_dl.bundle import Bundle
-from qobuz_dl.color import ACCENT_PRESETS, BG, GREEN
+from qobuz_dl.color import (
+    ACCENT_PRESETS,
+    BG,
+    GREEN,
+    MUTED,
+    OFF,
+    RED,
+    RESET,
+    accent_preview,
+)
 from qobuz_dl.color import HIGHLIGHT as ACCENT
 from qobuz_dl.color import INFO as CYAN
-from qobuz_dl.color import MUTED, OFF, RED, RESET
 from qobuz_dl.color import WARNING as YELLOW
-from qobuz_dl.color import accent_preview
 from qobuz_dl.commands import qobuz_dl_args
 from qobuz_dl.core import QobuzDL
 from qobuz_dl.downloader import DEFAULT_FOLDER, DEFAULT_TRACK
@@ -363,7 +370,7 @@ async def _reset_config(config_file: str):
 
     disable_kr = (
         input(
-            " Desativar Keyring e salvar tokens em texto puro no config.ini? (yes/no) [Padrã··o: no]\n- "
+            " Desativar Keyring e salvar tokens em texto puro no config.ini? (yes/no) [Padrão: no]\n- "
         )
         .strip()
         .lower()
@@ -391,7 +398,7 @@ async def _reset_config(config_file: str):
     if config["qobuz"]["fetch_lyrics"] == "true":
         ui.emit(f"\n{C_ACCENT}[?] Idioma de Tradução de Letras:{OFF}")
         ui.emit(
-            " Opç·µes: pt (Português), en (Inglês), es (Espanhol), fr (Francês), original (Manter nativo)"
+            " Opções: pt (Português), en (Inglês), es (Espanhol), fr (Francês), original (Manter nativo)"
         )
         lang_choice = input(" Idioma [Padrão: pt]:\n- ").strip().lower()
         if lang_choice in ["original", "orig"]:
@@ -664,7 +671,7 @@ async def _auth_command(
         sub_info = client.check_subscription()
 
         if update_credentials and token:
-            # CORREÇ·Ã·O: Salva em user_token E user_auth_token
+            # CORREÇÃO: Salva em user_token E user_auth_token
             _save_token_in_both_config_keys(config, token)
             config.set(section, "password", "")
             if not disable_keyring and _keyring_save("auth_token", token):
@@ -732,30 +739,30 @@ async def _auth_command(
         ui.emit(f" • Data de Início: {sub_info.get('start_date') or 'N/A'}")
         ui.emit(f" • Data de Término: {sub_info.get('end_date') or 'N/A'}")
         ui.emit(
-            f" • Cancelamento: {'Sim (Cancelada pelo usuário)' if sub_info.get('is_canceled') else 'Nã··o'}"
+            f" • Cancelamento: {'Sim (Cancelada pelo usuário)' if sub_info.get('is_canceled') else 'Não'}"
         )
         ui.emit(f" • Vagas Família: {sub_info.get('household_size_max')} membro(s)")
 
         ui.emit(f"\n {CYAN}[🎛️ CREDENCIAL & RECURSOS DA CONTA]{OFF}")
         ui.emit(f" • Tipo de Membro: {cred.get('description', 'Membro Qobuz')}")
         ui.emit(
-            f" • Streaming: {'Disponível' if sf.get('streaming') else 'Indisponí·ªvel'}"
+            f" • Streaming: {'Disponível' if sf.get('streaming') else 'Indisponível'}"
         )
         ui.emit(
-            f" • Letras (Lyrics): {'Disponível' if sf.get('lyrics') else 'Indisponí·ªvel'}"
+            f" • Letras (Lyrics): {'Disponível' if sf.get('lyrics') else 'Indisponível'}"
         )
         ui.emit(
-            f" • Importaç·ªo M úsicas: {'Disponível' if sf.get('music_import') else 'Indisponí·ªvel'}"
+            f" • Importação de Músicas: {'Disponível' if sf.get('music_import') else 'Indisponível'}"
         )
         ui.emit(
-            f" • Rá·ªdio / Club / Q: {'Disponível' if sf.get('radio') or sf.get('club') else 'Indisponí·ªvel'}"
+            f" • Rádio / Club / Q: {'Disponível' if sf.get('radio') or sf.get('club') else 'Indisponível'}"
         )
 
         if last_update:
             ui.emit(f"\n {CYAN}[📊 ATIVIDADES & ÚLTIMAS ATUALIZAÇÕES]{OFF}")
             ui.emit(f" • Playlists: {_format_timestamp(last_update.get('playlist'))}")
             ui.emit(
-                f" • Á•lbuns Favoritos: {_format_timestamp(last_update.get('favorite_album'))}"
+                f" • Álbuns Favoritos: {_format_timestamp(last_update.get('favorite_album'))}"
             )
             ui.emit(
                 f" • Faixas Favoritas: {_format_timestamp(last_update.get('favorite_track'))}"
@@ -768,7 +775,7 @@ async def _auth_command(
             )
 
         if not sub_info.get("is_active"):
-            ui.warn("⚠️• AVISO DE ASSINATURA INATIVA:")
+            ui.warn("⚠️ AVISO DE ASSINATURA INATIVA:")
             ui.detail(
                 f"Sua assinatura expirou em {sub_info.get('end_date')}. Para baixar álbuns e faixas completas em alta resolução, é necessário possuir uma conta ativa."
             )
@@ -808,7 +815,7 @@ async def _garantir_assinatura_ativa(qobuz: QobuzDL) -> bool:
             f" {CYAN}•{OFF} Validade / Término: {sub_info.get('end_date') or 'N/A'}"
         )
         ui.emit(
-            f" {CYAN}•{OFF} Cancelamento: {'Sim (Cancelada)' if sub_info.get('is_canceled') else 'Nã··o'}"
+            f" {CYAN}•{OFF} Cancelamento: {'Sim (Cancelada)' if sub_info.get('is_canceled') else 'Não'}"
         )
         ui.warn(
             "ℹ️ Sem uma assinatura ativa, a API da Qobuz não permite o download de faixas completas. É obrigatório informar o e-mail e o user_token de uma conta com assinatura ativa para continuar."
@@ -821,7 +828,7 @@ async def _garantir_assinatura_ativa(qobuz: QobuzDL) -> bool:
             .strip()
             .lower()
         )
-        if resp in ("cancelar", "cancel", "sair", "n", "nao", "nã··o"):
+        if resp in ("cancelar", "cancel", "sair", "n", "nao", "não"):
             ui.error(
                 "Operação cancelada. Nenhum comando de download roda sem assinatura ativa."
             )
@@ -1028,7 +1035,7 @@ _COMMAND_DESCRIPTIONS_PT = {
     "library": "Status e manutenção do catálogo local (missing, history, reconcile, reset-stuck).",
     "doctor": "Diagnostica ambiente, config, bancos e sentinelas (somente leitura).",
     "import-playlist": "Importa um arquivo de playlist (TXT, CSV, JSON) de qualquer plataforma para download.",
-    "stats": "Mostra estatí·ªsticas detalhadas sobre sua biblioteca e downloads efetuados.",
+    "stats": "Mostra estatísticas detalhadas sobre sua biblioteca e downloads efetuados.",
     "inspect": "Navega e mostra TODAS as tags de um arquivo de áudio local, mais uma checagem de autenticidade.",
     "auth": "Exibe status da conta/assinatura ou atualiza credenciais de login e token.",
     "user": "Exibe informações da conta, status da assinatura e dados do perfil.",
@@ -1155,7 +1162,7 @@ async def async_main():
 
     if offline_command in ("gui", "studio", "web"):
         action = getattr(offline_args, "action", "start")
-        host = getattr(offline_args, "host", "0.0.0.0")
+        host = getattr(offline_args, "host", None) or "127.0.0.1"
         port = getattr(offline_args, "port", 8060)
         demo = getattr(offline_args, "demo", False)
         open_browser = not getattr(offline_args, "no_browser", False)
@@ -1210,7 +1217,8 @@ async def async_main():
                 f"{YELLOW}Instale com: pip install 'qobuz-dl-ultra[gui]'{RESET}"
             )
         try:
-            await run_gui(host=host, port=port, demo=demo, open_browser=open_browser)
+            # run_gui é síncrona (bloqueante): não usar await.
+            run_gui(host=host, port=port, demo=demo, open_browser=open_browser)
         except ValueError as error:
             sys.exit(f"{RED}{error}{RESET}")
         except KeyboardInterrupt:
@@ -1551,7 +1559,7 @@ async def async_main():
                 settings=local_settings,
             )
         except KeyboardInterrupt:
-            ui.error("Operaç·ªo interrompida manualmente pelo usuário (CTRL+C).")
+            ui.error("Operação interrompida manualmente pelo usuário (CTRL+C).")
             ui.warn("Os arquivos já processados estão seguros. Saindo...")
         finally:
             if lyrics_client:

@@ -31,9 +31,8 @@ except ImportError:
     _CRYPTO_AVAILABLE = False
 
 from qobuz_dl import ui
-from qobuz_dl.color import GREEN
+from qobuz_dl.color import GREEN, OFF, RED, RESET
 from qobuz_dl.color import INFO as CYAN
-from qobuz_dl.color import OFF, RED, RESET
 from qobuz_dl.color import WARNING as YELLOW
 from qobuz_dl.exceptions import (
     AuthenticationError,

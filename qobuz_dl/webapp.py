@@ -8,13 +8,14 @@ from __future__ import annotations
 
 import asyncio
 import configparser
-from contextlib import asynccontextmanager
 import logging
 import mimetypes
 import os
 import secrets
+import sys
 import tempfile
 import time
+from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -25,8 +26,8 @@ from fastapi.responses import FileResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from qobuz_dl.core import QobuzDL
 from qobuz_dl.constants import DEFAULT_FOLDER, DEFAULT_TRACK
+from qobuz_dl.core import QobuzDL
 from qobuz_dl.downloader import _resolve_art_url
 from qobuz_dl.paths import ensure_directory_ready
 from qobuz_dl.settings import QobuzDLSettings
@@ -941,7 +942,7 @@ class GuiService:
         argv = ["--no-color", *argv]
         try:
             process = await asyncio.create_subprocess_exec(
-                os.sys.executable,
+                sys.executable,
                 "-m",
                 "qobuz_dl",
                 *argv,
@@ -1708,16 +1709,16 @@ def create_app(*, demo: bool = False, allow_network: bool = False) -> FastAPI:
 
 
 def run_gui(
-    host: str = "0.0.0.0",
+    host: str = "127.0.0.1",
     port: int = 8060,
     demo: bool = False,
     open_browser: bool = True,
 ) -> None:
-    """Sobe o servidor da GUI (bloqueante — roda em primeiro plano até Ctrl+C).
+    """Sobe o servidor da GUI (bloqueante -- roda em primeiro plano até Ctrl+C).
 
     Usado por `qobuz-dl gui run` e pelo processo filho que
     `qobuz_dl.gui_daemon.start()` cria em segundo plano. `host` aceita
-    loopback, `0.0.0.0` (padrão), `lan` (IP desta máquina na rede local)
+    loopback (`127.0.0.1`, padrão), `0.0.0.0`, `lan` (IP desta máquina na rede local)
     ou um IP válido.
     """
     import asyncio
@@ -1739,6 +1740,20 @@ def run_gui(
     ):
         local = "127.0.0.1" if resolved_host == "0.0.0.0" else resolved_host
         webbrowser.open(f"http://{local}:{port}/")
+
+    if resolved_host not in loopback:
+        logger.warning(
+            "GUI exposta em %s:%s sem autenticação: qualquer pessoa que alcance "
+            "esta porta controla a sessão Qobuz e os downloads. Restrinja por "
+            "firewall/Security Group ou use --host 127.0.0.1 com túnel SSH.",
+            resolved_host,
+            port,
+        )
+        print(
+            f"AVISO: GUI exposta na rede ({resolved_host}:{port}) sem login. "
+            "Restrinja o acesso por firewall ou use --host 127.0.0.1.",
+            file=sys.stderr,
+        )
 
     server = uvicorn.Server(
         uvicorn.Config(
@@ -1778,17 +1793,20 @@ def run_gui(
 def main() -> None:
     """Ponto de entrada para `python -m qobuz_dl.webapp` (uso direto, fora
     do comando principal). O caminho documentado e recomendado é
-    `qobuz-dl gui` (ou `qobuz-dl gui run` para primeiro plano) — ver
+    `qobuz-dl gui` (ou `qobuz-dl gui run` para primeiro plano) -- ver
     qobuz_dl/cli.py e o README."""
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="Qobuz-DL Studio — interface web local"
+        description="Qobuz-DL Studio -- interface web local"
     )
     parser.add_argument(
         "--host",
-        default="0.0.0.0",
-        help="Interface de rede (padrão: 0.0.0.0, todas as interfaces)",
+        default="127.0.0.1",
+        help=(
+            "Interface de rede (padrão: 127.0.0.1, somente esta máquina; "
+            "use 0.0.0.0 ou lan para expor na rede)"
+        ),
     )
     parser.add_argument(
         "--port", type=int, default=8060, help="Porta local (padrão: 8060)"

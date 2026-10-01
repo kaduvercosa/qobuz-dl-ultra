@@ -5,57 +5,61 @@
 # e as funcoes de apoio (capa, booklet, letras, nomes de arquivo/pasta).
 # Ponto de entrada tipico: Download(...).download_id_by_type(...).
 # ============================================================================
-from qobuz_dl.settings import QobuzDLSettings
-from typing import Optional
-from qobuz_dl.constants import (
-    DEFAULT_FOLDER,
-    DEFAULT_TRACK,
-    DEFAULT_MULTIPLE_DISC_TRACK,
-)
-from qobuz_dl.db import handle_download_id
-from qobuz_dl.utils import (
-    clean_filename,
-    verify_audio_integrity,
-    get_apple_hq_cover,
-)
-from .lyrics_engine import LyricsEngine
-import qobuz_dl.postprocess as postprocess
+import asyncio
 import logging
 import os
-import shutil
-import sys
-import time
 import re
-import threading
+import shutil
 import signal
+import sys
 import textwrap
-import asyncio
+import threading
+import time
+from typing import Optional
 
+import aiofiles
 import httpx
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from pathvalidate import sanitize_filename
+from tenacity import (
+    AsyncRetrying,
+    retry_if_not_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
 from tqdm import tqdm
 
 import qobuz_dl.metadata as metadata
+import qobuz_dl.postprocess as postprocess
 from qobuz_dl import ui
 from qobuz_dl.color import (
-    OFF,
     GREEN,
-    RED,
-    WARNING as YELLOW,
-    INFO as CYAN,
-    RESET,
     MUTED,
+    OFF,
+    RED,
+    RESET,
 )
+from qobuz_dl.color import (
+    INFO as CYAN,
+)
+from qobuz_dl.color import (
+    WARNING as YELLOW,
+)
+from qobuz_dl.constants import (
+    DEFAULT_FOLDER,
+    DEFAULT_MULTIPLE_DISC_TRACK,
+    DEFAULT_TRACK,
+)
+from qobuz_dl.db import handle_download_id
 from qobuz_dl.exceptions import NonStreamable
-
-import aiofiles
-from tenacity import (
-    AsyncRetrying,
-    stop_after_attempt,
-    wait_exponential,
-    retry_if_not_exception_type,
+from qobuz_dl.settings import QobuzDLSettings
+from qobuz_dl.utils import (
+    clean_filename,
+    get_apple_hq_cover,
+    verify_audio_integrity,
 )
+
+from .lyrics_engine import LyricsEngine
 
 # Ordem de fallback de qualidade quando o tier pedido falha por motivo de rede/servidor (NAO usado para faixas indisponiveis -- ver _PermanentDownloadError). 27=Hi-Res >96kHz | 7=Hi-Res 96kHz | 6=CD 16bit/44.1kHz | 5=MP3 320kbps
 FALLBACK_TIERS = [27, 7, 6, 5]
@@ -69,17 +73,17 @@ def _flatten_artists(artist_data):
 
 
 from qobuz_dl.download_utils import (
-    is_track_streamable,
-    create_missing_placeholder,
-    _get_safe_ncols,
-    _desc_budget,  # noqa: F401 -- usado só em testes
-    _PositionPool,
-    format_release_type,
-    process_folder_format_with_subdirs,
-    _clean_format_str,
-    _safe_get,
     _artist_label,
+    _clean_format_str,
+    _desc_budget,  # noqa: F401 -- usado só em testes
+    _get_safe_ncols,
+    _PositionPool,
+    _safe_get,
+    create_missing_placeholder,
+    format_release_type,
     get_album_artist,
+    is_track_streamable,
+    process_folder_format_with_subdirs,
 )
 
 # ANTES: as 10 funções/classe acima estavam definidas aqui direto. Movidas

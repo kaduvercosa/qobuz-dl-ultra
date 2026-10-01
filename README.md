@@ -471,7 +471,7 @@ pip install 'qobuz-dl-ultra[gui]'
 qobuz-dl gui
 ```
 
-`qobuz-dl gui` (equivalente a `qobuz-dl gui start`) sobe o servidor **em segundo plano** e devolve o terminal imediatamente — livre pra rodar qualquer outro comando enquanto a interface fica no ar. O padrão é escutar em `0.0.0.0` (todas as interfaces), e o comando já mostra o endereço certo pra acessar -- o IP da rede local, ou o IP público quando detecta que está numa nuvem com NAT (AWS EC2 etc.), nunca `0.0.0.0` literal. Pra manter só neste computador, use `--host 127.0.0.1`.
+`qobuz-dl gui` (equivalente a `qobuz-dl gui start`) sobe o servidor **em segundo plano** e devolve o terminal imediatamente — livre pra rodar qualquer outro comando enquanto a interface fica no ar. O padrão é escutar só em `127.0.0.1` (este computador), e o comando mostra o endereço certo pra acessar. Com `--host 0.0.0.0` ou `lan`, ele mostra o IP da rede local, ou o IP público quando detecta que está numa nuvem com NAT (AWS EC2 etc.), nunca `0.0.0.0` literal. Pra acessar de outros dispositivos, use `--host 0.0.0.0` (ou `lan`).
 
 ```bash
 qobuz-dl gui status   # confere se está rodando, PID e URL
@@ -511,7 +511,7 @@ qobuz-dl gui --demo
 
 ### Acesso pela rede local
 
-Por padrão `--host` é `0.0.0.0` (todas as interfaces -- acessível pelo IP desta máquina na rede). Outras opções:
+Por padrão `--host` é `127.0.0.1` (somente este computador). Outras opções:
 
 ```bash
 qobuz-dl gui start --host 127.0.0.1    # só este computador
@@ -545,7 +545,7 @@ Operações em **Ferramentas** usam a mesma CLI interna com argumentos validados
 
 ### 🔒 Segurança e permissões
 
-- **Host padrão é `0.0.0.0` (todas as interfaces).** Pensado pra já funcionar em servidores/instâncias de nuvem sem configuração extra. Isso expõe a interface -- e por tabela o controle da sua conta Qobuz -- pra quem alcançar a porta 8060; use `--host 127.0.0.1` se quiser manter só neste computador, e libere a porta no firewall/security group apenas para os IPs que devem acessar, nunca `0.0.0.0/0`. A proteção contra origem cruzada (CSRF) continua ativa nos dois casos.
+- **Host padrão é `127.0.0.1` (somente este computador).** Para acessar de outros dispositivos ou de uma instância de nuvem, use `--host 0.0.0.0` (ou `lan`). Isso expõe a interface, e por tabela o controle da sua conta Qobuz, a quem alcançar a porta 8060, e o servidor mostra um aviso. Libere a porta no firewall/security group apenas para os IPs que devem acessar, nunca `0.0.0.0/0`. Sem acesso direto, um túnel SSH (`ssh -L 8060:127.0.0.1:8060 usuario@servidor`) permite abrir a interface com segurança. A proteção contra origem cruzada (CSRF) continua ativa nos dois casos.
 - **Sem instalação com privilégios.** `pip install 'qobuz-dl-ultra[gui]'` roda como usuário comum; nunca use `sudo pip install`. Prefira um ambiente virtual (`python -m venv`) ou `pipx install 'qobuz-dl-ultra[gui]'` para manter as dependências isoladas do resto do sistema.
 - **Docker já roda sem root.** A imagem oficial executa como usuário `qobuz` sem privilégios (não root), com `$HOME` gravável só para config, banco e downloads — mesma base de permissões do restante da CLI, nada especial pra GUI.
 - **O processo em segundo plano é seu, sob seu usuário.** `gui start` sobe um processo comum (sem sudo, sem serviço de sistema) na sua própria sessão; `gui.pid`/`gui.log` ficam no diretório de configuração com permissão restrita (`0600`/`0700` quando o sistema de arquivos suporta).

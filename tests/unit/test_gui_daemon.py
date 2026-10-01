@@ -5,21 +5,17 @@ from __future__ import annotations
 import json
 import os
 import signal
-import socket
-import subprocess
-import sys
-import time
 from pathlib import Path
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 import qobuz_dl.gui_daemon as gd
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture(autouse=True)
 def isolate_state_path(tmp_path, monkeypatch):
@@ -38,6 +34,7 @@ def isolate_state_path(tmp_path, monkeypatch):
 # _read_state
 # ---------------------------------------------------------------------------
 
+
 def test_read_state_arquivo_ausente():
     assert gd._read_state() is None
 
@@ -45,7 +42,9 @@ def test_read_state_arquivo_ausente():
 def test_read_state_json_invalido(tmp_path, monkeypatch):
     config_path = tmp_path / "config2"
     config_path.mkdir()
-    monkeypatch.setattr(gd, "get_config_paths", lambda: {"config_path": str(config_path)})
+    monkeypatch.setattr(
+        gd, "get_config_paths", lambda: {"config_path": str(config_path)}
+    )
     (config_path / "gui.pid").write_text("nao-e-json", encoding="utf-8")
     assert gd._read_state() is None
 
@@ -53,15 +52,21 @@ def test_read_state_json_invalido(tmp_path, monkeypatch):
 def test_read_state_sem_pid(tmp_path, monkeypatch):
     config_path = tmp_path / "config3"
     config_path.mkdir()
-    monkeypatch.setattr(gd, "get_config_paths", lambda: {"config_path": str(config_path)})
-    (config_path / "gui.pid").write_text(json.dumps({"host": "127.0.0.1"}), encoding="utf-8")
+    monkeypatch.setattr(
+        gd, "get_config_paths", lambda: {"config_path": str(config_path)}
+    )
+    (config_path / "gui.pid").write_text(
+        json.dumps({"host": "127.0.0.1"}), encoding="utf-8"
+    )
     assert gd._read_state() is None
 
 
 def test_read_state_valido(tmp_path, monkeypatch):
     config_path = tmp_path / "config4"
     config_path.mkdir()
-    monkeypatch.setattr(gd, "get_config_paths", lambda: {"config_path": str(config_path)})
+    monkeypatch.setattr(
+        gd, "get_config_paths", lambda: {"config_path": str(config_path)}
+    )
     state = {"pid": 12345, "host": "127.0.0.1", "port": 8060}
     (config_path / "gui.pid").write_text(json.dumps(state), encoding="utf-8")
     resultado = gd._read_state()
@@ -71,6 +76,7 @@ def test_read_state_valido(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 # _process_alive
 # ---------------------------------------------------------------------------
+
 
 def test_process_alive_pid_inexistente():
     assert not gd._process_alive(9_999_999)
@@ -103,6 +109,7 @@ def test_process_alive_process_lookup_error_retorna_false():
 # detect_lan_ip
 # ---------------------------------------------------------------------------
 
+
 def test_detect_lan_ip_retorna_string_ou_none():
     resultado = gd.detect_lan_ip()
     assert resultado is None or isinstance(resultado, str)
@@ -128,6 +135,7 @@ def test_detect_lan_ip_retorna_ip_quando_connect_ok():
 # resolve_host
 # ---------------------------------------------------------------------------
 
+
 def test_resolve_host_passthrough():
     assert gd.resolve_host("127.0.0.1") == "127.0.0.1"
     assert gd.resolve_host("0.0.0.0") == "0.0.0.0"
@@ -148,6 +156,7 @@ def test_resolve_host_lan_sem_ip_levanta():
 # validate_host
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.parametrize("host", ["127.0.0.1", "localhost", "::1", "0.0.0.0"])
 def test_validate_host_loopback_e_any(host):
     assert gd.validate_host(host) == host
@@ -167,13 +176,16 @@ def test_validate_host_invalido_levanta():
 # status
 # ---------------------------------------------------------------------------
 
+
 def test_status_sem_arquivo_retorna_nao_rodando():
     resultado = gd.status()
     assert resultado == {"running": False}
 
 
 def test_status_processo_morto_retorna_nao_rodando():
-    with patch.object(gd, "_read_state", return_value={"pid": 9_999_999, "host": "127.0.0.1"}):
+    with patch.object(
+        gd, "_read_state", return_value={"pid": 9_999_999, "host": "127.0.0.1"}
+    ):
         with patch.object(gd, "_process_alive", return_value=False):
             resultado = gd.status()
     assert resultado["running"] is False
@@ -191,6 +203,7 @@ def test_status_processo_vivo_retorna_estado():
 # ---------------------------------------------------------------------------
 # stop
 # ---------------------------------------------------------------------------
+
 
 def test_stop_sem_processo_retorna_false():
     with patch.object(gd, "_read_state", return_value=None):
@@ -261,6 +274,7 @@ def test_stop_process_lookup_error_ao_matar():
 # _tail_log
 # ---------------------------------------------------------------------------
 
+
 def test_tail_log_arquivo_ausente():
     assert gd._tail_log(Path("/caminho/que/nao/existe/gui.log")) == ""
 
@@ -277,6 +291,7 @@ def test_tail_log_retorna_ultimas_linhas(tmp_path):
 # ---------------------------------------------------------------------------
 # _wait_for_startup
 # ---------------------------------------------------------------------------
+
 
 def test_wait_for_startup_porta_respondendo(tmp_path):
     proc = MagicMock()
@@ -318,7 +333,9 @@ def test_wait_for_startup_host_0000_usa_loopback(tmp_path):
     fake_conn = MagicMock()
     fake_conn.__enter__ = lambda s: s
     fake_conn.__exit__ = MagicMock(return_value=False)
-    with patch("qobuz_dl.gui_daemon.socket.create_connection", return_value=fake_conn) as mock_cc:
+    with patch(
+        "qobuz_dl.gui_daemon.socket.create_connection", return_value=fake_conn
+    ) as mock_cc:
         gd._wait_for_startup(proc, "0.0.0.0", 8060, log, timeout=2.0)
         args = mock_cc.call_args[0][0]
         assert args[0] == "127.0.0.1"
@@ -327,6 +344,7 @@ def test_wait_for_startup_host_0000_usa_loopback(tmp_path):
 # ---------------------------------------------------------------------------
 # detect_public_ip
 # ---------------------------------------------------------------------------
+
 
 def test_detect_public_ip_retorna_none_fora_de_nuvem():
     with patch("urllib.request.urlopen", side_effect=OSError):
@@ -366,6 +384,7 @@ def test_detect_public_ip_segundo_urlopen_levanta_oserror():
 # display_url
 # ---------------------------------------------------------------------------
 
+
 def test_display_url_loopback():
     url = gd.display_url("127.0.0.1", 8060)
     assert url == "http://127.0.0.1:8060/"
@@ -398,6 +417,7 @@ def test_display_url_ip_privado_sem_publico_usa_proprio():
 # ---------------------------------------------------------------------------
 # start
 # ---------------------------------------------------------------------------
+
 
 def test_start_ja_rodando_retorna_already_running():
     with patch.object(gd, "status", return_value={"running": True, "pid": 99}):
@@ -440,7 +460,9 @@ def test_start_com_demo_adiciona_flag():
         patch.object(gd, "status", return_value={"running": False}),
         patch.object(gd, "resolve_host", return_value="127.0.0.1"),
         patch.object(gd, "validate_host", return_value="127.0.0.1"),
-        patch("qobuz_dl.gui_daemon.subprocess.Popen", return_value=mock_proc) as mock_popen,
+        patch(
+            "qobuz_dl.gui_daemon.subprocess.Popen", return_value=mock_proc
+        ) as mock_popen,
         patch.object(gd, "_wait_for_startup"),
     ):
         gd.start(host="127.0.0.1", port=8060, demo=True, open_browser=False)

@@ -73,6 +73,7 @@ def base_payload(music_dir):
 # segment_workers clampado
 # ---------------------------------------------------------------------------
 
+
 class TestSegmentWorkersClamp:
     def test_clampado_acima_de_32(self, tmp_config):
         config_file = Path(tmp_config["config_file"])
@@ -98,6 +99,7 @@ class TestSegmentWorkersClamp:
 # ---------------------------------------------------------------------------
 # verify_after_download / embed_art lidos corretamente
 # ---------------------------------------------------------------------------
+
 
 class TestBoolFlags:
     def test_verify_after_download_true(self, tmp_config):
@@ -141,6 +143,7 @@ class TestBoolFlags:
 # save_settings sem engine não deve levantar
 # ---------------------------------------------------------------------------
 
+
 class TestSaveWithoutEngine:
     def test_sem_engine_nao_explode(self, service, base_payload, music_dir):
         assert not hasattr(service, "engine") or service.engine is None
@@ -152,6 +155,7 @@ class TestSaveWithoutEngine:
 # ---------------------------------------------------------------------------
 # GuiService em modo demo
 # ---------------------------------------------------------------------------
+
 
 class TestDemoMode:
     def test_demo_nao_le_config_ini(self, tmp_config):
@@ -173,6 +177,7 @@ class TestDemoMode:
 # build_tool_argv — playlist_as_albums
 # ---------------------------------------------------------------------------
 
+
 class TestBuildToolArgvExtra:
     BASE = {
         "directory": "/tmp/Music",
@@ -184,7 +189,9 @@ class TestBuildToolArgvExtra:
 
     def test_dl_com_playlist_as_albums_inclui_flag(self):
         argv = build_tool_argv(
-            ToolRequest(action="dl", dry_run=True, target="https://open.qobuz.com/album/abc"),
+            ToolRequest(
+                action="dl", dry_run=True, target="https://open.qobuz.com/album/abc"
+            ),
             self.BASE,
         )
         assert "--playlist-as-albums" in argv
@@ -218,6 +225,7 @@ class TestBuildToolArgvExtra:
 # ---------------------------------------------------------------------------
 # INI sem seção [qobuz]
 # ---------------------------------------------------------------------------
+
 
 class TestIniSemSecao:
     def test_config_sem_secao_qobuz_usa_defaults(self, tmp_config):

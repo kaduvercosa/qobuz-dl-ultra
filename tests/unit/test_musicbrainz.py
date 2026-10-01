@@ -8,10 +8,10 @@ import pytest
 
 import qobuz_dl.musicbrainz as mb
 
-
 # ---------------------------------------------------------------------------
 # Fixture: limpa estado global entre testes
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture(autouse=True)
 def limpa_estado_global():
@@ -27,10 +27,12 @@ def limpa_estado_global():
 # _get_sem
 # ---------------------------------------------------------------------------
 
+
 def test_get_sem_cria_semaphore_na_primeira_chamada():
     async def _run():
         sem = mb._get_sem()
         assert isinstance(sem, asyncio.Semaphore)
+
     asyncio.run(_run())
 
 
@@ -39,12 +41,14 @@ def test_get_sem_retorna_mesma_instancia():
         sem1 = mb._get_sem()
         sem2 = mb._get_sem()
         assert sem1 is sem2
+
     asyncio.run(_run())
 
 
 # ---------------------------------------------------------------------------
 # lookup_by_isrc -- ISRC vazio
 # ---------------------------------------------------------------------------
+
 
 def test_isrc_vazio_retorna_nones():
     resultado = asyncio.run(mb.lookup_by_isrc(""))
@@ -55,6 +59,7 @@ def test_isrc_vazio_retorna_nones():
 # lookup_by_isrc -- cache hit
 # ---------------------------------------------------------------------------
 
+
 def test_cache_hit_retorna_sem_requisicao():
     mb._MB_CACHE["ISRC123"] = ("track", "album", "artist")
     resultado = asyncio.run(mb.lookup_by_isrc("isrc123"))  # normalizado para upper
@@ -64,6 +69,7 @@ def test_cache_hit_retorna_sem_requisicao():
 # ---------------------------------------------------------------------------
 # Helpers para mock de resposta HTTP
 # ---------------------------------------------------------------------------
+
 
 def _make_response(data: dict, status_code: int = 200) -> MagicMock:
     """Cria um mock de httpx.Response com .json() e raise_for_status()."""
@@ -89,6 +95,7 @@ def _make_client(response_data: dict, status_code: int = 200) -> AsyncMock:
 # ---------------------------------------------------------------------------
 # lookup_by_isrc -- resposta com recordings
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture()
 def payload_completo():
@@ -122,6 +129,7 @@ def test_lookup_armazena_no_cache(payload_completo):
 # lookup_by_isrc -- sem releases (album_mbid None)
 # ---------------------------------------------------------------------------
 
+
 def test_sem_releases_album_mbid_e_none():
     payload = {
         "recordings": [
@@ -144,6 +152,7 @@ def test_sem_releases_album_mbid_e_none():
 # lookup_by_isrc -- artist-credit sem chave "artist"
 # ---------------------------------------------------------------------------
 
+
 def test_artist_credit_sem_artist_retorna_none():
     payload = {
         "recordings": [
@@ -164,6 +173,7 @@ def test_artist_credit_sem_artist_retorna_none():
 # lookup_by_isrc -- sem recordings
 # ---------------------------------------------------------------------------
 
+
 def test_sem_recordings_retorna_nones_e_cacheia():
     client = _make_client({"recordings": []})
     with patch("qobuz_dl.musicbrainz.asyncio.sleep", new_callable=AsyncMock):
@@ -176,6 +186,7 @@ def test_sem_recordings_retorna_nones_e_cacheia():
 # lookup_by_isrc -- HTTPStatusError nao cacheia
 # ---------------------------------------------------------------------------
 
+
 def test_http_status_error_nao_cacheia():
     client = _make_client({}, status_code=500)
     with patch("qobuz_dl.musicbrainz.asyncio.sleep", new_callable=AsyncMock):
@@ -187,6 +198,7 @@ def test_http_status_error_nao_cacheia():
 # ---------------------------------------------------------------------------
 # lookup_by_isrc -- excecao generica nao cacheia
 # ---------------------------------------------------------------------------
+
 
 def test_excecao_generica_nao_cacheia():
     client = AsyncMock(spec=httpx.AsyncClient)
@@ -201,6 +213,7 @@ def test_excecao_generica_nao_cacheia():
 # ---------------------------------------------------------------------------
 # lookup_by_isrc -- sem session (cria client proprio)
 # ---------------------------------------------------------------------------
+
 
 def test_cria_client_proprio_quando_session_e_none(payload_completo):
     mock_client = _make_client(payload_completo)
@@ -217,6 +230,7 @@ def test_cria_client_proprio_quando_session_e_none(payload_completo):
 # lookup_by_isrc -- ISRC normalizado para UPPER
 # ---------------------------------------------------------------------------
 
+
 def test_isrc_normalizado_para_upper(payload_completo):
     client = _make_client(payload_completo)
     with patch("qobuz_dl.musicbrainz.asyncio.sleep", new_callable=AsyncMock):
@@ -227,6 +241,7 @@ def test_isrc_normalizado_para_upper(payload_completo):
 # ---------------------------------------------------------------------------
 # lookup_by_isrc -- cache hit apos semaphore (segunda verificacao)
 # ---------------------------------------------------------------------------
+
 
 def test_cache_preenchido_enquanto_aguarda_semaphore(payload_completo):
     """Simula outra task preenchendo cache enquanto esta esperava o semaphore."""
@@ -248,6 +263,7 @@ def test_cache_preenchido_enquanto_aguarda_semaphore(payload_completo):
 # ---------------------------------------------------------------------------
 # Headers e constantes
 # ---------------------------------------------------------------------------
+
 
 def test_mb_base_url():
     assert mb._MB_BASE == "https://musicbrainz.org/ws/2"

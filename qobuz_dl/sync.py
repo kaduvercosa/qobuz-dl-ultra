@@ -11,9 +11,8 @@ from mutagen import File
 from mutagen.flac import FLAC
 from mutagen.id3 import ID3
 
-from qobuz_dl.color import GREEN
+from qobuz_dl.color import GREEN, OFF, RED
 from qobuz_dl.color import INFO as CYAN
-from qobuz_dl.color import OFF, RED
 from qobuz_dl.color import WARNING as YELLOW
 from qobuz_dl.db import handle_download_id
 
@@ -137,11 +136,11 @@ async def sync_database(directory, db_path, client):
                     album_name = talb.text[0] if talb else ""
                     release_date = str(tdrc.text[0]) if tdrc else ""
                     bit_depth = 16
-                    sampling_rate = (
-                        getattr(audio.info, "sample_rate", 44100) / 1000.0
-                        if getattr(audio.info, "sample_rate", None)
-                        else None
+                    # ID3 só lê tags; não tem .info (isso é do MP3/FLAC).
+                    mp3_rate = getattr(
+                        getattr(audio, "info", None), "sample_rate", None
                     )
+                    sampling_rate = mp3_rate / 1000.0 if mp3_rate else None
 
                 # # Arquivos antigos sem ID embutido são recuperados via busca por ISRC na API.
                 if not track_id and isrc:

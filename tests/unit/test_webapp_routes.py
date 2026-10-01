@@ -267,9 +267,7 @@ async def test_cross_origin_bloqueado():
     """Requisição com Origin de domínio externo deve ser bloqueada (403)."""
     app = create_app(demo=False)
     transport = ASGITransport(app=app)
-    async with AsyncClient(
-        transport=transport, base_url="http://localhost"
-    ) as ac:
+    async with AsyncClient(transport=transport, base_url="http://localhost") as ac:
         r = await ac.get(
             "/api/status",
             headers={

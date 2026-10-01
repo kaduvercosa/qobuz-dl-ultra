@@ -1,7 +1,8 @@
 """Testes unitários adicionais para a API qopy.py."""
 
-import pytest
 from unittest.mock import AsyncMock, patch
+
+import pytest
 
 from qobuz_dl.qopy import Client
 

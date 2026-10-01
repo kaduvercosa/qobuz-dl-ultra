@@ -4,7 +4,14 @@ from qobuz_dl import constants
 
 
 def test_default_folder_contem_placeholders_essenciais():
-    for ph in ("{release_type}", "{album_artist}", "{album_title}", "{year}", "{format}", "{bit_depth}"):
+    for ph in (
+        "{release_type}",
+        "{album_artist}",
+        "{album_title}",
+        "{year}",
+        "{format}",
+        "{bit_depth}",
+    ):
         assert ph in constants.DEFAULT_FOLDER
 
 

@@ -16,11 +16,10 @@
 # ==============================================================================
 import os
 import subprocess
+from typing import Any
 
 from qobuz_dl import ui
 from qobuz_dl.utils import encontrar_binario, format_duration
-
-from typing import Any
 
 Application: Any = None
 try:

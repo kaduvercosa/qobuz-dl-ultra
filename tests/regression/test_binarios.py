@@ -171,8 +171,9 @@ class TestOrdemDaChecagem:
 
     def _rodar_sem_binarios(self, args, monkeypatch, capsys):
         import sys
-        from qobuz_dl.cli import main
+
         from qobuz_dl import utils
+        from qobuz_dl.cli import main
 
         # Isola os binários forçando shutil.which a não achar nada
         monkeypatch.setattr(utils.shutil, "which", lambda *a, **k: None)

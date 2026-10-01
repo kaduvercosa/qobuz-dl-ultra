@@ -40,6 +40,7 @@ BUGS QUE ESTES TESTES TRAVAM
 """
 
 import re
+
 import pytest
 
 # ---------------------------------------------------------------------------

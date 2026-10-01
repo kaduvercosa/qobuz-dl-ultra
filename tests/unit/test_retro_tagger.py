@@ -19,7 +19,6 @@ em si.
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-
 from qobuz_dl import retro_tagger
 from qobuz_dl.retro_tagger import (
     extract_track_id,

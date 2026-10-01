@@ -987,12 +987,12 @@ def gui_args(subparsers):
     )
     gui.add_argument(
         "--host",
-        default="0.0.0.0",
+        default="127.0.0.1",
         help=(
-            "interface de rede (padrão: 0.0.0.0, todas as interfaces, "
-            "acessível pelo IP da máquina). Aceita '127.0.0.1' para só "
-            "este computador, 'lan' para o IP da rede local, ou um IP "
-            "específico"
+            "interface de rede (padrão: 127.0.0.1, somente este computador). "
+            "Use '0.0.0.0' para todas as interfaces (acessível pelo IP da "
+            "máquina, sem login: restrinja por firewall), 'lan' para o IP "
+            "da rede local, ou um IP específico"
         ),
     )
     gui.add_argument(

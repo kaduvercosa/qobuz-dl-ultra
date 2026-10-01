@@ -3,10 +3,11 @@
 import os
 import re
 import sys
+
 import pytest
 
-from qobuz_dl.cli import main
 from qobuz_dl import utils
+from qobuz_dl.cli import main
 
 ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 LARGURAS = (120, 100, 80, 72, 60, 50, 40, 32)

@@ -10,9 +10,9 @@
 import asyncio
 import logging
 import os
+import re
 import shutil
 import sys
-import re
 from typing import Any, Optional
 
 import httpx
@@ -36,9 +36,8 @@ except ImportError:
 import qobuz_dl.postprocess as postprocess
 from qobuz_dl import downloader, qopy, ui
 from qobuz_dl.bundle import Bundle
-from qobuz_dl.color import GREEN
+from qobuz_dl.color import GREEN, OFF, RED, RESET
 from qobuz_dl.color import INFO as CYAN
-from qobuz_dl.color import OFF, RED, RESET
 from qobuz_dl.color import WARNING as YELLOW
 from qobuz_dl.db import create_db, handle_download_id
 from qobuz_dl.exceptions import NonStreamable
@@ -63,11 +62,12 @@ HEADER_STAGGER_DELAY = 1.5
 from qobuz_dl.interactive_ui import (
     _align_text,
     _get_table_layout,
-    pt_style,
-    prompt_style,
     _hex_accent,
     _shade,  # noqa: F401 -- usado só em testes
+    prompt_style,
+    pt_style,
 )
+
 # ANTES: o tema visual (pt_style/prompt_style) e os helpers _shade/
 # _align_text/_get_table_layout estavam definidos aqui direto. Movidos pra
 # qobuz_dl/interactive_ui.py (passo 2 de quebrar este arquivo em módulos

@@ -2,17 +2,16 @@
 
 import os
 import stat
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
 from qobuz_dl.paths import DirectoryNotUsable, ensure_directory_ready
 
-
 # ---------------------------------------------------------------------------
 # DirectoryNotUsable
 # ---------------------------------------------------------------------------
+
 
 def test_directory_not_usable_herda_de_value_error():
     assert issubclass(DirectoryNotUsable, ValueError)
@@ -26,6 +25,7 @@ def test_directory_not_usable_instancia_com_mensagem():
 # ---------------------------------------------------------------------------
 # ensure_directory_ready — caminho feliz
 # ---------------------------------------------------------------------------
+
 
 def test_cria_pasta_que_nao_existe(tmp_path):
     nova = tmp_path / "nova" / "sub"
@@ -63,6 +63,7 @@ def test_nao_deixa_arquivo_de_prova(tmp_path):
 # ensure_directory_ready — caminho com arquivo no lugar da pasta
 # ---------------------------------------------------------------------------
 
+
 def test_levanta_quando_caminho_e_arquivo(tmp_path):
     arquivo = tmp_path / "sou_um_arquivo.txt"
     arquivo.write_text("conteúdo")
@@ -73,6 +74,7 @@ def test_levanta_quando_caminho_e_arquivo(tmp_path):
 # ---------------------------------------------------------------------------
 # ensure_directory_ready — falha ao criar
 # ---------------------------------------------------------------------------
+
 
 def test_levanta_quando_mkdir_falha(tmp_path):
     caminho_impossivel = tmp_path / "fantasma" / "sub"
@@ -85,15 +87,19 @@ def test_levanta_quando_mkdir_falha(tmp_path):
 # ensure_directory_ready — falha ao escrever arquivo de prova
 # ---------------------------------------------------------------------------
 
+
 def test_levanta_quando_escrita_falha(tmp_path):
     with patch("qobuz_dl.paths.Path.write_text", side_effect=OSError("read-only")):
-        with pytest.raises(DirectoryNotUsable, match="sem permissão de leitura/escrita"):
+        with pytest.raises(
+            DirectoryNotUsable, match="sem permissão de leitura/escrita"
+        ):
             ensure_directory_ready(str(tmp_path))
 
 
 # ---------------------------------------------------------------------------
 # ensure_directory_ready — pasta somente-leitura real (POSIX)
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.skipif(os.name != "posix", reason="permissões POSIX necessárias")
 def test_pasta_readonly_levanta_directory_not_usable(tmp_path):
@@ -112,6 +118,7 @@ def test_pasta_readonly_levanta_directory_not_usable(tmp_path):
 # Idempotência
 # ---------------------------------------------------------------------------
 
+
 def test_chamar_duas_vezes_na_mesma_pasta_e_idempotente(tmp_path):
     r1 = ensure_directory_ready(str(tmp_path))
     r2 = ensure_directory_ready(str(tmp_path))
@@ -121,6 +128,7 @@ def test_chamar_duas_vezes_na_mesma_pasta_e_idempotente(tmp_path):
 # ---------------------------------------------------------------------------
 # OSError com strerror None (cobertura do ramo `or str(error)`)
 # ---------------------------------------------------------------------------
+
 
 def test_mkdir_oserror_sem_strerror_usa_str(tmp_path):
     erro = OSError("descrição do erro")

@@ -25,7 +25,6 @@ consertar.
 
 from types import SimpleNamespace
 
-
 from qobuz_dl import sync
 from qobuz_dl.sync import _compute_fingerprint
 

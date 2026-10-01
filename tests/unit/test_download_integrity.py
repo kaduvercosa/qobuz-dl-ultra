@@ -9,7 +9,6 @@ from tenacity import wait_none
 
 from qobuz_dl import downloader
 
-
 pytestmark = pytest.mark.unit
 
 

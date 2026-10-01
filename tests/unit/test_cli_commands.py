@@ -6,9 +6,10 @@ Versao corrigida para a arquitetura argparse real do cli.py:
 - Mocka os.makedirs/os.path.isdir no lugar de patch("qobuz_dl.cli.Path") que nao existe.
 """
 
-import pytest
-from unittest.mock import patch, AsyncMock, MagicMock
 import sys
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 # Importa o modulo real que contem async_main()
 from qobuz_dl import cli

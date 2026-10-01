@@ -12,11 +12,11 @@ from mutagen.flac import FLAC
 from mutagen.id3 import ID3, TXXX, USLT, ID3NoHeaderError
 from tqdm import tqdm
 
+from qobuz_dl import __version__
 from qobuz_dl.color import ERROR as RED
 from qobuz_dl.color import MUTED, RESET
 from qobuz_dl.color import SUCCESS as GREEN
 from qobuz_dl.color import WARNING as YELLOW
-from qobuz_dl import __version__
 from qobuz_dl.settings import QobuzDLSettings
 
 logger = logging.getLogger(__name__)
@@ -490,110 +490,112 @@ class LyricsEngine:
                     if final_sync:
                         final_sync = self._inject_instrumental_pauses(final_sync)
 
-                    is_bilingual = bool(best_trans and best_trans.get("synced"))
-                    result["synchronized"] = True
-                    result["bilingual"] = is_bilingual
-                    result["language"] = lang_tag
+                        is_bilingual = bool(best_trans and best_trans.get("synced"))
+                        result["synchronized"] = True
+                        result["bilingual"] = is_bilingual
+                        result["language"] = lang_tag
 
-                    if embed_lyrics:
-                        saved = self._inject_metadata(
-                            file_path,
-                            final_sync,
-                            source=source_label,
-                            language=lang_tag,
-                            bilingual=is_bilingual,
-                        )
+                        if embed_lyrics:
+                            saved = self._inject_metadata(
+                                file_path,
+                                final_sync,
+                                source=source_label,
+                                language=lang_tag,
+                                bilingual=is_bilingual,
+                            )
 
-                        result["embedded"] = saved
+                            result["embedded"] = saved
 
-                    if save_lrc:
-                        saved = self._save_lrc_file(
-                            file_path,
-                            final_sync,
-                            source=source_label,
-                            language=lang_tag,
-                        )
+                        if save_lrc:
+                            saved = self._save_lrc_file(
+                                file_path,
+                                final_sync,
+                                source=source_label,
+                                language=lang_tag,
+                            )
 
-                        result["saved_external"] = saved
+                            result["saved_external"] = saved
 
-                    if result["embedded"] or result["saved_external"]:
-                        result["success"] = True
-                        result["source"] = source_label
+                        if result["embedded"] or result["saved_external"]:
+                            result["success"] = True
+                            result["source"] = source_label
 
-                    is_bilingual_str = " BILINGUAL " if is_bilingual else ""
-                    if embed_lyrics and save_lrc:
-                        _tw(
-                            f" ✅ Letras {GREEN}{is_bilingual_str}{RESET} sincronizadas "
-                            f"injetadas e salvas em .lrc (via Qobuz)!"
-                        )
-                    elif save_lrc:
-                        _tw(
-                            f" ✅ Letras {GREEN}{is_bilingual_str}{RESET} sincronizadas "
-                            f"salvas em .lrc (via Qobuz)!"
-                        )
-                    elif embed_lyrics:
-                        _tw(
-                            f" ✅ Letras {GREEN}{is_bilingual_str}{RESET} sincronizadas "
-                            f"injetadas no metadata (via Qobuz)!"
-                        )
-                    else:
-                        _tw(
-                            f" {RED}❌ Falha ao gravar letras sincronizadas (Qobuz){RESET}"
-                        )
+                        is_bilingual_str = " BILINGUAL " if is_bilingual else ""
+                        if embed_lyrics and save_lrc:
+                            _tw(
+                                f" ✅ Letras {GREEN}{is_bilingual_str}{RESET} sincronizadas "
+                                f"injetadas e salvas em .lrc (via Qobuz)!"
+                            )
+                        elif save_lrc:
+                            _tw(
+                                f" ✅ Letras {GREEN}{is_bilingual_str}{RESET} sincronizadas "
+                                f"salvas em .lrc (via Qobuz)!"
+                            )
+                        elif embed_lyrics:
+                            _tw(
+                                f" ✅ Letras {GREEN}{is_bilingual_str}{RESET} sincronizadas "
+                                f"injetadas no metadata (via Qobuz)!"
+                            )
+                        else:
+                            _tw(
+                                f" {RED}❌ Falha ao gravar letras sincronizadas (Qobuz){RESET}"
+                            )
 
-                    return result
+                        return result
 
-                elif final_plain:
-                    is_bilingual = bool(best_trans and best_trans.get("plain"))
-                    result["synchronized"] = False
-                    result["bilingual"] = is_bilingual
-                    result["language"] = lang_tag
+                    elif final_plain:
+                        is_bilingual = bool(best_trans and best_trans.get("plain"))
+                        result["synchronized"] = False
+                        result["bilingual"] = is_bilingual
+                        result["language"] = lang_tag
 
-                    if embed_lyrics:
-                        saved = self._inject_metadata(
-                            file_path,
-                            final_plain,
-                            source=source_label,
-                            language=lang_tag,
-                            bilingual=is_bilingual,
-                        )
+                        if embed_lyrics:
+                            saved = self._inject_metadata(
+                                file_path,
+                                final_plain,
+                                source=source_label,
+                                language=lang_tag,
+                                bilingual=is_bilingual,
+                            )
 
-                        result["embedded"] = saved
+                            result["embedded"] = saved
 
-                    if save_lrc:
-                        saved = self._save_lrc_file(
-                            file_path,
-                            final_plain,
-                            source=source_label,
-                            language=lang_tag,
-                        )
+                        if save_lrc:
+                            saved = self._save_lrc_file(
+                                file_path,
+                                final_plain,
+                                source=source_label,
+                                language=lang_tag,
+                            )
 
-                        result["saved_external"] = saved
+                            result["saved_external"] = saved
 
-                    if result["embedded"] or result["saved_external"]:
-                        result["success"] = True
-                        result["source"] = source_label
+                        if result["embedded"] or result["saved_external"]:
+                            result["success"] = True
+                            result["source"] = source_label
 
-                    is_bilingual_str = "BILINGUAL " if is_bilingual else ""
-                    if embed_lyrics and save_lrc:
-                        _tw(
-                            f" ✅ Letras {GREEN}{is_bilingual_str}{RESET} padrao "
-                            f"injetadas e salvas em .txt (via Qobuz)!"
-                        )
-                    elif save_lrc:
-                        _tw(
-                            f" ✅ Letras {GREEN}{is_bilingual_str}{RESET} padrao "
-                            f"salvas em .txt (via Qobuz)!"
-                        )
-                    elif embed_lyrics:
-                        _tw(
-                            f" ✅ Letras {GREEN}{is_bilingual_str}{RESET} padrao "
-                            f"injetadas no metadata (via Qobuz)!"
-                        )
-                    else:
-                        _tw(f" {RED}❌ Falha ao gravar letras padrao (Qobuz){RESET}")
+                        is_bilingual_str = "BILINGUAL " if is_bilingual else ""
+                        if embed_lyrics and save_lrc:
+                            _tw(
+                                f" ✅ Letras {GREEN}{is_bilingual_str}{RESET} padrao "
+                                f"injetadas e salvas em .txt (via Qobuz)!"
+                            )
+                        elif save_lrc:
+                            _tw(
+                                f" ✅ Letras {GREEN}{is_bilingual_str}{RESET} padrao "
+                                f"salvas em .txt (via Qobuz)!"
+                            )
+                        elif embed_lyrics:
+                            _tw(
+                                f" ✅ Letras {GREEN}{is_bilingual_str}{RESET} padrao "
+                                f"injetadas no metadata (via Qobuz)!"
+                            )
+                        else:
+                            _tw(
+                                f" {RED}❌ Falha ao gravar letras padrao (Qobuz){RESET}"
+                            )
 
-                    return result
+                        return result
 
             # Fallback Musicmatch
             mxm_lyrics = self._fetch_musixmatch_lyrics(artist, track)

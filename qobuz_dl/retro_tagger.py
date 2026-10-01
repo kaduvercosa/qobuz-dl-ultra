@@ -12,9 +12,8 @@ import mutagen.id3 as id3
 from mutagen.flac import FLAC
 
 from qobuz_dl import ui
-from qobuz_dl.color import BG, GREEN
+from qobuz_dl.color import BG, GREEN, OFF, RED, RESET
 from qobuz_dl.color import INFO as CYAN
-from qobuz_dl.color import OFF, RED, RESET
 from qobuz_dl.color import WARNING as YELLOW
 from qobuz_dl.lyrics_engine import LyricsEngine
 from qobuz_dl.settings import QobuzDLSettings
@@ -697,7 +696,7 @@ async def process_retroactive_lyrics_async(
             if "ATUALIZADO" in status or "UPGRADE" in status or "CORRIGIDO" in status:
                 color = GREEN
                 prefix = "[✓]"
-            elif "SEM ALTERACAO" in status:
+            elif "SEM ALTERAÇÃO" in status:
                 color = CYAN
                 prefix = "[-]"
             else:
@@ -770,7 +769,8 @@ async def inject_lyrics_retroactively(
                 logger.debug(
                     f"Não foi possível ler 'directory' do config.ini, usando padrao: {e}"
                 )
-            directory_path = "QobuzDownloads"
+            if not directory_path:
+                directory_path = "QobuzDownloads"
 
     directory_path = os.path.expanduser(directory_path)
 

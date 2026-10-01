@@ -25,7 +25,6 @@ from qobuz_dl.webapp import (
     build_tool_argv,
 )
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -190,30 +189,46 @@ class TestSettingsFromIni:
 
 
 class TestWriteSettingsToIni:
-    def test_round_trip_qualidade_e_diretorio(self, service, settings_payload, tmp_config):
-        with patch.object(webapp, "ensure_directory_ready", return_value=Path(settings_payload.directory)):
+    def test_round_trip_qualidade_e_diretorio(
+        self, service, settings_payload, tmp_config
+    ):
+        with patch.object(
+            webapp,
+            "ensure_directory_ready",
+            return_value=Path(settings_payload.directory),
+        ):
             service.save_settings(settings_payload)
         text = Path(tmp_config["config_file"]).read_text(encoding="utf-8")
         assert "default_quality = 7" in text
         assert "directory = " in text
 
     def test_round_trip_max_workers(self, service, settings_payload, tmp_config):
-        with patch.object(webapp, "ensure_directory_ready", return_value=Path(settings_payload.directory)):
+        with patch.object(
+            webapp,
+            "ensure_directory_ready",
+            return_value=Path(settings_payload.directory),
+        ):
             service.save_settings(settings_payload)
         text = Path(tmp_config["config_file"]).read_text(encoding="utf-8")
         assert "max_workers = 4" in text
 
     def test_round_trip_playlist_as_albums(self, service, settings_payload, tmp_config):
         payload = settings_payload.model_copy(update={"playlist_as_albums": True})
-        with patch.object(webapp, "ensure_directory_ready", return_value=Path(payload.directory)):
+        with patch.object(
+            webapp, "ensure_directory_ready", return_value=Path(payload.directory)
+        ):
             service.save_settings(payload)
         text = Path(tmp_config["config_file"]).read_text(encoding="utf-8")
         assert "playlist_as_albums = true" in text
 
-    def test_bool_invertido_no_lrc_files_gravado(self, service, settings_payload, tmp_config):
+    def test_bool_invertido_no_lrc_files_gravado(
+        self, service, settings_payload, tmp_config
+    ):
         """lrc_files=False na GUI → no_lrc_files = true no INI."""
         payload = settings_payload.model_copy(update={"lrc_files": False})
-        with patch.object(webapp, "ensure_directory_ready", return_value=Path(payload.directory)):
+        with patch.object(
+            webapp, "ensure_directory_ready", return_value=Path(payload.directory)
+        ):
             service.save_settings(payload)
         text = Path(tmp_config["config_file"]).read_text(encoding="utf-8")
         assert "no_lrc_files = true" in text
@@ -221,19 +236,29 @@ class TestWriteSettingsToIni:
     def test_bool_invertido_no_m3u_gravado(self, service, settings_payload, tmp_config):
         """m3u=True na GUI → no_m3u = false no INI."""
         payload = settings_payload.model_copy(update={"m3u": True})
-        with patch.object(webapp, "ensure_directory_ready", return_value=Path(payload.directory)):
+        with patch.object(
+            webapp, "ensure_directory_ready", return_value=Path(payload.directory)
+        ):
             service.save_settings(payload)
         text = Path(tmp_config["config_file"]).read_text(encoding="utf-8")
         assert "no_m3u = false" in text
 
-    def test_arquivo_tem_permissao_600_no_posix(self, service, settings_payload, tmp_config):
-        with patch.object(webapp, "ensure_directory_ready", return_value=Path(settings_payload.directory)):
+    def test_arquivo_tem_permissao_600_no_posix(
+        self, service, settings_payload, tmp_config
+    ):
+        with patch.object(
+            webapp,
+            "ensure_directory_ready",
+            return_value=Path(settings_payload.directory),
+        ):
             service.save_settings(settings_payload)
         if os.name == "posix":
             mode = Path(tmp_config["config_file"]).stat().st_mode & 0o777
             assert mode == 0o600
 
-    def test_preserva_chaves_existentes(self, service_with_ini, settings_payload, tmp_config):
+    def test_preserva_chaves_existentes(
+        self, service_with_ini, settings_payload, tmp_config
+    ):
         """Gravar settings não apaga chaves como email/app_id."""
         config_file = Path(tmp_config["config_file"])
         parser = configparser.ConfigParser(interpolation=None)
@@ -245,7 +270,11 @@ class TestWriteSettingsToIni:
         with open(config_file, "w", encoding="utf-8") as fh:
             parser.write(fh)
 
-        with patch.object(webapp, "ensure_directory_ready", return_value=Path(settings_payload.directory)):
+        with patch.object(
+            webapp,
+            "ensure_directory_ready",
+            return_value=Path(settings_payload.directory),
+        ):
             service_with_ini.save_settings(settings_payload)
 
         text = config_file.read_text(encoding="utf-8")
@@ -288,7 +317,11 @@ class TestSaveSettings:
             service.save_settings(obj)
 
     def test_atualiza_local_settings(self, service, settings_payload):
-        with patch.object(webapp, "ensure_directory_ready", return_value=Path(settings_payload.directory)):
+        with patch.object(
+            webapp,
+            "ensure_directory_ready",
+            return_value=Path(settings_payload.directory),
+        ):
             service.save_settings(settings_payload)
         assert service.local_settings["quality"] == 7
         assert service.local_settings["max_workers"] == 4
@@ -297,7 +330,11 @@ class TestSaveSettings:
         engine = MagicMock()
         engine.settings = MagicMock()
         service.engine = engine
-        with patch.object(webapp, "ensure_directory_ready", return_value=Path(settings_payload.directory)):
+        with patch.object(
+            webapp,
+            "ensure_directory_ready",
+            return_value=Path(settings_payload.directory),
+        ):
             service.save_settings(settings_payload)
         assert engine.quality == 7
         assert engine.settings.max_workers == 4
@@ -369,22 +406,30 @@ class TestBuildToolArgv:
 
     def test_purge_sem_confirmacao_levanta(self):
         with pytest.raises(ValueError):
-            build_tool_argv(ToolRequest(action="purge", confirm_delete=False), self._s())
+            build_tool_argv(
+                ToolRequest(action="purge", confirm_delete=False), self._s()
+            )
 
     def test_purge_com_confirmacao(self):
-        argv = build_tool_argv(ToolRequest(action="purge", confirm_delete=True), self._s())
+        argv = build_tool_argv(
+            ToolRequest(action="purge", confirm_delete=True), self._s()
+        )
         assert argv == ["-p"]
 
     def test_dl_sem_url_levanta(self):
         with pytest.raises(ValueError):
             build_tool_argv(
-                ToolRequest(action="dl", dry_run=False, confirm_downloads=True, target=""),
+                ToolRequest(
+                    action="dl", dry_run=False, confirm_downloads=True, target=""
+                ),
                 self._s(),
             )
 
     def test_dl_com_url(self):
         argv = build_tool_argv(
-            ToolRequest(action="dl", dry_run=True, target="https://open.qobuz.com/album/abc"),
+            ToolRequest(
+                action="dl", dry_run=True, target="https://open.qobuz.com/album/abc"
+            ),
             self._s(),
         )
         assert "dl" in argv
@@ -393,20 +438,32 @@ class TestBuildToolArgv:
     def test_dl_sem_confirmacao_e_sem_dry_run_levanta(self):
         with pytest.raises(ValueError):
             build_tool_argv(
-                ToolRequest(action="dl", dry_run=False, confirm_downloads=False, target="https://x"),
+                ToolRequest(
+                    action="dl",
+                    dry_run=False,
+                    confirm_downloads=False,
+                    target="https://x",
+                ),
                 self._s(),
             )
 
     def test_lucky_sem_target_levanta(self):
         with pytest.raises(ValueError):
             build_tool_argv(
-                ToolRequest(action="lucky", dry_run=False, confirm_downloads=True, target=""),
+                ToolRequest(
+                    action="lucky", dry_run=False, confirm_downloads=True, target=""
+                ),
                 self._s(),
             )
 
     def test_lucky_com_target(self):
         argv = build_tool_argv(
-            ToolRequest(action="lucky", dry_run=False, confirm_downloads=True, target="pink floyd"),
+            ToolRequest(
+                action="lucky",
+                dry_run=False,
+                confirm_downloads=True,
+                target="pink floyd",
+            ),
             self._s(),
         )
         assert "lucky" in argv
@@ -442,7 +499,9 @@ class TestBuildToolArgv:
     def test_watch_sem_confirmacao_levanta(self):
         with pytest.raises(ValueError):
             build_tool_argv(
-                ToolRequest(action="watch", target="/tmp/Music", confirm_file_changes=False),
+                ToolRequest(
+                    action="watch", target="/tmp/Music", confirm_file_changes=False
+                ),
                 self._s(),
             )
 
@@ -476,7 +535,12 @@ class TestBuildToolArgv:
     def test_scan_sem_confirmacao_e_sem_dry_run_levanta(self):
         with pytest.raises(ValueError):
             build_tool_argv(
-                ToolRequest(action="scan", target="/tmp/Music", dry_run=False, confirm_file_changes=False),
+                ToolRequest(
+                    action="scan",
+                    target="/tmp/Music",
+                    dry_run=False,
+                    confirm_file_changes=False,
+                ),
                 self._s(),
             )
 
@@ -508,7 +572,11 @@ class TestBuildToolArgv:
     def test_import_playlist_sem_confirmacao_levanta(self):
         with pytest.raises(ValueError):
             build_tool_argv(
-                ToolRequest(action="import-playlist", target="https://x", confirm_downloads=False),
+                ToolRequest(
+                    action="import-playlist",
+                    target="https://x",
+                    confirm_downloads=False,
+                ),
                 self._s(),
             )
 
@@ -529,7 +597,9 @@ class TestBuildToolArgv:
             build_tool_argv(ToolRequest(action="rm-rf"), self._s())
 
     def test_library_status(self):
-        argv = build_tool_argv(ToolRequest(action="library", subaction="status"), self._s())
+        argv = build_tool_argv(
+            ToolRequest(action="library", subaction="status"), self._s()
+        )
         assert argv == ["library", "status"]
 
     def test_library_missing_com_limit(self):
@@ -588,7 +658,7 @@ class TestSettingsRequestValidation:
     def test_quality_invalido_levanta(self, tmp_path):
         music = tmp_path / "Music"
         music.mkdir()
-        with pytest.raises(Exception):
+        with pytest.raises(ValueError):
             SettingsRequest(directory=str(music), quality=99)
 
     def test_quality_minimo(self, tmp_path):
@@ -600,22 +670,24 @@ class TestSettingsRequestValidation:
     def test_embedded_art_size_invalido_levanta(self, tmp_path):
         music = tmp_path / "Music"
         music.mkdir()
-        with pytest.raises(Exception):
+        with pytest.raises(ValueError):
             SettingsRequest(directory=str(music), quality=6, embedded_art_size="9999")
 
     def test_embedded_art_size_validos(self, tmp_path):
         music = tmp_path / "Music"
         music.mkdir()
         for size in ("50", "100", "150", "300", "600", "max", "org"):
-            sr = SettingsRequest(directory=str(music), quality=6, embedded_art_size=size)
+            sr = SettingsRequest(
+                directory=str(music), quality=6, embedded_art_size=size
+            )
             assert sr.embedded_art_size == size
 
     def test_directory_vazio_levanta(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValueError):
             SettingsRequest(directory="", quality=6)
 
     def test_max_workers_fora_do_range_levanta(self, tmp_path):
         music = tmp_path / "Music"
         music.mkdir()
-        with pytest.raises(Exception):
+        with pytest.raises(ValueError):
             SettingsRequest(directory=str(music), quality=6, max_workers=99)
