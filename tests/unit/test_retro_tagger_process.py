@@ -7,6 +7,7 @@ letra), fetch_qobuz_lyrics_raw (resposta do Qobuz) e LyricsEngine. O que se
 verifica é a DECISÃO: qual status vai pro relatório e o que foi injetado.
 """
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -498,7 +499,7 @@ async def test_inject_expande_til_do_home(tmp_path, espiao, monkeypatch):
     await rt.inject_lyrics_retroactively(
         directory_path="~/Musicas", settings=SimpleNamespace()
     )
-    assert espiao.chamadas[0]["directory_path"] == str(tmp_path / "Musicas")
+    assert Path(espiao.chamadas[0]["directory_path"]) == tmp_path / "Musicas"
 
 
 async def test_inject_propaga_erro_apos_avisar(tmp_path, monkeypatch):
