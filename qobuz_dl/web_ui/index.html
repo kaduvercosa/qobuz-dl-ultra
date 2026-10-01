@@ -98,6 +98,10 @@
         <a class="nav-item sub" href="#/library/playlists" data-route="library" data-sub="playlists" title="Playlists"><svg class="ic"><use href="#i-queue"/></svg><span>Playlists</span></a>
         <a class="nav-item sub" href="#/library/tracks" data-route="library" data-sub="tracks" title="Faixas"><svg class="ic"><use href="#i-play"/></svg><span>Faixas</span></a>
 
+        <p class="side-label">Arquivos</p>
+        <a class="nav-item sub" href="#/files/albums" data-route="files" data-sub="albums" title="Álbuns no disco"><svg class="ic"><use href="#i-library"/></svg><span>Álbuns no disco</span></a>
+        <a class="nav-item sub" href="#/files/tracks" data-route="files" data-sub="tracks" title="Faixas no disco"><svg class="ic"><use href="#i-play"/></svg><span>Faixas no disco</span></a>
+
         <p class="side-label">Downloads</p>
         <a class="nav-item sub" href="#/downloads/queue" data-route="downloads" data-sub="queue" title="Fila"><svg class="ic"><use href="#i-download"/></svg><span>Fila</span><b class="count" id="queue-count">0</b></a>
         <a class="nav-item sub" href="#/downloads/history" data-route="downloads" data-sub="history" title="Histórico"><svg class="ic"><use href="#i-check"/></svg><span>Histórico</span></a>
@@ -338,7 +342,11 @@
         <input id="settings-folder-format" type="text" placeholder="{release_type}/{album_artist} - {album_title} ({year})">
         <label class="label" for="settings-track-format">Padrão de nome da faixa</label>
         <input id="settings-track-format" type="text" placeholder="{track_number}. {track_title_base} {explicit}">
+        <h3 class="group-title">Opções avançadas</h3>
+        <p class="hint">Cada opção abaixo é uma chave do config.ini, lida e gravada diretamente nele.</p>
+        <div id="advanced-settings"></div>
         <p class="hint mono" id="config-footnote"></p>
+        <button class="btn ghost sm" id="reload-settings" type="button"><svg class="ic"><use href="#i-refresh"/></svg>Recarregar do config.ini</button>
       </div>
       <footer class="modal-foot">
         <button class="btn ghost" data-close-modal>Cancelar</button>

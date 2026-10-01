@@ -51,7 +51,7 @@
     lib: { source: store.get("qs-src", "all"), sort: store.get("qs-sort", "recent") },
     pb: { list: [], order: null, index: -1, shuffle: false, repeat: "off" },
     lyrics: { key: null, kind: "none", lines: [], active: -1 },
-    npPanel: null, albumCache: new Map(), routeKey: "",
+    npPanel: null, albumCache: new Map(), artistCache: new Map(), plCache: new Map(), routeKey: "", playlists: null, playlistsError: "", filesQ: "", filesSort: "recent", adv: null,
     toolJobs: [], activeJob: null,
     token: 0,
   };
@@ -100,31 +100,56 @@
   function albumCard(a) {
     const href = "#/album/" + encodeURIComponent(a.id);
     const t = typeLabel(a.type);
-    const meta2 = [a.year, t && t !== "Álbum" ? t : "", a.source === "local" ? "Local" : "Qobuz"].filter(Boolean).join(" · ");
+    const meta2 = a.source === "local" ? [a.year, (a.tracks ? a.tracks.length : 0) + " faixas", (a.format || "").toUpperCase(), a.size ? fmtSize(a.size) : ""].filter(Boolean).join(" · ") : [a.year, t && t !== "Álbum" ? t : "", "Qobuz"].filter(Boolean).join(" · ");
     return '<div class="card"><a class="card-link" href="' + href + '">' + cover(a.cover, "") + '<div class="card-title">' + esc(a.title) + '</div><div class="card-meta"><span>' + esc(a.artist) + '</span></div><div class="card-meta"><span>' + esc(meta2) + "</span></div></a>" +
       '<button type="button" class="card-play" data-play-album="' + esc(a.id) + '" aria-label="Reproduzir ' + esc(a.title) + '">' + icon("play") + "</button></div>";
   }
   function artistCard(x) {
-    return '<a class="card" href="#/artist/' + encodeURIComponent(x.name) + '">' + cover(x.cover, "round", "user") + '<div class="card-title">' + esc(x.name) + '</div><div class="card-meta"><span>' + x.count + (x.count === 1 ? " álbum" : " álbuns") + "</span></div></a>";
+    return '<div class="card"><a class="card-link" href="' + artistHref(x) + '">' + cover(x.cover, "round", "user") + '<div class="card-title">' + esc(x.name) + '</div><div class="card-meta"><span>' + (x.count != null ? x.count + (x.count === 1 ? " álbum" : " álbuns") : (x.albums_count ? x.albums_count + " álbuns" : "Artista")) + "</span></div></a></div>";
+  }
+  function playlistCard(p) {
+    return '<div class="card"><a class="card-link" href="#/playlist/' + encodeURIComponent(p.id) + '">' + cover(p.cover, "", "queue") + '<div class="card-title">' + esc(p.title) + '</div><div class="card-meta"><span>' + esc([p.tracks_count ? p.tracks_count + " faixas" : "", p.owner].filter(Boolean).join(" · ")) + "</span></div></a></div>";
   }
   function emptyBox(ic, title, text, action) {
     return '<div class="empty">' + icon(ic) + "<b>" + esc(title) + "</b><p>" + esc(text) + "</p>" + (action || "") + "</div>";
   }
+  /* ---- links e formatação compartilhados ---- */
+  const splitNames = (s) => String(s || "").split(/\s*[,;]\s*/).filter(Boolean);
+  const artistHref = (a) => (a.id ? "#/artist/" + encodeURIComponent(a.id) + "?n=" + encodeURIComponent(a.name) : "#/artist/" + encodeURIComponent(a.name));
+  function artistLinks(x) {
+    const list = x.artists && x.artists.length ? x.artists : splitNames(x.artist).map((n) => ({ name: n }));
+    return list.map((a) => '<a class="lnk" href="' + artistHref(a) + '">' + esc(a.name) + "</a>").join(", ");
+  }
+  const searchLink = (text) => '<a class="lnk" href="#/search?q=' + encodeURIComponent(text) + '">' + esc(text) + "</a>";
+  const localAlbumId = (t) => "l:" + encodeURIComponent((t.albumArtist || t.artist || "") + "||" + (t.album || "Sem álbum"));
+  const albumHref = (t) => (t.albumId ? "#/album/" + encodeURIComponent(t.albumId) : t.source === "local" && t.album ? "#/album/" + localAlbumId(t) : "");
+  const trackHref = (t) => "#/track/" + (t.source === "local" ? "l:" + encodeURIComponent(t.key) : encodeURIComponent(t.id));
+  const fmtSize = (n) => (n >= 1e9 ? (n / 1e9).toFixed(2) + " GB" : n >= 1e6 ? (n / 1e6).toFixed(1) + " MB" : Math.max(1, Math.round((n || 0) / 1e3)) + " KB");
+  function techLabel(t) {
+    if (t.source !== "local") return t.quality || "Qobuz";
+    const f = (t.format || "").toUpperCase();
+    if (t.bitDepth && t.sampleRate) return f + " " + t.bitDepth + "/" + t.sampleRate;
+    return f + (t.bitrate ? " " + t.bitrate + " kbps" : "");
+  }
+  const explicitChip = (t) => (t.explicit ? ' <span class="chip sm-chip" title="Conteúdo explícito">E</span>' : "");
+
   function trackRow(t, i, listId, opt) {
     const o = opt || {}; const key = t.source + ":" + (t.key || t.id);
     const playing = S.pb.list[S.pb.index] && trackKey(S.pb.list[S.pb.index]) === key;
-    const dl = t.source === "qobuz" ? '<button class="icon-btn" data-dl="' + esc(t.id) + '" data-title="' + esc(t.title) + '" data-artist="' + esc(t.artist) + '" title="Baixar" aria-label="Baixar">' + icon("download") + "</button>" : "";
+    const dl = t.source === "qobuz" ? '<button class="icon-btn" data-dl="' + esc(t.id) + '" data-title="' + esc(t.title) + '" data-artist="' + esc(t.artist) + '" data-cover="' + esc(t.cover || "") + '" title="Baixar" aria-label="Baixar">' + icon("download") + "</button>" : "";
+    const ah = albumHref(t);
+    const albumPart = o.showAlbum && t.album ? ' · ' + (ah ? '<a class="lnk" href="' + ah + '">' + esc(t.album) + "</a>" : esc(t.album)) : "";
     return '<li class="trow' + (playing ? " playing" : "") + '" data-tk="' + esc(key) + '">' +
-      (o.select ? '<input type="checkbox" class="t-check" data-sel="' + esc(t.id) + '" aria-label="Selecionar">' : "") +
       '<button class="t-idx" data-play="' + listId + ":" + i + '" aria-label="Reproduzir"><span class="n">' + (o.index != null ? o.index : i + 1) + '</span><span class="eq"><i></i><i></i><i></i></span></button>' +
-      '<div class="t-main"><span class="t-title">' + esc(t.title) + '</span><span class="t-sub">' + esc([t.artist, o.showAlbum && t.album ? t.album : ""].filter(Boolean).join(" · ")) + "</span></div>" +
-      '<span class="chip t-q">' + esc(t.source === "local" ? (t.format || "local").toUpperCase() : (t.quality || "Qobuz")) + "</span>" +
+      '<button class="t-thumb" data-play="' + listId + ":" + i + '" tabindex="-1" aria-hidden="true">' + cover(t.cover, "sm") + "</button>" +
+      '<div class="t-main"><a class="t-title lnk" href="' + trackHref(t) + '">' + esc(t.title) + "</a>" + explicitChip(t) + '<span class="t-sub">' + artistLinks(t) + albumPart + "</span>" + (o.showPath && t.path ? '<span class="t-path mono">' + esc(t.path) + " · " + fmtSize(t.size) + "</span>" : "") + "</div>" +
+      '<span class="chip t-q">' + esc(techLabel(t)) + "</span>" +
       '<span class="t-dur">' + fmtTime(t.duration) + "</span>" +
-      '<div class="t-actions">' + dl + "</div></li>";
+      '<div class="t-actions">' + dl + '<a class="icon-btn" href="' + trackHref(t) + '" title="Detalhes e créditos" aria-label="Detalhes">' + icon("more") + "</a></div></li>";
   }
   const trackKey = (t) => t.source + ":" + (t.key || t.id);
   const normQ = (t) => Object.assign({ source: "qobuz" }, t);
-  const normLocal = (f) => ({ source: "local", id: f.key, key: f.key, title: f.title, artist: f.artist, album: f.album, duration: f.duration, cover: f.cover, format: f.format });
+  const normLocal = (f) => Object.assign({}, f, { source: "local", id: f.key, coverOrg: f.cover });
 
   /* ------------------------------------------------------------ dados */
   async function loadFav() {
@@ -138,21 +163,26 @@
   }
   async function loadLocal(force) {
     if (S.local && !force) return;
-    try { const d = await api("/api/library"); S.local = (d.items || []).map(normLocal); S.localDir = d.directory || ""; } catch (e) { S.local = []; }
+    try { const d = await api("/api/library" + (force ? "?refresh=true" : "")); S.local = (d.items || []).map(normLocal); S.localDir = d.directory || ""; } catch (e) { S.local = S.local || []; }
+  }
+  async function loadPlaylists() {
+    if (S.playlists) return;
+    try { const d = await api("/api/playlists"); S.playlists = d.items || []; } catch (e) { S.playlists = []; S.playlistsError = e.message; }
   }
   function localAlbums() {
     const map = new Map();
     (S.local || []).forEach((t) => {
-      const title = t.album || "Sem álbum"; const id = "l:" + encodeURIComponent(t.artist + "||" + title);
-      if (!map.has(id)) map.set(id, { id, title, artist: t.artist, year: "", type: "", cover: t.cover, source: "local", tracks: [] });
-      map.get(id).tracks.push(t);
+      const id = localAlbumId(t);
+      if (!map.has(id)) map.set(id, { id, title: t.album || "Sem álbum", artist: t.albumArtist || t.artist, artists: splitNames(t.albumArtist || t.artist).map((n) => ({ name: n })), year: t.year, genre: t.genre, label: t.label, type: "", cover: t.cover, coverOrg: t.cover, source: "local", tracks: [], format: t.format, size: 0, duration: 0, folder: t.folder });
+      const a = map.get(id); a.tracks.push(t); a.size += t.size || 0; a.duration += t.duration || 0; if (!a.year && t.year) a.year = t.year;
     });
+    map.forEach((a) => a.tracks.sort((x, y) => (x.discNumber || 1) - (y.discNumber || 1) || (x.trackNumber || 0) - (y.trackNumber || 0)));
     return Array.from(map.values());
   }
   function allAlbums() { return (S.favAlbums || []).concat(localAlbums()); }
   function artistsFrom(albums) {
     const map = new Map();
-    albums.forEach((a) => { a.artist.split(/,\s*/).slice(0, 1).forEach((n) => { const k = n.toLowerCase(); if (!map.has(k)) map.set(k, { name: n, cover: a.cover, count: 0 }); map.get(k).count += 1; }); });
+    albums.forEach((a) => { (a.artists && a.artists.length ? a.artists : splitNames(a.artist).map((n) => ({ name: n }))).forEach((ar) => { const k = ar.name.toLowerCase(); if (!map.has(k)) map.set(k, { id: ar.id, name: ar.name, cover: a.cover, count: 0 }); map.get(k).count += 1; }); });
     return Array.from(map.values());
   }
   function sortItems(items, sort, keyTitle, keyArtist, keyYear) {
@@ -161,7 +191,7 @@
     if (sort === "az") arr.sort((a, b) => c(keyTitle(a), keyTitle(b)));
     else if (sort === "artist") arr.sort((a, b) => c(keyArtist(a), keyArtist(b)) || c(keyTitle(a), keyTitle(b)));
     else if (sort === "year") arr.sort((a, b) => Number(keyYear(b) || 0) - Number(keyYear(a) || 0));
-    return arr; // "recent" mantém a ordem recebida (mais recentes primeiro)
+    return arr;
   }
 
   /* ------------------------------------------------------------ roteador */
@@ -171,8 +201,8 @@
     return { name: parts[0] || "home", parts: parts.slice(1), query: new URLSearchParams(qs || "") };
   }
   function markNav(r) {
-    const sub = r.name === "library" ? (r.parts[0] || "albums") : r.name === "downloads" ? (r.parts[0] || "queue") : "";
-    const route = r.name === "album" || r.name === "artist" ? "library" : r.name;
+    const sub = r.name === "library" ? (r.parts[0] || "albums") : r.name === "downloads" ? (r.parts[0] || "queue") : r.name === "files" ? (r.parts[0] === "tracks" ? "tracks" : "albums") : "";
+    const route = ["album", "artist", "track", "playlist"].includes(r.name) ? "library" : r.name;
     $$("[data-route]").forEach((el) => {
       const on = el.dataset.route === route && (!el.dataset.sub || el.dataset.sub === sub);
       el.classList.toggle("active", on);
@@ -189,6 +219,9 @@
     if (r.name === "tools") { loadToolJobs(); if (!same) scrollTop(); return; }
     if (r.name === "search" && $("#search-results")) { await updateSearch(r, token); return; }
     bar(true);
+    const rp = r.parts[0] || "";
+    const cold = (["home", "library", "files"].includes(r.name) && (S.local === null || S.favAlbums === null)) || (r.name === "album" && !rp.startsWith("l:") && !S.albumCache.has(rp)) || (r.name === "playlist" && !S.plCache.has(rp)) || (r.name === "artist" && /^\d+$/.test(rp) && !S.artistCache.has(rp));
+    if (cold && !same) { dyn.innerHTML = skeleton(""); scrollTop(); }
     try {
       let html = "";
       if (r.name === "search") html = await viewSearch(r);
@@ -196,6 +229,9 @@
       else if (r.name === "album") html = await viewAlbum(r);
       else if (r.name === "artist") html = await viewArtist(r);
       else if (r.name === "downloads") html = viewDownloads(r);
+      else if (r.name === "files") html = await viewFiles(r);
+      else if (r.name === "track") html = await viewTrack(r);
+      else if (r.name === "playlist") html = await viewPlaylist(r);
       else html = await viewHome();
       if (token !== S.token) return;
       const y = window.scrollY; dyn.innerHTML = html; afterRender(r);
@@ -210,6 +246,24 @@
   }
 
   /* ------------------------------------------------------------ views */
+  function dl(pairs) {
+    const rows = pairs.filter((p) => p[1] != null && p[1] !== "" && p[1] !== false).map((p) => "<div><dt>" + esc(p[0]) + "</dt><dd>" + p[1] + "</dd></div>");
+    return rows.length ? '<dl class="infogrid">' + rows.join("") + "</dl>" : "";
+  }
+  function creditsHtml(groups) {
+    if (!groups || !groups.length) return "";
+    return '<div class="credits">' + groups.map((g) => '<div class="credit"><span class="label">' + esc(g.role) + "</span><span>" + g.people.map((p) => searchLink(p.name)).join(", ") + "</span></div>").join("") + "</div>";
+  }
+  const sectionBox = (title, inner) => (inner ? '<div class="section-head"><h2>' + esc(title) + "</h2></div>" + inner : "");
+  function tracksList(tracks, lid, opt) {
+    const discs = new Set(tracks.map((t) => t.discNumber || 1));
+    if (discs.size < 2) return '<ol class="list">' + tracks.map((t, i) => trackRow(t, i, lid, Object.assign({ index: t.trackNumber || i + 1 }, opt))).join("") + "</ol>";
+    let out = "", last = null;
+    tracks.forEach((t, i) => { const d = t.discNumber || 1; if (d !== last) { out += (last !== null ? "</ol>" : "") + '<p class="disc-head label">Disco ' + d + '</p><ol class="list">'; last = d; } out += trackRow(t, i, lid, Object.assign({ index: t.trackNumber || i + 1 }, opt)); });
+    return out + "</ol>";
+  }
+  const skeleton = (title) => '<section class="page"><header class="page-head"><p class="label">Carregando</p><h1 class="page-title">' + esc(title || "…") + '</h1></header><div class="grid">' + Array.from({ length: 10 }, () => '<div class="card sk"><div class="cover skeleton"></div><div class="sk-line"></div><div class="sk-line short"></div></div>').join("") + "</div></section>";
+
   async function viewHome() {
     await Promise.all([loadFav(), loadLocal()]);
     const last = store.get("qs-last", null);
@@ -217,21 +271,19 @@
     const done = S.queue.filter((q) => q.status === "concluído").length;
     const st = S.status || {};
     const resume = last
-      ? '<div class="resume">' + cover(last.cover, "", "music") + '<div class="resume-copy"><span class="label">Continuar ouvindo</span><b>' + esc(last.title) + '</b><span class="muted">' + esc(last.artist || "") + '</span><div class="row"><button class="btn accent sm" data-resume>' + icon("play") + "Continuar</button></div></div></div>"
+      ? '<div class="resume">' + cover(last.cover, "", "music") + '<div class="resume-copy"><span class="label">Continuar ouvindo</span><b>' + esc(last.title) + '</b><span class="muted">' + artistLinks(last) + '</span><div class="row"><button class="btn accent sm" data-resume>' + icon("play") + "Continuar</button></div></div></div>"
       : '<span class="label">Continuar ouvindo</span>' + emptyBox("music", "Nada tocado ainda", "Escolha um álbum ou faixa para começar.");
     const recent = allAlbums().slice(0, 14);
     const local = (S.local || []).slice(0, 6); const lid = registerList(local);
     const nAlb = allAlbums().length, nTr = (S.local || []).length, nFav = (S.favAlbums || []).length;
-    return '<section class="page"><header class="page-head"><p class="label">Início</p><h1 class="page-title">qobuz-dl</h1></header>' +
-      '<div class="modules">' +
+    const total = (S.local || []).reduce((s, t) => s + (t.size || 0), 0);
+    return '<section class="page"><header class="page-head"><p class="label">Início</p><h1 class="page-title">qobuz-dl</h1></header><div class="modules">' +
       '<div class="panel module m-resume">' + resume + "</div>" +
       '<div class="panel module m-dl"><span class="label">Downloads</span><div class="big-num">' + pending + '</div><div class="stat-line"><span><b>' + pending + '</b> na fila</span><span><b>' + done + '</b> concluídos</span></div><div class="row"><a class="btn sm" href="#/downloads/queue">Abrir fila</a></div></div>' +
-      '<div class="panel module m-stats"><div class="stat"><span class="label">Álbuns</span><b class="big-num">' + nAlb + '</b></div><div class="stat"><span class="label">Faixas locais</span><b class="big-num">' + nTr + '</b></div><div class="stat"><span class="label">Favoritos</span><b class="big-num">' + nFav + "</b></div></div>" +
-      '<div class="panel module m-server"><span class="label">Servidor</span><div class="kv"><div><span class="label">Estado</span><b>' + (st.demo ? "Demonstração" : st.connected ? "Conectado ao Qobuz" : "Sem conta conectada") + '</b></div><div><span class="label">Endereço</span><b>' + esc(location.host) + '</b></div><div><span class="label">Pasta</span><b>' + esc(S.localDir || st.directory || "—") + '</b></div><div><span class="label">Qualidade</span><b>' + esc(qualityName(st.quality)) + "</b></div></div></div>" +
-      "</div>" +
+      '<div class="panel module m-stats"><a class="stat" href="#/library/albums"><span class="label">Álbuns</span><b class="big-num">' + nAlb + '</b></a><a class="stat" href="#/files/tracks"><span class="label">Faixas locais</span><b class="big-num">' + nTr + '</b></a><a class="stat" href="#/files/albums"><span class="label">No disco</span><b class="big-num sm">' + fmtSize(total) + '</b></a><a class="stat" href="#/library/albums"><span class="label">Favoritos</span><b class="big-num">' + nFav + "</b></a></div>" +
+      '<div class="panel module m-server"><span class="label">Servidor</span>' + dl([["Estado", st.demo ? "Demonstração" : st.connected ? "Conectado ao Qobuz" : "Sem conta conectada"], ["Endereço", esc(location.host)], ["Pasta", esc(S.localDir || st.directory || "—")], ["Qualidade", esc(qualityName(st.quality))]]).replace("infogrid", "infogrid kv4") + "</div></div>" +
       (recent.length ? '<div class="section-head"><h2>Álbuns recentes</h2><a class="btn ghost sm" href="#/library/albums">Ver tudo</a></div><div class="strip">' + recent.map(albumCard).join("") + "</div>" : "") +
-      (local.length ? '<div class="section-head"><h2>Faixas locais recentes</h2><a class="btn ghost sm" href="#/library/tracks">Ver tudo</a></div><ol class="list">' + local.map((t, i) => trackRow(t, i, lid, { showAlbum: true })).join("") + "</ol>" : "") +
-      "</section>";
+      (local.length ? '<div class="section-head"><h2>Faixas locais recentes</h2><a class="btn ghost sm" href="#/files/tracks">Ver tudo</a></div><ol class="list">' + local.map((t, i) => trackRow(t, i, lid, { showAlbum: true })).join("") + "</ol>" : "") + "</section>";
   }
   const qualityName = (q) => ({ 5: "MP3 320", 6: "FLAC 16/44.1", 7: "Hi-Res 24/96", 27: "Hi-Res 24/192" }[Number(q)] || "—");
 
@@ -244,43 +296,71 @@
   }
   async function viewLibrary(r) {
     const sub = ["albums", "artists", "singles", "playlists", "tracks"].includes(r.parts[0]) ? r.parts[0] : "albums";
-    await Promise.all([loadFav(), loadLocal(), sub === "tracks" ? loadFavTracks() : null]);
+    await Promise.all([loadFav(), loadLocal(), sub === "tracks" ? loadFavTracks() : null, sub === "playlists" ? loadPlaylists() : null]);
     const tabs = [["albums", "Álbuns"], ["artists", "Artistas"], ["singles", "Singles"], ["playlists", "Playlists"], ["tracks", "Faixas"]];
     const src = S.lib.source; const pick = (x) => src === "all" || x.source === src;
     let body = "";
     if (sub === "albums" || sub === "singles") {
       let items = allAlbums().filter(pick).filter((a) => (sub === "singles") === isSingle(a));
       items = sortItems(items, S.lib.sort, (a) => a.title, (a) => a.artist, (a) => a.year);
-      body = items.length ? '<div class="grid">' + items.map(albumCard).join("") + "</div>" :
-        emptyBox("library", sub === "singles" ? "Nenhum single" : "Nenhum álbum", src === "local" ? "Escolha a pasta da biblioteca em Preferências para ver os arquivos locais." : "Favorite álbuns no Qobuz ou baixe músicas para vê-los aqui.");
+      body = items.length ? '<div class="grid">' + items.map(albumCard).join("") + "</div>" : emptyBox("library", sub === "singles" ? "Nenhum single" : "Nenhum álbum", src === "local" ? "Escolha a pasta da biblioteca em Preferências para ver os arquivos locais." : "Favorite álbuns no Qobuz ou baixe músicas para vê-los aqui.");
     } else if (sub === "artists") {
       const items = artistsFrom(allAlbums().filter(pick)).sort((a, b) => a.name.localeCompare(b.name, "pt", { sensitivity: "base" }));
       body = items.length ? '<div class="grid">' + items.map(artistCard).join("") + "</div>" : emptyBox("user", "Nenhum artista", "Os artistas aparecem conforme sua biblioteca cresce.");
     } else if (sub === "playlists") {
-      body = emptyBox("queue", "Playlists ainda não disponíveis", "Esta versão não lê playlists do Qobuz nem cria playlists locais. Para importar ou sincronizar, use Ferramentas.", '<a class="btn sm" href="#/tools">Abrir Ferramentas</a>');
+      body = (S.playlists || []).length ? '<div class="grid">' + S.playlists.map(playlistCard).join("") + "</div>" : emptyBox("queue", S.playlistsError ? "Não foi possível carregar suas playlists" : "Nenhuma playlist", S.playlistsError || "As playlists da sua conta Qobuz aparecem aqui.");
     } else {
       let items = ((src !== "local" ? S.favTracks || [] : []).concat(src !== "qobuz" ? S.local || [] : []));
-      items = sortItems(items, S.lib.sort, (t) => t.title, (t) => t.artist, () => 0);
+      items = sortItems(items, S.lib.sort, (t) => t.title, (t) => t.artist, (t) => t.year);
       const id = registerList(items);
-      body = items.length ? '<ol class="list">' + items.map((t, i) => trackRow(t, i, id, { showAlbum: true })).join("") + "</ol>" : emptyBox("music", "Nenhuma faixa", "Nada encontrado para este filtro.");
+      body = items.length ? '<ol class="list">' + items.slice(0, 500).map((t, i) => trackRow(t, i, id, { showAlbum: true })).join("") + "</ol>" : emptyBox("music", "Nenhuma faixa", "Nada encontrado para este filtro.");
     }
     return '<section class="page"><header class="page-head"><p class="label">Biblioteca</p><h1 class="page-title">' + esc(tabs.find((t) => t[0] === sub)[1]) + "</h1></header>" +
-      '<nav class="tabs" aria-label="Seções da biblioteca">' + tabs.map(([k, l]) => '<a class="tab' + (k === sub ? " active" : "") + '" href="#/library/' + k + '">' + l + "</a>").join("") + "</nav>" + libToolbar(r) + body + "</section>";
+      '<nav class="tabs" aria-label="Seções da biblioteca">' + tabs.map(([k, l]) => '<a class="tab' + (k === sub ? " active" : "") + '" href="#/library/' + k + '">' + l + "</a>").join("") + '<a class="tab" href="#/files/albums">Arquivos</a></nav>' + (sub === "playlists" ? "" : libToolbar(r)) + body + "</section>";
   }
 
-  function searchTabs() {
-    return [["all", "Tudo"], ["tracks", "Faixas"], ["albums", "Álbuns"]].map(([k, l]) => '<button type="button" class="tab' + (S.search.tab === k ? " active" : "") + '" data-stab="' + k + '">' + l + "</button>").join("");
+  /* ---- Arquivos locais (separado: o que está de fato baixado no disco) ---- */
+  function filesBody(sub) {
+    const q = (S.filesQ || "").toLowerCase(); const sort = S.filesSort;
+    if (sub === "albums") {
+      let items = localAlbums().filter((a) => !q || (a.title + " " + a.artist).toLowerCase().includes(q));
+      items = sortItems(items, sort, (a) => a.title, (a) => a.artist, (a) => a.year);
+      if (sort === "size") items.sort((a, b) => b.size - a.size);
+      return items.length ? '<div class="grid">' + items.map(albumCard).join("") + "</div>" : emptyBox("library", "Nada encontrado", "Nenhum álbum local combina com o filtro.");
+    }
+    let items = (S.local || []).filter((t) => !q || (t.title + " " + t.artist + " " + t.album + " " + t.path).toLowerCase().includes(q));
+    items = sortItems(items, sort, (t) => t.title, (t) => t.artist, (t) => t.year);
+    if (sort === "size") items.sort((a, b) => b.size - a.size);
+    const id = registerList(items);
+    return items.length ? '<ol class="list">' + items.slice(0, 400).map((t, i) => trackRow(t, i, id, { showAlbum: true, showPath: true })).join("") + "</ol>" + (items.length > 400 ? '<p class="hint">Mostrando 400 de ' + items.length + ". Use o filtro para refinar.</p>" : "") : emptyBox("music", "Nada encontrado", "Nenhuma faixa local combina com o filtro.");
   }
+  async function viewFiles(r) {
+    await loadLocal(); const sub = r.parts[0] === "tracks" ? "tracks" : "albums";
+    const total = (S.local || []).reduce((s, t) => s + (t.size || 0), 0);
+    const sorts = [["recent", "Recentes"], ["az", "A–Z"], ["artist", "Artista"], ["size", "Tamanho"]];
+    return '<section class="page"><header class="page-head"><p class="label">Arquivos</p><h1 class="page-title">No disco</h1><p class="muted">' + (S.local || []).length + " faixas · " + fmtSize(total) + " · <span class=\"mono\">" + esc(S.localDir) + "</span></p></header>" +
+      '<nav class="tabs"><a class="tab' + (sub === "albums" ? " active" : "") + '" href="#/files/albums">Álbuns</a><a class="tab' + (sub === "tracks" ? " active" : "") + '" href="#/files/tracks">Faixas</a></nav>' +
+      '<div class="toolbar"><label class="search-box inline" for="files-filter">' + icon("search") + '<input id="files-filter" type="search" placeholder="Filtrar por título, artista, álbum ou pasta" value="' + esc(S.filesQ) + '" autocomplete="off"></label><div class="group"><span class="label">Ordem</span>' +
+      sorts.map(([k, l]) => '<button type="button" class="chip' + (S.filesSort === k ? " on" : "") + '" data-fsort="' + k + '">' + l + "</button>").join("") + '</div><button type="button" class="btn sm" data-files-refresh>' + icon("refresh") + 'Atualizar</button></div><div id="files-results" data-fsub="' + sub + '">' + filesBody(sub) + "</div></section>";
+  }
+
+  /* ---- busca (campo nunca é recriado) ---- */
+  const SEARCH_TABS = [["all", "Tudo"], ["tracks", "Faixas"], ["albums", "Álbuns"], ["playlists", "Playlists"], ["artists", "Artistas"]];
+  const searchTabs = () => SEARCH_TABS.map(([k, l]) => '<button type="button" class="tab' + (S.search.tab === k ? " active" : "") + '" data-stab="' + k + '">' + l + "</button>").join("");
   async function searchContent(q) {
-    if (q.length < 2) return emptyBox("search", "Pesquise no catálogo", "Digite ao menos 2 letras para buscar artistas, álbuns e faixas do Qobuz.");
+    if (q.length < 2) return emptyBox("search", "Pesquise no catálogo", "Digite ao menos 2 letras para buscar artistas, álbuns, faixas e playlists do Qobuz.");
     if (S.search.q !== q || !S.search.loaded) {
       const d = await api("/api/search?q=" + encodeURIComponent(q) + "&kind=all&limit=24");
-      S.search = { q, tracks: (d.tracks || []).map(normQ), albums: (d.albums || []).map((a) => Object.assign({}, a, { source: "qobuz", tracks: [] })), loaded: true, tab: S.search.tab };
+      S.search = { q, tracks: (d.tracks || []).map(normQ), albums: (d.albums || []).map((a) => Object.assign({}, a, { source: "qobuz", tracks: [] })), playlists: d.playlists || [], artists: d.artists || [], loaded: true, tab: S.search.tab };
     }
-    const tab = S.search.tab; const showA = tab !== "tracks", showT = tab !== "albums"; const lid = registerList(S.search.tracks);
-    const a = showA && S.search.albums.length ? '<div class="section-head"><h2>Álbuns</h2></div><div class="grid">' + S.search.albums.map(albumCard).join("") + "</div>" : "";
-    const t = showT && S.search.tracks.length ? '<div class="section-head"><h2>Faixas</h2></div><ol class="list">' + S.search.tracks.map((x, i) => trackRow(x, i, lid, { showAlbum: true })).join("") + "</ol>" : "";
-    return a + t || emptyBox("search", "Nada encontrado", "Tente outro nome de artista, álbum ou faixa.");
+    const tab = S.search.tab; const show = (k) => tab === "all" || tab === k; const lid = registerList(S.search.tracks);
+    const parts = [
+      show("artists") && S.search.artists.length ? sectionBox("Artistas", '<div class="strip">' + S.search.artists.slice(0, tab === "all" ? 8 : 24).map(artistCard).join("") + "</div>") : "",
+      show("albums") && S.search.albums.length ? sectionBox("Álbuns", '<div class="grid">' + S.search.albums.map(albumCard).join("") + "</div>") : "",
+      show("tracks") && S.search.tracks.length ? sectionBox("Faixas", '<ol class="list">' + S.search.tracks.map((x, i) => trackRow(x, i, lid, { showAlbum: true })).join("") + "</ol>") : "",
+      show("playlists") && S.search.playlists.length ? sectionBox("Playlists", '<div class="grid">' + S.search.playlists.map(playlistCard).join("") + "</div>") : "",
+    ].join("");
+    return parts || emptyBox("search", "Nada encontrado", "Tente outro nome de artista, álbum ou faixa.");
   }
   async function viewSearch(r) {
     const q = (r.query.get("q") || "").trim(); const input = $("#top-search"); if (input && document.activeElement !== input) input.value = q;
@@ -295,64 +375,117 @@
     } catch (e) { toast(e.message, "error"); } finally { if (token === S.token) bar(false); }
   }
 
+  /* ---- álbum ---- */
+  function heroBlock(o) {
+    return '<div class="hero">' + cover(o.cover, "", "music") + '<div class="hero-copy"><span class="label">' + esc(o.kind) + '</span><h1 class="hero-title">' + esc(o.title) + explicitChip(o) + '</h1><div class="hero-artist">' + o.artistsHtml + '</div><div class="meta-line">' + o.meta.filter(Boolean).map((x) => "<span>" + x + "</span>").join("") + '</div><div class="tech">' + o.chips.filter(Boolean).map((x) => '<span class="chip hi">' + esc(x) + "</span>").join("") + '</div><div class="row">' + o.actions + "</div></div></div>";
+  }
   async function viewAlbum(r) {
-    const id = r.parts[0] || ""; let album, tracks;
+    const id = r.parts[0] || ""; let html;
     if (id.startsWith("l:")) {
-      await loadLocal(); album = localAlbums().find((a) => a.id === id);
-      if (!album) return '<section class="page">' + emptyBox("x", "Álbum não encontrado", "Ele pode ter sido removido da pasta local.") + "</section>";
-      tracks = album.tracks;
+      await loadLocal(); const a = localAlbums().find((x) => x.id === id);
+      if (!a) return '<section class="page">' + emptyBox("x", "Álbum não encontrado", "Ele pode ter sido removido da pasta local.") + "</section>";
+      const tracks = a.tracks, lid = registerList(tracks); const first = tracks[0] || {};
+      const creators = Array.from(new Set(tracks.map((t) => t.composer).filter(Boolean)));
+      html = heroBlock({ kind: "Álbum local", title: a.title, cover: a.cover, artistsHtml: artistLinks(a), meta: [a.year, tracks.length + " faixas", fmtTime(a.duration), fmtSize(a.size), a.genre ? searchLink(a.genre) : ""], chips: [techLabel(first), "No disco"], actions: '<button class="btn accent" data-play="' + lid + ':0">' + icon("play") + "Reproduzir</button>" }) +
+        sectionBox("Informações", dl([["Pasta", '<span class="mono">' + esc(a.folder || "—") + "</span>"], ["Gênero", a.genre ? searchLink(a.genre) : ""], ["Selo", a.label ? searchLink(a.label) : ""], ["Compositores", creators.map(searchLink).join(", ")], ["Copyright", esc(first.copyright || "")]])) +
+        sectionBox("Faixas", tracksList(tracks, lid, { showPath: true }));
     } else {
-      const d = S.albumCache.get(id) || await api("/api/album/" + encodeURIComponent(id));
-      S.albumCache.set(id, d);
-      album = Object.assign({}, d.album, { source: "qobuz" });
-      tracks = (d.tracks || []).map((t) => Object.assign(normQ(t), { album: t.album || album.title, cover: t.cover || album.cover }));
+      const d = S.albumCache.get(id) || await api("/api/album/" + encodeURIComponent(id)); S.albumCache.set(id, d);
+      const al = d.album; const tracks = (d.tracks || []).map((t) => Object.assign(normQ(t), { album: t.album || al.title, albumId: t.albumId || al.id, cover: t.cover || al.cover, coverOrg: t.coverOrg || al.coverOrg })); const lid = registerList(tracks);
+      const total = tracks.reduce((s, t) => s + (Number(t.duration) || 0), 0) || al.duration;
+      html = heroBlock({ kind: (typeLabel(al.type) || "Álbum"), title: al.title, explicit: al.explicit, cover: al.coverOrg || al.cover, artistsHtml: artistLinks(al),
+        meta: [al.year, (al.tracks_count || tracks.length) + " faixas", fmtTime(total), al.label ? searchLink(al.label) : "", al.genre ? searchLink(al.genre) : ""], chips: [al.quality, al.hires ? "Hi-Res" : ""],
+        actions: '<button class="btn accent" data-play="' + lid + ':0">' + icon("play") + 'Reproduzir</button><button class="btn" data-dl-album="' + esc(al.id) + '" data-title="' + esc(al.title) + '" data-artist="' + esc(al.artist) + '" data-cover="' + esc(al.cover || "") + '">' + icon("download") + 'Baixar álbum</button><button class="btn ghost" data-fav="' + esc(al.id) + '">' + icon("plus") + 'Favoritar</button><button class="btn ghost" data-select-toggle>Selecionar</button>' + (al.url ? '<a class="btn ghost" href="' + esc(al.url) + '" target="_blank" rel="noopener noreferrer">Abrir no Qobuz</a>' : "") }) +
+        '<div class="row" id="select-bar" hidden><span class="muted small" id="select-count">0 selecionadas</span><button class="btn sm accent" data-dl-selected>' + icon("download") + 'Baixar selecionadas</button></div>' +
+        '<div id="album-tracks">' + tracksList(tracks, lid, {}) + "</div>" +
+        (d.descriptionHtml ? sectionBox("Sobre o álbum", '<div class="rich">' + d.descriptionHtml + "</div>") : "") +
+        sectionBox("Créditos", creditsHtml(d.credits)) +
+        sectionBox("Informações", dl([["Lançamento", esc(al.releaseDate)], ["Selo", al.label ? searchLink(al.label) : ""], ["Gênero", al.genre ? searchLink(al.genre) : ""], ["Discos", al.discs > 1 ? al.discs : ""], ["Qualidade máxima", esc(al.quality)], ["UPC", '<span class="mono">' + esc(al.upc) + "</span>"], ["Copyright", esc(al.copyright)], ["Prêmios", (al.awards || []).map((a) => esc(a.name + (a.year ? " (" + a.year + ")" : ""))).join("<br>")]]));
     }
-    const lid = registerList(tracks); const total = tracks.reduce((s, t) => s + (Number(t.duration) || 0), 0);
-    const qual = album.source === "qobuz" ? [album.quality, typeLabel(album.type)] : [(tracks[0] && tracks[0].format ? tracks[0].format.toUpperCase() : "LOCAL")];
-    return '<section class="page"><button type="button" class="back" data-back>' + icon("back") + "Voltar</button>" +
-      '<div class="hero">' + cover(album.cover, "", "music") + '<div class="hero-copy"><span class="label">' + (album.source === "local" ? "Álbum local" : "Álbum") + '</span><h1 class="hero-title">' + esc(album.title) + '</h1><a class="hero-artist" href="#/artist/' + encodeURIComponent(album.artist.split(/,\s*/)[0]) + '">' + esc(album.artist) + "</a>" +
-      '<div class="meta-line">' + [album.year, tracks.length + " faixas", total ? fmtTime(total) : "", album.genre].filter(Boolean).map((x) => "<span>" + esc(x) + "</span>").join("") + "</div>" +
-      '<div class="tech">' + qual.filter(Boolean).map((x) => '<span class="chip hi">' + esc(x) + "</span>").join("") + "</div>" +
-      '<div class="row"><button class="btn accent" data-play="' + lid + ':0">' + icon("play") + "Reproduzir</button>" +
-      (album.source === "qobuz" ? '<button class="btn" data-dl-album="' + esc(album.id) + '" data-title="' + esc(album.title) + '" data-artist="' + esc(album.artist) + '">' + icon("download") + 'Baixar álbum</button><button class="btn ghost" data-fav="' + esc(album.id) + '">' + icon("plus") + "Favoritar</button>" : "") +
-      '<button class="btn ghost" data-select-toggle>Selecionar</button></div></div></div>' +
-      '<div class="row" id="select-bar" hidden><span class="muted small" id="select-count">0 selecionadas</span><button class="btn sm accent" data-dl-selected>' + icon("download") + 'Baixar selecionadas</button></div>' +
-      '<ol class="list" id="album-tracks">' + tracks.map((t, i) => trackRow(t, i, lid, { select: false })).join("") + "</ol></section>";
+    return '<section class="page"><button type="button" class="back" data-back>' + icon("back") + "Voltar</button>" + html + "</section>";
   }
 
+  /* ---- faixa ---- */
+  async function viewTrack(r) {
+    const id = r.parts[0] || ""; let html;
+    if (id.startsWith("l:")) {
+      await loadLocal(); const key = id.slice(2); const t = (S.local || []).find((x) => x.key === key);
+      if (!t) return '<section class="page">' + emptyBox("x", "Arquivo não encontrado", "Ele pode ter sido movido ou apagado.") + "</section>";
+      const lid = registerList([t]); const ah = albumHref(t);
+      html = heroBlock({ kind: "Faixa local", title: t.title, cover: t.cover, artistsHtml: artistLinks(t), meta: [ah ? '<a class="lnk" href="' + ah + '">' + esc(t.album) + "</a>" : esc(t.album), t.year, fmtTime(t.duration)], chips: [techLabel(t)], actions: '<button class="btn accent" data-play="' + lid + ':0">' + icon("play") + "Reproduzir</button>" }) +
+        sectionBox("Arquivo", dl([["Caminho", '<span class="mono">' + esc(t.path) + '</span> <button class="btn sm ghost" data-copy="' + esc(t.path) + '">Copiar</button>'], ["Formato", esc((t.format || "").toUpperCase())], ["Resolução", t.bitDepth ? t.bitDepth + "-bit / " + t.sampleRate + " kHz" : t.sampleRate ? t.sampleRate + " kHz" : ""], ["Taxa de bits", t.bitrate ? t.bitrate + " kbps" : ""], ["Canais", t.channels], ["Tamanho", fmtSize(t.size)], ["Duração", fmtTime(t.duration)], ["Letra .lrc", t.hasLrc ? "Sim" : "Não"]])) +
+        sectionBox("Tags", dl([["Álbum", ah ? '<a class="lnk" href="' + ah + '">' + esc(t.album) + "</a>" : esc(t.album)], ["Artista do álbum", t.albumArtist ? artistLinks({ artist: t.albumArtist }) : ""], ["Faixa", t.trackNumber ? t.trackNumber + (t.discNumber ? " · disco " + t.discNumber : "") : ""], ["Gênero", t.genre ? searchLink(t.genre) : ""], ["Compositor", t.composer ? splitNames(t.composer).map(searchLink).join(", ") : ""], ["Selo", t.label ? searchLink(t.label) : ""], ["ISRC", '<span class="mono">' + esc(t.isrc) + "</span>"], ["Copyright", esc(t.copyright)]]));
+    } else {
+      const d = await api("/api/track/" + encodeURIComponent(id)); const t = normQ(d.track); const al = d.album; const lid = registerList([t]);
+      t.coverOrg = t.coverOrg || (al && al.coverOrg); t.cover = t.cover || (al && al.cover);
+      html = heroBlock({ kind: "Faixa", title: t.title, explicit: t.explicit, cover: t.coverOrg || t.cover, artistsHtml: artistLinks(t), meta: [t.albumId ? '<a class="lnk" href="#/album/' + encodeURIComponent(t.albumId) + '">' + esc(t.album) + "</a>" : esc(t.album), al && al.year, fmtTime(t.duration)], chips: [t.quality],
+        actions: '<button class="btn accent" data-play="' + lid + ':0">' + icon("play") + 'Reproduzir</button><button class="btn" data-dl="' + esc(t.id) + '" data-title="' + esc(t.title) + '" data-artist="' + esc(t.artist) + '" data-cover="' + esc(t.cover || "") + '">' + icon("download") + "Baixar</button>" }) +
+        sectionBox("Créditos", creditsHtml(t.credits)) +
+        sectionBox("Informações", dl([["Álbum", t.albumId ? '<a class="lnk" href="#/album/' + encodeURIComponent(t.albumId) + '">' + esc(t.album) + "</a>" : esc(t.album)], ["Faixa", t.trackNumber ? t.trackNumber + (t.discNumber > 1 ? " · disco " + t.discNumber : "") : ""], ["Compositor", t.composer ? searchLink(t.composer.name) : ""], ["Obra", esc(t.work)], ["Qualidade", esc(t.quality)], ["ISRC", '<span class="mono">' + esc(t.isrc) + "</span>"], ["Copyright", esc(t.copyright)], ["Selo", al && al.label ? searchLink(al.label) : ""], ["Gênero", al && al.genre ? searchLink(al.genre) : ""]]));
+    }
+    return '<section class="page"><button type="button" class="back" data-back>' + icon("back") + "Voltar</button>" + html + "</section>";
+  }
+
+  /* ---- artista ---- */
   async function viewArtist(r) {
-    const name = r.parts[0] || ""; await Promise.all([loadFav(), loadLocal()]);
-    const albums = allAlbums().filter((a) => a.artist.toLowerCase().includes(name.toLowerCase()));
-    const tracks = (S.local || []).filter((t) => t.artist.toLowerCase().includes(name.toLowerCase()));
-    const lid = registerList(tracks);
-    return '<section class="page"><button type="button" class="back" data-back>' + icon("back") + "Voltar</button>" +
-      '<header class="page-head"><p class="label">Artista</p><h1 class="page-title">' + esc(name) + "</h1></header>" +
-      (albums.length ? '<div class="section-head"><h2>Álbuns</h2></div><div class="grid">' + albums.map(albumCard).join("") + "</div>" : emptyBox("user", "Nada na sua biblioteca", "Use Pesquisar para encontrar a discografia no catálogo.", '<a class="btn sm" href="#/search?q=' + encodeURIComponent(name) + '">Pesquisar “' + esc(name) + "”</a>")) +
-      (tracks.length ? '<div class="section-head"><h2>Faixas locais</h2></div><ol class="list">' + tracks.map((t, i) => trackRow(t, i, lid, { showAlbum: true })).join("") + "</ol>" : "") + "</section>";
+    const ref = r.parts[0] || ""; const name = r.query.get("n") || ref; await Promise.all([loadFav(), loadLocal()]);
+    const mine = allAlbums().filter((a) => (a.artist || "").toLowerCase().includes(name.toLowerCase()));
+    const tracks = (S.local || []).filter((t) => (t.artist || "").toLowerCase().includes(name.toLowerCase())); const lid = registerList(tracks);
+    let head = '<header class="page-head"><p class="label">Artista</p><h1 class="page-title">' + esc(name) + "</h1></header>", rest = "";
+    if (/^\d+$/.test(ref)) {
+      try {
+        const d = S.artistCache.get(ref) || await api("/api/artist/" + encodeURIComponent(ref)); S.artistCache.set(ref, d); const a = d.artist;
+        head = '<div class="hero">' + cover(a.coverOrg || a.cover, "round", "user") + '<div class="hero-copy"><span class="label">Artista</span><h1 class="hero-title">' + esc(a.name) + '</h1><div class="meta-line"><span>' + (a.albums_count || d.albums.length) + " álbuns</span>" + (a.category ? "<span>" + esc(a.category) + "</span>" : "") + "</div></div></div>";
+        rest += (a.biographyHtml ? sectionBox("Biografia", '<div class="rich">' + a.biographyHtml + "</div>") : "") + sectionBox("Discografia", d.albums.length ? '<div class="grid">' + d.albums.map((x) => albumCard(Object.assign({}, x, { source: "qobuz", tracks: [] }))).join("") + "</div>" : emptyBox("library", "Sem álbuns listados", "O catálogo não retornou álbuns para este artista."));
+      } catch (e) { rest += '<p class="hint">' + esc(e.message) + "</p>"; }
+    } else {
+      rest += '<div class="row"><a class="btn sm" href="#/search?q=' + encodeURIComponent(name) + '">Buscar “' + esc(name) + '” no catálogo</a></div>';
+    }
+    if (mine.length) rest += sectionBox("Na sua biblioteca", '<div class="grid">' + mine.map(albumCard).join("") + "</div>");
+    if (tracks.length) rest += sectionBox("Faixas locais", '<ol class="list">' + tracks.slice(0, 100).map((t, i) => trackRow(t, i, lid, { showAlbum: true })).join("") + "</ol>");
+    return '<section class="page"><button type="button" class="back" data-back>' + icon("back") + "Voltar</button>" + head + rest + "</section>";
   }
 
+  /* ---- playlist ---- */
+  async function viewPlaylist(r) {
+    const id = r.parts[0] || ""; const d = S.plCache.get(id) || await api("/api/playlist/" + encodeURIComponent(id)); S.plCache.set(id, d);
+    const p = d.playlist; const tracks = (d.tracks || []).map(normQ); const lid = registerList(tracks);
+    const total = tracks.reduce((s, t) => s + (Number(t.duration) || 0), 0) || p.duration;
+    return '<section class="page"><button type="button" class="back" data-back>' + icon("back") + "Voltar</button>" +
+      heroBlock({ kind: "Playlist", title: p.title, cover: p.coverOrg || p.cover, artistsHtml: esc(p.owner || ""), meta: [(p.tracks_count || tracks.length) + " faixas", fmtTime(total), p.public ? "Pública" : "Privada"], chips: [], actions: '<button class="btn accent" data-play="' + lid + ':0">' + icon("play") + 'Reproduzir</button><button class="btn" data-dl-all="' + lid + '">' + icon("download") + "Baixar faixas</button>" }) +
+      (p.description ? '<div class="rich">' + esc(p.description) + "</div>" : "") +
+      sectionBox("Faixas", tracks.length ? tracksList(tracks, lid, { showAlbum: true }) : emptyBox("music", "Playlist vazia", "Nenhuma faixa encontrada.")) + sectionBox("Créditos", creditsHtml(d.credits)) + "</section>";
+  }
+
+  /* ---- downloads (com conferência no disco) ---- */
   function statusChip(s) {
-    const m = { aguardando: ["", "Na fila"], baixando: ["on", "Baixando"], "concluído": ["ok", "Concluído"], falhou: ["bad", "Falhou"], interrompido: ["bad", "Interrompido"] };
+    const m = { aguardando: ["", "Na fila"], baixando: ["on", "Baixando"], "concluído": ["ok", "Concluído"], ignorado: ["", "Nada novo"], falhou: ["bad", "Falhou"], interrompido: ["bad", "Interrompido"] };
     const [c, l] = m[s] || ["", s || "—"]; return '<span class="chip ' + c + '">' + l + "</span>";
+  }
+  function dlDetails(q) {
+    if (!q.files && !q.savedTo) return "";
+    const files = (q.files || []).map((f) => '<li class="dl-file' + (f.ok && f.tagsOk ? "" : " warn") + '"><span class="mono">' + esc(f.name) + "</span><span class=\"muted\">" + esc([(f.format || "").toUpperCase(), f.bitDepth && f.sampleRate ? f.bitDepth + "-bit/" + f.sampleRate + " kHz" : "", fmtSize(f.size), fmtTime(f.duration)].filter(Boolean).join(" · ")) + "</span><span class=\"checks\">" + (f.ok ? "✓ áudio" : "✗ áudio") + " · " + (f.tagsOk ? "✓ tags" : "✗ tags") + " · " + (f.hasCover ? "✓ capa" : "– capa") + (f.hasLrc ? " · ✓ letra" : "") + "</span></li>").join("");
+    return '<details class="dl-more"><summary>Ver onde foi salvo' + (q.verified ? ' <span class="chip ok">✓ verificado</span>' : q.files && q.files.length ? ' <span class="chip bad">verificar</span>' : "") + "</summary>" +
+      '<div class="dl-path"><span class="label">Pasta</span><span class="mono">' + esc(q.savedTo || "") + '</span> <button class="btn sm ghost" data-copy="' + esc(q.savedTo || "") + '">Copiar</button> <a class="btn sm ghost" href="#/files/tracks">Ver em Arquivos</a></div>' +
+      (files ? '<ul class="dl-files">' + files + "</ul>" : '<p class="hint">Nenhum arquivo novo encontrado.</p>') + ((q.warnings || []).length ? '<ul class="dl-warn">' + q.warnings.map((w) => "<li>" + esc(w) + "</li>").join("") + "</ul>" : "") + "</details>";
   }
   function dlItem(q) {
     const removable = q.status === "aguardando";
     return '<div class="panel dl-item">' + cover(q.cover, "md", q.kind === "album" ? "library" : "music") +
       '<div class="dl-copy"><b>' + esc(q.title) + "</b><small>" + esc([q.artist, q.kind === "album" ? "álbum" : "faixa", fmtRelative(q.createdAt)].filter(Boolean).join(" · ")) + (q.message ? " · " + esc(q.message) : "") + "</small></div>" +
       '<div class="dl-side">' + statusChip(q.status) + (removable ? '<button class="icon-btn" data-remove-queue="' + esc(q.id) + '" aria-label="Remover da fila">' + icon("x") + "</button>" : "") + "</div>" +
-      (q.status === "baixando" ? '<div class="progress" role="progressbar" aria-label="Baixando"><i></i></div>' : "") + "</div>";
+      (q.status === "baixando" ? '<div class="progress" role="progressbar" aria-label="Baixando"><i></i></div>' : "") + dlDetails(q) + "</div>";
   }
   function viewDownloads(r) {
     const sub = r.parts[0] === "history" ? "history" : "queue";
     const active = S.queue.filter((q) => q.status === "aguardando" || q.status === "baixando");
     const past = S.queue.filter((q) => !(q.status === "aguardando" || q.status === "baixando")).slice().reverse();
-    const list = sub === "queue" ? active : past;
-    const cnt = (s) => S.queue.filter((q) => q.status === s).length;
+    const list = sub === "queue" ? active : past; const cnt = (s) => S.queue.filter((q) => q.status === s).length;
     return '<section class="page"><header class="page-head"><p class="label">Downloads</p><h1 class="page-title">' + (sub === "queue" ? "Fila" : "Histórico") + "</h1></header>" +
       '<div class="sum"><div class="panel"><span class="label">Na fila</span><div class="big-num">' + cnt("aguardando") + '</div></div><div class="panel"><span class="label">Baixando</span><div class="big-num">' + cnt("baixando") + '</div></div><div class="panel"><span class="label">Concluídos</span><div class="big-num">' + cnt("concluído") + "</div></div></div>" +
       '<nav class="tabs"><a class="tab' + (sub === "queue" ? " active" : "") + '" href="#/downloads/queue">Fila</a><a class="tab' + (sub === "history" ? " active" : "") + '" href="#/downloads/history">Histórico</a></nav>' +
       (list.length ? list.map(dlItem).join("") : emptyBox("download", sub === "queue" ? "Fila vazia" : "Nada no histórico", "Baixe um álbum ou faixa pela Pesquisa ou pela Biblioteca.", '<a class="btn sm" href="#/search">Pesquisar</a>')) +
-      '<p class="hint">O servidor informa só o estado de cada item; o progresso por bytes ainda não é reportado.</p></section>';
+      '<p class="hint">Ao terminar cada item, o servidor confere no disco o que foi gravado (existência, tamanho, duração, tags e capa).</p></section>';
   }
 
   /* ------------------------------------------------------------ status / conta / preferências */
@@ -379,6 +512,7 @@
   }
   const BOOLS = { "setting-embed-art": "embed_art", "setting-lyrics": "fetch_lyrics", "setting-lrc": "lrc_files", "setting-credits": "credits", "setting-m3u": "m3u", "setting-fallback": "quality_fallback", "setting-playlist-albums": "playlist_as_albums", "setting-verify": "verify_after_download", "setting-no-cover": "no_cover", "setting-smart-discography": "smart_discography", "setting-multi-tags": "multi_value_tags" };
   async function loadSettings() { try { S.settings = await api("/api/settings"); fillSettings(); } catch (e) { toast("Não foi possível carregar as preferências.", "error"); } }
+  async function loadAdvanced() { try { S.adv = await api("/api/settings/advanced"); renderAdvanced(); } catch (e) { /* servidor antigo: sem opções avançadas */ } }
   function fillSettings() {
     const s = S.settings; if (!s) return;
     $("#settings-directory").value = s.directory || ""; $("#settings-quality").value = String(s.quality || 6);
@@ -386,7 +520,19 @@
     $("#settings-max-workers").value = s.max_workers || 1; $("#settings-segment-workers").value = s.segment_workers || 4;
     $("#settings-embedded-size").value = s.embedded_art_size || "org"; $("#settings-saved-size").value = s.saved_art_size || "org";
     $("#settings-folder-format").value = s.folder_format || ""; $("#settings-track-format").value = s.track_format || "";
+    $("#config-footnote").textContent = s.configFile ? "Arquivo: " + s.configFile + " (o mesmo usado pelo terminal)" : "";
   }
+  function renderAdvanced() {
+    const box = $("#advanced-settings"); if (!box || !S.adv) return;
+    const groups = {}; S.adv.schema.forEach((f) => { (groups[f.group] = groups[f.group] || []).push(f); });
+    box.innerHTML = Object.entries(groups).map(([g, fields]) => '<details class="disclosure adv-group"><summary>' + esc(g) + ' <span class="muted small">(' + fields.length + ")</span></summary>" + fields.map((f) => {
+      const v = S.adv.values[f.key]; const hint = f.hint ? "<small>" + esc(f.hint) + "</small>" : "";
+      if (f.type === "bool") return '<label class="switch-row"><span><b>' + esc(f.label) + "</b>" + hint + '</span><input type="checkbox" data-adv="' + f.key + '"' + (v ? " checked" : "") + "><i></i></label>";
+      return '<label class="label" for="adv-' + f.key + '">' + esc(f.label) + '</label><input id="adv-' + f.key + '" data-adv="' + f.key + '" type="' + (f.type === "int" ? "number" : "text") + '" value="' + esc(v) + '"' + (f.type === "int" ? ' min="' + (f.min || 0) + '" max="' + (f.max || 999999) + '"' : "") + ">" + (f.hint ? '<small class="hint">' + esc(f.hint) + "</small>" : "");
+    }).join("") + "</details>").join("");
+  }
+  function collectAdvanced() { const out = {}; $$("[data-adv]").forEach((el) => { out[el.dataset.adv] = el.type === "checkbox" ? el.checked : el.type === "number" ? Number(el.value) : el.value; }); return out; }
+  async function openSettings() { openModal(); await Promise.all([loadSettings(), loadAdvanced(), loadStatus()]); }
   async function saveSettings() {
     const p = { directory: $("#settings-directory").value.trim(), quality: Number($("#settings-quality").value), max_workers: Number($("#settings-max-workers").value) || 1,
       segment_workers: Number($("#settings-segment-workers").value) || 4, embedded_art_size: $("#settings-embedded-size").value, saved_art_size: $("#settings-saved-size").value,
@@ -395,8 +541,13 @@
     Object.entries(BOOLS).forEach(([id, k]) => { p[k] = $("#" + id).checked; });
     if (!p.directory) { toast("Informe a pasta da biblioteca.", "error"); return; }
     const b = $("#save-settings"); b.disabled = true;
-    try { S.settings = await api("/api/settings", { method: "POST", body: p }); fillSettings(); toast("Preferências salvas.", "success"); closeModal(); await loadStatus(); S.local = null; render(); }
-    catch (e) { toast(e.message, "error"); } finally { b.disabled = false; }
+    try {
+      await api("/api/settings", { method: "POST", body: p });
+      if (S.adv) await api("/api/settings/advanced", { method: "POST", body: { values: collectAdvanced() } });
+      await Promise.all([loadSettings(), loadAdvanced(), loadStatus()]);   // relê do config.ini para mostrar o que realmente ficou gravado
+      toast("Salvo no config.ini — o terminal usa as mesmas opções.", "success");
+      S.local = null; S.albumCache.clear(); loadLocal(true).then(render);
+    } catch (e) { toast(e.message, "error"); } finally { b.disabled = false; }
   }
   async function saveAccount() {
     const email = $("#account-email").value.trim(), token = $("#account-token").value.trim();
@@ -424,7 +575,7 @@
   }
 
   /* ------------------------------------------------------------ player */
-  const audio = $("#audio-element");
+  const audio = $("#audio-element"); audio.preload = "auto";
   const srcFor = (t) => t.source === "local" ? "/api/library/play/" + encodeURIComponent(t.key || t.id) : "/api/stream/" + encodeURIComponent(t.id) + "?quality=" + (S.settings && Number(S.settings.quality) === 5 ? 5 : 6);
   function order() {
     const p = S.pb; if (!p.shuffle) return p.list.map((_, i) => i);
@@ -436,7 +587,7 @@
     const t = S.pb.list[S.pb.index]; if (!t) return;
     document.body.classList.add("has-player"); $("#player").hidden = false;
     audio.src = srcFor(t); audio.play().catch(() => {});
-    store.set("qs-last", { source: t.source, id: t.id, key: t.key, title: t.title, artist: t.artist, album: t.album, cover: t.cover, duration: t.duration, format: t.format, quality: t.quality });
+    store.set("qs-last", { source: t.source, id: t.id, key: t.key, title: t.title, artist: t.artist, artists: t.artists, album: t.album, albumId: t.albumId, cover: t.cover, coverOrg: t.coverOrg, duration: t.duration, format: t.format, quality: t.quality });
     renderPlayerMeta(); mediaSessionMeta(t); loadLyricsFor(t); markPlaying();
   }
   function renderPlayerMeta() {
@@ -444,9 +595,9 @@
     $("#player-title").textContent = t.title; $("#player-artist").textContent = t.artist || "";
     $("#player-cover").innerHTML = t.cover ? '<img src="' + esc(t.cover) + '" alt="">' : icon("music");
     $("#player-quality").textContent = t.source === "local" ? (t.format || "local").toUpperCase() : (t.quality || "Qobuz");
-    $("#np-title").textContent = t.title; $("#np-artist").textContent = t.artist || ""; $("#np-album").textContent = t.album || "";
+    $("#np-title").textContent = t.title; $("#np-artist").innerHTML = artistLinks(t); const ah = albumHref(t); $("#np-album").innerHTML = ah ? '<a class="lnk" href="' + ah + '">' + esc(t.album || "") + "</a>" : esc(t.album || "");
     $("#np-quality").textContent = [t.source === "local" ? "Local" : "Qobuz", t.source === "local" ? (t.format || "").toUpperCase() : t.quality].filter(Boolean).join(" · ");
-    $("#np-cover").innerHTML = t.cover ? '<img src="' + esc(t.cover) + '" alt="">' : icon("music");
+    $("#np-cover").innerHTML = (t.coverOrg || t.cover) ? '<img src="' + esc(t.coverOrg || t.cover) + '" alt="">' : icon("music");
     $("#np-cover").className = "cover xl" + (t.cover ? "" : " dots");
     renderQueuePane();
   }
@@ -464,6 +615,11 @@
     ["#play-button", "#np-play"].forEach((s) => $(s).setAttribute("aria-label", audio.paused ? "Reproduzir" : "Pausar"));
     document.body.classList.toggle("is-playing", !audio.paused);
     if ("mediaSession" in navigator) navigator.mediaSession.playbackState = audio.paused ? "paused" : "playing";
+  }
+  function copyText(text) {
+    const done = () => toast("Copiado.", "success");
+    const fallback = () => { const ta = document.createElement("textarea"); ta.value = text; ta.style.cssText = "position:fixed;opacity:0"; document.body.appendChild(ta); ta.select(); try { document.execCommand("copy"); done(); } catch (e) { toast("Não foi possível copiar.", "error"); } ta.remove(); };
+    if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(text).then(done, fallback); else fallback();
   }
   function togglePlay() { if (!S.pb.list.length) return; if (audio.paused) audio.play().catch(() => {}); else audio.pause(); }
   function step(dir) {
@@ -488,7 +644,15 @@
       [$("#progress-slider"), $("#np-seek")].forEach((s) => { if (document.activeElement !== s) s.value = String(pct * 10); fill(s, pct); });
       $("#player-bar-fill").style.width = pct.toFixed(2) + "%"; updateLyricsActive(); updatePosition();
     });
-    audio.addEventListener("error", () => { if (S.pb.list.length) toast("Não foi possível reproduzir esta faixa.", "error"); });
+    audio.addEventListener("error", async () => {
+      if (!S.pb.list.length) return; const cur = S.pb.list[S.pb.index] || {}; let msg = "Não foi possível reproduzir esta faixa.";
+      try {
+        const r = await fetch(audio.currentSrc || audio.src, { headers: { Range: "bytes=0-1" } });
+        if (!r.ok) { let d = null; try { d = (await r.json()).detail; } catch (e) { /* sem corpo JSON */ } msg = d || "O servidor respondeu HTTP " + r.status + "."; }
+        else msg += " O arquivo chegou, mas o navegador não conseguiu decodificar (" + String(cur.format || "áudio").toUpperCase() + ").";
+      } catch (e) { msg += " Sem conexão com o servidor."; }
+      toast(msg, "error");
+    });
     [$("#progress-slider"), $("#np-seek")].forEach((s) => {
       s.addEventListener("input", () => fill(s, Number(s.value) / 10));
       s.addEventListener("change", () => { if (audio.duration) audio.currentTime = (Number(s.value) / 1000) * audio.duration; });
@@ -521,8 +685,9 @@
     const set = (a, fn) => { try { navigator.mediaSession.setActionHandler(a, fn); } catch (e) { /* ação não suportada */ } };
     set("play", () => audio.play().catch(() => {})); set("pause", () => audio.pause());
     set("previoustrack", () => step(-1)); set("nexttrack", () => step(1));
-    set("seekbackward", (d) => { audio.currentTime = Math.max(0, audio.currentTime - ((d && d.seekOffset) || 10)); });
-    set("seekforward", (d) => { audio.currentTime = Math.min(audio.duration || 0, audio.currentTime + ((d && d.seekOffset) || 10)); });
+    // Sem handlers de seekbackward/seekforward: no iOS eles trocam os botões de
+    // faixa anterior/próxima pelos de ±10 s (a faixa vira "transmissão").
+    set("seekbackward", null); set("seekforward", null);
     set("seekto", (d) => { if (d && typeof d.seekTime === "number") audio.currentTime = d.seekTime; });
   }
 
@@ -753,8 +918,12 @@
       const t = e.target;
       let el;
       if ((el = t.closest("[data-play]"))) { const [lid, idx] = el.dataset.play.split(":"); const list = LISTS.get(lid); if (list && list[Number(idx)]) playList(list, Number(idx)); return; }
-      if ((el = t.closest("[data-dl]"))) { enqueue({ id: el.dataset.dl, kind: "track", title: el.dataset.title, artist: el.dataset.artist }); return; }
-      if ((el = t.closest("[data-dl-album]"))) { enqueue({ id: el.dataset.dlAlbum, kind: "album", title: el.dataset.title, artist: el.dataset.artist }); return; }
+      if ((el = t.closest("[data-dl]"))) { enqueue({ id: el.dataset.dl, kind: "track", title: el.dataset.title, artist: el.dataset.artist, cover: el.dataset.cover || "" }); return; }
+      if ((el = t.closest("[data-dl-album]"))) { enqueue({ id: el.dataset.dlAlbum, kind: "album", title: el.dataset.title, artist: el.dataset.artist, cover: el.dataset.cover || "" }); return; }
+      if ((el = t.closest("[data-dl-all]"))) { (LISTS.get(el.dataset.dlAll) || []).forEach((x) => { if (x.source === "qobuz") enqueue({ id: x.id, kind: "track", title: x.title, artist: x.artist, cover: x.cover || "" }); }); return; }
+      if ((el = t.closest("[data-copy]"))) { copyText(el.dataset.copy); return; }
+      if ((el = t.closest("[data-fsort]"))) { S.filesSort = el.dataset.fsort; render(); return; }
+      if (t.closest("[data-files-refresh]")) { loadLocal(true).then(render); return; }
       if ((el = t.closest("[data-fav]"))) { try { await api("/api/favorites", { method: "POST", body: { id: el.dataset.fav, kind: "album" } }); toast("Adicionado aos favoritos.", "success"); S.favAlbums = null; } catch (err) { toast(err.message, "error"); } return; }
       if ((el = t.closest("[data-remove-queue]"))) { try { await api("/api/queue/" + encodeURIComponent(el.dataset.removeQueue), { method: "DELETE" }); loadQueue(); } catch (err) { toast(err.message, "error"); } return; }
       if ((el = t.closest("[data-src]"))) { S.lib.source = el.dataset.src; store.set("qs-src", S.lib.source); render(); return; }
@@ -770,8 +939,10 @@
       if ((el = t.closest("#np-lyrics p[data-li]"))) { const l = S.lyrics.lines[Number(el.dataset.li)]; if (l) audio.currentTime = l.t; return; }
     });
     document.addEventListener("change", (e) => { if (e.target.matches("[data-sel]")) updateSelectCount(); });
+    document.addEventListener("input", (e) => { if (e.target.id === "files-filter") { S.filesQ = e.target.value; const box = $("#files-results"); if (box) box.innerHTML = filesBody(box.dataset.fsub); } });
     document.addEventListener("error", (e) => { const t = e.target; if (t && t.tagName === "IMG") { const c = t.closest(".cover"); if (c) { c.classList.add("dots"); c.innerHTML = icon("music"); } } }, true);
-    ["#open-settings", "#open-settings-phone", "#open-settings-nav"].forEach((s) => $(s).addEventListener("click", openModal));
+    ["#open-settings", "#open-settings-phone", "#open-settings-nav"].forEach((s) => $(s).addEventListener("click", openSettings));
+    $("#reload-settings").addEventListener("click", async () => { await Promise.all([loadSettings(), loadAdvanced()]); toast("Recarregado do config.ini.", "info"); });
     $$("[data-close-modal]").forEach((b) => b.addEventListener("click", closeModal));
     $("#modal-backdrop").addEventListener("click", (e) => { if (e.target.id === "modal-backdrop") closeModal(); });
     $("#np-close").addEventListener("click", closeNP);
@@ -784,7 +955,7 @@
     const go = debounce((v) => { const q = v.trim(); location.hash = q ? "#/search?q=" + encodeURIComponent(q) : "#/search"; }, 380);
     $("#top-search").addEventListener("input", (e) => go(e.target.value));
     $("#top-search").addEventListener("keydown", (e) => { if (e.key === "Enter") { const q = e.target.value.trim(); location.hash = q ? "#/search?q=" + encodeURIComponent(q) : "#/search"; } });
-    window.addEventListener("hashchange", render);
+    window.addEventListener("hashchange", () => { if (!$("#now-playing").hidden) closeNP(); render(); });
   }
   function toggleSelect() {
     const list = $("#album-tracks"); if (!list) return; const on = !list.classList.contains("selecting-on");
@@ -796,7 +967,7 @@
   function downloadSelected() {
     const rows = $$("#album-tracks .trow").filter((r) => $("[data-sel]", r) && $("[data-sel]", r).checked);
     if (!rows.length) { toast("Marque ao menos uma faixa.", "info"); return; }
-    rows.forEach((r) => { const b = $("[data-dl]", r); if (b) enqueue({ id: b.dataset.dl, kind: "track", title: b.dataset.title, artist: b.dataset.artist }); });
+    rows.forEach((r) => { const b = $("[data-dl]", r); if (b) enqueue({ id: b.dataset.dl, kind: "track", title: b.dataset.title, artist: b.dataset.artist, cover: b.dataset.cover || "" }); });
   }
 
   /* ------------------------------------------------------------ PWA */
@@ -816,6 +987,7 @@
     if (!location.hash) history.replaceState(null, "", "#/home");
     await Promise.all([loadStatus(), loadSettings(), loadQueue()]);
     render(); setInterval(() => { if (!document.hidden) loadQueue(); }, 3500); initPwa();
+    loadFav(); loadLocal(); loadPlaylists();   // aquece os caches: as próximas telas abrem na hora
   }
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init); else init();
 })();

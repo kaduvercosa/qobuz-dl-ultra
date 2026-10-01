@@ -7,15 +7,16 @@ from the user's local config/keyring and are never returned to the browser.
 from __future__ import annotations
 
 import asyncio
+import re
 import configparser
+from contextlib import asynccontextmanager
+import json
 import logging
 import mimetypes
 import os
 import secrets
-import sys
 import tempfile
 import time
-from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -26,10 +27,14 @@ from fastapi.responses import FileResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from qobuz_dl.constants import DEFAULT_FOLDER, DEFAULT_TRACK
 from qobuz_dl.core import QobuzDL
+from qobuz_dl.constants import DEFAULT_FOLDER, DEFAULT_TRACK
 from qobuz_dl.downloader import _resolve_art_url
+from qobuz_dl import gui_meta
 from qobuz_dl.paths import ensure_directory_ready
+import hashlib
+import httpx
+from starlette.responses import StreamingResponse
 from qobuz_dl.settings import QobuzDLSettings
 from qobuz_dl.utils import get_config_paths
 
@@ -51,6 +56,7 @@ class DownloadRequest(BaseModel):
     kind: str = Field(pattern="^(track|album)$")
     title: str = Field(default="", max_length=300)
     artist: str = Field(default="", max_length=300)
+    cover: str = Field(default="", max_length=600)
 
 
 class SettingsRequest(BaseModel):
@@ -218,7 +224,7 @@ def build_tool_argv(payload: ToolRequest, settings: dict[str, Any]) -> list[str]
         raise ValueError(
             "Confirme as alterações nos arquivos locais antes de continuar."
         )
-    argv = [action]
+    argv: list[str] = [action]
     if action in {"dl", "sync-favorites", "lucky"}:
         argv += [
             "--directory",
@@ -297,6 +303,8 @@ class GuiService:
         self.history: list[dict[str, Any]] = []
         self.current: dict[str, Any] | None = None
         self.local_files: dict[str, Path] = {}
+        self._lib_cache: dict[str, Any] = {}
+        self._engine_dirty = False
         self.tool_jobs: dict[str, dict[str, Any]] = {}
         self.tool_processes: dict[str, asyncio.subprocess.Process] = {}
         self.tool_tasks: set[asyncio.Task] = set()
@@ -345,12 +353,7 @@ class GuiService:
         "smart_discography": ("smart_discography", False),
         "multi_value_tags": ("multi_value_tags", False),
     }
-    _INI_STRINGS = (
-        "embedded_art_size",
-        "saved_art_size",
-        "folder_format",
-        "track_format",
-    )
+    _INI_STRINGS = ("embedded_art_size", "saved_art_size", "folder_format", "track_format")
     _INI_INTS = ("max_workers", "segment_workers")
 
     def _settings_from_ini(self, defaults: dict[str, Any]) -> dict[str, Any]:
@@ -725,42 +728,111 @@ class GuiService:
             )
         return self.client
 
-    def save_settings(self, request: SettingsRequest) -> dict[str, Any]:
+    def save_settings(self, request: SettingsRequest, write: bool = True) -> dict[str, Any]:
         directory, quality = request.directory, request.quality
         if quality not in QUALITY_LABELS:
             raise ValueError("Qualidade inválida")
         # Testa (e cria, se preciso) a pasta de verdade antes de gravar
-        # qualquer coisa -- ver qobuz_dl/paths.py. DirectoryNotUsable é uma
-        # ValueError, então a rota /api/settings já converte pro toast
-        # certo sem precisar de mais nenhum tratamento aqui.
+        # qualquer coisa -- ver qobuz_dl/paths.py.
         expanded = ensure_directory_ready(directory)
         self.local_settings = request.model_dump()
         self.local_settings["directory"] = str(expanded)
-        self._write_settings_to_ini(self.local_settings)
-        if self.engine:
-            self.engine.directory, self.engine.quality = str(expanded), quality
-            (
-                self.engine.settings.default_folder,
-                self.engine.settings.default_quality,
-            ) = str(expanded), quality
-            self.engine.embed_art = request.embed_art
-            self.engine.fetch_lyrics = request.fetch_lyrics
-            self.engine.no_lrc_files = not request.lrc_files
-            self.engine.no_credits = not request.credits
-            self.engine.no_m3u_for_playlists = not request.m3u
-            self.engine.quality_fallback = request.quality_fallback
-            self.engine.playlist_as_albums = request.playlist_as_albums
-            self.engine.settings.verify_after_download = request.verify_after_download
-            self.engine.settings.max_workers = request.max_workers
-            self.engine.settings.segment_workers = request.segment_workers
-            self.engine.settings.multi_value_tags = request.multi_value_tags
-            self.engine.settings.smart_discography = request.smart_discography
-            self.engine.settings.embedded_art_size = request.embedded_art_size
-            self.engine.settings.saved_art_size = request.saved_art_size
-            self.engine.no_cover = request.no_cover
-            self.engine.folder_format = request.folder_format
-            self.engine.track_format = request.track_format
-        return self.config_status()
+        if write:
+            self._write_settings_to_ini(self.local_settings)
+        self._apply_to_engine()
+        self.invalidate_library()
+        return self.settings_payload()
+
+    def _apply_to_engine(self) -> None:
+        if not self.engine:
+            return
+        ls = self.local_settings
+        self.engine.directory, self.engine.quality = ls["directory"], ls["quality"]
+        (
+            self.engine.settings.default_folder,
+            self.engine.settings.default_quality,
+        ) = ls["directory"], ls["quality"]
+        self.engine.embed_art = ls["embed_art"]
+        self.engine.fetch_lyrics = ls["fetch_lyrics"]
+        self.engine.no_lrc_files = not ls["lrc_files"]
+        self.engine.no_credits = not ls["credits"]
+        self.engine.no_m3u_for_playlists = not ls["m3u"]
+        self.engine.quality_fallback = ls["quality_fallback"]
+        self.engine.playlist_as_albums = ls["playlist_as_albums"]
+        self.engine.settings.verify_after_download = ls["verify_after_download"]
+        self.engine.settings.max_workers = ls["max_workers"]
+        self.engine.settings.segment_workers = ls["segment_workers"]
+        self.engine.settings.multi_value_tags = ls["multi_value_tags"]
+        self.engine.settings.smart_discography = ls["smart_discography"]
+        self.engine.settings.embedded_art_size = ls["embedded_art_size"]
+        self.engine.settings.saved_art_size = ls["saved_art_size"]
+        self.engine.no_cover = ls["no_cover"]
+        self.engine.folder_format = ls["folder_format"]
+        self.engine.track_format = ls["track_format"]
+
+    def settings_payload(self) -> dict[str, Any]:
+        result = dict(self.local_settings)
+        status = self.config_status()
+        result["directory"] = result["directory"] or status["directory"]
+        result["quality"] = result["quality"] or status["quality"]
+        result["configDir"] = status["configDir"]
+        result["configFile"] = get_config_paths()["config_file"]
+        return result
+
+    def reload_settings(self) -> None:
+        """Relê o config.ini (alterações feitas no terminal aparecem na GUI)."""
+        if self.current:
+            return
+        self.local_settings = self._settings_from_ini(self.local_settings)
+        self._apply_to_engine()
+
+    def _ini_parser(self) -> configparser.ConfigParser:
+        parser = configparser.ConfigParser(interpolation=None)
+        try:
+            parser.read(get_config_paths()["config_file"], encoding="utf-8")
+        except (OSError, configparser.Error):
+            pass
+        return parser
+
+    def advanced_payload(self) -> dict[str, Any]:
+        parser = self._ini_parser()
+        section = "qobuz" if parser.has_section("qobuz") else "DEFAULT"
+        return {
+            "schema": gui_meta.ADVANCED_SCHEMA,
+            "values": gui_meta.read_advanced(parser, section),
+            "configFile": get_config_paths()["config_file"],
+        }
+
+    async def save_advanced(self, values: dict[str, Any]) -> dict[str, Any]:
+        parser = self._ini_parser()
+        gui_meta.write_advanced(parser, "qobuz", values)
+        config_file = get_config_paths()["config_file"]
+        os.makedirs(os.path.dirname(config_file), mode=0o700, exist_ok=True)
+        temporary = config_file + ".tmp"
+        with open(temporary, "w", encoding="utf-8") as handle:
+            parser.write(handle)
+        try:
+            os.chmod(temporary, 0o600)
+        except OSError:
+            pass
+        os.replace(temporary, config_file)
+        await self.refresh_engine()
+        return self.advanced_payload()
+
+    async def refresh_engine(self) -> None:
+        """Recria o motor de download a partir do config.ini atual (opções
+        avançadas só entram em vigor assim). Adia se houver download ativo."""
+        if self.demo or not self.client:
+            return
+        if self.current:
+            self._engine_dirty = True
+            return
+        self._engine_dirty = False
+        self.engine = None
+        try:
+            await self.connect()
+        except Exception:
+            logger.exception("Could not refresh engine")
 
     async def enqueue(self, request: DownloadRequest) -> dict[str, Any]:
         if self.demo:
@@ -778,7 +850,7 @@ class GuiService:
             "status": "aguardando",
             "createdAt": time.time(),
             "message": "Na fila",
-            "cover": None,
+            "cover": request.cover if request.cover.startswith("https://") else None,
         }
         async with self.queue_lock:
             self.queue.append(entry)
@@ -798,7 +870,13 @@ class GuiService:
                     "baixando",
                     "O downloader está processando este item",
                 )
+            started_at = time.time()
             try:
+                if self._engine_dirty:
+                    self.current = None
+                    await self.refresh_engine()
+                    self.current = item
+                self.reload_settings_unlocked()
                 self.engine.directory = (
                     self.local_settings["directory"] or self.engine.directory
                 )
@@ -819,6 +897,7 @@ class GuiService:
                     if success
                     else "O downloader não concluiu este item; consulte o log local."
                 )
+                await self._verify_download(item, started_at, bool(success))
             except asyncio.CancelledError:
                 item["status"], item["message"] = (
                     "interrompido",
@@ -839,58 +918,199 @@ class GuiService:
                     self.history.append(item)
                     self.history = self.history[-80:]
 
-    def library(self) -> list[dict[str, Any]]:
+    def reload_settings_unlocked(self) -> None:
+        self.local_settings = self._settings_from_ini(self.local_settings)
+        self._apply_to_engine()
+
+    def library(self, force: bool = False) -> list[dict[str, Any]]:
         root = (
             Path(self.local_settings["directory"] or self.config_status()["directory"])
             .expanduser()
             .resolve()
         )
+        cache = self._lib_cache
+        if (
+            not force
+            and cache.get("root") == str(root)
+            and time.time() - cache.get("at", 0) < 45
+        ):
+            return cache["rows"]
         if not root.is_dir():
-            self.local_files.clear()
+            self.local_files = {}
+            self._lib_cache = {}
             return []
         try:
-            from mutagen import File as AudioFile
-        except ImportError:
-            return []
-        rows: list[dict[str, Any]] = []
-        self.local_files.clear()
-        try:
-            files = (
+            files = [
                 p
                 for p in root.rglob("*")
                 if p.is_file() and p.suffix.lower() in AUDIO_SUFFIXES
-            )
-            ordered = sorted(files, key=lambda p: p.stat().st_mtime, reverse=True)
+            ]
+            files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
         except OSError:
             return []
-        for path in ordered[:500]:
-            try:
-                audio = AudioFile(path, easy=True)
-                if audio is None:
-                    continue
-                tags = audio.tags or {}
-                get = lambda name, default="", _tags=tags: str(
-                    (_tags.get(name) or [default])[0]
-                )
-                info = getattr(audio, "info", None)
-                key = secrets.token_urlsafe(16)
-                self.local_files[key] = path.resolve()
-                rows.append(
-                    {
-                        "key": key,
-                        "title": get("title", path.stem),
-                        "artist": get("artist", "Artista desconhecido"),
-                        "album": get("album", ""),
-                        "duration": int(getattr(info, "length", 0) or 0),
-                        "format": path.suffix.lower().lstrip("."),
-                        "size": path.stat().st_size,
-                        "pathLabel": path.parent.name,
-                        "cover": f"/api/library/cover/{key}",
-                    }
-                )
-            except (OSError, ValueError, TypeError):
-                continue
+        rows, mapping = [], {}
+        for path in files[:3000]:
+            row = self._audio_row(path, root)
+            if row:
+                rows.append(row)
+                mapping[row["key"]] = path.resolve()
+        self.local_files = mapping
+        self._lib_cache = {"root": str(root), "at": time.time(), "rows": rows}
         return rows
+
+    def invalidate_library(self) -> None:
+        self._lib_cache = {}
+
+    async def local_path(self, key: str) -> Path | None:
+        path = self.local_files.get(key)
+        if path is None:
+            await asyncio.to_thread(self.library, True)
+            path = self.local_files.get(key)
+        return path if path and path.is_file() else None
+
+    def _audio_row(self, path: Path, root: Path, check_cover: bool = False) -> dict[str, Any] | None:
+        try:
+            from mutagen import File as AudioFile
+        except ImportError:
+            return None
+        try:
+            stat = path.stat()
+            audio = AudioFile(path, easy=True)
+        except Exception:
+            audio, stat = None, None
+        if stat is None:
+            try:
+                stat = path.stat()
+            except OSError:
+                return None
+        tags = getattr(audio, "tags", None) or {}
+        info = getattr(audio, "info", None)
+
+        def tag(*names: str) -> str:
+            for name in names:
+                value = tags.get(name) if hasattr(tags, "get") else None
+                if value:
+                    return ", ".join(str(v) for v in value) if isinstance(value, (list, tuple)) else str(value)
+            return ""
+
+        def number(text: str) -> int | None:
+            match = re.match(r"\s*(\d+)", text or "")
+            return int(match.group(1)) if match else None
+
+        resolved = path.resolve()
+        try:
+            relative = str(resolved.relative_to(root))
+        except ValueError:
+            relative = path.name
+        artist = tag("artist") or tag("albumartist") or "Artista desconhecido"
+        rate = getattr(info, "sample_rate", 0) or 0
+        row = {
+            "key": hashlib.sha1(str(resolved).encode()).hexdigest()[:20],
+            "title": tag("title") or path.stem,
+            "artist": artist,
+            "artists": [{"name": n.strip()} for n in re.split(r"\s*[,;]\s*", artist) if n.strip()],
+            "album": tag("album"),
+            "albumArtist": tag("albumartist"),
+            "year": (tag("date", "originaldate") or "")[:4],
+            "genre": tag("genre"),
+            "trackNumber": number(tag("tracknumber")),
+            "discNumber": number(tag("discnumber")),
+            "composer": tag("composer"),
+            "label": tag("organization", "label"),
+            "isrc": tag("isrc"),
+            "copyright": tag("copyright"),
+            "duration": int(getattr(info, "length", 0) or 0),
+            "format": path.suffix.lower().lstrip("."),
+            "bitDepth": getattr(info, "bits_per_sample", None) or None,
+            "sampleRate": round(rate / 1000, 1) if rate else None,
+            "bitrate": int((getattr(info, "bitrate", 0) or 0) / 1000) or None,
+            "channels": getattr(info, "channels", None),
+            "size": stat.st_size,
+            "mtime": stat.st_mtime,
+            "path": relative,
+            "folder": str(Path(relative).parent) if Path(relative).parent != Path(".") else "",
+            "pathLabel": path.parent.name,
+            "hasLrc": path.with_suffix(".lrc").is_file(),
+        }
+        row["cover"] = f"/api/library/cover/{row['key']}"
+        row["id"] = row["key"]
+        if check_cover:
+            row["hasCover"] = self._has_cover(path)
+        return row
+
+    @staticmethod
+    def _has_cover(path: Path) -> bool:
+        try:
+            from mutagen import File as AudioFile
+
+            audio = AudioFile(path)
+            if getattr(audio, "pictures", None):
+                return True
+            tags = getattr(audio, "tags", None)
+            if tags is None:
+                return False
+            if hasattr(tags, "getall") and tags.getall("APIC"):
+                return True
+            return bool(tags.get("covr")) if hasattr(tags, "get") else False
+        except Exception:
+            return False
+
+    def _scan_new_files(self, root: Path, since: float) -> list[dict[str, Any]]:
+        found = []
+        for dirpath, _dirs, names in os.walk(root):
+            for name in names:
+                if Path(name).suffix.lower() not in AUDIO_SUFFIXES:
+                    continue
+                candidate = Path(dirpath) / name
+                try:
+                    if candidate.stat().st_mtime >= since - 2:
+                        found.append(candidate)
+                except OSError:
+                    continue
+            if len(found) > 300:
+                break
+        rows = []
+        for path in found[:120]:
+            row = self._audio_row(path, root, check_cover=True)
+            if row:
+                row["tagsOk"] = bool(row["title"] and row["artist"] != "Artista desconhecido" and row["album"])
+                row["ok"] = bool(row["size"] > 1000 and row["duration"] > 1)
+                rows.append(row)
+        return rows
+
+    async def _verify_download(self, item: dict[str, Any], since: float, success: bool) -> None:
+        """Confere no disco o que o downloader realmente gravou."""
+        root = Path(self.local_settings["directory"]).expanduser().resolve()
+        try:
+            rows = await asyncio.to_thread(self._scan_new_files, root, since)
+        except Exception:
+            logger.exception("Could not verify download")
+            return
+        self.invalidate_library()
+        warnings = []
+        for row in rows:
+            if not row["ok"]:
+                warnings.append(f"{row['path']}: arquivo vazio ou ilegível")
+            elif not row["tagsOk"]:
+                warnings.append(f"{row['path']}: tags incompletas")
+            elif not row["hasCover"] and not self.local_settings["no_cover"]:
+                warnings.append(f"{row['path']}: sem capa embutida")
+        item["savedTo"] = str(root)
+        if rows:
+            parents = {str((root / r["path"]).parent) for r in rows}
+            item["savedTo"] = parents.pop() if len(parents) == 1 else str(root)
+        item["files"] = [
+            {k: r.get(k) for k in ("name", "key", "path", "format", "size", "duration", "bitDepth", "sampleRate", "bitrate", "hasCover", "hasLrc", "tagsOk", "ok", "title")}
+            | {"name": Path(r["path"]).name}
+            for r in rows
+        ]
+        item["warnings"] = warnings[:20]
+        item["verified"] = bool(rows) and all(r["ok"] and r["tagsOk"] for r in rows)
+        if success and not rows:
+            item["status"] = "ignorado"
+            item["message"] = "Nenhum arquivo novo foi gravado: já existia na pasta ou foi pulado pelo downloader."
+        elif rows:
+            item["message"] = f"{len(rows)} arquivo(s) gravado(s) e conferido(s) no disco."
 
     async def start_tool(self, payload: ToolRequest) -> dict[str, Any]:
         if self.demo:
@@ -942,7 +1162,7 @@ class GuiService:
         argv = ["--no-color", *argv]
         try:
             process = await asyncio.create_subprocess_exec(
-                sys.executable,
+                os.sys.executable,
                 "-m",
                 "qobuz_dl",
                 *argv,
@@ -1118,82 +1338,68 @@ DEMO_TRACKS = [
 
 
 def _cover(item: dict[str, Any]) -> str | None:
-    """URL da capa em resolução original (_org), mesma troca de sufixo que a
-    CLI usa (`_resolve_art_url`). Prefere a maior variante que o Qobuz manda."""
-    image = item.get("image") or item.get("cover")
-    url = None
-    if isinstance(image, str) and image.startswith(("https://", "http://")):
-        url = image
-    elif isinstance(image, dict):
-        for key in ("large", "extralarge", "mega", "org", "small", "thumbnail"):
-            value = image.get(key)
-            if isinstance(value, str) and value.startswith(("https://", "http://")):
-                url = value
-                break
-        if not url:
-            for value in image.values():
-                if isinstance(value, str) and value.startswith(("https://", "http://")):
-                    url = value
-                    break
-    if not url:
-        return None
-    return _resolve_art_url(
-        url.replace("_230.", "_600.")
-        .replace("_50.", "_600.")
-        .replace("_150.", "_600."),
-        "org",
-    )
+    return gui_meta.cover_pair(item)[0]
 
 
 def _track_result(item: dict[str, Any]) -> dict[str, Any]:
-    album = item.get("album") or {}
-    performer = item.get("performer") or item.get("artist") or {}
-    return {
-        "id": str(item.get("id", "")),
-        "title": item.get("title") or "Faixa sem título",
-        "artist": performer.get("name", "Artista desconhecido")
-        if isinstance(performer, dict)
-        else str(performer),
-        "album": album.get("title", "") if isinstance(album, dict) else str(album),
-        "duration": int(item.get("duration") or 0),
-        "cover": _cover(album if isinstance(album, dict) else item) or _cover(item),
-        "quality": f"{item.get('maximum_bit_depth', 16)}b/{item.get('maximum_sampling_rate', 44.1)}kHz"
-        if item.get("hires_streamable")
-        else "16b/44.1kHz",
-        "isrc": item.get("isrc", ""),
-    }
+    return gui_meta.track_view(item)
 
 
 def _album_result(item: dict[str, Any]) -> dict[str, Any]:
-    artist = item.get("artist") or item.get("artists") or item.get("performer") or {}
-    if isinstance(artist, list):
-        artist_name = ", ".join(
-            a.get("name", "") for a in artist if isinstance(a, dict)
-        )
-    elif isinstance(artist, dict):
-        artist_name = artist.get("name", "Artista desconhecido")
-    else:
-        artist_name = str(artist)
-    genre = item.get("genre") or ""
-    return {
-        "id": str(item.get("id", "")),
-        "title": item.get("title") or "Álbum sem título",
-        "artist": artist_name or "Artista desconhecido",
-        "year": str(
-            item.get("release_date_original") or item.get("release_date") or ""
-        )[:4],
-        "genre": genre.get("name", "") if isinstance(genre, dict) else genre,
-        "tracks_count": int(item.get("tracks_count") or 0),
-        "quality": f"{item.get('maximum_bit_depth', 16)}b/{item.get('maximum_sampling_rate', 44.1)}kHz"
-        if item.get("hires_streamable")
-        else "16b/44.1kHz",
-        "cover": _cover(item),
-        "duration": "",
-        # Tipo real informado pelo catálogo (album, ep, single, live,
-        # compilation...); vazio quando o Qobuz não informa -- a interface
-        # não inventa rótulo nesse caso.
-        "type": str(item.get("release_type") or item.get("product_type") or "").lower(),
-    }
+    return gui_meta.album_view(item)
+
+
+_AUDIO_TYPES = {
+    ".flac": "audio/flac", ".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".mp4": "audio/mp4",
+    ".aac": "audio/aac", ".ogg": "audio/ogg", ".opus": "audio/ogg", ".wav": "audio/wav",
+    ".aiff": "audio/aiff", ".aif": "audio/aiff", ".wv": "audio/x-wavpack",
+}
+
+
+def _ranged_file(path: Path, request: Request):
+    """Serve o arquivo com suporte completo a Range (206). Safari e o iOS só
+    tocam áudio se o servidor aceitar pedidos por faixa de bytes -- sem isso
+    o player trata como transmissão: sem duração, sem avanço livre e só com
+    os botões de +-10 s."""
+    size = path.stat().st_size
+    start, end, status = 0, size - 1, 200
+    header = request.headers.get("range", "")
+    if header.startswith("bytes="):
+        try:
+            first, _, last = header[6:].split(",")[0].partition("-")
+            if first == "":
+                start = max(0, size - int(last))
+            else:
+                start = int(first)
+                end = int(last) if last else size - 1
+            end = min(end, size - 1)
+            if start > end or start >= size:
+                return Response(status_code=416, headers={"Content-Range": f"bytes */{size}"})
+            status = 206
+        except ValueError:
+            start, end, status = 0, size - 1, 200
+    length = end - start + 1
+
+    def body():
+        with open(path, "rb") as handle:
+            handle.seek(start)
+            remaining = length
+            while remaining > 0:
+                chunk = handle.read(min(262144, remaining))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+                yield chunk
+
+    headers = {"Accept-Ranges": "bytes", "Content-Length": str(length), "Cache-Control": "private, max-age=3600"}
+    if status == 206:
+        headers["Content-Range"] = f"bytes {start}-{end}/{size}"
+    return StreamingResponse(
+        body(),
+        status_code=status,
+        media_type=_AUDIO_TYPES.get(path.suffix.lower(), "application/octet-stream"),
+        headers=headers,
+    )
 
 
 def create_app(*, demo: bool = False, allow_network: bool = False) -> FastAPI:
@@ -1301,12 +1507,22 @@ def create_app(*, demo: bool = False, allow_network: bool = False) -> FastAPI:
 
     @app.get("/api/settings")
     async def get_settings():
-        result = dict(service.local_settings)
-        status = service.config_status()
-        result["directory"] = result["directory"] or status["directory"]
-        result["quality"] = result["quality"] or status["quality"]
-        result["configDir"] = status["configDir"]
-        return result
+        service.reload_settings()
+        return service.settings_payload()
+
+    @app.get("/api/settings/advanced")
+    async def get_advanced():
+        return service.advanced_payload()
+
+    @app.post("/api/settings/advanced")
+    async def post_advanced(payload: dict[str, Any]):
+        values = payload.get("values") if isinstance(payload, dict) else None
+        if not isinstance(values, dict):
+            raise HTTPException(status_code=400, detail="Formato inválido")
+        try:
+            return await service.save_advanced(values)
+        except (ValueError, OSError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
 
     @app.post("/api/connect")
     async def connect():
@@ -1320,82 +1536,138 @@ def create_app(*, demo: bool = False, allow_network: bool = False) -> FastAPI:
         return await service.configure_account(payload)
 
     @app.get("/api/search")
-    async def search(q: str, kind: str = "tracks", limit: int = 24):
+    async def search(q: str, kind: str = "all", limit: int = 24):
+        empty = {"tracks": [], "albums": [], "playlists": [], "artists": []}
         if len(q.strip()) < 2:
-            return {"tracks": [], "albums": []}
+            return empty
         limit = max(1, min(limit, 50))
         if service.demo:
             query = q.casefold()
-            tracks = [
-                t
-                for t in DEMO_TRACKS
-                if query in f"{t['title']} {t['artist']} {t['album']}".casefold()
-            ]
-            albums = [
-                a
-                for a in DEMO_ALBUMS
-                if query in f"{a['title']} {a['artist']} {a['genre']}".casefold()
-            ]
             return {
-                "tracks": tracks[:limit] if kind in {"tracks", "all"} else [],
-                "albums": albums[:limit] if kind in {"albums", "all"} else [],
+                **empty,
+                "tracks": [t for t in DEMO_TRACKS if query in f"{t['title']} {t['artist']} {t['album']}".casefold()][:limit] if kind in {"tracks", "all"} else [],
+                "albums": [a for a in DEMO_ALBUMS if query in f"{a['title']} {a['artist']} {a['genre']}".casefold()][:limit] if kind in {"albums", "all"} else [],
             }
         client = await service.ensure_connected()
-        try:
-            data: dict[str, list[dict[str, Any]]] = {"tracks": [], "albums": []}
-            if kind in {"tracks", "all"}:
-                raw = await client.search_tracks(q.strip(), limit=limit)
-                items = (
-                    raw.get("tracks", {}).get("items", [])
-                    if isinstance(raw, dict)
-                    else []
-                )
-                data["tracks"] = [
-                    _track_result(x) for x in items if isinstance(x, dict)
-                ]
-            if kind in {"albums", "all"}:
-                raw = await client.search_albums(q.strip(), limit=limit)
-                items = (
-                    raw.get("albums", {}).get("items", [])
-                    if isinstance(raw, dict)
-                    else []
-                )
-                data["albums"] = [
-                    _album_result(x) for x in items if isinstance(x, dict)
-                ]
-            return data
-        except Exception:
-            logger.exception("Catalog search failed")
-            raise HTTPException(
-                status_code=502, detail="A busca no catálogo falhou. Tente novamente."
-            ) from None
+        data: dict[str, list[dict[str, Any]]] = dict(empty)
+
+        async def grab(method: str, key: str, view):
+            try:
+                raw = await getattr(client, method)(q.strip(), limit=limit)
+                items = raw.get(key, {}).get("items", []) if isinstance(raw, dict) else []
+                return [view(x) for x in items if isinstance(x, dict)]
+            except Exception:
+                logger.exception("Catalog search failed (%s)", method)
+                return []
+
+        plan = []
+        if kind in {"tracks", "all"}:
+            plan.append(("tracks", "search_tracks", "tracks", gui_meta.track_view))
+        if kind in {"albums", "all"}:
+            plan.append(("albums", "search_albums", "albums", gui_meta.album_view))
+        if kind in {"playlists", "all"}:
+            plan.append(("playlists", "search_playlists", "playlists", gui_meta.playlist_view))
+        if kind in {"artists", "all"}:
+            plan.append(("artists", "search_artists", "artists", gui_meta.artist_view))
+        results = await asyncio.gather(*(grab(m, k, v) for _, m, k, v in plan))
+        for (name, *_), rows in zip(plan, results):
+            data[name] = rows
+        return data
 
     @app.get("/api/album/{album_id}")
-    async def album_details(album_id: str):
+    async def album(album_id: str):
         if service.demo:
-            album = next((x for x in DEMO_ALBUMS if x["id"] == album_id), None)
-            if album is None:
+            match = next((a for a in DEMO_ALBUMS if a["id"] == album_id), None)
+            if not match:
                 raise HTTPException(status_code=404, detail="Álbum não encontrado")
-            return {
-                "album": album,
-                "tracks": [
-                    dict(x) for x in DEMO_TRACKS if x["album"] == album["title"]
-                ],
-            }
+            return {"album": match, "tracks": [t for t in DEMO_TRACKS if t["album"] == match["title"]] or DEMO_TRACKS[:5], "credits": [], "descriptionHtml": ""}
         client = await service.ensure_connected()
         try:
             raw = await client.get_album_meta(album_id)
-            block = raw.get("tracks", {}) if isinstance(raw, dict) else {}
-            items = block.get("items", []) if isinstance(block, dict) else []
-            return {
-                "album": _album_result(raw),
-                "tracks": [_track_result(x) for x in items if isinstance(x, dict)],
-            }
         except Exception:
-            logger.exception("Album metadata fetch failed")
-            raise HTTPException(
-                status_code=502, detail="Não foi possível carregar este álbum."
-            ) from None
+            logger.exception("Album lookup failed")
+            raise HTTPException(status_code=502, detail="Não foi possível carregar este álbum.") from None
+        if not isinstance(raw, dict):
+            raise HTTPException(status_code=404, detail="Álbum não encontrado")
+        items = [x for x in (raw.get("tracks", {}) or {}).get("items", []) if isinstance(x, dict)]
+        tracks = [gui_meta.track_view(x, raw) for x in items]
+        return {
+            "album": gui_meta.album_view(raw),
+            "tracks": tracks,
+            "credits": gui_meta.merge_credits([t["credits"] for t in tracks]),
+            "descriptionHtml": gui_meta.clean_html(str(raw.get("description") or "")),
+        }
+
+    @app.get("/api/track/{track_id}")
+    async def track(track_id: str):
+        client = await service.ensure_connected()
+        if client is None:
+            raise HTTPException(status_code=404, detail="Faixa indisponível na demonstração")
+        try:
+            raw = await client.get_track_meta(track_id)
+        except Exception:
+            raise HTTPException(status_code=502, detail="Não foi possível carregar esta faixa.") from None
+        if not isinstance(raw, dict):
+            raise HTTPException(status_code=404, detail="Faixa não encontrada")
+        album_raw = raw.get("album") if isinstance(raw.get("album"), dict) else {}
+        return {"track": gui_meta.track_view(raw, album_raw), "album": gui_meta.album_view(album_raw) if album_raw else None}
+
+    @app.get("/api/artist/{artist_id}")
+    async def artist(artist_id: str):
+        client = await service.ensure_connected()
+        if client is None:
+            raise HTTPException(status_code=404, detail="Artista indisponível na demonstração")
+        try:
+            raw = await client.api_call("artist/get", id=artist_id, offset=0, limit=50, type=None)
+        except Exception:
+            raise HTTPException(status_code=502, detail="Não foi possível carregar este artista.") from None
+        if not isinstance(raw, dict):
+            raise HTTPException(status_code=404, detail="Artista não encontrado")
+        albums = [gui_meta.album_view(x) for x in (raw.get("albums", {}) or {}).get("items", []) if isinstance(x, dict)]
+        info = gui_meta.artist_view(raw)
+        info["biographyHtml"] = gui_meta.clean_html(info.pop("biography", ""))
+        return {"artist": info, "albums": albums}
+
+    @app.get("/api/playlists")
+    async def playlists():
+        client = await service.ensure_connected()
+        if client is None:
+            return {"items": []}
+        try:
+            raw = await client.get_user_playlists(limit=100)
+        except Exception:
+            logger.exception("Playlist listing failed")
+            raise HTTPException(status_code=502, detail="Não foi possível carregar suas playlists.") from None
+        if isinstance(raw, dict):
+            raw = (raw.get("playlists", {}) or {}).get("items", []) or raw.get("items", [])
+        return {"items": [gui_meta.playlist_view(x) for x in (raw or []) if isinstance(x, dict)]}
+
+    @app.get("/api/playlist/{playlist_id}")
+    async def playlist(playlist_id: str):
+        client = await service.ensure_connected()
+        if client is None:
+            raise HTTPException(status_code=404, detail="Playlist indisponível na demonstração")
+        items, head, offset = [], None, 0
+        try:
+            while offset < 500:
+                raw = await client.api_call("playlist/get", id=playlist_id, offset=offset, limit=100, type=None)
+                if not isinstance(raw, dict):
+                    break
+                head = head or raw
+                page = [x for x in (raw.get("tracks", {}) or {}).get("items", []) if isinstance(x, dict)]
+                if not page:
+                    break
+                items += page
+                offset += len(page)
+                if offset >= int(raw.get("tracks_count") or 0):
+                    break
+        except Exception:
+            logger.exception("Playlist lookup failed")
+            if not items:
+                raise HTTPException(status_code=502, detail="Não foi possível carregar esta playlist.") from None
+        if not head:
+            raise HTTPException(status_code=404, detail="Playlist não encontrada")
+        return {"playlist": gui_meta.playlist_view(head), "tracks": [gui_meta.track_view(x) for x in items], "credits": gui_meta.merge_credits([gui_meta.credits_of(x) for x in items])}
 
     @app.get("/api/favorites")
     async def favorites(kind: str = "albums", limit: int = 40):
@@ -1447,38 +1719,28 @@ def create_app(*, demo: bool = False, allow_network: bool = False) -> FastAPI:
             ) from None
 
     @app.get("/api/library")
-    async def library():
+    async def library(refresh: bool = False):
+        rows = await asyncio.to_thread(service.library, refresh)
         return {
-            "items": service.library(),
-            "directory": service.local_settings["directory"]
-            or service.config_status()["directory"],
+            "directory": str(
+                Path(service.local_settings["directory"] or service.config_status()["directory"]).expanduser()
+            ),
+            "items": rows,
+            "total": len(rows),
         }
 
     @app.get("/api/library/play/{file_key}")
-    async def local_audio(file_key: str):
-        path = service.local_files.get(file_key)
-        if not path or not path.is_file():
-            raise HTTPException(status_code=404, detail="Arquivo não encontrado")
-        root = (
-            Path(
-                service.local_settings["directory"]
-                or service.config_status()["directory"]
-            )
-            .expanduser()
-            .resolve()
-        )
-        if root not in path.resolve().parents:
-            raise HTTPException(status_code=403, detail="Caminho fora da biblioteca")
-        return FileResponse(
-            path,
-            media_type=mimetypes.guess_type(path.name)[0] or "application/octet-stream",
-        )
+    async def local_audio(file_key: str, request: Request):
+        path = await service.local_path(file_key)
+        if not path:
+            raise HTTPException(status_code=404, detail="Arquivo não encontrado (a biblioteca mudou; recarregue a página)")
+        return _ranged_file(path, request)
 
     @app.get("/api/library/cover/{file_key}")
     async def local_cover(file_key: str):
         """Capa embutida no arquivo de áudio (APIC/PICTURE/covr) ou cover.jpg ao lado."""
-        path = service.local_files.get(file_key)
-        if not path or not path.is_file():
+        path = await service.local_path(file_key)
+        if not path:
             raise HTTPException(status_code=404, detail="Arquivo não encontrado")
         data, mime = b"", "image/jpeg"
         try:
@@ -1495,21 +1757,11 @@ def create_app(*, demo: bool = False, allow_network: bool = False) -> FastAPI:
             elif tags is not None and "covr" in tags and tags["covr"]:
                 pic = tags["covr"][0]
                 data = bytes(pic)
-                mime = (
-                    "image/png"
-                    if getattr(pic, "imageformat", 13) == 14
-                    else "image/jpeg"
-                )
+                mime = "image/png" if getattr(pic, "imageformat", 13) == 14 else "image/jpeg"
         except Exception:
             data = b""
         if not data:
-            for name in (
-                "cover.jpg",
-                "folder.jpg",
-                "cover.png",
-                "folder.png",
-                "front.jpg",
-            ):
+            for name in ("cover.jpg", "folder.jpg", "cover.png", "folder.png", "front.jpg"):
                 candidate = path.parent / name
                 if candidate.is_file() and candidate.stat().st_size < 12_000_000:
                     data = candidate.read_bytes()
@@ -1517,13 +1769,12 @@ def create_app(*, demo: bool = False, allow_network: bool = False) -> FastAPI:
                     break
         if not data:
             raise HTTPException(status_code=404, detail="Sem capa")
-        return Response(
-            data, media_type=mime, headers={"Cache-Control": "private, max-age=86400"}
-        )
+        return Response(data, media_type=mime, headers={"Cache-Control": "private, max-age=86400"})
 
     @app.get("/api/lyrics/{track_id}")
     async def stream_lyrics(track_id: str):
         """Letra (sincronizada quando existir) de uma faixa do catálogo Qobuz."""
+        import re
 
         import httpx
 
@@ -1540,17 +1791,9 @@ def create_app(*, demo: bool = False, allow_network: bool = False) -> FastAPI:
         if not parsed:
             return {"kind": "none", "text": ""}
         if parsed.get("synced"):
-            return {
-                "kind": "synced",
-                "text": parsed["synced"],
-                "lang": parsed.get("lang"),
-            }
+            return {"kind": "synced", "text": parsed["synced"], "lang": parsed.get("lang")}
         if parsed.get("plain"):
-            return {
-                "kind": "plain",
-                "text": parsed["plain"],
-                "lang": parsed.get("lang"),
-            }
+            return {"kind": "plain", "text": parsed["plain"], "lang": parsed.get("lang")}
         return {"kind": "none", "text": ""}
 
     @app.get("/api/library/lyrics/{file_key}")
@@ -1558,8 +1801,8 @@ def create_app(*, demo: bool = False, allow_network: bool = False) -> FastAPI:
         """Letras de um arquivo local: .lrc ao lado do áudio ou tag embutida."""
         import re
 
-        path = service.local_files.get(file_key)
-        if not path or not path.is_file():
+        path = await service.local_path(file_key)
+        if not path:
             raise HTTPException(status_code=404, detail="Arquivo não encontrado")
         root = (
             Path(
@@ -1589,12 +1832,7 @@ def create_app(*, demo: bool = False, allow_network: bool = False) -> FastAPI:
                         frames = tags.getall("USLT")
                         text = str(frames[0].text) if frames else ""
                     else:
-                        for name in (
-                            "LYRICS",
-                            "lyrics",
-                            "UNSYNCEDLYRICS",
-                            "unsyncedlyrics",
-                        ):
+                        for name in ("LYRICS", "lyrics", "UNSYNCEDLYRICS", "unsyncedlyrics"):
                             value = tags.get(name)
                             if value:
                                 text = str(value[0])
@@ -1666,16 +1904,11 @@ def create_app(*, demo: bool = False, allow_network: bool = False) -> FastAPI:
         return {"success": True}
 
     @app.get("/api/stream/{track_id}")
-    async def stream(track_id: str, quality: int = 6):
+    async def stream(track_id: str, request: Request, quality: int = 6):
         if quality not in {5, 6}:
-            raise HTTPException(
-                status_code=400,
-                detail="O player do navegador suporta MP3 ou FLAC de CD. Hi-Res segmentado não é reproduzido pelo navegador nesta versão.",
-            )
+            quality = 6
         if service.demo:
-            raise HTTPException(
-                status_code=409, detail="A reprodução fica desativada na demonstração."
-            )
+            raise HTTPException(status_code=409, detail="A reprodução fica desativada na demonstração.")
         client = await service.ensure_connected()
         try:
             result = await client.get_track_url(track_id, quality)
@@ -1688,37 +1921,64 @@ def create_app(*, demo: bool = False, allow_network: bool = False) -> FastAPI:
         if result.get("raw_key") or result.get("key") or not result.get("url"):
             raise HTTPException(
                 status_code=415,
-                detail="O fluxo exige decodificação proprietária e não pode ser reproduzido pelo player do navegador.",
+                detail="Esta faixa vem criptografada/segmentada e ainda não pode ser tocada no navegador. Baixe-a para ouvir.",
             )
         parsed = urlparse(result["url"])
         host = (parsed.hostname or "").lower()
         allowed = (
-            host == "qobuz.com"
-            or host.endswith(".qobuz.com")
-            or host.endswith(".akamaized.net")
-            or host.endswith(".akamaihd.net")
+            host == "qobuz.com" or host.endswith(".qobuz.com")
+            or host.endswith(".akamaized.net") or host.endswith(".akamaihd.net")
         )
         if parsed.scheme != "https" or not allowed:
-            raise HTTPException(
-                status_code=502,
-                detail="A origem do fluxo retornado não foi reconhecida como CDN Qobuz.",
-            )
-        return RedirectResponse(result["url"], status_code=307)
+            raise HTTPException(status_code=502, detail="A origem do fluxo retornado não foi reconhecida como CDN Qobuz.")
+        # O servidor busca o áudio e entrega como ARQUIVO (200/206, Content-Length,
+        # Accept-Ranges): o navegador enxerga duração e permite avançar/voltar livremente.
+        upstream_headers = {}
+        if request.headers.get("range"):
+            upstream_headers["Range"] = request.headers["range"]
+        http = httpx.AsyncClient(follow_redirects=True, timeout=httpx.Timeout(20.0, read=60.0))
+        try:
+            upstream = await http.send(http.build_request("GET", result["url"], headers=upstream_headers), stream=True)
+        except Exception:
+            await http.aclose()
+            raise HTTPException(status_code=502, detail="Não foi possível abrir o áudio no CDN do Qobuz.") from None
+        if upstream.status_code >= 400:
+            code = upstream.status_code
+            await upstream.aclose()
+            await http.aclose()
+            raise HTTPException(status_code=502, detail=f"O CDN do Qobuz recusou o áudio (HTTP {code}).")
+        headers = {"Accept-Ranges": "bytes", "Cache-Control": "private, max-age=600"}
+        for name in ("content-length", "content-range"):
+            if name in upstream.headers:
+                headers[name.title()] = upstream.headers[name]
+        ctype = upstream.headers.get("content-type", "")
+        if not ctype.startswith("audio/"):
+            ctype = "audio/flac" if quality == 6 else "audio/mpeg"
+
+        async def body():
+            try:
+                async for chunk in upstream.aiter_raw():
+                    yield chunk
+            finally:
+                await upstream.aclose()
+                await http.aclose()
+
+        return StreamingResponse(body(), status_code=upstream.status_code, media_type=ctype, headers=headers)
 
     return app
 
 
 def run_gui(
-    host: str = "127.0.0.1",
+    host: str = "0.0.0.0",
     port: int = 8060,
     demo: bool = False,
     open_browser: bool = True,
 ) -> None:
-    """Sobe o servidor da GUI (bloqueante -- roda em primeiro plano até Ctrl+C).
+    """Sobe o servidor da GUI (bloqueante — roda em primeiro plano até Ctrl+C).
 
     Usado por `qobuz-dl gui run` e pelo processo filho que
     `qobuz_dl.gui_daemon.start()` cria em segundo plano. `host` aceita
-    loopback (`127.0.0.1`, padrão), `0.0.0.0`, `lan` (IP desta máquina na rede local)
+    loopback, `0.0.0.0` (padrão), `lan` (IP desta máquina na rede local)
     ou um IP válido.
     """
     import asyncio
@@ -1733,27 +1993,11 @@ def run_gui(
         raise ValueError("a porta precisa estar entre 1 e 65535")
     resolved_host = validate_host(resolve_host(host))
     loopback = {"127.0.0.1", "localhost", "::1"}
-    if (
-        open_browser
-        and not demo
-        and (resolved_host in loopback or resolved_host == "0.0.0.0")
+    if open_browser and not demo and (
+        resolved_host in loopback or resolved_host == "0.0.0.0"
     ):
         local = "127.0.0.1" if resolved_host == "0.0.0.0" else resolved_host
         webbrowser.open(f"http://{local}:{port}/")
-
-    if resolved_host not in loopback:
-        logger.warning(
-            "GUI exposta em %s:%s sem autenticação: qualquer pessoa que alcance "
-            "esta porta controla a sessão Qobuz e os downloads. Restrinja por "
-            "firewall/Security Group ou use --host 127.0.0.1 com túnel SSH.",
-            resolved_host,
-            port,
-        )
-        print(
-            f"AVISO: GUI exposta na rede ({resolved_host}:{port}) sem login. "
-            "Restrinja o acesso por firewall ou use --host 127.0.0.1.",
-            file=sys.stderr,
-        )
 
     server = uvicorn.Server(
         uvicorn.Config(
@@ -1793,20 +2037,17 @@ def run_gui(
 def main() -> None:
     """Ponto de entrada para `python -m qobuz_dl.webapp` (uso direto, fora
     do comando principal). O caminho documentado e recomendado é
-    `qobuz-dl gui` (ou `qobuz-dl gui run` para primeiro plano) -- ver
+    `qobuz-dl gui` (ou `qobuz-dl gui run` para primeiro plano) — ver
     qobuz_dl/cli.py e o README."""
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="Qobuz-DL Studio -- interface web local"
+        description="Qobuz-DL Studio — interface web local"
     )
     parser.add_argument(
         "--host",
-        default="127.0.0.1",
-        help=(
-            "Interface de rede (padrão: 127.0.0.1, somente esta máquina; "
-            "use 0.0.0.0 ou lan para expor na rede)"
-        ),
+        default="0.0.0.0",
+        help="Interface de rede (padrão: 0.0.0.0, todas as interfaces)",
     )
     parser.add_argument(
         "--port", type=int, default=8060, help="Porta local (padrão: 8060)"
