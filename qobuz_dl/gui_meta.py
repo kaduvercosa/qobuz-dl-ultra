@@ -23,7 +23,15 @@ def _pick_image(image: Any) -> str | None:
             if isinstance(value, str) and value.startswith(("https://", "http://")):
                 return value
     if isinstance(image, dict):
-        for key in ("mega", "extralarge", "large", "org", "medium", "small", "thumbnail"):
+        for key in (
+            "mega",
+            "extralarge",
+            "large",
+            "org",
+            "medium",
+            "small",
+            "thumbnail",
+        ):
             value = image.get(key)
             if isinstance(value, str) and value.startswith(("https://", "http://")):
                 return value
@@ -153,7 +161,8 @@ def artists_of(item: dict[str, Any]) -> list[dict[str, Any]]:
             for a in arts
             if isinstance(a, dict)
             and any(
-                re.sub(r"[^a-z]", "", str(r).lower()) in {"mainartist", "featuredartist"}
+                re.sub(r"[^a-z]", "", str(r).lower())
+                in {"mainartist", "featuredartist"}
                 for r in (a.get("roles") or ["main-artist"])
             )
         ]
@@ -162,7 +171,9 @@ def artists_of(item: dict[str, Any]) -> list[dict[str, Any]]:
     if not found:
         people = parse_performers(item.get("performers"))
         for p in people:
-            if any(re.sub(r"[^a-z]", "", r.lower()) == "mainartist" for r in p["roles"]):
+            if any(
+                re.sub(r"[^a-z]", "", r.lower()) == "mainartist" for r in p["roles"]
+            ):
                 add({"id": None, "name": p["name"]})
     for key in ("performer", "artist"):
         if not found:
@@ -178,7 +189,10 @@ def credits_of(item: dict[str, Any]) -> list[dict[str, Any]]:
         people.append({"name": composer["name"], "roles": ["Composer"]})
     elif composer:
         for p in people:
-            if p["name"].lower() == composer["name"].lower() and "Composer" not in p["roles"]:
+            if (
+                p["name"].lower() == composer["name"].lower()
+                and "Composer" not in p["roles"]
+            ):
                 p["roles"].append("Composer")
     groups: dict[str, list[str]] = {}
     for p in people:
@@ -187,7 +201,10 @@ def credits_of(item: dict[str, Any]) -> list[dict[str, Any]]:
             names = groups.setdefault(label, [])
             if p["name"] not in names:
                 names.append(p["name"])
-    return [{"role": role, "people": [{"name": n} for n in names]} for role, names in groups.items()]
+    return [
+        {"role": role, "people": [{"name": n} for n in names]}
+        for role, names in groups.items()
+    ]
 
 
 def merge_credits(groups: list[list[dict[str, Any]]]) -> list[dict[str, Any]]:
@@ -198,7 +215,15 @@ def merge_credits(groups: list[list[dict[str, Any]]]) -> list[dict[str, Any]]:
             for person in group["people"]:
                 if person["name"] not in names:
                     names.append(person["name"])
-    order = ["Artista principal", "Participação", "Compositor", "Letrista", "Produção", "Mixagem", "Masterização"]
+    order = [
+        "Artista principal",
+        "Participação",
+        "Compositor",
+        "Letrista",
+        "Produção",
+        "Mixagem",
+        "Masterização",
+    ]
     rank = {r: i for i, r in enumerate(order)}
     return [
         {"role": r, "people": [{"name": n} for n in merged[r]]}
@@ -220,7 +245,11 @@ def quality_label(item: dict[str, Any]) -> str:
 
 
 def _date(item: dict[str, Any]) -> str:
-    for key in ("release_date_original", "release_date_stream", "release_date_download"):
+    for key in (
+        "release_date_original",
+        "release_date_stream",
+        "release_date_download",
+    ):
         if item.get(key):
             return str(item[key])
     stamp = item.get("released_at")
@@ -234,16 +263,28 @@ def _date(item: dict[str, Any]) -> str:
 def _title(item: dict[str, Any]) -> str:
     title = str(item.get("title") or item.get("name") or "").strip()
     version = str(item.get("version") or "").strip()
-    return f"{title} ({version})" if version and version.lower() not in title.lower() else title
+    return (
+        f"{title} ({version})"
+        if version and version.lower() not in title.lower()
+        else title
+    )
 
 
 def _names(value: Any) -> dict[str, Any] | None:
     return _name_id(value)
 
 
-def track_view(item: dict[str, Any], album: dict[str, Any] | None = None) -> dict[str, Any]:
-    album = album if isinstance(album, dict) else (item.get("album") if isinstance(item.get("album"), dict) else {})
-    thumb, org = cover_pair(item if item.get("image") else {"album": album} if album else item)
+def track_view(
+    item: dict[str, Any], album: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    album = (
+        album
+        if isinstance(album, dict)
+        else (item.get("album") if isinstance(item.get("album"), dict) else {})
+    )
+    thumb, org = cover_pair(
+        item if item.get("image") else {"album": album} if album else item
+    )
     arts = artists_of(item) or artists_of(album)
     return {
         "id": str(item.get("id", "")),
@@ -333,7 +374,9 @@ def artist_view(item: dict[str, Any]) -> dict[str, Any]:
         "cover": thumb,
         "coverOrg": org,
         "albums_count": item.get("albums_count") or 0,
-        "biography": str(bio.get("content") or bio.get("summary") or item.get("information") or ""),
+        "biography": str(
+            bio.get("content") or bio.get("summary") or item.get("information") or ""
+        ),
         "category": str(item.get("artist_category") or ""),
     }
 
@@ -358,7 +401,9 @@ def clean_html(html: str) -> str:
                 href = dict(attrs).get("href") or ""
                 if re.match(r"^https?://", href, re.I):
                     safe = href.replace('"', "%22")
-                    out.append(f'<a href="{safe}" target="_blank" rel="noopener noreferrer">')
+                    out.append(
+                        f'<a href="{safe}" target="_blank" rel="noopener noreferrer">'
+                    )
                 else:
                     out.append("<a>")
             else:
@@ -369,7 +414,9 @@ def clean_html(html: str) -> str:
                 out.append(f"</{tag}>")
 
         def handle_data(self, data):
-            out.append(data.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+            out.append(
+                data.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            )
 
     try:
         P(convert_charrefs=True).feed(html or "")
@@ -382,35 +429,102 @@ def clean_html(html: str) -> str:
 
 # (chave no config.ini, tipo, grupo, rótulo, dica)
 _TAGS = [
-    ("no_album_artist_tag", "Artista do álbum"), ("no_album_title_tag", "Título do álbum"),
-    ("no_track_artist_tag", "Artista da faixa"), ("no_track_title_tag", "Título da faixa"),
-    ("no_release_date_tag", "Data de lançamento"), ("no_media_type_tag", "Tipo de mídia"),
-    ("no_genre_tag", "Gênero"), ("no_track_number_tag", "Número da faixa"),
-    ("no_track_total_tag", "Total de faixas"), ("no_disc_number_tag", "Número do disco"),
-    ("no_disc_total_tag", "Total de discos"), ("no_composer_tag", "Compositor"),
-    ("no_conductor_tag", "Regente"), ("no_ensemble_tag", "Conjunto"), ("no_work_tag", "Obra"),
-    ("no_explicit_tag", "Conteúdo explícito"), ("no_copyright_tag", "Copyright"),
-    ("no_label_tag", "Selo"), ("no_upc_tag", "UPC"), ("no_isrc_tag", "ISRC"),
-    ("no_replaygain_tag", "ReplayGain"), ("no_album_url_tag", "URL do álbum"),
+    ("no_album_artist_tag", "Artista do álbum"),
+    ("no_album_title_tag", "Título do álbum"),
+    ("no_track_artist_tag", "Artista da faixa"),
+    ("no_track_title_tag", "Título da faixa"),
+    ("no_release_date_tag", "Data de lançamento"),
+    ("no_media_type_tag", "Tipo de mídia"),
+    ("no_genre_tag", "Gênero"),
+    ("no_track_number_tag", "Número da faixa"),
+    ("no_track_total_tag", "Total de faixas"),
+    ("no_disc_number_tag", "Número do disco"),
+    ("no_disc_total_tag", "Total de discos"),
+    ("no_composer_tag", "Compositor"),
+    ("no_conductor_tag", "Regente"),
+    ("no_ensemble_tag", "Conjunto"),
+    ("no_work_tag", "Obra"),
+    ("no_explicit_tag", "Conteúdo explícito"),
+    ("no_copyright_tag", "Copyright"),
+    ("no_label_tag", "Selo"),
+    ("no_upc_tag", "UPC"),
+    ("no_isrc_tag", "ISRC"),
+    ("no_replaygain_tag", "ReplayGain"),
+    ("no_album_url_tag", "URL do álbum"),
 ]
 
-ADVANCED_SCHEMA: list[dict[str, Any]] = (
-    [
-        {"key": "og_cover", "type": "bool", "group": "Downloads", "label": "Capa em resolução original (_org)", "hint": "Baixa a capa no tamanho máximo do Qobuz."},
-        {"key": "albums_only", "type": "bool", "group": "Downloads", "label": "Só álbuns completos", "hint": "Ignora singles e EPs em discografias."},
-        {"key": "no_database", "type": "bool", "group": "Downloads", "label": "Não usar o banco de downloads", "hint": "Baixa de novo mesmo o que já foi baixado antes."},
-        {"key": "write_sentinel", "type": "bool", "group": "Downloads", "label": "Marcar álbuns concluídos", "hint": "Grava um marcador na pasta quando o álbum termina."},
-        {"key": "multiple_disc_prefix", "type": "text", "group": "Downloads", "label": "Prefixo de disco", "hint": "Ex.: CD, Disc."},
-        {"key": "multiple_disc_one_dir", "type": "bool", "group": "Downloads", "label": "Todos os discos na mesma pasta"},
-        {"key": "fallback_folder_format", "type": "text", "group": "Nomes", "label": "Padrão de pasta alternativo"},
-        {"key": "default_limit", "type": "int", "group": "Downloads", "label": "Limite padrão de resultados", "min": 1, "max": 100},
-        {"key": "only_synced_lyrics", "type": "bool", "group": "Letras", "label": "Só letras sincronizadas", "hint": "Ignora letras sem tempo."},
-    ]
-    + [
-        {"key": key, "type": "bool", "group": "Tags nos arquivos", "label": f"Não gravar: {label}"}
-        for key, label in _TAGS
-    ]
-)
+ADVANCED_SCHEMA: list[dict[str, Any]] = [
+    {
+        "key": "og_cover",
+        "type": "bool",
+        "group": "Downloads",
+        "label": "Capa em resolução original (_org)",
+        "hint": "Baixa a capa no tamanho máximo do Qobuz.",
+    },
+    {
+        "key": "albums_only",
+        "type": "bool",
+        "group": "Downloads",
+        "label": "Só álbuns completos",
+        "hint": "Ignora singles e EPs em discografias.",
+    },
+    {
+        "key": "no_database",
+        "type": "bool",
+        "group": "Downloads",
+        "label": "Não usar o banco de downloads",
+        "hint": "Baixa de novo mesmo o que já foi baixado antes.",
+    },
+    {
+        "key": "write_sentinel",
+        "type": "bool",
+        "group": "Downloads",
+        "label": "Marcar álbuns concluídos",
+        "hint": "Grava um marcador na pasta quando o álbum termina.",
+    },
+    {
+        "key": "multiple_disc_prefix",
+        "type": "text",
+        "group": "Downloads",
+        "label": "Prefixo de disco",
+        "hint": "Ex.: CD, Disc.",
+    },
+    {
+        "key": "multiple_disc_one_dir",
+        "type": "bool",
+        "group": "Downloads",
+        "label": "Todos os discos na mesma pasta",
+    },
+    {
+        "key": "fallback_folder_format",
+        "type": "text",
+        "group": "Nomes",
+        "label": "Padrão de pasta alternativo",
+    },
+    {
+        "key": "default_limit",
+        "type": "int",
+        "group": "Downloads",
+        "label": "Limite padrão de resultados",
+        "min": 1,
+        "max": 100,
+    },
+    {
+        "key": "only_synced_lyrics",
+        "type": "bool",
+        "group": "Letras",
+        "label": "Só letras sincronizadas",
+        "hint": "Ignora letras sem tempo.",
+    },
+] + [
+    {
+        "key": key,
+        "type": "bool",
+        "group": "Tags nos arquivos",
+        "label": f"Não gravar: {label}",
+    }
+    for key, label in _TAGS
+]
 
 _ADV_BY_KEY = {f["key"]: f for f in ADVANCED_SCHEMA}
 _DEFAULTS = {"write_sentinel": True, "default_limit": 20, "multiple_disc_prefix": "CD"}
@@ -424,8 +538,14 @@ def read_advanced(parser: configparser.ConfigParser, section: str) -> dict[str, 
     values: dict[str, Any] = {}
     for field in ADVANCED_SCHEMA:
         key, kind = field["key"], field["type"]
-        raw = parser.get(section, key, fallback=None) if (section == "DEFAULT" or parser.has_section(section)) else None
-        default = _DEFAULTS.get(key, False if kind == "bool" else 0 if kind == "int" else "")
+        raw = (
+            parser.get(section, key, fallback=None)
+            if (section == "DEFAULT" or parser.has_section(section))
+            else None
+        )
+        default = _DEFAULTS.get(
+            key, False if kind == "bool" else 0 if kind == "int" else ""
+        )
         if raw is None or raw.strip() == "":
             values[key] = default
         elif kind == "bool":
@@ -440,7 +560,9 @@ def read_advanced(parser: configparser.ConfigParser, section: str) -> dict[str, 
     return values
 
 
-def write_advanced(parser: configparser.ConfigParser, section: str, incoming: dict[str, Any]) -> dict[str, Any]:
+def write_advanced(
+    parser: configparser.ConfigParser, section: str, incoming: dict[str, Any]
+) -> dict[str, Any]:
     """Valida contra o esquema e grava no parser. Retorna o que foi aceito."""
     if not parser.has_section(section) and section != "DEFAULT":
         parser.add_section(section)

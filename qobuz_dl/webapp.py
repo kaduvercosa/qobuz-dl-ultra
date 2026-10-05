@@ -10,9 +10,7 @@ import asyncio
 import re
 import configparser
 from contextlib import asynccontextmanager
-import json
 import logging
-import mimetypes
 import os
 import secrets
 import tempfile
@@ -23,13 +21,12 @@ from typing import Any
 from urllib.parse import urlparse
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from qobuz_dl.core import QobuzDL
 from qobuz_dl.constants import DEFAULT_FOLDER, DEFAULT_TRACK
-from qobuz_dl.downloader import _resolve_art_url
 from qobuz_dl import gui_meta
 from qobuz_dl.paths import ensure_directory_ready
 import hashlib
@@ -353,7 +350,12 @@ class GuiService:
         "smart_discography": ("smart_discography", False),
         "multi_value_tags": ("multi_value_tags", False),
     }
-    _INI_STRINGS = ("embedded_art_size", "saved_art_size", "folder_format", "track_format")
+    _INI_STRINGS = (
+        "embedded_art_size",
+        "saved_art_size",
+        "folder_format",
+        "track_format",
+    )
     _INI_INTS = ("max_workers", "segment_workers")
 
     def _settings_from_ini(self, defaults: dict[str, Any]) -> dict[str, Any]:
@@ -728,7 +730,9 @@ class GuiService:
             )
         return self.client
 
-    def save_settings(self, request: SettingsRequest, write: bool = True) -> dict[str, Any]:
+    def save_settings(
+        self, request: SettingsRequest, write: bool = True
+    ) -> dict[str, Any]:
         directory, quality = request.directory, request.quality
         if quality not in QUALITY_LABELS:
             raise ValueError("Qualidade inválida")
@@ -968,7 +972,9 @@ class GuiService:
             path = self.local_files.get(key)
         return path if path and path.is_file() else None
 
-    def _audio_row(self, path: Path, root: Path, check_cover: bool = False) -> dict[str, Any] | None:
+    def _audio_row(
+        self, path: Path, root: Path, check_cover: bool = False
+    ) -> dict[str, Any] | None:
         try:
             from mutagen import File as AudioFile
         except ImportError:
@@ -990,7 +996,11 @@ class GuiService:
             for name in names:
                 value = tags.get(name) if hasattr(tags, "get") else None
                 if value:
-                    return ", ".join(str(v) for v in value) if isinstance(value, (list, tuple)) else str(value)
+                    return (
+                        ", ".join(str(v) for v in value)
+                        if isinstance(value, (list, tuple))
+                        else str(value)
+                    )
             return ""
 
         def number(text: str) -> int | None:
@@ -1008,7 +1018,11 @@ class GuiService:
             "key": hashlib.sha1(str(resolved).encode()).hexdigest()[:20],
             "title": tag("title") or path.stem,
             "artist": artist,
-            "artists": [{"name": n.strip()} for n in re.split(r"\s*[,;]\s*", artist) if n.strip()],
+            "artists": [
+                {"name": n.strip()}
+                for n in re.split(r"\s*[,;]\s*", artist)
+                if n.strip()
+            ],
             "album": tag("album"),
             "albumArtist": tag("albumartist"),
             "year": (tag("date", "originaldate") or "")[:4],
@@ -1028,7 +1042,9 @@ class GuiService:
             "size": stat.st_size,
             "mtime": stat.st_mtime,
             "path": relative,
-            "folder": str(Path(relative).parent) if Path(relative).parent != Path(".") else "",
+            "folder": str(Path(relative).parent)
+            if Path(relative).parent != Path(".")
+            else "",
             "pathLabel": path.parent.name,
             "hasLrc": path.with_suffix(".lrc").is_file(),
         }
@@ -1073,12 +1089,18 @@ class GuiService:
         for path in found[:120]:
             row = self._audio_row(path, root, check_cover=True)
             if row:
-                row["tagsOk"] = bool(row["title"] and row["artist"] != "Artista desconhecido" and row["album"])
+                row["tagsOk"] = bool(
+                    row["title"]
+                    and row["artist"] != "Artista desconhecido"
+                    and row["album"]
+                )
                 row["ok"] = bool(row["size"] > 1000 and row["duration"] > 1)
                 rows.append(row)
         return rows
 
-    async def _verify_download(self, item: dict[str, Any], since: float, success: bool) -> None:
+    async def _verify_download(
+        self, item: dict[str, Any], since: float, success: bool
+    ) -> None:
         """Confere no disco o que o downloader realmente gravou."""
         root = Path(self.local_settings["directory"]).expanduser().resolve()
         try:
@@ -1100,7 +1122,25 @@ class GuiService:
             parents = {str((root / r["path"]).parent) for r in rows}
             item["savedTo"] = parents.pop() if len(parents) == 1 else str(root)
         item["files"] = [
-            {k: r.get(k) for k in ("name", "key", "path", "format", "size", "duration", "bitDepth", "sampleRate", "bitrate", "hasCover", "hasLrc", "tagsOk", "ok", "title")}
+            {
+                k: r.get(k)
+                for k in (
+                    "name",
+                    "key",
+                    "path",
+                    "format",
+                    "size",
+                    "duration",
+                    "bitDepth",
+                    "sampleRate",
+                    "bitrate",
+                    "hasCover",
+                    "hasLrc",
+                    "tagsOk",
+                    "ok",
+                    "title",
+                )
+            }
             | {"name": Path(r["path"]).name}
             for r in rows
         ]
@@ -1108,9 +1148,13 @@ class GuiService:
         item["verified"] = bool(rows) and all(r["ok"] and r["tagsOk"] for r in rows)
         if success and not rows:
             item["status"] = "ignorado"
-            item["message"] = "Nenhum arquivo novo foi gravado: já existia na pasta ou foi pulado pelo downloader."
+            item["message"] = (
+                "Nenhum arquivo novo foi gravado: já existia na pasta ou foi pulado pelo downloader."
+            )
         elif rows:
-            item["message"] = f"{len(rows)} arquivo(s) gravado(s) e conferido(s) no disco."
+            item["message"] = (
+                f"{len(rows)} arquivo(s) gravado(s) e conferido(s) no disco."
+            )
 
     async def start_tool(self, payload: ToolRequest) -> dict[str, Any]:
         if self.demo:
@@ -1350,9 +1394,17 @@ def _album_result(item: dict[str, Any]) -> dict[str, Any]:
 
 
 _AUDIO_TYPES = {
-    ".flac": "audio/flac", ".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".mp4": "audio/mp4",
-    ".aac": "audio/aac", ".ogg": "audio/ogg", ".opus": "audio/ogg", ".wav": "audio/wav",
-    ".aiff": "audio/aiff", ".aif": "audio/aiff", ".wv": "audio/x-wavpack",
+    ".flac": "audio/flac",
+    ".mp3": "audio/mpeg",
+    ".m4a": "audio/mp4",
+    ".mp4": "audio/mp4",
+    ".aac": "audio/aac",
+    ".ogg": "audio/ogg",
+    ".opus": "audio/ogg",
+    ".wav": "audio/wav",
+    ".aiff": "audio/aiff",
+    ".aif": "audio/aiff",
+    ".wv": "audio/x-wavpack",
 }
 
 
@@ -1374,7 +1426,9 @@ def _ranged_file(path: Path, request: Request):
                 end = int(last) if last else size - 1
             end = min(end, size - 1)
             if start > end or start >= size:
-                return Response(status_code=416, headers={"Content-Range": f"bytes */{size}"})
+                return Response(
+                    status_code=416, headers={"Content-Range": f"bytes */{size}"}
+                )
             status = 206
         except ValueError:
             start, end, status = 0, size - 1, 200
@@ -1391,7 +1445,11 @@ def _ranged_file(path: Path, request: Request):
                 remaining -= len(chunk)
                 yield chunk
 
-    headers = {"Accept-Ranges": "bytes", "Content-Length": str(length), "Cache-Control": "private, max-age=3600"}
+    headers = {
+        "Accept-Ranges": "bytes",
+        "Content-Length": str(length),
+        "Cache-Control": "private, max-age=3600",
+    }
     if status == 206:
         headers["Content-Range"] = f"bytes {start}-{end}/{size}"
     return StreamingResponse(
@@ -1545,8 +1603,20 @@ def create_app(*, demo: bool = False, allow_network: bool = False) -> FastAPI:
             query = q.casefold()
             return {
                 **empty,
-                "tracks": [t for t in DEMO_TRACKS if query in f"{t['title']} {t['artist']} {t['album']}".casefold()][:limit] if kind in {"tracks", "all"} else [],
-                "albums": [a for a in DEMO_ALBUMS if query in f"{a['title']} {a['artist']} {a['genre']}".casefold()][:limit] if kind in {"albums", "all"} else [],
+                "tracks": [
+                    t
+                    for t in DEMO_TRACKS
+                    if query in f"{t['title']} {t['artist']} {t['album']}".casefold()
+                ][:limit]
+                if kind in {"tracks", "all"}
+                else [],
+                "albums": [
+                    a
+                    for a in DEMO_ALBUMS
+                    if query in f"{a['title']} {a['artist']} {a['genre']}".casefold()
+                ][:limit]
+                if kind in {"albums", "all"}
+                else [],
             }
         client = await service.ensure_connected()
         data: dict[str, list[dict[str, Any]]] = dict(empty)
@@ -1554,7 +1624,9 @@ def create_app(*, demo: bool = False, allow_network: bool = False) -> FastAPI:
         async def grab(method: str, key: str, view):
             try:
                 raw = await getattr(client, method)(q.strip(), limit=limit)
-                items = raw.get(key, {}).get("items", []) if isinstance(raw, dict) else []
+                items = (
+                    raw.get(key, {}).get("items", []) if isinstance(raw, dict) else []
+                )
                 return [view(x) for x in items if isinstance(x, dict)]
             except Exception:
                 logger.exception("Catalog search failed (%s)", method)
@@ -1566,7 +1638,9 @@ def create_app(*, demo: bool = False, allow_network: bool = False) -> FastAPI:
         if kind in {"albums", "all"}:
             plan.append(("albums", "search_albums", "albums", gui_meta.album_view))
         if kind in {"playlists", "all"}:
-            plan.append(("playlists", "search_playlists", "playlists", gui_meta.playlist_view))
+            plan.append(
+                ("playlists", "search_playlists", "playlists", gui_meta.playlist_view)
+            )
         if kind in {"artists", "all"}:
             plan.append(("artists", "search_artists", "artists", gui_meta.artist_view))
         results = await asyncio.gather(*(grab(m, k, v) for _, m, k, v in plan))
@@ -1580,16 +1654,28 @@ def create_app(*, demo: bool = False, allow_network: bool = False) -> FastAPI:
             match = next((a for a in DEMO_ALBUMS if a["id"] == album_id), None)
             if not match:
                 raise HTTPException(status_code=404, detail="Álbum não encontrado")
-            return {"album": match, "tracks": [t for t in DEMO_TRACKS if t["album"] == match["title"]] or DEMO_TRACKS[:5], "credits": [], "descriptionHtml": ""}
+            return {
+                "album": match,
+                "tracks": [t for t in DEMO_TRACKS if t["album"] == match["title"]]
+                or DEMO_TRACKS[:5],
+                "credits": [],
+                "descriptionHtml": "",
+            }
         client = await service.ensure_connected()
         try:
             raw = await client.get_album_meta(album_id)
         except Exception:
             logger.exception("Album lookup failed")
-            raise HTTPException(status_code=502, detail="Não foi possível carregar este álbum.") from None
+            raise HTTPException(
+                status_code=502, detail="Não foi possível carregar este álbum."
+            ) from None
         if not isinstance(raw, dict):
             raise HTTPException(status_code=404, detail="Álbum não encontrado")
-        items = [x for x in (raw.get("tracks", {}) or {}).get("items", []) if isinstance(x, dict)]
+        items = [
+            x
+            for x in (raw.get("tracks", {}) or {}).get("items", [])
+            if isinstance(x, dict)
+        ]
         tracks = [gui_meta.track_view(x, raw) for x in items]
         return {
             "album": gui_meta.album_view(raw),
@@ -1602,28 +1688,45 @@ def create_app(*, demo: bool = False, allow_network: bool = False) -> FastAPI:
     async def track(track_id: str):
         client = await service.ensure_connected()
         if client is None:
-            raise HTTPException(status_code=404, detail="Faixa indisponível na demonstração")
+            raise HTTPException(
+                status_code=404, detail="Faixa indisponível na demonstração"
+            )
         try:
             raw = await client.get_track_meta(track_id)
         except Exception:
-            raise HTTPException(status_code=502, detail="Não foi possível carregar esta faixa.") from None
+            raise HTTPException(
+                status_code=502, detail="Não foi possível carregar esta faixa."
+            ) from None
         if not isinstance(raw, dict):
             raise HTTPException(status_code=404, detail="Faixa não encontrada")
         album_raw = raw.get("album") if isinstance(raw.get("album"), dict) else {}
-        return {"track": gui_meta.track_view(raw, album_raw), "album": gui_meta.album_view(album_raw) if album_raw else None}
+        return {
+            "track": gui_meta.track_view(raw, album_raw),
+            "album": gui_meta.album_view(album_raw) if album_raw else None,
+        }
 
     @app.get("/api/artist/{artist_id}")
     async def artist(artist_id: str):
         client = await service.ensure_connected()
         if client is None:
-            raise HTTPException(status_code=404, detail="Artista indisponível na demonstração")
+            raise HTTPException(
+                status_code=404, detail="Artista indisponível na demonstração"
+            )
         try:
-            raw = await client.api_call("artist/get", id=artist_id, offset=0, limit=50, type=None)
+            raw = await client.api_call(
+                "artist/get", id=artist_id, offset=0, limit=50, type=None
+            )
         except Exception:
-            raise HTTPException(status_code=502, detail="Não foi possível carregar este artista.") from None
+            raise HTTPException(
+                status_code=502, detail="Não foi possível carregar este artista."
+            ) from None
         if not isinstance(raw, dict):
             raise HTTPException(status_code=404, detail="Artista não encontrado")
-        albums = [gui_meta.album_view(x) for x in (raw.get("albums", {}) or {}).get("items", []) if isinstance(x, dict)]
+        albums = [
+            gui_meta.album_view(x)
+            for x in (raw.get("albums", {}) or {}).get("items", [])
+            if isinstance(x, dict)
+        ]
         info = gui_meta.artist_view(raw)
         info["biographyHtml"] = gui_meta.clean_html(info.pop("biography", ""))
         return {"artist": info, "albums": albums}
@@ -1637,24 +1740,40 @@ def create_app(*, demo: bool = False, allow_network: bool = False) -> FastAPI:
             raw = await client.get_user_playlists(limit=100)
         except Exception:
             logger.exception("Playlist listing failed")
-            raise HTTPException(status_code=502, detail="Não foi possível carregar suas playlists.") from None
+            raise HTTPException(
+                status_code=502, detail="Não foi possível carregar suas playlists."
+            ) from None
         if isinstance(raw, dict):
-            raw = (raw.get("playlists", {}) or {}).get("items", []) or raw.get("items", [])
-        return {"items": [gui_meta.playlist_view(x) for x in (raw or []) if isinstance(x, dict)]}
+            raw = (raw.get("playlists", {}) or {}).get("items", []) or raw.get(
+                "items", []
+            )
+        return {
+            "items": [
+                gui_meta.playlist_view(x) for x in (raw or []) if isinstance(x, dict)
+            ]
+        }
 
     @app.get("/api/playlist/{playlist_id}")
     async def playlist(playlist_id: str):
         client = await service.ensure_connected()
         if client is None:
-            raise HTTPException(status_code=404, detail="Playlist indisponível na demonstração")
+            raise HTTPException(
+                status_code=404, detail="Playlist indisponível na demonstração"
+            )
         items, head, offset = [], None, 0
         try:
             while offset < 500:
-                raw = await client.api_call("playlist/get", id=playlist_id, offset=offset, limit=100, type=None)
+                raw = await client.api_call(
+                    "playlist/get", id=playlist_id, offset=offset, limit=100, type=None
+                )
                 if not isinstance(raw, dict):
                     break
                 head = head or raw
-                page = [x for x in (raw.get("tracks", {}) or {}).get("items", []) if isinstance(x, dict)]
+                page = [
+                    x
+                    for x in (raw.get("tracks", {}) or {}).get("items", [])
+                    if isinstance(x, dict)
+                ]
                 if not page:
                     break
                 items += page
@@ -1664,10 +1783,16 @@ def create_app(*, demo: bool = False, allow_network: bool = False) -> FastAPI:
         except Exception:
             logger.exception("Playlist lookup failed")
             if not items:
-                raise HTTPException(status_code=502, detail="Não foi possível carregar esta playlist.") from None
+                raise HTTPException(
+                    status_code=502, detail="Não foi possível carregar esta playlist."
+                ) from None
         if not head:
             raise HTTPException(status_code=404, detail="Playlist não encontrada")
-        return {"playlist": gui_meta.playlist_view(head), "tracks": [gui_meta.track_view(x) for x in items], "credits": gui_meta.merge_credits([gui_meta.credits_of(x) for x in items])}
+        return {
+            "playlist": gui_meta.playlist_view(head),
+            "tracks": [gui_meta.track_view(x) for x in items],
+            "credits": gui_meta.merge_credits([gui_meta.credits_of(x) for x in items]),
+        }
 
     @app.get("/api/favorites")
     async def favorites(kind: str = "albums", limit: int = 40):
@@ -1723,7 +1848,10 @@ def create_app(*, demo: bool = False, allow_network: bool = False) -> FastAPI:
         rows = await asyncio.to_thread(service.library, refresh)
         return {
             "directory": str(
-                Path(service.local_settings["directory"] or service.config_status()["directory"]).expanduser()
+                Path(
+                    service.local_settings["directory"]
+                    or service.config_status()["directory"]
+                ).expanduser()
             ),
             "items": rows,
             "total": len(rows),
@@ -1733,7 +1861,10 @@ def create_app(*, demo: bool = False, allow_network: bool = False) -> FastAPI:
     async def local_audio(file_key: str, request: Request):
         path = await service.local_path(file_key)
         if not path:
-            raise HTTPException(status_code=404, detail="Arquivo não encontrado (a biblioteca mudou; recarregue a página)")
+            raise HTTPException(
+                status_code=404,
+                detail="Arquivo não encontrado (a biblioteca mudou; recarregue a página)",
+            )
         return _ranged_file(path, request)
 
     @app.get("/api/library/cover/{file_key}")
@@ -1757,11 +1888,21 @@ def create_app(*, demo: bool = False, allow_network: bool = False) -> FastAPI:
             elif tags is not None and "covr" in tags and tags["covr"]:
                 pic = tags["covr"][0]
                 data = bytes(pic)
-                mime = "image/png" if getattr(pic, "imageformat", 13) == 14 else "image/jpeg"
+                mime = (
+                    "image/png"
+                    if getattr(pic, "imageformat", 13) == 14
+                    else "image/jpeg"
+                )
         except Exception:
             data = b""
         if not data:
-            for name in ("cover.jpg", "folder.jpg", "cover.png", "folder.png", "front.jpg"):
+            for name in (
+                "cover.jpg",
+                "folder.jpg",
+                "cover.png",
+                "folder.png",
+                "front.jpg",
+            ):
                 candidate = path.parent / name
                 if candidate.is_file() and candidate.stat().st_size < 12_000_000:
                     data = candidate.read_bytes()
@@ -1769,12 +1910,13 @@ def create_app(*, demo: bool = False, allow_network: bool = False) -> FastAPI:
                     break
         if not data:
             raise HTTPException(status_code=404, detail="Sem capa")
-        return Response(data, media_type=mime, headers={"Cache-Control": "private, max-age=86400"})
+        return Response(
+            data, media_type=mime, headers={"Cache-Control": "private, max-age=86400"}
+        )
 
     @app.get("/api/lyrics/{track_id}")
     async def stream_lyrics(track_id: str):
         """Letra (sincronizada quando existir) de uma faixa do catálogo Qobuz."""
-        import re
 
         import httpx
 
@@ -1791,9 +1933,17 @@ def create_app(*, demo: bool = False, allow_network: bool = False) -> FastAPI:
         if not parsed:
             return {"kind": "none", "text": ""}
         if parsed.get("synced"):
-            return {"kind": "synced", "text": parsed["synced"], "lang": parsed.get("lang")}
+            return {
+                "kind": "synced",
+                "text": parsed["synced"],
+                "lang": parsed.get("lang"),
+            }
         if parsed.get("plain"):
-            return {"kind": "plain", "text": parsed["plain"], "lang": parsed.get("lang")}
+            return {
+                "kind": "plain",
+                "text": parsed["plain"],
+                "lang": parsed.get("lang"),
+            }
         return {"kind": "none", "text": ""}
 
     @app.get("/api/library/lyrics/{file_key}")
@@ -1832,7 +1982,12 @@ def create_app(*, demo: bool = False, allow_network: bool = False) -> FastAPI:
                         frames = tags.getall("USLT")
                         text = str(frames[0].text) if frames else ""
                     else:
-                        for name in ("LYRICS", "lyrics", "UNSYNCEDLYRICS", "unsyncedlyrics"):
+                        for name in (
+                            "LYRICS",
+                            "lyrics",
+                            "UNSYNCEDLYRICS",
+                            "unsyncedlyrics",
+                        ):
                             value = tags.get(name)
                             if value:
                                 text = str(value[0])
@@ -1908,7 +2063,9 @@ def create_app(*, demo: bool = False, allow_network: bool = False) -> FastAPI:
         if quality not in {5, 6}:
             quality = 6
         if service.demo:
-            raise HTTPException(status_code=409, detail="A reprodução fica desativada na demonstração.")
+            raise HTTPException(
+                status_code=409, detail="A reprodução fica desativada na demonstração."
+            )
         client = await service.ensure_connected()
         try:
             result = await client.get_track_url(track_id, quality)
@@ -1926,27 +2083,42 @@ def create_app(*, demo: bool = False, allow_network: bool = False) -> FastAPI:
         parsed = urlparse(result["url"])
         host = (parsed.hostname or "").lower()
         allowed = (
-            host == "qobuz.com" or host.endswith(".qobuz.com")
-            or host.endswith(".akamaized.net") or host.endswith(".akamaihd.net")
+            host == "qobuz.com"
+            or host.endswith(".qobuz.com")
+            or host.endswith(".akamaized.net")
+            or host.endswith(".akamaihd.net")
         )
         if parsed.scheme != "https" or not allowed:
-            raise HTTPException(status_code=502, detail="A origem do fluxo retornado não foi reconhecida como CDN Qobuz.")
+            raise HTTPException(
+                status_code=502,
+                detail="A origem do fluxo retornado não foi reconhecida como CDN Qobuz.",
+            )
         # O servidor busca o áudio e entrega como ARQUIVO (200/206, Content-Length,
         # Accept-Ranges): o navegador enxerga duração e permite avançar/voltar livremente.
         upstream_headers = {}
         if request.headers.get("range"):
             upstream_headers["Range"] = request.headers["range"]
-        http = httpx.AsyncClient(follow_redirects=True, timeout=httpx.Timeout(20.0, read=60.0))
+        http = httpx.AsyncClient(
+            follow_redirects=True, timeout=httpx.Timeout(20.0, read=60.0)
+        )
         try:
-            upstream = await http.send(http.build_request("GET", result["url"], headers=upstream_headers), stream=True)
+            upstream = await http.send(
+                http.build_request("GET", result["url"], headers=upstream_headers),
+                stream=True,
+            )
         except Exception:
             await http.aclose()
-            raise HTTPException(status_code=502, detail="Não foi possível abrir o áudio no CDN do Qobuz.") from None
+            raise HTTPException(
+                status_code=502,
+                detail="Não foi possível abrir o áudio no CDN do Qobuz.",
+            ) from None
         if upstream.status_code >= 400:
             code = upstream.status_code
             await upstream.aclose()
             await http.aclose()
-            raise HTTPException(status_code=502, detail=f"O CDN do Qobuz recusou o áudio (HTTP {code}).")
+            raise HTTPException(
+                status_code=502, detail=f"O CDN do Qobuz recusou o áudio (HTTP {code})."
+            )
         headers = {"Accept-Ranges": "bytes", "Cache-Control": "private, max-age=600"}
         for name in ("content-length", "content-range"):
             if name in upstream.headers:
@@ -1963,7 +2135,9 @@ def create_app(*, demo: bool = False, allow_network: bool = False) -> FastAPI:
                 await upstream.aclose()
                 await http.aclose()
 
-        return StreamingResponse(body(), status_code=upstream.status_code, media_type=ctype, headers=headers)
+        return StreamingResponse(
+            body(), status_code=upstream.status_code, media_type=ctype, headers=headers
+        )
 
     return app
 
@@ -1993,8 +2167,10 @@ def run_gui(
         raise ValueError("a porta precisa estar entre 1 e 65535")
     resolved_host = validate_host(resolve_host(host))
     loopback = {"127.0.0.1", "localhost", "::1"}
-    if open_browser and not demo and (
-        resolved_host in loopback or resolved_host == "0.0.0.0"
+    if (
+        open_browser
+        and not demo
+        and (resolved_host in loopback or resolved_host == "0.0.0.0")
     ):
         local = "127.0.0.1" if resolved_host == "0.0.0.0" else resolved_host
         webbrowser.open(f"http://{local}:{port}/")
