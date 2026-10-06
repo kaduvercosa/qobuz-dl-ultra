@@ -214,7 +214,7 @@ class LyricsEngine:
         combined.sort(key=lambda x: (x[0], x[3]))
 
         result = []
-        for ms, tag, text, is_trans in combined:
+        for _ms, tag, text, is_trans in combined:
             if tag:
                 if is_trans:
                     result.append(f"{tag}» {text}")
