@@ -143,7 +143,7 @@ def print_download_header(kind: str, rows: list) -> None:
 def emit_progress_json(settings, event, **fields):
     """
     Emite uma linha JSON em stdout descrevendo um evento de progresso
-    (inicio/fim de faixa), para frontends (GUI web, app) conseguirem
+    (inicio/fim de faixa), para frontends externos (scripts, apps) conseguirem
     acompanhar downloads sem parsear a barra tqdm/ANSI no terminal.
     So' emite algo se settings.progress_json estiver ligado.
     """

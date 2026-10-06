@@ -36,6 +36,21 @@ MULTI_VALUE_FIELDS = {
 }
 
 
+# # Campos multivalorados: com multi_value_tags o campo principal (ARTIST,
+# # ALBUMARTIST, COMPOSER, GENRE) continua sendo UM texto "A, B" -- é o que
+# # os players exibem, separado por vírgula -- e a lista de verdade vai no
+# # campo plural (ARTISTS, ALBUMARTISTS, COMPOSERS, GENRES; ARTISTS e
+# # ALBUMARTISTS seguem a convenção do MusicBrainz Picard), que bibliotecas
+# # e taggers leem como valores separados. Assim não depende de como cada
+# # player junta tags multivaloradas ("; ", "/" ou só o 1º valor).
+DISPLAY_JOINED_FIELDS = {
+    "ARTIST": "ARTISTS",
+    "ALBUMARTIST": "ALBUMARTISTS",
+    "COMPOSER": "COMPOSERS",
+    "GENRE": "GENRES",
+}
+
+
 def _split_multi_value(value: str) -> list:
     """Quebra um texto unido por ", " em uma lista de valores individuais.
 
@@ -300,7 +315,10 @@ def _embed_flac_img(root_dir, audio: FLAC, cover_override=None):
     cover_image = _get_cover_path(root_dir, override=cover_override)
 
     if not cover_image or not os.path.isfile(cover_image):
-        logger.debug("Cover image not found to embed.")
+        logger.warning(
+            "Capa não embutida: arquivo de capa não encontrado "
+            f"(procurado em '{root_dir}' e na pasta pai) -- faixa segue sem capa."
+        )
         return
 
     try:
@@ -341,11 +359,17 @@ def _embed_id3_img(root_dir, audio: id3.ID3, cover_override=None):
     cover_image = _get_cover_path(root_dir, override=cover_override)
 
     if not cover_image or not os.path.isfile(cover_image):
-        logger.debug("Cover image not found to embed.")
+        logger.warning(
+            "Capa não embutida: arquivo de capa não encontrado "
+            f"(procurado em '{root_dir}' e na pasta pai) -- faixa segue sem capa."
+        )
         return
 
-    with open(cover_image, "rb") as cover:
-        audio.add(id3.APIC(3, "image/jpeg", 3, "", cover.read()))
+    try:
+        with open(cover_image, "rb") as cover:
+            audio.add(id3.APIC(3, "image/jpeg", 3, "", cover.read()))
+    except OSError as e:
+        logger.warning(f"Capa não embutida: falha ao ler '{cover_image}': {e}")
 
 
 # # Aplica tags Vorbis, comentário técnico, capa e salva o FLAC final.
@@ -454,7 +478,13 @@ def tag_flac(
                 and isinstance(v, str)
                 and ", " in v
             ):
-                audio[k] = _split_multi_value(v)
+                if k in DISPLAY_JOINED_FIELDS:
+                    # Principal em texto único (vírgula no player) + plural
+                    # com os valores separados de verdade.
+                    audio[k] = v
+                    audio[DISPLAY_JOINED_FIELDS[k]] = _split_multi_value(v)
+                else:
+                    audio[k] = _split_multi_value(v)
             else:
                 audio[k] = v
 
@@ -570,7 +600,10 @@ def tag_mp3(
                 and isinstance(v, str)
                 and ", " in v
             )
-            write_values = _split_multi_value(v) if is_multi else [v]
+            joined_display = is_multi and k in DISPLAY_JOINED_FIELDS
+            write_values = (
+                [v] if joined_display else _split_multi_value(v) if is_multi else [v]
+            )
 
             id3tag = ID3_LEGEND.get(k.lower()) or ID3_LEGEND.get(k)
             if id3tag:
@@ -580,6 +613,14 @@ def tag_mp3(
                     audio.add(id3tag(encoding=3, lang="eng", desc="", text=[v]))
                 else:
                     audio[id3tag.__name__] = id3tag(encoding=3, text=write_values)
+                    if joined_display:
+                        audio.add(
+                            id3.TXXX(
+                                encoding=3,
+                                desc=DISPLAY_JOINED_FIELDS[k],
+                                text=_split_multi_value(v),
+                            )
+                        )
 
     _trck_n = qobuz_item.get("track_number", "1")
     _trck_total = qobuz_album.get("tracks_count", "1")

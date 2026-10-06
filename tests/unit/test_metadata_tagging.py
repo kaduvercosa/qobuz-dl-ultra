@@ -187,9 +187,9 @@ class TestTagFlac:
         assert fake.tags.vendor == ""
 
     def test_multi_value_tags_grava_lista_de_artistas(self, monkeypatch, tmp_path):
-        """Com multi_value_tags=True, ARTIST deve ser uma lista real de
-        valores (tags Vorbis multivaloradas), não uma string com separador.
-        A implementação chama _split_multi_value() e grava audio[k] = lista."""
+        """Com multi_value_tags=True, ARTIST segue em texto único "A, B"
+        (exibição com vírgula nos players) e ARTISTS recebe a lista real
+        de valores (tags Vorbis multivaloradas)."""
         fake = FakeFLAC()
         monkeypatch.setattr(metadata, "FLAC", lambda path: fake)
 
@@ -212,9 +212,21 @@ class TestTagFlac:
             settings=QobuzDLSettings(multi_value_tags=True),
         )
 
-        # Com multi_value_tags, a implementação grava uma lista real de
-        # valores Vorbis (um por artista), não uma string única com "; ".
-        assert fake["ARTIST"] == ["Artista Um", "Artista Dois"]
+        # ARTIST fica como texto único com vírgula (é o que o player mostra)
+        # e ARTISTS guarda a lista real de valores Vorbis, um por artista.
+        assert fake["ARTIST"] == "Artista Um, Artista Dois"
+        assert fake["ARTISTS"] == ["Artista Um", "Artista Dois"]
+
+    def test_campos_multivalorados_tem_campo_plural(self):
+        """Artista, artista do álbum, compositor e gênero mantêm o texto com
+        vírgula no campo principal e guardam a lista no campo plural."""
+        assert metadata.DISPLAY_JOINED_FIELDS == {
+            "ARTIST": "ARTISTS",
+            "ALBUMARTIST": "ALBUMARTISTS",
+            "COMPOSER": "COMPOSERS",
+            "GENRE": "GENRES",
+        }
+        assert set(metadata.DISPLAY_JOINED_FIELDS) <= metadata.MULTI_VALUE_FIELDS
 
     def test_sem_multi_value_tags_mantem_virgula(self, monkeypatch, tmp_path):
         fake = FakeFLAC()

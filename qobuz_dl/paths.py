@@ -1,8 +1,7 @@
-"""Utilitários de caminho compartilhados entre a CLI e a GUI.
+"""Utilitários de caminho usados pela CLI.
 
 Centraliza a validação/criação da pasta de biblioteca (a opção `directory`
-do config.ini e da GUI) num único lugar, pra CLI e GUI nunca divergirem no
-que "uma pasta válida" significa -- não importa se o programa foi
+do config.ini) num único lugar -- não importa se o programa foi
 instalado via pip, pipx, venv ou dentro de um container Docker: o caminho
 é sempre resolvido (`~`, relativos) e testado de verdade gravando e
 apagando um arquivo de prova, não só lido dos bits de permissão do SO
@@ -18,9 +17,8 @@ from pathlib import Path
 class DirectoryNotUsable(ValueError):
     """Pasta não existe e não pôde ser criada, ou existe mas não é
     legível/gravável pelo usuário atual. Subclasse de ValueError de
-    propósito: tanto qobuz_dl/webapp.py (rota /api/settings) quanto
-    qobuz_dl/cli.py já sabem converter ValueError numa mensagem curta
-    pro usuário, sem precisar de mais um bloco except em cada lugar."""
+    propósito: qobuz_dl/cli.py já sabe converter ValueError numa mensagem
+    curta pro usuário, sem precisar de mais um bloco except."""
 
 
 def ensure_directory_ready(raw_path: str) -> Path:
@@ -35,8 +33,8 @@ def ensure_directory_ready(raw_path: str) -> Path:
       do sistema decide; não forçamos modo aberto).
     - Se o caminho existir e NÃO for uma pasta (por exemplo, for um
       arquivo comum), ou se a escrita falhar, levanta DirectoryNotUsable
-      com uma mensagem pronta pra mostrar ao usuário -- CLI e GUI só
-      precisam capturar isso e exibir `str(erro)`.
+      com uma mensagem pronta pra mostrar ao usuário -- quem chama só
+      precisa capturar isso e exibir `str(erro)`.
 
     Retorna o Path já resolvido (absoluto, `~` expandido) em caso de
     sucesso, pra quem chamou usar exatamente o mesmo valor que foi

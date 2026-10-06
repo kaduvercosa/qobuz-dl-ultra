@@ -33,13 +33,6 @@ class LyricsEngine:
     em arquivos auxiliares e metadados FLAC/MP3.
     """
 
-    # # Deslocamento (ms) aplicado a uma linha de traducao que colide com um
-    # # timestamp ja usado no LRC bilingue. 20ms fica acima da resolucao de
-    # # centesimos de segundo (2 casas) usada por alguns parsers de LRC, mas
-    # # e' bem abaixo do limiar de ~100ms onde um atraso texto/audio comeca a
-    # # ser percebido. Ver docstring de _build_bilingual_lrc().
-    _BILINGUAL_TRANSLATION_OFFSET_MS = 20
-
     def __init__(self, genius_token=None, session=None, settings=None):
         """Initialize lyrics engine with optional Genius token and HTTP session."""
         self.genius_token = genius_token
@@ -80,12 +73,8 @@ class LyricsEngine:
         return f"[{minutes:02d}:{seconds:06.3f}]"
 
     def _qobuz_lines_to_lrc(self, lines, inject_intro=False):
-        """
-        Converte linhas sincronizadas do Qobuz para LRC.
-        O marcador inicial representa a introducao antes do primeiro verso.
-        """
+        """Converte linhas sincronizadas do Qobuz para LRC canonico."""
         lrc_rows = []
-        intro_added = False
 
         for entry in lines:
             start = entry.get("start")
@@ -93,27 +82,39 @@ class LyricsEngine:
                 continue
 
             text = (entry.get("line") or "").strip()
-
-            if inject_intro and not intro_added:
-                if start > 0:
-                    lrc_rows.append("[00:00.000] » » » ")
-
-                if text:
-                    lrc_rows.append(f"{self._ms_to_lrc_timestamp(start)} {text}")
-                else:
-                    if start == 0:
-                        lrc_rows.append("[00:00.000] » » » ")
-                    else:
-                        lrc_rows.append(f"{self._ms_to_lrc_timestamp(start)} {text}")
-
-                # A trava precisa ficar aqui fora para garantir que a introducao
-                # seja injetada apenas uma unica vez no arquivo.
-                intro_added = True
-            else:
-                if text:
-                    lrc_rows.append(f"{self._ms_to_lrc_timestamp(start)} {text}")
+            if text:
+                # LRC canonico: nenhum espaco artificial entre timestamp e texto.
+                lrc_rows.append(f"{self._ms_to_lrc_timestamp(start)}{text}")
 
         return "\n".join(lrc_rows) if lrc_rows else None
+
+    def _normalize_lrc(self, lrc_text):
+        """Normaliza uma letra LRC para o formato canonico do projeto."""
+        if not lrc_text:
+            return lrc_text
+
+        timestamp_re = re.compile(r"\[(\d{2,}):(\d{2})\.(\d{1,3})\]")
+        normalized = []
+
+        for raw_line in lrc_text.splitlines():
+            line = raw_line.rstrip()
+            matches = list(timestamp_re.finditer(line))
+            if not matches:
+                normalized.append(line)
+                continue
+
+            # Mantem tags de tempo multiplas, mas normaliza todas para mm:ss.mmm.
+            timestamps = []
+            for match in matches:
+                minutes = int(match.group(1))
+                seconds = int(match.group(2))
+                millis = int(match.group(3).ljust(3, "0")[:3])
+                timestamps.append(self._ms_to_lrc_timestamp(minutes * 60000 + seconds * 1000 + millis))
+
+            text = timestamp_re.sub("", line).lstrip()
+            normalized.append("".join(timestamps) + text)
+
+        return "\n".join(normalized)
 
     @staticmethod
     def _qobuz_lines_to_plain(lines):
@@ -169,106 +170,65 @@ class LyricsEngine:
 
         return result
 
-    def _build_bilingual_lrc(self, original_lrc, translated_lrc):
-        """
-        Combina letra original e traducao numa unica letra LRC, uma linha
-        por idioma para cada verso (traducao prefixada com " » ").
+    def _build_bilingual_lrc(self, original_lrc: str, translated_lrc: str) -> str:
+        """Combina letras originais e traduzidas com o mesmo timestamp."""
+        if not original_lrc:
+            return translated_lrc or ""
+        if not translated_lrc:
+            return original_lrc
 
-        Historico do bug: a primeira versao gravava original e traducao com
-        o MESMO timestamp [MM:SS.mmm] -- convencao usada por apps tipo
-        NetEase/QQ Music -- porque foi o unico formato que empilhou as duas
-        linhas corretamente num player especifico testado manualmente
-        (Flacbox). O problema: timestamp EXATAMENTE igual quebra em muitos
-        outros players de LRC. Dois sintomas relatados, e os dois vem da
-        MESMA causa (chave de tempo duplicada):
-          1. Players que guardam as linhas num dicionario indexado pelo
-             timestamp (ex.: lyricsByTime["00:12.340"] = texto) tem a
-             traducao sobrescrevendo a original nessa chave -- so a
-             traducao (a "2a linha") fica visivel.
-          2. Players que tratam duas entradas com o mesmo tempo como uma
-             unica "linha atual" concatenam o texto das duas num bloco so,
-             sem quebra visual entre original e traducao.
+        tags_re = re.compile(r"\[\d{2,}:\d{2}\.\d{2,3}\]")
 
-        Correcao: a linha de traducao so recebe o EXATO mesmo timestamp da
-        original quando esse tempo ainda nao foi usado; se colidir (que e'
-        sempre o caso aqui, ja que original/traducao vem alinhadas ponto a
-        ponto pela API), ela e' deslocada pra frente em incrementos de
-        _BILINGUAL_TRANSLATION_OFFSET_MS ate virar uma chave unica. Um
-        deslocamento de poucos milissegundos e' imperceptivel pra quem
-        esta ouvindo (bem abaixo do limiar de ~100ms onde um atraso
-        texto/audio comeca a ser notado), mas ja e' suficiente pra virar
-        uma chave diferente em qualquer parser -- resolve os dois sintomas
-        acima na grande maioria dos players. O valor usado (20ms) fica
-        acima da resolucao de centesimos de segundo (2 casas decimais) que
-        alguns parsers usam ao comparar tempos, o que 1ms nao garantia.
-
-        Tradeoff que isso reintroduz: um player que SO empilha duas linhas
-        quando o timestamp e' exatamente identico (como o Flacbox testado
-        originalmente) passa a tratar original e traducao como duas linhas
-        sequenciais normais, com a traducao "realcando" ~20ms depois da
-        original, em vez de uma dupla simultanea. Na pratica costuma ser
-        imperceptivel, ja que a maioria dos players mostra uma janela de
-        varias linhas ao redor da atual de qualquer forma -- e e' um
-        tradeoff bem melhor do que perder a linha original inteira ou
-        misturar as duas letras num bloco ilegivel, que e' o que acontecia
-        antes na maioria dos outros players.
-        """
-        if not original_lrc or not translated_lrc:
-            return original_lrc or translated_lrc
-
-        def parse_lrc(lrc_text, is_translation):
-            """Parse LRC lyrics format into timestamped lines."""
-            parsed = []
+        def parse_lrc(lrc_text, is_translation=False):
+            # Só entram linhas com timestamp e texto: metadados LRC ([ti:],
+            # [ar:]...) e linhas vazias são descartados, já que o cabeçalho é
+            # gerado separadamente. Várias tags na mesma linha viram várias
+            # entradas, uma por timestamp.
+            lines = []
             for line in lrc_text.splitlines():
-                tags = re.findall(r"\[\d{2,}:\d{2}\.\d{2,3}\]", line)
-                text = re.sub(r"\[\d{2,}:\d{2}\.\d{2,3}\]", "", line).strip()
-
-                if not text:
+                tags = tags_re.findall(line)
+                text = tags_re.sub("", line).strip()
+                if not tags or not text:
                     continue
-
                 for tag in tags:
-                    try:
-                        m, s = tag.strip("[]").split(":")
-                        s, ms = s.split(".")
-                        time_ms = (
-                            int(m) * 60000 + int(s) * 1000 + int(ms.ljust(3, "0")[:3])
-                        )
+                    lines.append((tag, text, is_translation))
+            return lines
 
-                        parsed.append((time_ms, text, is_translation))
-                    except ValueError:
-                        continue
-            return parsed
+        orig_lines = parse_lrc(original_lrc, is_translation=False)
+        trans_lines = parse_lrc(translated_lrc, is_translation=True)
 
-        orig_parsed = parse_lrc(original_lrc, False)
-        trans_parsed = parse_lrc(translated_lrc, True)
+        def tag_to_ms(tag):
+            if not tag:
+                return -1
+            m = re.match(r'\[(\d{2,}):(\d{2})\.(\d{2,3})\]', tag)
+            if not m:
+                return -1
+            return int(m.group(1)) * 60000 + int(m.group(2)) * 1000 + int(m.group(3).ljust(3, '0')[:3])
 
-        combined = orig_parsed + trans_parsed
-        combined.sort(key=lambda x: (x[0], x[2]))
+        combined = []
+        for tag, text, is_trans in orig_lines + trans_lines:
+            combined.append((tag_to_ms(tag), tag, text, is_trans))
 
-        # # Garante timestamps unicos: quando a linha de traducao colide com
-        # # um tempo ja usado (pela original ou por outra traducao), ela e'
-        # # deslocada pra frente ate ficar unica -- nunca sobrescrevendo a
-        # # original, nunca virando um bloco so com a linha anterior.
-        used_times = set()
-        final_lrc = []
-        for time_ms, text, is_trans in combined:
-            final_time = time_ms
-            if is_trans:
-                while final_time in used_times:
-                    final_time += self._BILINGUAL_TRANSLATION_OFFSET_MS
-            used_times.add(final_time)
+        # Ordena por timestamp (x[0]) e usa is_translation (x[3]) como desempate
+        # garante que a linha original vem sempre imediatamente antes da traduzida
+        combined.sort(key=lambda x: (x[0], x[3]))
 
-            tag = self._ms_to_lrc_timestamp(final_time)
-            if is_trans:
-                final_lrc.append(f"{tag} » {text}")
+        result = []
+        for ms, tag, text, is_trans in combined:
+            if tag:
+                if is_trans:
+                    result.append(f"{tag}» {text}")
+                else:
+                    result.append(f"{tag}{text}")
             else:
-                final_lrc.append(f"{tag} {text}")
+                if text:
+                    result.append(text)
 
-        return "\n".join(final_lrc)
+        return "\n".join(result)
 
     def _inject_instrumental_pauses(self, lrc_text):
         """
-        - Adiciona marcador de pausa instrumental '3 (• • •)' 0.5s apos a ultima
+        - Adiciona marcador de pausa instrumental '• • •' 0.5s apos a ultima
         linha se houver um intervalo maior que 10 segundos na sincronizacao.
         - Ignora a injecao no inicio da musica (se a linha anterior estiver em 00:00.000).
         """
@@ -302,8 +262,8 @@ class LyricsEngine:
 
                 # Se a diferenca for > 10s e o tempo anterior for maior que zero
                 if gap > 10000 and last_time > 0:
-                    inst_time = last_time + 1000
-                    pause_line = f"{self._ms_to_lrc_timestamp(inst_time)} • • •"
+                    inst_time = last_time + 500
+                    pause_line = f"{self._ms_to_lrc_timestamp(inst_time)}• • •"
 
                     # Evita duplicar marcadores no mesmo instante
                     if not new_lines or new_lines[-1] != pause_line:
@@ -577,22 +537,22 @@ class LyricsEngine:
                         is_bilingual_str = "BILINGUAL " if is_bilingual else ""
                         if embed_lyrics and save_lrc:
                             _tw(
-                                f" ✅ Letras {GREEN}{is_bilingual_str}{RESET} padrao "
+                                f" ✅ Letras {GREEN}{is_bilingual_str}{RESET} padrão "
                                 f"injetadas e salvas em .txt (via Qobuz)!"
                             )
                         elif save_lrc:
                             _tw(
-                                f" ✅ Letras {GREEN}{is_bilingual_str}{RESET} padrao "
+                                f" ✅ Letras {GREEN}{is_bilingual_str}{RESET} padrão "
                                 f"salvas em .txt (via Qobuz)!"
                             )
                         elif embed_lyrics:
                             _tw(
-                                f" ✅ Letras {GREEN}{is_bilingual_str}{RESET} padrao "
+                                f" ✅ Letras {GREEN}{is_bilingual_str}{RESET} padrão "
                                 f"injetadas no metadata (via Qobuz)!"
                             )
                         else:
                             _tw(
-                                f" {RED}❌ Falha ao gravar letras padrao (Qobuz){RESET}"
+                                f" {RED}❌ Falha ao gravar letras padrão (Qobuz){RESET}"
                             )
 
                         return result
@@ -825,6 +785,8 @@ class LyricsEngine:
                 header_lines.append(f"[by:{source}]")
             if language:
                 header_lines.append(f"[la:{language}]")
+
+            synced_lyrics = self._normalize_lrc(synced_lyrics)
 
             content = (
                 ("\n".join(header_lines) + "\n" + synced_lyrics)

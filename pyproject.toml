@@ -74,12 +74,8 @@ genius = [
 analyze = [
     "numpy",
 ]
-gui = [
-    "fastapi>=0.110",
-    "uvicorn>=0.29",
-]
 all = [
-    "qobuz-dl-ultra[speed,covers,watch,duplicates,genius,analyze,gui]",
+    "qobuz-dl-ultra[speed,covers,watch,duplicates,genius,analyze]",
 ]
 dev = [
     "pytest>=8",
@@ -89,10 +85,6 @@ dev = [
     "ruff>=0.6",
     "mypy>=1.11",
     "mypy-baseline>=0.7",
-    # httpx2 é o fork mantido pelo Starlette/FastAPI; substitui o httpx
-    # no TestClient e elimina o StarletteDeprecationWarning nos testes.
-    # Só necessário em dev -- o código de produção continua usando httpx.
-    "httpx2",
 ]
 
 [project.urls]
@@ -110,8 +102,6 @@ version = { attr = "qobuz_dl.__version__" }
 [tool.setuptools.packages.find]
 include = ["qobuz_dl*"]
 
-[tool.setuptools.package-data]
-qobuz_dl = ["web_ui/*.html", "web_ui/*.css", "web_ui/*.js", "web_ui/*.webmanifest", "gui_assets/*.jpg", "gui_assets/*.png"]
 
 [tool.pytest.ini_options]
 minversion = "8.0"
@@ -151,11 +141,6 @@ filterwarnings = [
     "ignore::DeprecationWarning:httpx",
     "ignore::DeprecationWarning:tqdm",
     "ignore::PendingDeprecationWarning",
-    # StarletteDeprecationWarning sobre httpx/httpx2 -- emitido pelo
-    # FastAPI/Starlette enquanto ambos os pacotes coexistem no ambiente.
-    # Silenciado aqui porque nao e um bug do projeto; some apos
-    # httpx2 ser instalado e o httpx classico ser removido do venv.
-    "ignore::DeprecationWarning:starlette",
 ]
 
 [tool.coverage.run]

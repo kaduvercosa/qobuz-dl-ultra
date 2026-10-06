@@ -60,12 +60,13 @@ def test_qobuz_lines_to_lrc(engine):
         {"start": 5000, "line": "Segunda linha"},
     ]
     lrc_intro = engine._qobuz_lines_to_lrc(lines, inject_intro=True)
-    assert "[00:00.000] » » » " in lrc_intro
-    assert "[00:01.000] Primeira linha" in lrc_intro
+    assert "[00:00.000]" not in lrc_intro
+    assert "[00:01.000]Primeira linha" in lrc_intro
+    assert "[00:05.000]Segunda linha" in lrc_intro
 
     lrc_no_intro = engine._qobuz_lines_to_lrc(lines, inject_intro=False)
     assert "[00:00.000]" not in lrc_no_intro
-    assert "[00:01.000] Primeira linha" in lrc_no_intro
+    assert "[00:01.000]Primeira linha" in lrc_no_intro
 
 
 def test_qobuz_lines_to_plain(engine):
@@ -97,10 +98,11 @@ def test_build_bilingual_lrc(engine):
     trans = "[00:01.000] Olá"
     bilingual = engine._build_bilingual_lrc(orig, trans)
     # A linha original deve aparecer no timestamp exato
-    assert "[00:01.000] Hello" in bilingual
-    # A tradução recebe +20 ms para evitar colisões em players que indexam
-    # por timestamp -- o prefixo » confirma que é tradução
-    assert "» Olá" in bilingual
+    assert "[00:01.000]Hello" in bilingual
+    # A tradução usa o mesmo timestamp, logo abaixo da original; o prefixo »
+    # confirma que é tradução
+    assert "[00:01.000]» Olá" in bilingual
+    assert bilingual.index("Hello") < bilingual.index("» Olá")
 
 
 def test_inject_instrumental_pauses(engine):
@@ -122,7 +124,7 @@ def test_save_lrc_file(engine, tmp_path):
     content = lrc_file.read_text(encoding="utf-8")
     assert "[by:Qobuz]" in content
     assert "[la:pt]" in content
-    assert "[00:01.000] Teste" in content
+    assert "[00:01.000]Teste" in content
 
 
 class FakeFLAC(dict):

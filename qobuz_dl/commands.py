@@ -482,7 +482,7 @@ def add_common_arg(custom_parser, default_folder, default_quality):
         default=argparse.SUPPRESS,
         help=(
             "emite uma linha JSON para cada evento track-start/track-done no "
-            "stdout para interfaces externas (GUI web, app)."
+            "stdout para interfaces externas (scripts, apps)."
         ),
     )
     custom_parser.add_argument(
@@ -513,7 +513,7 @@ def add_common_arg(custom_parser, default_folder, default_quality):
         dest="multi_value_tags",
         action="store_true",
         default=argparse.SUPPRESS,
-        help="divide metadados separados por vírgulas (como gêneros) em múltiplos campos na tag",
+        help="grava artistas, compositores e gêneros como tags múltiplas de verdade: o campo principal continua com vírgula (é o que o player mostra) e os valores separados vão em ARTISTS, ALBUMARTISTS, COMPOSERS e GENRES",
     )
     custom_parser.add_argument(
         "--no-multi-tags",
@@ -960,57 +960,6 @@ def doctor_args(subparsers):
     return doc
 
 
-def gui_args(subparsers):
-    """Define the 'gui' subcommand and its arguments."""
-    gui = subparsers.add_parser(
-        "gui",
-        aliases=["studio", "web"],
-        usage="qobuz-dl gui [start|stop|status|run] [--host HOST] [--port N] [--demo] [--no-browser]",
-        description=(
-            "Controla a interface web local (Qobuz Studio) desta mesma "
-            "instalação. 'start' (padrão) sobe em segundo plano e devolve "
-            "o terminal na hora; 'stop' encerra; 'status' informa se está "
-            "rodando; 'run' sobe em primeiro plano (bloqueante, Ctrl+C "
-            "encerra) -- é o modo usado por trás de 'start' e também o "
-            "indicado para Docker. Os outros comandos (dl, lucky, "
-            "doctor...) continuam funcionando normalmente, com ou sem a "
-            "GUI ligada, com ou sem o extra opcional 'gui' instalado."
-        ),
-        help="controla a interface web local (Qobuz Studio): start/stop/status/run",
-    )
-    gui.add_argument(
-        "action",
-        nargs="?",
-        default="start",
-        choices=["start", "stop", "status", "run"],
-        help="start (padrão): sobe em segundo plano; stop: encerra; status: consulta; run: primeiro plano",
-    )
-    gui.add_argument(
-        "--host",
-        default="127.0.0.1",
-        help=(
-            "interface de rede (padrão: 127.0.0.1, somente este computador). "
-            "Use '0.0.0.0' para todas as interfaces (acessível pelo IP da "
-            "máquina, sem login: restrinja por firewall), 'lan' para o IP "
-            "da rede local, ou um IP específico"
-        ),
-    )
-    gui.add_argument(
-        "--port", type=int, default=8060, help="porta local (padrão: 8060)"
-    )
-    gui.add_argument(
-        "--demo",
-        action="store_true",
-        help="abre em modo demonstração, sem acessar conta nem baixar nada de verdade",
-    )
-    gui.add_argument(
-        "--no-browser",
-        action="store_true",
-        help="não abre o navegador automaticamente",
-    )
-    return gui
-
-
 # ----------------------------------------------------------------------------
 # Montagem do parser principal
 # ----------------------------------------------------------------------------
@@ -1093,7 +1042,6 @@ def qobuz_dl_args(default_quality=6, default_limit=20, default_folder=None):
     scan_cmd = scan_args(subparsers)
     library_cmd = library_args(subparsers)
     doctor_cmd = doctor_args(subparsers)
-    gui_cmd = gui_args(subparsers)
 
     for subparser in (interactive, download, lucky, sync_pl_cmd, sync_fav_cmd):
         add_common_arg(subparser, default_folder, default_quality)

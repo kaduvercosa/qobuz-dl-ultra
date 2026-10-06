@@ -20,14 +20,13 @@ disponivel para verificacao manual com credenciais reais.
 
 BUGS QUE ESTES TESTES TRAVAM
 -----------------------------
-1. TRADUCAO RECEBE +20 MS: a implementacao aplica um offset de 20 ms no
-   timestamp da traducao para evitar colisoes em players que indexam por
-   timestamp (ex.: dict[timestamp] = texto ficaria so com a traducao se
-   ambos tivessem o mesmo valor). O par correto e:
+1. TRADUCAO COM O MESMO TIMESTAMP: a traducao usa exatamente o mesmo
+   timestamp da original (sem offset), para players que empilham as duas
+   linhas como um unico verso. O par correto e:
      [00:12.340] Original
-     [00:12.360] » Traducao
+     [00:12.340] » Traducao
    O teste verifica que a linha de traducao (com prefixo ») aparece logo
-   apos a linha original e que seu timestamp e exatamente 20 ms maior.
+   apos a linha original e que seu timestamp e identico.
 
 2. TRADUCAO ANTES DO ORIGINAL: `combined.sort()` usava so x[0] (timestamp),
    entao a ordem de insercao de orig/trans era nao-deterministica dentro
@@ -134,9 +133,8 @@ class TestBuildBilingualLrc:
 
     def test_original_aparece_antes_da_traducao_em_cada_par(self, build_bilingual):
         """A linha original deve vir imediatamente antes da linha com o
-        prefixo ». A implementacao aplica +20 ms na traducao para evitar
-        colisoes em players que indexam por timestamp; o teste verifica
-        que a diferenca e exatamente 20 ms."""
+        prefixo ». Os dois usam o MESMO timestamp (sem offset); o teste
+        verifica que a diferenca e exatamente 0 ms."""
         r = build_bilingual(ORIGINAL_SIMPLES, TRADUCAO_SIMPLES)
         linhas = r.splitlines()
         for i, linha in enumerate(linhas):
@@ -149,8 +147,8 @@ class TestBuildBilingualLrc:
                 ms_trad = _tag_to_ms(tag_traducao.group(1))
                 ms_orig = _tag_to_ms(tag_original.group(1))
                 diff = ms_trad - ms_orig
-                assert diff == 20, (
-                    f"esperado offset de 20 ms entre original e traducao, "
+                assert diff == 0, (
+                    f"esperado o mesmo timestamp para original e traducao, "
                     f"mas foi {diff} ms (original: {tag_original.group(1)}, "
                     f"traducao: {tag_traducao.group(1)})"
                 )

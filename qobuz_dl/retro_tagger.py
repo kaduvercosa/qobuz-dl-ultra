@@ -202,7 +202,7 @@ async def process_retroactive_lyrics_async(
         target_lang.upper() if target_lang else "ORIGINAL (Sem traducao forcada)"
     )
     ui.emit(
-        f"\n{CYAN}[*] Iniciando verificacao e atualizacao de letras no Qobuz...{OFF}"
+        f"\n{CYAN}[*] Iniciando verificação e atualização de letras no Qobuz...{OFF}"
     )
     ui.emit(f"{CYAN} • Pasta raiz :{RESET} {directory_path}")
     ui.emit(f"{CYAN} • Idioma alvo:{RESET} {lang_display}\n")
@@ -223,8 +223,7 @@ async def process_retroactive_lyrics_async(
         # Guarda uma linha detalhada por arquivo para auditoria das alteracoes.
         report_items = []
 
-        # Contadores usados no relatorio final; cada caminho de decisao incrementa
-        # um deles.
+        # Contadores usados no relatorio final; cada caminho de decisao incrementa um deles.
         stats = {
             "total": len(files_to_check),
             "updated_new_original": 0,
