@@ -109,7 +109,9 @@ class LyricsEngine:
                 minutes = int(match.group(1))
                 seconds = int(match.group(2))
                 millis = int(match.group(3).ljust(3, "0")[:3])
-                timestamps.append(self._ms_to_lrc_timestamp(minutes * 60000 + seconds * 1000 + millis))
+                timestamps.append(
+                    self._ms_to_lrc_timestamp(minutes * 60000 + seconds * 1000 + millis)
+                )
 
             text = timestamp_re.sub("", line).lstrip()
             normalized.append("".join(timestamps) + text)
@@ -200,10 +202,14 @@ class LyricsEngine:
         def tag_to_ms(tag):
             if not tag:
                 return -1
-            m = re.match(r'\[(\d{2,}):(\d{2})\.(\d{2,3})\]', tag)
+            m = re.match(r"\[(\d{2,}):(\d{2})\.(\d{2,3})\]", tag)
             if not m:
                 return -1
-            return int(m.group(1)) * 60000 + int(m.group(2)) * 1000 + int(m.group(3).ljust(3, '0')[:3])
+            return (
+                int(m.group(1)) * 60000
+                + int(m.group(2)) * 1000
+                + int(m.group(3).ljust(3, "0")[:3])
+            )
 
         combined = []
         for tag, text, is_trans in orig_lines + trans_lines:
