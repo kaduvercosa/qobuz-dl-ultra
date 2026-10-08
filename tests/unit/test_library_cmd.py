@@ -1,6 +1,7 @@
 """Testes da camada de terminal (scan / library / sync-favorites)."""
 
 import asyncio
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -169,6 +170,10 @@ def _sf(**kw):
     return SimpleNamespace(**base)
 
 
+@pytest.mark.skipif(
+    sys.platform == "ios",
+    reason="prompt_toolkit/ctypes incompatível com o runtime iOS do a-Shell",
+)
 def test_ask_accepts_async_input_and_handles_ctrl_c(monkeypatch):
     """The terminal prompt accepts typed input and treats Ctrl+C as quit."""
 

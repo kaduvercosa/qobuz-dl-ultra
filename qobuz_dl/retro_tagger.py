@@ -10,6 +10,7 @@ import time
 
 import mutagen.id3 as id3
 from mutagen.flac import FLAC
+from mutagen.mp3 import MP3
 
 from qobuz_dl import ui
 from qobuz_dl.color import BG, GREEN, OFF, RED, RESET
@@ -63,6 +64,49 @@ def extract_track_id(file_path: str) -> str | None:
     return None
 
 
+def _lyrics_lookup_hints(file_path):
+    """ISRC e duração (s) do arquivo: ajudam fontes que identificam a gravação
+    exata (BiniLyrics). Qualquer falha de leitura devolve só o que deu."""
+    hints = {}
+    try:
+        if file_path.lower().endswith(".flac"):
+            audio = FLAC(file_path)
+            isrc = (audio.get("ISRC") or [""])[0]
+        else:
+            audio = MP3(file_path)
+            frame = audio.tags.get("TSRC") if audio.tags else None
+            isrc = frame.text[0] if frame and frame.text else ""
+        if isrc:
+            hints["isrc"] = str(isrc).strip()
+        length = getattr(audio.info, "length", 0)
+        if length:
+            hints["duration"] = int(round(length))
+    except Exception as e:
+        logger.debug(f"Falha ao ler ISRC/duração de {file_path}: {e}")
+    return hints
+
+
+_TIMED_LINE_RE = re.compile(r"^\s*\[(\d{2,}):(\d{2})\.(\d{2,3})\](.*)$")
+
+
+def _has_repeated_timestamp(lrc_text):
+    """True se dois versos DIFERENTES compartilham o mesmo timestamp -- é
+    assim que o formato atual guarda original + tradução."""
+    seen = {}
+    for line in (lrc_text or "").splitlines():
+        m = _TIMED_LINE_RE.match(line)
+        if not m:
+            continue
+        text = m.group(4).strip()
+        if not text:
+            continue
+        key = (int(m.group(1)), int(m.group(2)), m.group(3).ljust(3, "0")[:3])
+        if key in seen and seen[key] != text:
+            return True
+        seen.setdefault(key, text)
+    return False
+
+
 def inspect_existing_lyrics(file_path: str) -> dict:
     """
     Inspeciona letras embutidas e arquivos .lrc/.txt sem modificar o audio.
@@ -74,6 +118,7 @@ def inspect_existing_lyrics(file_path: str) -> dict:
 
     embedded = ""
     embedded_lang = None
+    embedded_bilingual = False
     if ext == ".flac":
         try:
             audio_flac = FLAC(file_path)
@@ -84,6 +129,9 @@ def inspect_existing_lyrics(file_path: str) -> dict:
             lang_vals = audio_flac.get("LYRICS_LANG")
             if lang_vals:
                 embedded_lang = str(lang_vals[0]).strip().lower() or None
+            bil_vals = audio_flac.get("LYRICS_BILINGUAL")
+            if bil_vals:
+                embedded_bilingual = str(bil_vals[0]).strip() == "1"
         except Exception as e:
             logger.debug(f"Falha ao ler letra/idioma embutidos no FLAC: {e}")
     elif ext == ".mp3":
@@ -96,6 +144,10 @@ def inspect_existing_lyrics(file_path: str) -> dict:
             for txxx in audio_id3.getall("TXXX:LYRICS_LANG"):
                 if txxx.text:
                     embedded_lang = str(txxx.text[0]).strip().lower() or None
+                    break
+            for txxx in audio_id3.getall("TXXX:LYRICS_BILINGUAL"):
+                if txxx.text:
+                    embedded_bilingual = str(txxx.text[0]).strip() == "1"
                     break
         except Exception as e:
             logger.debug(f"Falha ao ler letra/idioma embutidos no MP3 (USLT/TXXX): {e}")
@@ -124,8 +176,16 @@ def inspect_existing_lyrics(file_path: str) -> dict:
 
     is_bilingual = False
     if has_lyrics:
-        if " » " in lyrics_content or re.search(
-            r"---\s*TRADU[CÇ§][AÃ§]O", lyrics_content, re.IGNORECASE
+        # A tradução não tem mais marcador: ela é reconhecida pela flag
+        # LYRICS_BILINGUAL gravada junto da letra, pelo idioma composto
+        # ("en+pt"), por dois versos diferentes no mesmo timestamp (formato
+        # atual) ou pelo antigo marcador "»" / cabeçalho "--- TRADUÇÃO".
+        if (
+            embedded_bilingual
+            or _has_repeated_timestamp(lyrics_content)
+            or " » " in lyrics_content
+            or re.search(r"\]\s*»\s", lyrics_content)
+            or re.search(r"---\s*TRADU[CÇ§][AÃ§]O", lyrics_content, re.IGNORECASE)
         ):
             is_bilingual = True
         elif language and "+" in language:
@@ -266,6 +326,8 @@ async def process_retroactive_lyrics_async(
             if not title:
                 title = os.path.splitext(file_name)[0]
 
+            lookup_hints = _lyrics_lookup_hints(file_path)
+
             # IDs gravados pelo downloader sao confiaveis; busca textual e usada
             # apenas como fallback.
             track_id = extract_track_id(file_path)
@@ -347,6 +409,7 @@ async def process_retroactive_lyrics_async(
                     expected_lang = target_lang.lower()
                     if not has_lyrics:
                         result = engine.fetch_and_inject(
+                            **lookup_hints,
                             file_path=file_path,
                             artist=artist,
                             track=title,
@@ -382,6 +445,7 @@ async def process_retroactive_lyrics_async(
                         or upgrade_to_sync
                     ) and track_id_is_trusted:
                         result = engine.fetch_and_inject(
+                            **lookup_hints,
                             file_path=file_path,
                             artist=artist,
                             track=title,
@@ -433,6 +497,7 @@ async def process_retroactive_lyrics_async(
                     expected_lang = orig_lang
                     if not has_lyrics:
                         result = engine.fetch_and_inject(
+                            **lookup_hints,
                             file_path=file_path,
                             artist=artist,
                             track=title,
@@ -468,6 +533,7 @@ async def process_retroactive_lyrics_async(
                         or upgrade_to_sync
                     ) and track_id_is_trusted:
                         result = engine.fetch_and_inject(
+                            **lookup_hints,
                             file_path=file_path,
                             artist=artist,
                             track=title,
@@ -519,6 +585,7 @@ async def process_retroactive_lyrics_async(
                     expected_lang = f"{orig_lang}+{target_lang.lower()}"
                     if not has_lyrics:
                         result = engine.fetch_and_inject(
+                            **lookup_hints,
                             file_path=file_path,
                             artist=artist,
                             track=title,
@@ -554,6 +621,7 @@ async def process_retroactive_lyrics_async(
                         or upgrade_to_sync
                     ) and track_id_is_trusted:
                         result = engine.fetch_and_inject(
+                            **lookup_hints,
                             file_path=file_path,
                             artist=artist,
                             track=title,
@@ -594,6 +662,7 @@ async def process_retroactive_lyrics_async(
 
                     elif not is_bilingual and track_id_is_trusted:
                         result = engine.fetch_and_inject(
+                            **lookup_hints,
                             file_path=file_path,
                             artist=artist,
                             track=title,
@@ -645,6 +714,7 @@ async def process_retroactive_lyrics_async(
             else:
                 if not has_lyrics:
                     result = engine.fetch_and_inject(
+                        **lookup_hints,
                         file_path=file_path,
                         artist=artist,
                         track=title,

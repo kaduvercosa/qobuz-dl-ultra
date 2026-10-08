@@ -1592,6 +1592,8 @@ class Download:
                         qobuz_lyrics_response=qobuz_lyrics_response,
                         qobuz_translation_response=qobuz_translation_response,
                         track_number=track_no,
+                        isrc=track_metadata.get("isrc"),
+                        duration=track_metadata.get("duration"),
                     )
                     if translation_note:
                         tqdm.write(

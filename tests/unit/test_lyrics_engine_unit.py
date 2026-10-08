@@ -99,10 +99,10 @@ def test_build_bilingual_lrc(engine):
     bilingual = engine._build_bilingual_lrc(orig, trans)
     # A linha original deve aparecer no timestamp exato
     assert "[00:01.000]Hello" in bilingual
-    # A tradução usa o mesmo timestamp, logo abaixo da original; o prefixo »
-    # confirma que é tradução
-    assert "[00:01.000]» Olá" in bilingual
-    assert bilingual.index("Hello") < bilingual.index("» Olá")
+    # A tradução usa o mesmo timestamp, logo abaixo da original, sem marcador
+    assert "[00:01.000]Olá" in bilingual
+    assert "»" not in bilingual
+    assert bilingual.index("Hello") < bilingual.index("Olá")
 
 
 def test_inject_instrumental_pauses(engine):

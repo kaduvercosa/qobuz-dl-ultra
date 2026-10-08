@@ -114,6 +114,7 @@ class QobuzDLSettings:
         self.embed_lyrics = kwargs.get("embed_lyrics", True)
         self.fetch_translation = kwargs.get("fetch_translation", True)
         self.only_synced_lyrics = kwargs.get("only_synced_lyrics", False)
+        self.lyrics_word_sync = kwargs.get("lyrics_word_sync", False)
 
         self.multi_value_tags = kwargs.get("multi_value_tags", False)
 
@@ -291,6 +292,12 @@ class QobuzDLSettings:
             ),
             "only_synced_lyrics": config.getboolean(
                 section, "only_synced_lyrics", fallback=False
+            ),
+            # # --lyrics-word-sync liga o LRC por palavra (fonte BiniLyrics).
+            "lyrics_word_sync": _merge_bool_opt_in(
+                arguments,
+                "lyrics_word_sync",
+                config.getboolean(section, "lyrics_word_sync", fallback=False),
             ),
             # # --no-multi-tags força False; caso contrário, CLI tem precedência sobre config.ini.
             "multi_value_tags": (

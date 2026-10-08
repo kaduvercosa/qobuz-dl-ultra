@@ -26,7 +26,7 @@ def test_normalize_lrc_removes_artificial_space_and_normalizes_milliseconds():
     assert result == "[00:12.500]Primeiro verso\n[00:16.200]Segundo verso"
 
 
-def test_bilingual_lrc_uses_same_timestamp_with_translation_marker():
+def test_bilingual_lrc_uses_same_timestamp_without_translation_marker():
     e = engine()
     result = e._build_bilingual_lrc(
         "[00:12.500]First line\n[00:16.200]Second line",
@@ -35,11 +35,12 @@ def test_bilingual_lrc_uses_same_timestamp_with_translation_marker():
 
     assert result == (
         "[00:12.500]First line\n"
-        "[00:12.500]» Primeira linha\n"
+        "[00:12.500]Primeira linha\n"
         "[00:16.200]Second line\n"
-        "[00:16.200]» Segunda linha"
+        "[00:16.200]Segunda linha"
     )
     assert "~" not in result
+    assert "»" not in result
 
 
 def test_instrumental_pause_is_half_second_after_previous_line():

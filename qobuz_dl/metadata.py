@@ -48,6 +48,8 @@ DISPLAY_JOINED_FIELDS = {
     "ALBUMARTIST": "ALBUMARTISTS",
     "COMPOSER": "COMPOSERS",
     "GENRE": "GENRES",
+    "ARTISTSORT": "ARTISTSORTS",
+    "ALBUMARTISTSORT": "ALBUMARTISTSORTS"
 }
 
 
@@ -448,22 +450,41 @@ def tag_flac(
 
     _trk_id = qobuz_item.get("id", "?")
 
-    # # Comentário legível com qualidade, canais, duração, tipo, data e ID Qobuz.
-    base_comment = (
-        f"Qobuz | {_bit}b/{_rate}kHz | {_channels} | HiRes: {_hires}"
-        f" | Duração: {_duration} | Tipo: {_rtype}"
-        f" | Rel: {_rel_date} | Trk ID: {_trk_id}"
+    _rate_text = (
+        str(int(_rate))
+        if isinstance(_rate, float) and _rate.is_integer()
+        else str(_rate)
     )
+
+    # # Comentário legível com qualidade, canais, duração, tipo, data e ID Qobuz.
+    comment_lines = [
+        "Fonte: Qobuz",
+        f"Qualidade: FLAC {_bit}-bit / {_rate_text} kHz / {_channels}",
+        f"Hi-res: {'Sim' if qobuz_item.get('hires_streamable') else 'Não'}",
+        f"Duração: {_duration}",
+        f"Tipo: {_rtype.capitalize()}",
+        f"Lançamento: {_rel_date}",
+        f"Faixa Qobuz: https://open.qobuz.com/track/{_trk_id}",
+    ]
+
+    _album_id = qobuz_album.get("id")
+    if _album_id:
+        comment_lines.append(f"Álbum Qobuz: https://open.qobuz.com/album/{_album_id}")
 
     if em_image:
         cover_path = _get_cover_path(root_dir, override=embed_cover_path)
         if cover_path:
             img_size_bytes = os.path.getsize(cover_path)
             req_size = getattr(settings, "embedded_art_size", "unknown")
-            is_org = "YES" if req_size == "org" else "NO"
-            base_comment += f" | Cover: {humanize.naturalsize(img_size_bytes, binary=True)} (Req: {req_size}, Org: {is_org})"
+            cover_kind = "Original" if req_size == "org" else "Redimensionada"
+            comment_lines.append(
+                "Capa embutida: "
+                f"{humanize.naturalsize(img_size_bytes, binary=True)}"
+                f" | {cover_kind}"
+                f" | Solicitada: {req_size}"
+            )
 
-    tags["COMMENT"] = base_comment
+    tags["COMMENT"] = "\n".join(comment_lines)
 
     # # Só grava valores preenchidos. Com multi_value_tags, ARTIST/COMPOSER/
     # # GENRE etc. viram tags multivaloradas de verdade -- uma entrada
@@ -471,22 +492,19 @@ def tag_flac(
     # # players que entendem tags multivaloradas junta os valores com ", " ao
     # # exibir; quem não entende, mostra só o primeiro valor.
     for k, v in tags.items():
-        if v:
-            if (
-                getattr(settings, "multi_value_tags", False)
-                and k in MULTI_VALUE_FIELDS
-                and isinstance(v, str)
-                and ", " in v
-            ):
-                if k in DISPLAY_JOINED_FIELDS:
-                    # Principal em texto único (vírgula no player) + plural
-                    # com os valores separados de verdade.
-                    audio[k] = v
-                    audio[DISPLAY_JOINED_FIELDS[k]] = _split_multi_value(v)
-                else:
-                    audio[k] = _split_multi_value(v)
-            else:
-                audio[k] = v
+        if not v:
+            continue
+
+        is_multi = (
+            getattr(settings, "multi_value_tags", False)
+            and k in MULTI_VALUE_FIELDS
+            and isinstance(v, str)
+            and ", " in v
+        )
+        if is_multi:
+            audio[k] = _split_multi_value(v)
+        else:
+            audio[k] = v
 
     if em_image:
         _embed_flac_img(root_dir, audio, cover_override=embed_cover_path)
@@ -587,40 +605,54 @@ def tag_mp3(
 
     tags["COMMENT"] = base_comment
 
-    # # Só grava valores preenchidos. Com multi_value_tags, ARTIST/COMPOSER/
-    # # GENRE etc. viram frames ID3 com múltiplos valores de texto de
-    # # verdade (não mais "A ; B" num único texto). Isso exige ID3v2.4 --
-    # # v2.3 não tem suporte real a texto multivalor -- por isso o save()
-    # # abaixo usa v2_version=4 quando multi_value_tags está ativo.
+    # Grava os frames ID3.
+    #
+    # Com multi_value_tags desativado:
+    #   TPE1 = "A, B"
+    #
+    # Com multi_value_tags ativado:
+    #   TPE1 recebe ["A", "B"] em ID3v2.4.
+    #
+    # O campo principal continua sendo TPE1/TPE2/TCO/etc.; não dependemos dos campos personalizados ARTISTS ou ALBUMARTISTS para indexação.
     for k, v in tags.items():
-        if v:
-            is_multi = (
-                getattr(settings, "multi_value_tags", False)
-                and k in MULTI_VALUE_FIELDS
-                and isinstance(v, str)
-                and ", " in v
-            )
-            joined_display = is_multi and k in DISPLAY_JOINED_FIELDS
-            write_values = (
-                [v] if joined_display else _split_multi_value(v) if is_multi else [v]
-            )
+        if not v:
+            continue
 
-            id3tag = ID3_LEGEND.get(k.lower()) or ID3_LEGEND.get(k)
-            if id3tag:
-                if id3tag == id3.TXXX:
-                    audio.add(id3tag(encoding=3, desc=k, text=v))
-                elif id3tag == id3.COMM:
-                    audio.add(id3tag(encoding=3, lang="eng", desc="", text=[v]))
-                else:
-                    audio[id3tag.__name__] = id3tag(encoding=3, text=write_values)
-                    if joined_display:
-                        audio.add(
-                            id3.TXXX(
-                                encoding=3,
-                                desc=DISPLAY_JOINED_FIELDS[k],
-                                text=_split_multi_value(v),
-                            )
-                        )
+        is_multi = (
+            getattr(settings, "multi_value_tags", False)
+            and k in MULTI_VALUE_FIELDS
+            and isinstance(v, str)
+            and ", " in v
+        )
+
+        write_values = _split_multi_value(v) if is_multi else [v]
+        id3tag = ID3_LEGEND.get(k.lower()) or ID3_LEGEND.get(k)
+
+        if not id3tag:
+            continue
+
+        if id3tag == id3.TXXX:
+            audio.add(
+                id3tag(
+                    encoding=3,
+                    desc=k,
+                    text=write_values if is_multi else v,
+                )
+            )
+        elif id3tag == id3.COMM:
+            audio.add(
+                id3tag(
+                    encoding=3,
+                    lang="eng",
+                    desc="",
+                    text=[v],
+                )
+            )
+        else:
+            audio[id3tag.__name__] = id3tag(
+                encoding=3,
+                text=write_values,
+            )
 
     _trck_n = qobuz_item.get("track_number", "1")
     _trck_total = qobuz_album.get("tracks_count", "1")
@@ -678,9 +710,18 @@ def _get_tags_to_add(
         tags["TITLE"] = track_title
 
     if not settings.no_album_artist_tag:
-        _albumartist_val = get_album_artist(qobuz_album)
-        tags["ALBUMARTIST"] = _albumartist_val
-        tags["ALBUMARTISTSORT"] = _make_sort_name(_albumartist_val)
+        _albumartist_values = get_album_artist(qobuz_album)
+        _albumartist_text = ", ".join(
+            str(value).strip()
+            for value in _albumartist_values
+            if str(value).strip()
+        )
+        tags["ALBUMARTIST"] = _albumartist_text
+        tags["ALBUMARTISTSORT"] = ", ".join(
+            _make_sort_name(value)
+            for value in _albumartist_values
+            if str(value).strip()
+        )
 
     if not settings.no_track_artist_tag:
         artists = []
@@ -906,5 +947,10 @@ def _get_tags_to_add(
             raw_title = str(qobuz_album.get("title", "album"))
             slug = re.sub(r"[^a-z0-9]+", "-", raw_title.lower()).strip("-")
             tags["QOBUZ ALBUM URL"] = f"https://www.qobuz.com/album/{slug}/{album_id}"
+
+    for _k in MULTI_VALUE_FIELDS:
+        _v = tags.get(_k)
+        if isinstance(_v, (list, tuple)):
+            tags[_k] = ", ".join(str(p).strip() for p in _v if str(p).strip())
 
     return tags

@@ -78,6 +78,20 @@ from qobuz_dl.interactive_ui import (
 # `from qobuz_dl.core import pt_style` etc.) funcionando sem mudar nada.
 
 
+async def _ask_search_query(kind_raw, fallback):
+    """Tela de busca com o campo dentro de uma caixa (search_prompt.py); se o
+    módulo ou o terminal não suportar, usa o prompt simples `fallback`."""
+    try:
+        from qobuz_dl.search_prompt import ask_query
+    except ImportError as exc:
+        logger.warning(
+            f"Caixa de busca indisponível ({exc}); usando o prompt simples. "
+            "Confira se qobuz_dl/search_prompt.py foi copiado."
+        )
+        return await fallback()
+    return await ask_query(kind_raw, fallback)
+
+
 async def _tui_select(title, options_dicts, is_multi=False, item_category="album"):
     """Tela de seleção em tela cheia (prompt_toolkit), usada por TODOS os
     menus interativos do programa: escolher tipo de busca, resultados de
@@ -806,6 +820,12 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
                         [("class:meta", empty_prefix + borders["mid"])], fill_bg=False
                     )
 
+        if is_table and options_dicts:
+            table_prefix = " " * (5 if is_multi else 3)
+            res.append(
+                ("class:meta", table_prefix + borders["bot"] + "\n")
+            )
+
         if not is_table:
             res.append(("", " \n" * 8))
 
@@ -827,10 +847,6 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
             columns, is_multi, item_category
         )
         res = []
-
-        if is_table and options_dicts:
-            table_prefix = " " * (5 if is_multi else 3)
-            res.append(("class:meta", table_prefix + borders["bot"] + "\n"))
 
         res.append(("", "\n"))
 
@@ -2014,24 +2030,26 @@ class QobuzDL:
                     sys.stdout.write("\033[2J\033[H")
                     sys.stdout.flush()
 
-                    cols = min(shutil.get_terminal_size((80, 24)).columns, 80)
-                    bar = "━" * cols
-                    ui.emit(f"\n{CYAN}{bar}{RESET}")
-                    ui.emit(f"{CYAN}  🔎 {GREEN}NOVA PESQUISA{RESET}")
-                    ui.emit(f"{CYAN}{bar}{RESET}\n")
-
-                    prompt_message = FormattedText(
-                        [
-                            ("class:prompt_text", " O que você deseja ouvir? "),
-                            ("class:prompt_hint", "[Ctrl + C para cancelar]\n"),
-                            ("class:prompt_cursor", " ❯ "),
-                        ]
-                    )
-
-                    try:
-                        query = await session.prompt_async(
+                    async def _classic_prompt():
+                        """Prompt simples de antes (usado se a caixa falhar)."""
+                        cols = min(shutil.get_terminal_size((80, 24)).columns, 80)
+                        bar = "━" * cols
+                        ui.emit(f"\n{CYAN}{bar}{RESET}")
+                        ui.emit(f"{CYAN}  🔎 {GREEN}NOVA PESQUISA{RESET}")
+                        ui.emit(f"{CYAN}{bar}{RESET}\n")
+                        prompt_message = FormattedText(
+                            [
+                                ("class:prompt_text", " O que você deseja ouvir? "),
+                                ("class:prompt_hint", "[Ctrl + C para cancelar]\n"),
+                                ("class:prompt_cursor", " ❯ "),
+                            ]
+                        )
+                        return await session.prompt_async(
                             prompt_message, style=prompt_style
                         )
+
+                    try:
+                        query = await _ask_search_query(scelta_raw, _classic_prompt)
                     except (EOFError, KeyboardInterrupt):
                         break
 

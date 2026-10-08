@@ -9,18 +9,43 @@ from qobuz_dl.core import _get_table_layout
 
 
 class TestGetTableLayoutModoEstreito:
-    def test_menos_de_78_colunas_desativa_tabela(self):
+    def test_album_abaixo_do_minimo_usa_cartao(self):
         is_table, widths, headers, borders = _get_table_layout(
-            77, is_multi=False, item_category="album"
+            89, is_multi=False, item_category="album"
         )
         assert is_table is False
         assert widths == []
         assert headers == []
         assert borders == {}
 
-    def test_exatamente_78_colunas_ja_ativa_tabela(self):
-        is_table, *_ = _get_table_layout(78, is_multi=False, item_category="album")
+    def test_album_exatamente_no_minimo_ativa_tabela(self):
+        is_table, widths, *_ = _get_table_layout(
+            90, is_multi=False, item_category="album"
+        )
         assert is_table is True
+        # título e artista com largura útil (>= 18 e >= 15 caracteres)
+        assert widths[0] >= 18 and widths[1] >= 15
+
+    @pytest.mark.parametrize(
+        "categoria,minimo",
+        [("album", 90), ("track", 92), ("playlist", 60), ("artist", 45)],
+    )
+    def test_limite_de_tabela_por_categoria(self, categoria, minimo):
+        assert _get_table_layout(minimo, False, categoria)[0] is True
+        assert _get_table_layout(minimo - 1, False, categoria)[0] is False
+
+    def test_multi_exige_duas_colunas_a_mais(self):
+        assert _get_table_layout(91, True, "album")[0] is False
+        assert _get_table_layout(92, True, "album")[0] is True
+
+    def test_tabela_nunca_passa_da_largura_da_tela(self):
+        for categoria in ("album", "track", "playlist", "artist"):
+            for cols in (45, 60, 90, 92, 120, 160, 220):
+                for multi in (False, True):
+                    ok, widths, _, borders = _get_table_layout(cols, multi, categoria)
+                    if ok:
+                        prefixo = 5 if multi else 3
+                        assert prefixo + len(borders["top"]) <= cols
 
     def test_categoria_filter_sempre_desativa_tabela_mesmo_em_tela_larga(self):
         # Categoria "filter" é menu simples (sim/não) -- não faz sentido
@@ -77,12 +102,16 @@ class TestGetTableLayoutCategorias:
         assert headers == ["NOME DO ARTISTA", "LANÇAMENTOS"]
 
     def test_larguras_das_colunas_flex_nunca_ficam_negativas(self):
-        # Cada categoria tem um max(N, ...) pro flex -- mesmo numa tela
-        # bem apertada (mas ainda >=78 colunas), a coluna de texto livre
-        # não pode virar 0 ou negativa.
-        for categoria in ("album", "track", "playlist", "artist"):
+        # Na menor tela em que a tabela aparece, nenhuma coluna pode virar
+        # 0 ou negativa; abaixo disso a função devolve o modo cartão.
+        for categoria, minimo in (
+            ("album", 90),
+            ("track", 92),
+            ("playlist", 60),
+            ("artist", 45),
+        ):
             _, widths, _, _ = _get_table_layout(
-                78, is_multi=False, item_category=categoria
+                minimo, is_multi=False, item_category=categoria
             )
             assert all(w > 0 for w in widths), f"{categoria}: {widths}"
 
@@ -104,15 +133,15 @@ class TestGetTableLayoutCategorias:
         )
         assert set(borders.keys()) == {"top", "mid", "bot"}
         for borda in borders.values():
-            assert borda.startswith("+-")
-            assert borda.endswith("-+")
+            assert borda[0] in "┌├└"
+            assert borda[-1] in "┐┤┘"
 
     def test_largura_total_das_colunas_cresce_com_a_tela(self):
         # Não trava um valor absoluto (a soma exata depende da conta
         # interna de overhead) -- só garante que uma tela mais larga
         # resulta em colunas mais largas, não menores/iguais.
         _, widths_estreita, _, _ = _get_table_layout(
-            80, is_multi=False, item_category="track"
+            100, is_multi=False, item_category="track"
         )
         _, widths_larga, _, _ = _get_table_layout(
             200, is_multi=False, item_category="track"

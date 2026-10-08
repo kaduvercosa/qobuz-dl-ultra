@@ -24,9 +24,10 @@ BUGS QUE ESTES TESTES TRAVAM
    timestamp da original (sem offset), para players que empilham as duas
    linhas como um unico verso. O par correto e:
      [00:12.340] Original
-     [00:12.340] » Traducao
-   O teste verifica que a linha de traducao (com prefixo ») aparece logo
-   apos a linha original e que seu timestamp e identico.
+     [00:12.340] Traducao
+   Sem marcador na traducao: o que a distingue e a ordem (original
+   primeiro). O teste verifica que a traducao aparece logo apos a linha
+   original e que seu timestamp e identico.
 
 2. TRADUCAO ANTES DO ORIGINAL: `combined.sort()` usava so x[0] (timestamp),
    entao a ordem de insercao de orig/trans era nao-deterministica dentro
@@ -34,7 +35,7 @@ BUGS QUE ESTES TESTES TRAVAM
 
 3. FUNCAO DUPLICADA EM TEST_LYRICS.PY: havia uma copia de
    `_build_bilingual_lrc` com comportamento LIGEIRAMENTE diferente no
-   arquivo de teste manual (usava `~|` em vez de `»`). Qualquer mudanca
+   arquivo de teste manual (usava marcador `~|`). Qualquer mudanca
    na funcao real nao refletia no teste -- e vice-versa.
 """
 
@@ -132,37 +133,33 @@ class TestBuildBilingualLrc:
         assert r is not None
 
     def test_original_aparece_antes_da_traducao_em_cada_par(self, build_bilingual):
-        """A linha original deve vir imediatamente antes da linha com o
-        prefixo ». Os dois usam o MESMO timestamp (sem offset); o teste
-        verifica que a diferenca e exatamente 0 ms."""
+        """A linha original deve vir imediatamente antes da traducao, com o
+        MESMO timestamp (diferenca de exatamente 0 ms)."""
         r = build_bilingual(ORIGINAL_SIMPLES, TRADUCAO_SIMPLES)
         linhas = r.splitlines()
+        marcas_traducao = ("Ol\u00e1", "Vim conversar")
+        achou = 0
         for i, linha in enumerate(linhas):
-            if "\u00bb" in linha and i > 0:
+            if any(m in linha for m in marcas_traducao) and i > 0:
+                achou += 1
                 tag_traducao = re.match(r"(\[\d{2,}:\d{2}\.\d{2,3}\])", linha)
                 tag_original = re.match(r"(\[\d{2,}:\d{2}\.\d{2,3}\])", linhas[i - 1])
                 assert tag_traducao and tag_original, (
                     f"linha de traducao ou anterior sem timestamp valido: {linha!r}"
                 )
-                ms_trad = _tag_to_ms(tag_traducao.group(1))
-                ms_orig = _tag_to_ms(tag_original.group(1))
-                diff = ms_trad - ms_orig
+                diff = _tag_to_ms(tag_traducao.group(1)) - _tag_to_ms(
+                    tag_original.group(1)
+                )
                 assert diff == 0, (
                     f"esperado o mesmo timestamp para original e traducao, "
-                    f"mas foi {diff} ms (original: {tag_original.group(1)}, "
-                    f"traducao: {tag_traducao.group(1)})"
+                    f"mas foi {diff} ms"
                 )
+                assert "Hello" in linhas[i - 1] or "I have" in linhas[i - 1]
+        assert achou == 2
 
-    def test_prefixo_de_traducao_presente(self, build_bilingual):
+    def test_traducao_nao_tem_marcador(self, build_bilingual):
         r = build_bilingual(ORIGINAL_SIMPLES, TRADUCAO_SIMPLES)
-        linhas_com_traducao = [l for l in r.splitlines() if "\u00bb" in l]
-        assert len(linhas_com_traducao) == 2
-
-    def test_linhas_originais_sem_prefixo(self, build_bilingual):
-        r = build_bilingual(ORIGINAL_SIMPLES, TRADUCAO_SIMPLES)
-        for linha in r.splitlines():
-            if "\u00bb" not in linha:
-                assert "Hello" in linha or "I have" in linha or not linha.strip()
+        assert "\u00bb" not in r
 
     def test_numero_total_de_linhas(self, build_bilingual):
         """2 pares original+traducao = 4 linhas."""
@@ -197,7 +194,7 @@ class TestBuildBilingualLrc:
         traducao = "[00:12.340] Linha 1 PT"
         r = build_bilingual(original, traducao)
         assert "So no original" in r
-        assert "\u00bb" not in [l for l in r.splitlines() if "So no original" in l][0]
+        assert "\u00bb" not in r
 
     def test_timestamps_com_2_casas_decimais_aceitos(self, build_bilingual):
         """O Qobuz as vezes retorna [MM:SS.mm] com 2 digitos."""

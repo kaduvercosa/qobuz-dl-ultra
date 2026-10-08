@@ -337,3 +337,44 @@ def test_track_number_prefixa_saida(monkeypatch):
     eng.session.get.return_value = _resp(status=404)
     _run(eng, track_number=7)
     assert saidas and all("[7]" in s for s in saidas)
+
+
+# ---------------------------------------------------------------------------
+# Registro de fontes (LyricsEngine.PROVIDERS)
+# ---------------------------------------------------------------------------
+
+
+def test_fonte_nova_entra_pela_tupla_providers():
+    eng = _engine()
+    eng.PROVIDERS = ("_provider_nova",) + LyricsEngine.PROVIDERS
+    eng._provider_nova = lambda query: le.LyricsCandidate(SYNC, "NovaFonte", True)
+    r = _run(eng)
+    assert r["success"] and r["source"] == "NovaFonte" and r["synchronized"]
+    # a fonte nova veio antes: as seguintes nem são consultadas
+    eng.extract_qobuz_lyrics.assert_not_called()
+
+
+def test_fonte_com_erro_nao_bloqueia_as_seguintes():
+    eng = _engine()
+    eng.PROVIDERS = ("_provider_quebrada", "_provider_lrclib")
+
+    def quebrada(query):
+        raise RuntimeError("fora do ar")
+
+    eng._provider_quebrada = quebrada
+    eng.session.get.return_value = _resp({"syncedLyrics": SYNC})
+    r = _run(eng)
+    assert r["success"] and r["source"] == "LRCLIB" and r["error"] is None
+
+
+def test_falha_ao_gravar_imprime_mensagem_de_erro(monkeypatch):
+    saidas = []
+    monkeypatch.setattr(le.tqdm, "write", lambda m: saidas.append(m))
+    eng = _engine()
+    eng._inject_metadata.return_value = False
+    eng._save_lrc_file.return_value = False
+    eng._fetch_musixmatch_lyrics.return_value = SYNC
+    r = _run(eng)
+    assert r["success"] is False and r["source"] is None
+    assert any("Falha ao gravar" in s for s in saidas)
+    assert not any("injetadas" in s for s in saidas)

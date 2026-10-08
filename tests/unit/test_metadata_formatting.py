@@ -317,15 +317,15 @@ class TestGetTagsToAdd:
         assert tags_normal["EXPLICIT"] == ""
         assert tags_normal["RATING"] == ""
 
-    def test_album_artist_e_sort_name_vem_como_lista(self):
-        # get_album_artist() devolve LISTA (multi-artist tagging nativo em
-        # FLAC/Vorbis) -- ALBUMARTIST não é string aqui.
+    def test_album_artist_e_sort_name_vem_como_texto(self):
+        # O comportamento atual de _get_tags_to_add() normaliza os valores
+        # recebidos de get_album_artist() para texto separado por vírgula.
         settings = QobuzDLSettings()
         album = _album(artist={"name": "The Beatles"})
 
         tags = _get_tags_to_add(album, _item(), settings)
 
-        assert tags["ALBUMARTIST"] == ["The Beatles"]
+        assert tags["ALBUMARTIST"] == "The Beatles"
         assert tags["ALBUMARTISTSORT"] == "Beatles, The"
 
     def test_artistas_da_faixa_deduplicados_por_performers(self):

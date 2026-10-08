@@ -365,3 +365,30 @@ class TestFetchQobuzLyricsRaw:
         await fetch_qobuz_lyrics_raw(client, "track123", language="en")
         params_enviados = client.session.request.call_args.kwargs["params"]
         assert params_enviados["language"] == "en"
+
+
+class TestDeteccaoDeTraducaoSemMarcador:
+    """Original e tradução têm o mesmo timestamp e nenhum símbolo na linha."""
+
+    def test_versos_diferentes_no_mesmo_timestamp_sao_bilingue(self):
+        from qobuz_dl.retro_tagger import _has_repeated_timestamp
+
+        lrc = "[00:12.500]First\n[00:12.500]Primeira\n[00:16.200]Second"
+        assert _has_repeated_timestamp(lrc) is True
+
+    def test_letra_so_original_nao_e_bilingue(self):
+        from qobuz_dl.retro_tagger import _has_repeated_timestamp
+
+        lrc = "[00:12.500]First\n[00:16.200]Second\n[00:20.000]• • •"
+        assert _has_repeated_timestamp(lrc) is False
+
+    def test_linha_identica_repetida_nao_conta(self):
+        from qobuz_dl.retro_tagger import _has_repeated_timestamp
+
+        assert _has_repeated_timestamp("[00:12.500]La la\n[00:12.500]La la") is False
+
+    def test_entrada_vazia(self):
+        from qobuz_dl.retro_tagger import _has_repeated_timestamp
+
+        assert _has_repeated_timestamp("") is False
+        assert _has_repeated_timestamp(None) is False

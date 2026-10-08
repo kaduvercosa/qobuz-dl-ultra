@@ -150,51 +150,58 @@ def _align_text(text, width):
     return text + " " * (width - current_w)
 
 
+# Largura mínima útil (em caracteres) da coluna de texto livre ("flex") de
+# cada categoria. Se, depois de reservar as colunas fixas, sobrar menos que
+# isso, a tela é estreita demais pra tabela e a TUI cai no modo cartão --
+# melhor um cartão legível do que uma tabela com título de 8 caracteres.
+_MIN_FLEX = {"album": 34, "track": 36, "playlist": 28, "artist": 20}
+
+# Soma das colunas fixas + separadores " │ " de cada categoria.
+_FIXED_W = {
+    "album": 12 + 4 + 6 + 12 + 5 * 3,
+    "track": 12 + 10 + 12 + 5 * 3,
+    "playlist": 6 + 10 + 3 * 3,
+    "artist": 15 + 1 * 3,
+}
+
+
 def _get_table_layout(columns, is_multi, item_category):
-    """Decide se a tela é larga o bastante pra mostrar uma TABELA (>=78
-    colunas) ou se deve cair no modo "cartão" (mais compacto, usado em
-    telas estreitas/celular). Também calcula a largura de cada coluna com
-    base no espaço disponível e desenha as bordas ┌─┬─┐ / ├─┼─┤ / └─┴─┘.
+    """Decide se a tela é larga o bastante pra mostrar uma TABELA ou se deve
+    cair no modo "cartão" (mais compacto, usado em telas estreitas/celular).
+    A decisão é por categoria: a tabela só aparece quando a coluna de texto
+    livre (título/nome) fica com pelo menos `_MIN_FLEX[categoria]` caracteres
+    (em torno de 90 colunas para álbuns/faixas, 60 para playlists e 45 para
+    artistas). Também calcula a largura de cada coluna com base no espaço
+    disponível e desenha as bordas ┌─┬─┐ / ├─┼─┤ / └─┴─┘.
 
     Retorna: (is_table, larguras_das_colunas, cabeçalhos, bordas_prontas)
     Se a tela for estreita ou item_category == "filter" (menus simples de
     sim/não), retorna is_table=False e o restante vazio.
 
-    Para adicionar uma nova categoria de item na TUI: seguir o padrão dos
-    blocos elif abaixo (album/track/playlist/artist), definindo larguras
-    fixas + "flex" pra coluna de texto livre (título/nome).
+    Para adicionar uma nova categoria de item na TUI: incluir a categoria em
+    `_MIN_FLEX` e `_FIXED_W` e seguir o padrão dos blocos elif abaixo,
+    definindo larguras fixas + "flex" pra coluna de texto livre.
     """
-    is_table = columns >= 78
-    if not is_table or item_category == "filter":
+    if item_category not in _MIN_FLEX:
         return False, [], [], {}
 
     prefix_len = 5 if is_multi else 3
     # Overhead fixo por linha (fora do prefixo e das larguras de coluna):
-    # "│ " no início + " │" no fim = 4 caracteres. Antes este valor estava
-    # como 6, dois a mais que o real, fazendo a tabela inteira (bordas e
-    # linhas) terminar 2 colunas antes do fim do terminal. Como add_line()
-    # sempre preenche o resto da linha até `columns` com o estilo de
-    # destaque quando a linha está "hovered", essas 2 colunas sobrando
-    # ficavam pintadas com a cor de seleção *depois* do "│" direito,
-    # dando a impressão de que a borda da tabela "vazava" ou terminava
-    # no lugar errado.
+    # "│ " no início + " │" no fim = 4 caracteres. Descontar exatamente isso
+    # faz a tabela terminar na última coluna do terminal; com valor maior, o
+    # fundo de destaque da linha selecionada "vazava" depois do "│" direito.
     safe_columns = columns - prefix_len - 4
+    flex = safe_columns - _FIXED_W[item_category]
+    if flex < _MIN_FLEX[item_category]:
+        return False, [], [], {}
 
     if item_category == "album":
-        fixed_cols_w = 12 + 4 + 6 + 12
-        separators = 5 * 3
-        fixed = fixed_cols_w + separators
-        flex = max(10, safe_columns - fixed)
         w_tit = int(flex * 0.55)
         w_art = flex - w_tit
         widths = [w_tit, w_art, 12, 4, 6, 12]
         headers = ["ÁLBUM", "ARTISTA", "TIPO", "ANO", "FAIXAS", "QUALIDADE"]
 
     elif item_category == "track":
-        fixed_cols_w = 12 + 10 + 12
-        separators = 5 * 3
-        fixed = fixed_cols_w + separators
-        flex = max(15, safe_columns - fixed)
         w_tit = int(flex * 0.40)
         w_art = int(flex * 0.30)
         w_alb = flex - w_tit - w_art
@@ -202,29 +209,18 @@ def _get_table_layout(columns, is_multi, item_category):
         headers = ["FAIXA", "ARTISTA", "ÁLBUM", "TIPO", "DURAÇÃO", "QUALIDADE"]
 
     elif item_category == "playlist":
-        fixed_cols_w = 6 + 10
-        separators = 3 * 3
-        fixed = fixed_cols_w + separators
-        flex = max(10, safe_columns - fixed)
         w_nom = int(flex * 0.60)
         w_own = flex - w_nom
         widths = [w_nom, w_own, 6, 10]
         headers = ["NOME DA PLAYLIST", "CRIADOR", "FAIXAS", "DURAÇÃO"]
 
-    elif item_category == "artist":
-        fixed_cols_w = 15
-        separators = 1 * 3
-        fixed = fixed_cols_w + separators
-        flex = max(10, safe_columns - fixed)
+    else:  # artist
         widths = [flex, 15]
         headers = ["NOME DO ARTISTA", "LANÇAMENTOS"]
 
-    else:
-        return False, [], [], {}
-
-    top_border = "+-" + "-+-".join("-" * w for w in widths) + "-+"
-    mid_border = "+-" + "-+-".join("-" * w for w in widths) + "-+"
-    bot_border = "+-" + "-+-".join("-" * w for w in widths) + "-+"
+    top_border = "┌─" + "─┬─".join("─" * w for w in widths) + "─┐"
+    mid_border = "├─" + "─┼─".join("─" * w for w in widths) + "─┤"
+    bot_border = "└─" + "─┴─".join("─" * w for w in widths) + "─┘"
 
     return (
         True,

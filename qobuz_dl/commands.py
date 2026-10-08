@@ -509,6 +509,16 @@ def add_common_arg(custom_parser, default_folder, default_quality):
         help="não embute letras nas tags do arquivo de áudio (salva apenas como .lrc/.txt)",
     )
     custom_parser.add_argument(
+        "--lyrics-word-sync",
+        dest="lyrics_word_sync",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help=(
+            "grava letras sincronizadas por palavra (LRC estendido) quando a "
+            "fonte oferece (BiniLyrics); a maioria dos players só lê por linha"
+        ),
+    )
+    custom_parser.add_argument(
         "--multi-tags",
         dest="multi_value_tags",
         action="store_true",
