@@ -66,7 +66,12 @@ def box_enabled(environ=None) -> bool:
     (QOBUZ_DL_SIMPLE_PROMPT=1) ou durante os testes (pytest define
     PYTEST_CURRENT_TEST e os testes trocam o PromptSession por um falso)."""
     env = os.environ if environ is None else environ
-    if str(env.get(SIMPLE_PROMPT_ENV, "")).strip().lower() in {"1", "true", "yes", "on"}:
+    if str(env.get(SIMPLE_PROMPT_ENV, "")).strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }:
         return False
     return "PYTEST_CURRENT_TEST" not in env
 
@@ -165,10 +170,12 @@ def _build_application(kind: str):
         [frame],
         width=Dimension(preferred=width, max=width),
     )
-    root = HSplit([
-        Window(height=Dimension.exact(0)),
-        box,
-    ])
+    root = HSplit(
+        [
+            Window(height=Dimension.exact(0)),
+            box,
+        ]
+    )
 
     bindings = KeyBindings()
 
@@ -189,7 +196,6 @@ def _build_application(kind: str):
             "prompt_text": "bg:default fg:default",
             "prompt_hint": "bg:default fg:#808080",
             "prompt_cursor": f"bg:default fg:{_hex_accent} bold",
-
             # A cor escolhida no config.ini fica apenas na moldura e título
             "frame.border": f"bg:default fg:{_hex_accent} bold",
             "frame.label": f"bg:default fg:{_hex_accent} bold",

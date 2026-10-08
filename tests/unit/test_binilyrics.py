@@ -57,7 +57,9 @@ def cand(isrc, name, album, dur, timing, artist="Emicida"):
     }
 
 
-STUDIO = cand("BRX6F1900014", "Amarelo (feat. Pabllo Vittar & Majur)", "AmarElo", 321, "word")
+STUDIO = cand(
+    "BRX6F1900014", "Amarelo (feat. Pabllo Vittar & Majur)", "AmarElo", 321, "word"
+)
 LIVE = cand(
     "BRX6F2100060",
     "AmarElo (Sample: Sujeito de Sorte - Belchior) [Ao Vivo]",
@@ -123,7 +125,9 @@ def test_faixa_ao_vivo_nao_casa_com_a_de_estudio():
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("dur_candidato,aceita", [(323, True), (325, True), (338, False)])
+@pytest.mark.parametrize(
+    "dur_candidato,aceita", [(323, True), (325, True), (338, False)]
+)
 def test_tolerancia_de_duracao(dur_candidato, aceita):
     c = cand("ISRC1", "Song", "Alb", dur_candidato, "line")
     r = bl.select_candidate([c], title="Song", artist="Emicida", duration=321)
@@ -135,14 +139,18 @@ def test_mesma_gravacao_prefere_word_depois_line_depois_plain():
     a = cand("A", "Song", "Alb", 200, "plain")
     b = cand("B", "Song", "Alb", 200, "line")
     c = cand("C", "Song", "Alb", 200, "word")
-    r = bl.select_candidate([a, b, c], title="Song", artist="Emicida", album="Alb", duration=200)
+    r = bl.select_candidate(
+        [a, b, c], title="Song", artist="Emicida", album="Alb", duration=200
+    )
     assert r is c
 
 
 @pytest.mark.unit
 def test_artista_diferente_e_rejeitado():
     c = cand("A", "Song", "Alb", 200, "word", artist="Outra Banda")
-    assert bl.select_candidate([c], title="Song", artist="Emicida", duration=200) is None
+    assert (
+        bl.select_candidate([c], title="Song", artist="Emicida", duration=200) is None
+    )
 
 
 @pytest.mark.unit
@@ -364,6 +372,8 @@ def test_provider_ttml_invalido_nao_derruba_as_outras_fontes():
 
 @pytest.mark.unit
 def test_binilyrics_esta_no_registro_depois_do_qobuz():
-    assert LyricsEngine.PROVIDERS.index("_provider_qobuz") < LyricsEngine.PROVIDERS.index(
-        "_provider_binilyrics"
-    ) < LyricsEngine.PROVIDERS.index("_provider_musixmatch")
+    assert (
+        LyricsEngine.PROVIDERS.index("_provider_qobuz")
+        < LyricsEngine.PROVIDERS.index("_provider_binilyrics")
+        < LyricsEngine.PROVIDERS.index("_provider_musixmatch")
+    )

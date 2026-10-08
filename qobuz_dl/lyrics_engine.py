@@ -529,7 +529,9 @@ class LyricsEngine:
                 self.settings, "lyrics_word_sync", False
             )
             text = (
-                binilyrics.to_word_lrc(doc) if use_words else binilyrics.to_line_lrc(doc)
+                binilyrics.to_word_lrc(doc)
+                if use_words
+                else binilyrics.to_line_lrc(doc)
             )
             if trans_lang:
                 trans = binilyrics.translation_lrc(doc, trans_lang)
@@ -612,9 +614,7 @@ class LyricsEngine:
         kind = "sincronizadas" if candidate.synchronized else "padrão"
         ext = ".lrc" if candidate.synchronized else ".txt"
         if not ok:
-            return (
-                f" {RED}❌ Falha ao gravar letras {kind} ({candidate.source}){RESET}"
-            )
+            return f" {RED}❌ Falha ao gravar letras {kind} ({candidate.source}){RESET}"
         if embed_lyrics and save_lrc:
             action = f"injetadas e salvas em {ext}"
         elif save_lrc:

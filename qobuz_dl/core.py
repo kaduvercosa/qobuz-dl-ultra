@@ -34,10 +34,7 @@ try:
     from prompt_toolkit.layout.layout import Layout
     from prompt_toolkit.utils import get_cwidth
 except ImportError as exc:
-    sys.exit(
-        "Erro ao importar um componente de prompt_toolkit: "
-        f"{exc}"
-    )
+    sys.exit(f"Erro ao importar um componente de prompt_toolkit: {exc}")
 
 import qobuz_dl.postprocess as postprocess
 from qobuz_dl import downloader, qopy, ui
@@ -276,9 +273,7 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
         table_columns = max(40, columns - 2)
 
         is_table, widths, headers, borders = _get_table_layout(
-            table_columns,
-            is_multi,
-            item_category
+            table_columns, is_multi, item_category
         )
 
         prefix_len = 5 if is_multi else 3
@@ -299,9 +294,7 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
                 else:
                     res.append(("class:meta", " │\n"))
 
-            res.append(
-                ("class:meta", hdr_pref + borders["mid"])
-            )
+            res.append(("class:meta", hdr_pref + borders["mid"]))
 
         return res
 
@@ -333,9 +326,7 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
         table_columns = max(40, columns - 2)
 
         is_table, widths, headers, borders = _get_table_layout(
-            table_columns,
-            is_multi,
-            item_category
+            table_columns, is_multi, item_category
         )
         res = []
 
@@ -940,10 +931,7 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
     )
 
     list_window = Window(
-            content=FormattedTextControl(
-            text=get_list_text,
-            focusable=True
-        ),
+        content=FormattedTextControl(text=get_list_text, focusable=True),
         # No modo tabela a rolagem é feita em get_list_text (fatia de itens),
         # então o Window não deve aplicar margens próprias.
         scroll_offsets=ScrollOffsets(
@@ -957,14 +945,12 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
         try:
             columns = get_app().output.get_size().columns
         except Exception:
-            columns, _ = shutil.get_terminal_size((80,24))
+            columns, _ = shutil.get_terminal_size((80, 24))
 
         table_columns = max(40, columns - 2)
 
         is_table, widths, headers, borders = _get_table_layout(
-            table_columns,
-            is_multi,
-            item_category
+            table_columns, is_multi, item_category
         )
 
         if not is_table:
@@ -973,9 +959,7 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
         prefix_len = 5 if is_multi else 3
         prefix = " " * prefix_len
 
-        return [
-            ("class:meta", prefix + borders["bot"])
-        ]
+        return [("class:meta", prefix + borders["bot"])]
 
     table_bottom_window = Window(
         content=FormattedTextControl(text=get_table_bottom_text),
@@ -989,20 +973,17 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
         height=Dimension.exact(_FOOTER_LINES),
     )
 
-
     def _table_is_active() -> bool:
         """Avalia a cada redesenho se a tela comporta o layout em tabela"""
         try:
             columns = get_app().output.get_size().columns
         except Exception:
-            columns, _ = shutil.get_terminal_size((80,24))
+            columns, _ = shutil.get_terminal_size((80, 24))
 
         table_columns = max(40, columns - 2)
 
         table_enabled, _, _, _ = _get_table_layout(
-            table_columns,
-            is_multi,
-            item_category
+            table_columns, is_multi, item_category
         )
 
         return bool(table_enabled)
@@ -1333,13 +1314,15 @@ class QobuzDL:
             # completos). Itens sem dado de gravadora ficam e são conferidos
             # de novo no download. Roda antes do smart_discography, que então
             # escolhe a melhor versão entre os lançamentos da gravadora pedida.
-            filter_label = getattr(getattr(self, "settings", None), "filter_label", None)
+            filter_label = getattr(
+                getattr(self, "settings", None), "filter_label", None
+            )
             if filter_label and url_type == "artist":
                 total, matching = filter_chunks_by_label(
                     content, type_dict["iterable_key"], filter_label
                 )
                 logger.info(
-                    f'{YELLOW}[*] Filtro de gravadora: {matching} de {total} '
+                    f"{YELLOW}[*] Filtro de gravadora: {matching} de {total} "
                     f'lançamentos casam com "{filter_label}"{OFF}'
                 )
 
@@ -1997,7 +1980,9 @@ class QobuzDL:
                 )
 
             # --sort-date: mais novos primeiro (só álbuns/faixas, inclusive nos favoritos)
-            if getattr(getattr(self, "settings", None), "interactive_sort_date", False) and (
+            if getattr(
+                getattr(self, "settings", None), "interactive_sort_date", False
+            ) and (
                 item_type in ("album", "track")
                 or (item_type == "favorites" and fav_subtype in ("albums", "tracks"))
             ):

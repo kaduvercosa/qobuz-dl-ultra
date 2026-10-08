@@ -86,14 +86,18 @@ def test_rotulo_chega_traduzido_ao_construir_a_caixa():
 def test_cancelar_propaga_como_no_prompt_antigo(erro):
     with pytest.raises(erro):
         asyncio.run(
-            sp.ask_query("Tracks", _fallback, build_app=lambda k: _AppFalso(erro=erro()))
+            sp.ask_query(
+                "Tracks", _fallback, build_app=lambda k: _AppFalso(erro=erro())
+            )
         )
 
 
 @pytest.mark.unit
 def test_erro_ao_desenhar_cai_no_prompt_simples():
     out = asyncio.run(
-        sp.ask_query("Tracks", _fallback, build_app=lambda k: _AppFalso(erro=RuntimeError("x")))
+        sp.ask_query(
+            "Tracks", _fallback, build_app=lambda k: _AppFalso(erro=RuntimeError("x"))
+        )
     )
     assert out == "via fallback"
 

@@ -49,7 +49,7 @@ DISPLAY_JOINED_FIELDS = {
     "COMPOSER": "COMPOSERS",
     "GENRE": "GENRES",
     "ARTISTSORT": "ARTISTSORTS",
-    "ALBUMARTISTSORT": "ALBUMARTISTSORTS"
+    "ALBUMARTISTSORT": "ALBUMARTISTSORTS",
 }
 
 
@@ -712,9 +712,7 @@ def _get_tags_to_add(
     if not settings.no_album_artist_tag:
         _albumartist_values = get_album_artist(qobuz_album)
         _albumartist_text = ", ".join(
-            str(value).strip()
-            for value in _albumartist_values
-            if str(value).strip()
+            str(value).strip() for value in _albumartist_values if str(value).strip()
         )
         tags["ALBUMARTIST"] = _albumartist_text
         tags["ALBUMARTISTSORT"] = ", ".join(

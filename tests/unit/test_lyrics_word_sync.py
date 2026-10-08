@@ -140,9 +140,7 @@ def test_dicas_de_flac(monkeypatch):
 @pytest.mark.unit
 def test_dicas_de_mp3(monkeypatch):
     frame = SimpleNamespace(text=["USUM71607007"])
-    audio = SimpleNamespace(
-        tags={"TSRC": frame}, info=SimpleNamespace(length=229.0)
-    )
+    audio = SimpleNamespace(tags={"TSRC": frame}, info=SimpleNamespace(length=229.0))
     monkeypatch.setattr(retro_tagger, "MP3", lambda path: audio)
     assert retro_tagger._lyrics_lookup_hints("/m/a.mp3") == {
         "isrc": "USUM71607007",
