@@ -4,6 +4,7 @@
 # # ============================================================================
 import os
 
+from qobuz_dl.utils import normalize_label_filter
 from qobuz_dl.constants import (
     DEFAULT_FOLDER,
     DEFAULT_MULTIPLE_DISC_TRACK,
@@ -70,6 +71,10 @@ class QobuzDLSettings:
         )
         self.track_format = kwargs.get("track_format")
         self.smart_discography = kwargs.get("smart_discography", False)
+        # --filter-label: só baixa lançamentos desta gravadora (nome ou ID).
+        self.filter_label = kwargs.get("filter_label")
+        # --sort-date / interactive_sort_date: busca interativa do mais novo ao mais antigo.
+        self.interactive_sort_date = kwargs.get("interactive_sort_date", False)
         self.dry_run = kwargs.get("dry_run", False)
         self.tag_only = kwargs.get("tag_only", False)
         self.musicbrainz = kwargs.get("musicbrainz", False)
@@ -185,6 +190,14 @@ class QobuzDLSettings:
             or config.get(section, "track_format", fallback=DEFAULT_TRACK),
             "smart_discography": getattr(arguments, "smart_discography", False)
             or config.getboolean(section, "smart_discography", fallback=False),
+            "filter_label": normalize_label_filter(
+                getattr(arguments, "filter_label", None)
+            ),
+            "interactive_sort_date": _merge_bool_opt_in(
+                arguments,
+                "sort_date",
+                config.getboolean(section, "interactive_sort_date", fallback=False),
+            ),
             "dry_run": getattr(arguments, "dry_run", False),
             "tag_only": getattr(arguments, "tag_only", False),
             "musicbrainz": getattr(arguments, "musicbrainz", False),

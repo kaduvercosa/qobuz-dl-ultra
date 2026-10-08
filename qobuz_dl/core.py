@@ -24,13 +24,19 @@ try:
     from prompt_toolkit.application.current import get_app
     from prompt_toolkit.formatted_text import FormattedText
     from prompt_toolkit.key_binding import KeyBindings
-    from prompt_toolkit.layout.containers import HSplit, ScrollOffsets, Window
+    from prompt_toolkit.layout.containers import (
+        HSplit,
+        ScrollOffsets,
+        Window,
+    )
     from prompt_toolkit.layout.controls import FormattedTextControl
+    from prompt_toolkit.layout.dimension import Dimension
     from prompt_toolkit.layout.layout import Layout
     from prompt_toolkit.utils import get_cwidth
-except ImportError:
+except ImportError as exc:
     sys.exit(
-        "Erro: Por favor, instale o prompt_toolkit executando: pip install prompt_toolkit"
+        "Erro ao importar um componente de prompt_toolkit: "
+        f"{exc}"
     )
 
 import qobuz_dl.postprocess as postprocess
@@ -48,7 +54,9 @@ from qobuz_dl.utils import (
     format_duration,
     get_url_info,
     make_m3u,
+    filter_chunks_by_label,
     smart_discography_filter,
+    sort_by_release_date,
 )
 
 HEADER_STAGGER_DELAY = 1.5
@@ -245,6 +253,15 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
     def _(event):
         event.app.exit(exception=KeyboardInterrupt)
 
+    # Linhas fixas fora da lista: cabeçalho = linha em branco + título +
+    # ┌─┬─┐ + títulos das colunas + ├─┼─┤ (5 linhas); rodapé = 3 linhas no
+    # modo multi (Item / Selecionados / atalhos) e 2 nos demais.
+    _HEADER_LINES = 5
+    _FOOTER_LINES = 3 if is_multi else 2
+    # Primeiro item visível no modo TABELA (guardado entre redesenhos pra
+    # a rolagem ser estável, sem "pular" a cada tecla).
+    view = {"top": 0}
+
     def get_header_text():
         # Desenha o título + (se a tela for larga o bastante) o cabeçalho
         # da tabela com as bordas superiores ┌─┬─┐. Recalculado a cada
@@ -256,27 +273,35 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
         except Exception:
             columns, _ = shutil.get_terminal_size((80, 24))
 
+        table_columns = max(40, columns - 2)
+
         is_table, widths, headers, borders = _get_table_layout(
-            columns, is_multi, item_category
+            table_columns,
+            is_multi,
+            item_category
         )
 
         prefix_len = 5 if is_multi else 3
         hdr_pref = " " * prefix_len
 
-        res = [("class:title", f"\n === {title} ===\n\n")]
+        res = [("class:title", f"\n === {title} ===\n")]
 
         if is_table:
             res.append(("class:meta", hdr_pref + borders["top"] + "\n"))
 
             res.append(("class:meta", hdr_pref + "│ "))
+
             for idx, (h, w) in enumerate(zip(headers, widths)):
                 res.append(("class:table_header", _align_text(h, w)))
+
                 if idx < len(headers) - 1:
                     res.append(("class:meta", " │ "))
                 else:
                     res.append(("class:meta", " │\n"))
 
-            res.append(("class:meta", hdr_pref + borders["mid"]))
+            res.append(
+                ("class:meta", hdr_pref + borders["mid"])
+            )
 
         return res
 
@@ -305,8 +330,12 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
         except Exception:
             columns, _ = shutil.get_terminal_size((80, 24))
 
+        table_columns = max(40, columns - 2)
+
         is_table, widths, headers, borders = _get_table_layout(
-            columns, is_multi, item_category
+            table_columns,
+            is_multi,
+            item_category
         )
         res = []
 
@@ -410,7 +439,43 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
             final_fragments.append((border_st, f" {vt}\n"))
             res.extend(final_fragments)
 
-        for i, opt in enumerate(options_dicts):
+        # MODO TABELA: em vez de deixar o Window rolar por linhas (o que
+        # cortava a tabela no meio -- uma linha ├─┼─┤ sobrando embaixo do
+        # cabeçalho e a última linha sem borda), calculamos aqui quantos
+        # itens cabem (cada item = 1 linha de dados + 1 de borda) e
+        # desenhamos só essa fatia. A última borda da fatia é sempre └─┴─┘,
+        # então a tabela fica sempre fechada e o conteúdo nunca passa da
+        # altura da janela (o Window não precisa rolar).
+        if is_table:
+            try:
+                term_rows = get_app().output.get_size().rows
+            except Exception:
+                _, term_rows = shutil.get_terminal_size((80, 24))
+            info = list_window.render_info
+            avail = (
+                info.window_height
+                if info is not None and info.window_height > 0
+                else term_rows - _HEADER_LINES - _FOOTER_LINES
+            )
+            n_items = len(options_dicts)
+            k = max(1, avail // 2)
+            margin = 1 if k >= 3 else 0
+            top = view["top"]
+            if cursor_pos < top + margin:
+                top = cursor_pos - margin
+            elif cursor_pos > top + k - 1 - margin:
+                top = cursor_pos - k + 1 + margin
+            top = max(0, min(top, max(0, n_items - k)))
+            view["top"] = top
+            visible = range(top, min(n_items, top + k))
+            # O Window guarda a rolagem anterior e pode não zerar sozinho
+            # quando o conteúdo passa a caber; como a fatia já cabe, força 0.
+            list_window.vertical_scroll = 0
+        else:
+            visible = range(len(options_dicts))
+
+        for i in visible:
+            opt = options_dicts[i]
             hovered = i == cursor_pos
             checked = i in selected_indices
 
@@ -814,17 +879,9 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
                 hz = "━" if checked else "─"
                 res.append((border_st, f" {bot_l}{hz * (inner_w + 2)}{bot_r}\n"))
             else:
-                if i < len(options_dicts) - 1:
-                    empty_prefix = " " * len(prefix)
-                    add_line(
-                        [("class:meta", empty_prefix + borders["mid"])], fill_bg=False
-                    )
-
-        if is_table and options_dicts:
-            table_prefix = " " * (5 if is_multi else 3)
-            res.append(
-                ("class:meta", table_prefix + borders["bot"] + "\n")
-            )
+                empty_prefix = " " * len(prefix)
+                edge = borders["bot"] if i == visible[-1] else borders["mid"]
+                add_line([("class:meta", empty_prefix + edge)], fill_bg=False)
 
         if not is_table:
             res.append(("", " \n" * 8))
@@ -844,11 +901,9 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
             columns, _ = shutil.get_terminal_size((80, 24))
 
         is_table, widths, headers, borders = _get_table_layout(
-            columns, is_multi, item_category
+            max(40, columns - 2), is_multi, item_category
         )
         res = []
-
-        res.append(("", "\n"))
 
         if options_dicts:
             res.append(
@@ -884,33 +939,91 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
         content=FormattedTextControl(text=get_header_text), dont_extend_height=True
     )
 
-    # Offset bottom=8 força a câmera a subir toda a expansão do cartão
     list_window = Window(
-        content=FormattedTextControl(text=get_list_text, focusable=True),
-        scroll_offsets=ScrollOffsets(top=2, bottom=8),
+            content=FormattedTextControl(
+            text=get_list_text,
+            focusable=True
+        ),
+        # No modo tabela a rolagem é feita em get_list_text (fatia de itens),
+        # então o Window não deve aplicar margens próprias.
+        scroll_offsets=ScrollOffsets(
+            top=lambda: 0 if _table_is_active() else 1,
+            bottom=lambda: 0 if _table_is_active() else 2,
+        ),
         wrap_lines=False,
     )
 
-    footer_window = Window(
-        content=FormattedTextControl(text=get_footer_text), dont_extend_height=True
+    def get_table_bottom_text():
+        try:
+            columns = get_app().output.get_size().columns
+        except Exception:
+            columns, _ = shutil.get_terminal_size((80,24))
+
+        table_columns = max(40, columns - 2)
+
+        is_table, widths, headers, borders = _get_table_layout(
+            table_columns,
+            is_multi,
+            item_category
+        )
+
+        if not is_table:
+            return []
+
+        prefix_len = 5 if is_multi else 3
+        prefix = " " * prefix_len
+
+        return [
+            ("class:meta", prefix + borders["bot"])
+        ]
+
+    table_bottom_window = Window(
+        content=FormattedTextControl(text=get_table_bottom_text),
+        dont_extend_height=True,
+        height=Dimension.exact(1),
     )
+
+    footer_window = Window(
+        content=FormattedTextControl(text=get_footer_text),
+        dont_extend_height=True,
+        height=Dimension.exact(_FOOTER_LINES),
+    )
+
+
+    def _table_is_active() -> bool:
+        """Avalia a cada redesenho se a tela comporta o layout em tabela"""
+        try:
+            columns = get_app().output.get_size().columns
+        except Exception:
+            columns, _ = shutil.get_terminal_size((80,24))
+
+        table_columns = max(40, columns - 2)
+
+        table_enabled, _, _, _ = _get_table_layout(
+            table_columns,
+            is_multi,
+            item_category
+        )
+
+        return bool(table_enabled)
 
     # Monta a tela cheia (header + lista rolável + rodapé) e bloqueia
     # aqui até o usuário confirmar (Enter) ou cancelar (Ctrl+C).
-    layout = Layout(HSplit([header_window, list_window, footer_window]))
+    layout = Layout(
+        HSplit(
+            [
+                header_window,
+                list_window,
+                footer_window,
+            ]
+        )
+    )
+
     app = Application(
         layout=layout,
         key_bindings=bindings,
         full_screen=True,
         style=pt_style,
-        # mouse_support habilita rolagem com mouse/trackpad/scroll de duas
-        # dedos (útil com Magic Keyboard/trackpad no iPad, e em terminais
-        # desktop). NOTA: isso NÃO adiciona "toque pra selecionar" em cada
-        # linha -- pra isso seria preciso anexar um mouse_handler a cada
-        # fragmento de texto em get_list_text(), o que não foi feito aqui
-        # (mudança maior, deixada de fora por enquanto pra não arriscar
-        # quebrar o desenho das linhas). Selecionar continua sendo por
-        # teclado: setas/j-k, dígitos 1-9, espaço, enter.
         mouse_support=True,
     )
 
@@ -1214,6 +1327,21 @@ class QobuzDL:
             new_path = create_and_return_dir(
                 os.path.join(self.directory, sanitize_filename(content_name))
             )
+
+            # --- --filter-label: descarta, já na listagem do artista, os
+            # lançamentos de outras gravadoras (antes de buscar os metadados
+            # completos). Itens sem dado de gravadora ficam e são conferidos
+            # de novo no download. Roda antes do smart_discography, que então
+            # escolhe a melhor versão entre os lançamentos da gravadora pedida.
+            filter_label = getattr(getattr(self, "settings", None), "filter_label", None)
+            if filter_label and url_type == "artist":
+                total, matching = filter_chunks_by_label(
+                    content, type_dict["iterable_key"], filter_label
+                )
+                logger.info(
+                    f'{YELLOW}[*] Filtro de gravadora: {matching} de {total} '
+                    f'lançamentos casam com "{filter_label}"{OFF}'
+                )
 
             if self.smart_discography and url_type == "artist":
                 items = smart_discography_filter(
@@ -1867,6 +1995,13 @@ class QobuzDL:
                     if isinstance(results, dict)
                     else []
                 )
+
+            # --sort-date: mais novos primeiro (só álbuns/faixas, inclusive nos favoritos)
+            if getattr(getattr(self, "settings", None), "interactive_sort_date", False) and (
+                item_type in ("album", "track")
+                or (item_type == "favorites" and fav_subtype in ("albums", "tracks"))
+            ):
+                iterable = sort_by_release_date(iterable)
 
             item_list = []
 

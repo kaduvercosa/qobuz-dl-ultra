@@ -59,7 +59,7 @@ speed = [
     "brotli",
 ]
 covers = [
-    "Pillow>=10.0.0",
+    "Pillow==11.3.0",
 ]
 watch = [
     "watchdog",

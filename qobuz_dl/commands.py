@@ -112,6 +112,20 @@ def fun_args(subparsers, default_limit):
         default=default_limit,
         help=f"limite de resultados da pesquisa (padrão: {default_limit})",
     )
+    interactive.add_argument(
+        "-sd",
+        "--sort-date",
+        dest="sort_date",
+        action="store_true",
+        default=False,
+        help="ordena os resultados da busca por data de lançamento, do mais novo ao mais antigo",
+    )
+    interactive.add_argument(
+        "--filter-label",
+        type=str,
+        default=None,
+        help="Baixa só lançamentos desta gravadora (nome, ID numérico ou URL da gravadora no Qobuz)",
+    )
     return interactive
 
 
@@ -167,6 +181,12 @@ def dl_args(subparsers):
         help="Caminho para um arquivo de texto contendo palavras-chave para ignorar (blacklist)",
         type=str,
         default=None,
+    )
+    download.add_argument(
+        "--filter-label",
+        type=str,
+        default=None,
+        help="Baixa só lançamentos desta gravadora (nome, ID numérico ou URL da gravadora no Qobuz)",
     )
     download.add_argument(
         "--dry-run",

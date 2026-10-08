@@ -531,6 +531,74 @@ def get_url_info(url):
     return r.groups()
 
 
+def label_matches(label, filter_label) -> bool:
+    """Diz se a gravadora (objeto "label" da API do Qobuz) casa com o filtro.
+
+    Filtro numérico: precisa ser igual ao ID da gravadora. Qualquer filtro
+    também casa se estiver contido no nome (sem diferenciar maiúsculas).
+    Gravadora ausente nunca casa.
+    """
+    filter_label = str(filter_label or "").strip()
+    if not filter_label:
+        return True
+    label = label or {}
+    name = str(label.get("name") or "").strip()
+    label_id = str(label.get("id") or "").strip()
+    if filter_label.isdigit() and filter_label == label_id:
+        return True
+    return bool(name) and filter_label.lower() in name.lower()
+
+
+def normalize_label_filter(value):
+    """Aceita nome, ID ou URL de gravadora do Qobuz e devolve o texto do filtro
+    (só o caminho da URL conta: '?ref=...' é ignorado). Vazio vira None."""
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if "label/" in text:
+        text = urllib.parse.urlparse(text).path.rstrip("/").split("/")[-1]
+    return text or None
+
+
+def filter_chunks_by_label(content, iterable_key, filter_label):
+    """Remove (no próprio `content`) os lançamentos de outras gravadoras da
+    listagem de um artista. Itens sem o campo "label" ficam: serão conferidos de
+    novo no download. Devolve (total, mantidos)."""
+    total = kept = 0
+    for chunk in content:
+        section = chunk.get(iterable_key) or {}
+        batch = section.get("items", [])
+        section["items"] = [
+            item
+            for item in batch
+            if "label" not in item or label_matches(item.get("label"), filter_label)
+        ]
+        total += len(batch)
+        kept += len(section["items"])
+    return total, kept
+
+
+def release_date_key(item) -> str:
+    """Data de lançamento (AAAA-MM-DD) de um resultado da busca; '' se não tem."""
+    if not isinstance(item, dict):
+        return ""
+    album = item.get("album") if isinstance(item.get("album"), dict) else {}
+    for value in (
+        item.get("release_date_original"),
+        item.get("release_date"),
+        album.get("release_date_original"),
+        album.get("release_date"),
+    ):
+        if value:
+            return str(value)
+    return ""
+
+
+def sort_by_release_date(items) -> list:
+    """Do lançamento mais novo para o mais antigo (estável; sem data vai ao fim)."""
+    return sorted(items, key=release_date_key, reverse=True)
+
+
 def get_album_artist(qobuz_album: dict) -> list:
     # Extrai os artistas principais de um álbum a partir da resposta da API
     # do Qobuz, devolvendo uma LISTA de strings (não uma string única) para
