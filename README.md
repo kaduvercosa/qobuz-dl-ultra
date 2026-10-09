@@ -45,6 +45,7 @@ __Pesquise, explore e baixe músicas Lossless e Hi-Res do [Qobuz](https://www.qo
 * **Modo Bit-Perfect & Purista:** Desative completamente as tags de volume ReplayGain e Peak usando a flag CLI `-—no-replaygain-tag` (ou `no_replaygain_tag = true` no config.ini). Isso garante que seus arquivos de áudio permaneçam estritamente bit-perfect e intocados por quaisquer instruções de nivelamento de volume via software, ideal para DACs de alta fidelidade e DAPs dedicados.
 
 ### 🚀 Mecanismo de Download Resiliente
+
 * **Fila À Prova de Falhas:** Tratamento avançado de exceções no nível da faixa. Se uma única faixa estiver bloqueada geograficamente ou ausente nos servidores (erro 404), o mecanismo a pula normalmente e continua baixando o restante do seu álbum ou playlist sem travar.
 * **Recuperação e Sincronização de Banco de Dados:** Inclui um mecanismo especializado `-—sync-db` para restaurar entradas ausentes em seu banco de dados local escaneando suas pastas de música existentes.
 * **Sincronização Bidirecional de Playlists (`sync-playlist`):** Um poderoso mecanismo de espelhamento para playlists dinâmicas. Mantenha suas pastas locais perfeitamente sincronizadas com as alterações online (baixando novas faixas e excluindo de forma limpa as que foram removidas). **A v2.0.1 introduz a Lógica Inteligente de Pastas (Smart Folder Logic):** ao usar `-d .` ou caminhos genéricos, ele cria automaticamente uma subpasta com o nome da playlist, evitando a exclusão acidental de arquivos no seu diretório raiz.
@@ -71,26 +72,38 @@ __Pesquise, explore e baixe músicas Lossless e Hi-Res do [Qobuz](https://www.qo
 
 O Qobuz-DL Ultra permite profunda personalização da estrutura da sua biblioteca usando variáveis.
 
-* **Suporte a Playlists Reais (Nativo):** Lida perfeitamente com playlists do Qobuz e Last.fm com uma lógica especializada projetada para organização de biblioteca (Resolve a issue #257).
-* **Estrutura de Pasta Plana (Flat):** Baixa automaticamente todas as faixas em um único diretório nomeado com o título da playlist, evitando a criação de dezenas de subpastas de álbuns dispersas.
-* **Nomenclatura Independente de Posição:** Arquivos de áudio são salvos de forma limpa (ex.: `Artista - Título.flac`) sem prefixos numéricos fixos. Essa abordagem padrão da indústria garante que, se a ordem da playlist mudar online, seus arquivos locais sejam reconhecidos instantaneamente, evitando downloads duplicados em massa.
-* **`.m3u` Inteligente Baseado na API:** A ordem de reprodução é garantida por um arquivo `.m3u` gerado dinamicamente que espelha com perfeição a sequência exata ditada pelos servidores do Qobuz, independentemente dos nomes físicos dos arquivos.
-* **Gerenciamento Inteligente de Capas:** Elimina o bug de “Conflito de Capas”. O mecanismo gerencia dinamicamente as artes incorporadas, garantindo que cada faixa receba sua capa exclusiva correta sem deixar arquivos `cover.jpg` duplicados na pasta.
-* **Capas em Alta Resolução da Apple/iTunes:** Antes de usar a capa do Qobuz, o programa procura a mesma capa na Apple/iTunes (até 10000×10000 px). A busca começa pelo **UPC** do álbum e pelo **ISRC** da faixa (identificadores exatos) e só depois cai para a busca por texto, que exige artista, álbum e título compatíveis. Colaborações são reconhecidas (um álbum de `Cardi B` casa com `Cardi B & Bruno Mars` na Apple), e resultados de karaokê, tributo, instrumental, edições ao vivo ou deluxe diferentes do que você baixou são recusados: sem certeza, a capa do Qobuz é mantida. Se a versão maior passar de 16 MB, o programa desce em cascata (6000, 3000, 1200 e 600 px).
-* **Substituição de Modo de Álbum (`-—playlist-as-albums`):** *Novo recurso.* Se você usa playlists para buscar músicas específicas, essa flag ignora completamente a lógica de Pasta Plana. O mecanismo vai “explodir” a playlist, direcionando cada faixa para sua respectiva pasta de álbum original usando o seu `folder_format` padrão, mantendo os números de faixa originais e baixando a capa específica de cada álbum.
-* **Variáveis Poderosas:** `folder_format` e `track_format` agora suportam dezenas de novas variáveis (ex.: `{isrc}`, `{barcode}`, `{label}`, `{track_composer}`).
-* **Tipo de Lançamento (`{release_type}`):** Identifica automaticamente a categoria de publicação a partir das APIs do Qobuz (ex.: `Album`, `EP`, `Single`), permitindo que você encaminhe dinamicamente downloads para subdiretórios ou use como prefixo de nomenclatura sem impor uma estrutura fixa.
-  * *Exemplo de Pasta (Subdiretório):* `folder_format = {release_type}/{album_artist} - {album_title}` ➔ `Album/Daft Punk - Discovery`
-  * *Exemplo de Pasta (Prefixo):* `folder_format = {release_type} - {album_artist} - {album_title}` ➔ `Single - Gorillaz - Silent Running`
-* **Tag Explícita (`{explicit}` ou `{ExplicitFlag}`):** Adiciona automaticamente uma tag `[E]` se a faixa ou álbum tiver aviso parental no Qobuz. Se o conteúdo for limpo, a variável permanece vazia sem deixar espaços finais indesejados. **Você pode aplicar isso permanentemente adicionando as variáveis ao seu arquivo `config.ini`, ou temporariamente via CLI usando as flags `-ff` e `-tf`.**
-  * *Exemplo de Pasta:* `folder_format = {artist} - {album} {ExplicitFlag}` ➔ `Eminem - The Eminem Show [E]`
-  * *Exemplo de Faixa:* `track_format = {track_number} - {track_title} {ExplicitFlag}` ➔ `02 - Without Me [E].flac`
-* **Tag de Versão do Álbum (`{version_tag}`):** Adiciona automaticamente a versão do álbum (ex.: Live, Remastered, Deluxe Edition) ao nome da pasta ou faixa. Se o lançamento for uma edição padrão, a variável permanece completamente vazia, evitando espaços ou hifens indesejados.
-  * *Exemplo de Pasta (Padrão):* `folder_format = {album_artist} - {album_title}{version_tag}` ➔ `The Sunset Violent`
-  * *Exemplo de Pasta (Edição Especial):* `folder_format = {album_artist} - {album_title}{version_tag}` ➔ `The Sunset Violent - Live in Heidelberg`
-* **Roteamento Multi-Disco:** Armazene lançamentos com múltiplos discos em um único diretório ou divida-os usando prefixos personalizáveis (ex.: `CD 01`).
-* **Geração Universal de Playlists:** Arquivos `.m3u` são rigorosamente codificados em UTF-8, garantindo 100% de estabilidade mesmo com caracteres Unicode complexos ou japoneses (Resolve a issue #304).
-* **Substituição de Caracteres Legados (`legacy_charmap`):** Por padrão, a Edição Ultimate usa caracteres Unicode de largura total elegantes (ex.: `／`) para contornar com segurança as restrições de nomes de arquivos do SO sem perder a estética do título original. No entanto, puristas podem ativar a opção `legacy_charmap = true` no seu `config.ini` para forçar substituições padrão em ASCII (ex.: substituir `/` por `-` ou remover `?`), restaurando a convenção de nomenclatura clássica do qobuz-dl original.
+-  **Suporte a Playlists Reais (Nativo):** Lida perfeitamente com playlists do Qobuz e Last.fm com uma lógica especializada projetada para organização de biblioteca (Resolve a issue #257).
+-  **Estrutura de Pasta Plana (Flat):** Baixa automaticamente todas as faixas em um único diretório nomeado com o título da playlist, evitando a criação de dezenas de subpastas de álbuns dispersas.
+-  **Nomenclatura Independente de Posição:** Arquivos de áudio são salvos de forma limpa (ex.: `Artista - Título.flac`) sem prefixos numéricos fixos. Essa abordagem padrão da indústria garante que, se a ordem da playlist mudar online, seus arquivos locais sejam reconhecidos instantaneamente, evitando downloads duplicados em massa.
+-  **`.m3u` Inteligente Baseado na API:** A ordem de reprodução é garantida por um arquivo `.m3u` gerado dinamicamente que espelha com perfeição a sequência exata ditada pelos servidores do Qobuz, independentemente dos nomes físicos dos arquivos.
+-  **Gerenciamento Inteligente de Capas:** Elimina o bug de “Conflito de Capas”. O mecanismo gerencia dinamicamente as artes incorporadas, garantindo que cada faixa receba sua capa exclusiva correta sem deixar arquivos `cover.jpg` duplicados na pasta.
+-  **Capas em Alta Resolução da Apple/iTunes:** Antes de usar a capa do Qobuz, o programa procura a mesma capa na Apple/iTunes (até 10000×10000 px). A busca começa pelo **UPC** do álbum e pelo **ISRC** da faixa (identificadores exatos) e só depois cai para a busca por texto, que exige artista, álbum e título compatíveis. Colaborações são reconhecidas (um álbum de `Cardi B` casa com `Cardi B & Bruno Mars` na Apple), e resultados de karaokê, tributo, instrumental, edições ao vivo ou deluxe diferentes do que você baixou são recusados: sem certeza, a capa do Qobuz é mantida. Se a versão maior passar de 16 MB, o programa desce em cascata (6000, 3000, 1200 e 600 px).
+-  **Substituição de Modo de Álbum (`-—playlist-as-albums`):** *Novo recurso.* Se você usa playlists para buscar músicas específicas, essa flag ignora completamente a lógica de Pasta Plana. O mecanismo vai “explodir” a playlist, direcionando cada faixa para sua respectiva pasta de álbum original usando o seu `folder_format` padrão, mantendo os números de faixa originais e baixando a capa específica de cada álbum.
+-  **Variáveis Poderosas:** `folder_format` e `track_format` agora suportam dezenas de novas variáveis (ex.: `{isrc}`, `{barcode}`, `{label}`, `{track_composer}`).
+*  **Tipo de Lançamento (`{release_type}`):** Identifica automaticamente a categoria de publicação a partir das APIs do Qobuz (ex.: `Album`, `EP`, `Single`), permitindo que você encaminhe dinamicamente downloads para subdiretórios ou use como prefixo de nomenclatura sem impor uma estrutura fixa.
+
+```bash
+  *Exemplo de Pasta (Subdiretório):* `folder_format = {release_type}/{album_artist} - {album_title}` ➔ `Album/Daft Punk - Discovery`
+  *Exemplo de Pasta (Prefixo):* `folder_format = {release_type} - {album_artist} - {album_title}` ➔ `Single - Gorillaz - Silent Running`
+```
+
+- **Tag Explícita (`{explicit}` ou `{ExplicitFlag}`):** Adiciona automaticamente uma tag `[E]` se a faixa ou álbum tiver aviso parental no Qobuz. Se o conteúdo for limpo, a variável permanece vazia sem deixar espaços finais indesejados. **Você pode aplicar isso permanentemente adicionando as variáveis ao seu arquivo `config.ini`, ou temporariamente via CLI usando as flags `-ff` e `-tf`.**
+
+```bash
+  *Exemplo de Pasta:* `folder_format = {artist} - {album} {ExplicitFlag}` ➔ `Eminem - The Eminem Show [E]`
+  *Exemplo de Faixa:* `track_format = {track_number} - {track_title} {ExplicitFlag}` ➔ `02 - Without Me [E].flac`
+```
+ 
+- **Tag de Versão do Álbum (`{version_tag}`):** Adiciona automaticamente a versão do álbum (ex.: Live, Remastered, Deluxe Edition) ao nome da pasta ou faixa. Se o lançamento for uma edição padrão, a variável permanece completamente vazia, evitando espaços ou hifens indesejados.
+
+```bash
+  *Exemplo de Pasta (Padrão):* `folder_format = {album_artist} - {album_title}{version_tag}` ➔ `The Sunset Violent`
+  *Exemplo de Pasta (Edição Especial):* `folder_format = {album_artist} - {album_title}{version_tag}` ➔ `The Sunset Violent - Live in Heidelberg`
+```
+
+- **Roteamento Multi-Disco:** Armazene lançamentos com múltiplos discos em um único diretório ou divida-os usando prefixos personalizáveis (ex.: `CD 01`).
+- **Geração Universal de Playlists:** Arquivos `.m3u` são rigorosamente codificados em UTF-8, garantindo 100% de estabilidade mesmo com caracteres Unicode complexos ou japoneses (Resolve a issue #304).
+- **Substituição de Caracteres Legados (`legacy_charmap`):** Por padrão, a Edição Ultimate usa caracteres Unicode de largura total elegantes (ex.: `／`) para contornar com segurança as restrições de nomes de arquivos do SO sem perder a estética do título original. No entanto, puristas podem ativar a opção `legacy_charmap = true` no seu `config.ini` para forçar substituições padrão em ASCII (ex.: substituir `/` por `-` ou remover `?`), restaurando a convenção de nomenclatura clássica do qobuz-dl original.
 
 ### ❤️ Sincronização Nativa de Favoritos e Menu Interativo
 Conecte perfeitamente seus hábitos de escuta móvel com sua biblioteca local offline. Em vez de copiar URLs manualmente, inicie o Modo Interativo (`fun`) para acessar sua conta pessoal do Qobuz com segurança e navegar pelos seus **Álbuns, Faixas, Artistas e Playlists Favoritos** diretamente do terminal.
@@ -120,6 +133,7 @@ Diga adeus a bibliotecas desorganizadas e downloads corrompidos. O baixador agor
 <a name="opcao-a-pypi"></a>
 ### Opção A: 📦 Pacote PyPI (Recomendado para todas as plataformas)
 A maneira mais fácil e oficial de instalar a Edição Ultimate. Abra seu terminal e execute:
+
 ```bash
 pip install qobuz-dl-ultra
 ```
@@ -128,16 +142,19 @@ pip install qobuz-dl-ultra
 <a name="opcao-b-codigo-fonte"></a>
 ### Opção B: Código-fonte Python (Avançado)
 Clone este repositório e instale as dependências necessárias:
+
 ```bash
 git clone https://github.com/kaduvercosa/qobuz-dl-ultra.git
 cd qobuz-dl-ultra
 pip3 install -r requirements.txt
 ```
+
 *Execute o programa usando:* `python -m qobuz_dl`
 
 <a name="opcao-c-docker"></a>
 ### Opção C: 🐳 Uso com Docker (NAS e Servidores Caseiros)
 A Edição Ultimate é totalmente conteinerizada e inclui todas as dependências (Python, FFmpeg). Este é o método de instalação recomendado para Synology, QNAP, Unraid e servidores headless.
+
 ```bash
 # Baixar a imagem oficial mais recente
 docker pull ghcr.io/kaduvercosa/qobuz-dl-ultra:latest
@@ -333,22 +350,22 @@ A Edição Ultra inclui poderosos gerenciadores de biblioteca local para acompan
 
   O `tags` também **troca a capa embutida** pela versão em alta resolução da Apple/iTunes, usando as mesmas regras de validação dos downloads (UPC/ISRC primeiro, depois busca por texto com artista, álbum e título compatíveis). Quando a capa é trocada, a origem fica registrada no comentário da faixa (`Capa: Apple/iTunes`). Quando a Apple não tem uma correspondência segura, a capa que já estava no arquivo é preservada e o motivo aparece no log (por exemplo, `artista incompatível` ou `título completo da faixa incompatível`). O resumo final conta `Capas Apple embutidas`, `Capas Apple não encontradas` e `Falhas na etapa Apple`; os arquivos temporários de capa (`.apple-cover-*.jpg`) são apagados logo após cada arquivo.
 
-  ```
+  ```bash
   python -m qobuz_dl tags “/caminho/para/sua/pasta/local/de/musica” --multi-tags
-  python -m qobuz_dl tags “/caminho/para/sua/pasta/local/de/musica” --no-multi-tags
+  python -m qobuz_dl tags “/caminho/para/sua/pasta/local/de/musica” —-no-multi-tags
   ```
 
 * **Limpar Banco de Dados (`-p`, `—purge`):**
   Se você precisar recomeçar do zero, limpar seu histórico de downloads ou corrigir um estado corrompido, pode apagar instantaneamente o banco de dados local com um único comando.
 
-  ```
+  ```bash
   python -m qobuz_dl —purge
   ```
 
 * **Estatísticas do Usuário (`stats`):**
   Curioso sobre seus hábitos de download? Este comando consulta instantaneamente seu banco de dados SQLite local para exibir estatísticas dos seus downloads, incluindo o número total de artistas únicos baixados e uma lista alfabética completa da sua biblioteca.
 
-  ```
+  ```bash
   python -m qobuz_dl stats
   ```
 
@@ -356,7 +373,7 @@ A Edição Ultra inclui poderosos gerenciadores de biblioteca local para acompan
 
 Inspirado no libsync, agora existe um catálogo local (`library.db`, ao lado do `config.ini`) que responde: *”o que eu tenho na conta vs. o que eu tenho no disco?”*.
 
-```
+```bash
 qobuz-dl sync-favorites                  # mostra o diff (novos/removidos) e atualiza o catálogo
 qobuz-dl sync-favorites —download-new   # baixa o que foi favoritado desde a última vez
 qobuz-dl sync-favorites —download-missing —limit 20 -y
@@ -389,7 +406,7 @@ Você pode personalizar profundamente seu `config.ini` ou usar as flags CLI `-ff
 #### 📝 Tabela de Referência de Variáveis Completas
 
 | Categoria / Variável | Descrição | Exemplo de Saída |
-| :--- | :--- | :--- |
+| :---| :—-- | :—-- |
 | **Artistas & Compositores** | | |
 | `{album_artist}` | O principal artista do álbum (lida com compilações graciosamente). | `Daft Punk` |
 | `{artist}` / `{track_artist}` | O artista performático da faixa específica. | `Pharrell Williams` |
