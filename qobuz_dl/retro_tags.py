@@ -14,6 +14,7 @@ import os
 import re
 import tempfile
 from typing import Optional
+import functools
 
 import httpx
 import mutagen.id3 as id3
@@ -464,7 +465,8 @@ async def retag_directory(directory_path, client, settings):
             try:
                 await loop.run_in_executor(
                     None,
-                    lambda: tag_function(
+                    functools.partial( 
+                        tag_function,
                         file_path,
                         root_dir,
                         file_path,
