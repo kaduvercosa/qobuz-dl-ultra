@@ -120,9 +120,7 @@ class TestExtrairTituloCompleto:
 
     @pytest.mark.parametrize("marca", ["feat.", "ft.", "featuring", "with", "com"])
     def test_variantes_de_participacao(self, marca):
-        assert (
-            utils.extrair_titulo_completo(f"Musica ({marca} Fulano)") == "musica"
-        )
+        assert utils.extrair_titulo_completo(f"Musica ({marca} Fulano)") == "musica"
 
     def test_colchetes_tambem(self):
         assert utils.extrair_titulo_completo("Musica [feat. Fulano]") == "musica"
@@ -238,7 +236,11 @@ class TestLookupExato:
         assert url is not None
 
     async def test_isrc_aceita_quando_o_album_tem_relacao(self):
-        s = _Sessao(lookup=corpo(faixa("Cardi B & Bruno Mars", "Please Me - Single", "Please Me")))
+        s = _Sessao(
+            lookup=corpo(
+                faixa("Cardi B & Bruno Mars", "Please Me - Single", "Please Me")
+            )
+        )
         url, _, _ = await buscar(
             s, isrc="USX", artist="Cardi B", album="Please Me", track_title="Please Me"
         )
@@ -332,7 +334,11 @@ class TestBuscaTextual:
         # Documenta o motivo do bug: sem a versão o título completo só bate 0,58.
         s = _Sessao(
             search=corpo(
-                faixa("Sexyy Red", "Fat Juicy &... (Radio Edit)", "Fat Juicy &... (Radio Edit)")
+                faixa(
+                    "Sexyy Red",
+                    "Fat Juicy &... (Radio Edit)",
+                    "Fat Juicy &... (Radio Edit)",
+                )
             )
         )
         url, _, motivo = await buscar(
@@ -343,7 +349,9 @@ class TestBuscaTextual:
 
     async def test_participacao_so_de_um_lado_nao_atrapalha(self):
         s = _Sessao(
-            search=corpo(faixa("Cardi B", "Please Me - Single", "Please Me (feat. Bruno Mars)"))
+            search=corpo(
+                faixa("Cardi B", "Please Me - Single", "Please Me (feat. Bruno Mars)")
+            )
         )
         url, _, motivo = await buscar(
             s, artist="Cardi B", album="Please Me", track_title="Please Me"
@@ -371,9 +379,7 @@ class TestBuscaTextual:
         melhor = faixa("Banda", "Disco", "Musica")
         melhor["artworkUrl100"] = "https://melhor.test/100x100bb.jpg"
         s = _Sessao(search=corpo(pior, melhor))
-        url, _, _ = await buscar(
-            s, artist="Banda", album="Disco", track_title="Musica"
-        )
+        url, _, _ = await buscar(s, artist="Banda", album="Disco", track_title="Musica")
         assert url.startswith("https://melhor.test/")
 
     async def test_empate_fica_com_o_primeiro_resultado_da_apple(self):
@@ -383,14 +389,14 @@ class TestBuscaTextual:
         b = faixa("Banda & Convidado", "Disco - Single", "Musica")
         b["artworkUrl100"] = "https://segundo.test/100x100bb.jpg"
         s = _Sessao(search=corpo(a, b))
-        url, _, _ = await buscar(
-            s, artist="Banda", album="Disco", track_title="Musica"
-        )
+        url, _, _ = await buscar(s, artist="Banda", album="Disco", track_title="Musica")
         assert url.startswith("https://primeiro.test/")
 
     # --- travas de segurança: capa errada é pior que nenhuma capa ---------
     async def test_artista_diferente_e_rejeitado(self):
-        s = _Sessao(search=corpo(faixa("Bruno Mars", "Please Me - Single", "Please Me")))
+        s = _Sessao(
+            search=corpo(faixa("Bruno Mars", "Please Me - Single", "Please Me"))
+        )
         url, _, motivo = await buscar(
             s, artist="Cardi B", album="Please Me", track_title="Please Me"
         )
@@ -408,9 +414,7 @@ class TestBuscaTextual:
 
     async def test_termo_pedido_pelo_usuario_nao_e_lixo(self):
         # Se o álbum REAL se chama "... (Instrumental)", não pode ser barrado.
-        s = _Sessao(
-            search=corpo(colecao("Banda", "Disco (Instrumental)"))
-        )
+        s = _Sessao(search=corpo(colecao("Banda", "Disco (Instrumental)")))
         url, _, motivo = await buscar(s, artist="Banda", album="Disco (Instrumental)")
         assert url is not None, motivo
 
@@ -429,7 +433,9 @@ class TestBuscaTextual:
         assert "álbum incompatível" in motivo or "edição" in motivo
 
     async def test_album_muito_diferente_para_faixa_e_rejeitado(self):
-        s = _Sessao(search=corpo(faixa("Banda", "Totalmente Outra Coisa Aqui", "Musica")))
+        s = _Sessao(
+            search=corpo(faixa("Banda", "Totalmente Outra Coisa Aqui", "Musica"))
+        )
         url, _, motivo = await buscar(
             s, artist="Banda", album="Disco", track_title="Musica"
         )

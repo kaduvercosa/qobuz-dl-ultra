@@ -866,9 +866,7 @@ def extrair_titulo_completo(texto: str) -> str:
     texto = texto.replace("[", "(").replace("]", ")")
     # Participacoes ("feat."/"with") nao mudam a edicao da musica, e Apple e
     # Qobuz nem sempre concordam em coloca-las no titulo.
-    texto = re.sub(
-        r"\s*\((?:feat|ft|featuring|with|com)\b[^)]*\)", " ", texto
-    )
+    texto = re.sub(r"\s*\((?:feat|ft|featuring|with|com)\b[^)]*\)", " ", texto)
     texto = re.sub(r"[^\w\s\(\)]", " ", texto)
     texto = re.sub(r"\s+", " ", texto).strip()
 
@@ -877,6 +875,7 @@ def extrair_titulo_completo(texto: str) -> str:
     texto = re.sub(r"[-\s]*single\s*$", "", texto).strip()
 
     return texto
+
 
 # Separadores que a Apple usa para listar varios artistas no mesmo campo
 # (ex.: "Cardi B & Bruno Mars", "J Balvin, Dua Lipa, Bad Bunny & Tainy").
@@ -938,8 +937,13 @@ async def get_apple_hq_cover(
     }
     countries = ("br", "us")
     resolutions = ("10000x10000bb", "3000x3000bb", "1400x1400bb")
-    thresholds = {"artist": 0.85, "album": 0.80, "track": 0.80,
-                  "full_album": 0.87, "full_track": 0.85}
+    thresholds = {
+        "artist": 0.85,
+        "album": 0.80,
+        "track": 0.80,
+        "full_album": 0.87,
+        "full_track": 0.85,
+    }
 
     q_artist = extrair_essencia(artist or "")
     q_album = extrair_essencia(album or "")
@@ -968,7 +972,9 @@ async def get_apple_hq_cover(
                 f"{ordered[0][1]} (candidato mais próximo; "
                 f"{len(rejections)} rejeitado(s) no total)"
             )
-            examples = [f"{reason}: {label}" for _, reason, label in ordered[:3] if label]
+            examples = [
+                f"{reason}: {label}" for _, reason, label in ordered[:3] if label
+            ]
             if examples:
                 detail += "; exemplos: " + " | ".join(examples)
             return detail
@@ -1016,10 +1022,13 @@ async def get_apple_hq_cover(
 
             candidate_album_norm = extrair_essencia(candidate_album)
             candidate_track_norm = extrair_essencia(candidate_track)
-            artist_score = score_artista(artist or "", candidate_artist) if q_artist else 1.0
+            artist_score = (
+                score_artista(artist or "", candidate_artist) if q_artist else 1.0
+            )
             album_score = (
                 difflib.SequenceMatcher(None, q_album, candidate_album_norm).ratio()
-                if q_album else 1.0
+                if q_album
+                else 1.0
             )
             compare_track = bool(track_title and candidate_track)
             track_full_score = track_score = 1.0
@@ -1030,7 +1039,9 @@ async def get_apple_hq_cover(
                 track_score = difflib.SequenceMatcher(
                     None, q_track, candidate_track_norm
                 ).ratio()
-            scores = [artist_score, album_score] + ([track_full_score] if compare_track else [])
+            scores = [artist_score, album_score] + (
+                [track_full_score] if compare_track else []
+            )
             closeness = sum(scores) / len(scores)
 
             # --- Lookup exato por UPC/ISRC: o identificador ja' diz que e' a
@@ -1043,14 +1054,17 @@ async def get_apple_hq_cover(
                     reject(
                         f"ISRC encontrado em outro álbum ({album_score:.2f} < 0.45; "
                         f"pedido={album!r}, Apple={candidate_album!r})",
-                        label, closeness,
+                        label,
+                        closeness,
                     )
                     continue
                 valid_url, url_error = await artwork_url(
                     client, str(result.get("artworkUrl100") or "")
                 )
                 if not valid_url:
-                    reject(f"URL da imagem não validada ({url_error})", label, closeness)
+                    reject(
+                        f"URL da imagem não validada ({url_error})", label, closeness
+                    )
                     continue
                 score = (artist_score + album_score) / 2.0
                 if score > best_score or best_url is None:
@@ -1061,8 +1075,11 @@ async def get_apple_hq_cover(
             # --- Busca textual (fuzzy): mantem todas as travas.
             haystack = f"{candidate_album} {candidate_track}".casefold()
             requested_text = f"{album or ''} {track_title or ''}".casefold()
-            junk = [word for word in junk_words
-                    if word in haystack and word not in requested_text]
+            junk = [
+                word
+                for word in junk_words
+                if word in haystack and word not in requested_text
+            ]
             if junk:
                 reject(f"termo indesejado {junk[0]!r}", label, closeness)
                 continue
@@ -1073,28 +1090,32 @@ async def get_apple_hq_cover(
                         f"título completo da faixa incompatível "
                         f"({track_full_score:.2f} < {thresholds['full_track']:.2f}; "
                         f"pedido={track_title!r}, Apple={candidate_track!r})",
-                        label, closeness,
+                        label,
+                        closeness,
                     )
                     continue
                 if track_score < thresholds["track"]:
                     reject(
                         f"similaridade da faixa insuficiente "
                         f"({track_score:.2f} < {thresholds['track']:.2f})",
-                        label, closeness,
+                        label,
+                        closeness,
                     )
                     continue
             else:
                 track_score = 1.0
                 if not track_title:
                     album_full_score = difflib.SequenceMatcher(
-                        None, q_album_full,
+                        None,
+                        q_album_full,
                         extrair_titulo_completo(candidate_album),
                     ).ratio()
                     if album_full_score < thresholds["full_album"]:
                         reject(
                             f"edição/título do álbum incompatível "
                             f"({album_full_score:.2f} < {thresholds['full_album']:.2f})",
-                            label, closeness,
+                            label,
+                            closeness,
                         )
                         continue
 
@@ -1103,7 +1124,8 @@ async def get_apple_hq_cover(
                     f"artista incompatível ({artist_score:.2f} < "
                     f"{thresholds['artist']:.2f}; pedido={artist!r}, "
                     f"Apple={candidate_artist!r})",
-                    label, closeness,
+                    label,
+                    closeness,
                 )
                 continue
 
@@ -1112,7 +1134,8 @@ async def get_apple_hq_cover(
                     reject(
                         f"álbum muito diferente ({album_score:.2f} < 0.45; "
                         f"pedido={album!r}, Apple={candidate_album!r})",
-                        label, closeness,
+                        label,
+                        closeness,
                     )
                     continue
             elif album_score < thresholds["album"]:
@@ -1120,14 +1143,19 @@ async def get_apple_hq_cover(
                     f"álbum incompatível ({album_score:.2f} < "
                     f"{thresholds['album']:.2f}; pedido={album!r}, "
                     f"Apple={candidate_album!r})",
-                    label, closeness,
+                    label,
+                    closeness,
                 )
                 continue
 
             divisor = 3.0 if track_title else 2.0
-            score = (artist_score + album_score + (track_score if track_title else 0)) / divisor
+            score = (
+                artist_score + album_score + (track_score if track_title else 0)
+            ) / divisor
             if score < 0.80:
-                reject(f"pontuação combinada baixa ({score:.2f} < 0.80)", label, closeness)
+                reject(
+                    f"pontuação combinada baixa ({score:.2f} < 0.80)", label, closeness
+                )
                 continue
 
             valid_url, url_error = await artwork_url(
@@ -1157,14 +1185,18 @@ async def get_apple_hq_cover(
                         timeout=8,
                     )
                     if response.status_code != 200:
-                        network_errors.append(f"lookup {kind}/{country}: HTTP {response.status_code}")
+                        network_errors.append(
+                            f"lookup {kind}/{country}: HTTP {response.status_code}"
+                        )
                         continue
                     data = response.json()
                     url = await evaluate(data, client, exact=kind)
                     if url:
                         return url, "Apple/iTunes", None
                 except Exception as exc:
-                    network_errors.append(f"lookup {kind}/{country}: {type(exc).__name__}: {exc}")
+                    network_errors.append(
+                        f"lookup {kind}/{country}: {type(exc).__name__}: {exc}"
+                    )
 
         # Busca textual por faixa ou álbum.
         query = f"{artist or ''} {track_title if track_title else album or ''}".strip()
@@ -1174,19 +1206,27 @@ async def get_apple_hq_cover(
                 try:
                     response = await client.get(
                         "https://itunes.apple.com/search",
-                        params={"term": query, "entity": entity,
-                                "country": country, "limit": 25},
+                        params={
+                            "term": query,
+                            "entity": entity,
+                            "country": country,
+                            "limit": 25,
+                        },
                         headers=headers,
                         timeout=8,
                     )
                     if response.status_code != 200:
-                        network_errors.append(f"search {country}: HTTP {response.status_code}")
+                        network_errors.append(
+                            f"search {country}: HTTP {response.status_code}"
+                        )
                         continue
                     url = await evaluate(response.json(), client)
                     if url:
                         return url, "Apple/iTunes", None
                 except Exception as exc:
-                    network_errors.append(f"search {country}: {type(exc).__name__}: {exc}")
+                    network_errors.append(
+                        f"search {country}: {type(exc).__name__}: {exc}"
+                    )
 
         return None, None, final_reason()
 
@@ -1195,6 +1235,7 @@ async def get_apple_hq_cover(
 
     async with httpx.AsyncClient() as client:
         return await search(client)
+
 
 def get_config_paths():
     # Resolve o diretório de configuração multiplataforma (Windows,

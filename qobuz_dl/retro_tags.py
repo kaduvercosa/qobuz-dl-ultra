@@ -219,10 +219,7 @@ async def _fetch_apple_cover_for_track(
 
     album_data = item.get("album") or album or {}
     artist_data = (
-        item.get("performer")
-        or album_data.get("artist")
-        or album.get("artist")
-        or {}
+        item.get("performer") or album_data.get("artist") or album.get("artist") or {}
     )
 
     # A Qobuz separa "title" e "version" (ex.: "Fat Juicy &…" + "Radio Edit"),
@@ -331,7 +328,9 @@ async def retag_directory(directory_path, client, settings):
     ui.emit(f"\n{CYAN}[*] Iniciando correção retroativa de tags...{OFF}")
     ui.emit(f"{CYAN} • Pasta raiz  :{RESET} {directory_path}")
     ui.emit(f"{CYAN} • Multi-tags  :{RESET} {multi_tags_label(settings)}")
-    ui.emit(f"{CYAN} • Capas Apple :{RESET} procurando e substituindo quando validada\n")
+    ui.emit(
+        f"{CYAN} • Capas Apple :{RESET} procurando e substituindo quando validada\n"
+    )
 
     files = find_audio_files(directory_path)
     stats = {
@@ -401,15 +400,14 @@ async def retag_directory(directory_path, client, settings):
 
             if not resolved:
                 stats["not_found"] += 1
-                ui.skip(
-                    f"{label} {name} "
-                    f"(faixa {track_id} não encontrada no Qobuz)"
-                )
+                ui.skip(f"{label} {name} (faixa {track_id} não encontrada no Qobuz)")
                 continue
 
             item, album, istrack = resolved
             extension = os.path.splitext(file_path)[1].lower()
-            tag_function = metadata.tag_mp3 if extension == ".mp3" else metadata.tag_flac
+            tag_function = (
+                metadata.tag_mp3 if extension == ".mp3" else metadata.tag_flac
+            )
             root_dir = os.path.dirname(file_path)
 
             cover_path: Optional[str] = None
@@ -418,12 +416,14 @@ async def retag_directory(directory_path, client, settings):
             apple_diagnostic = None
 
             try:
-                apple_cover_url, apple_cover_source, apple_diagnostic = (
-                    await _fetch_apple_cover_for_track(
-                        item,
-                        album,
-                        http_session,
-                    )
+                (
+                    apple_cover_url,
+                    apple_cover_source,
+                    apple_diagnostic,
+                ) = await _fetch_apple_cover_for_track(
+                    item,
+                    album,
+                    http_session,
                 )
 
                 if not isinstance(apple_cover_url, str) or not apple_cover_url.strip():
@@ -433,7 +433,6 @@ async def retag_directory(directory_path, client, settings):
                         else "Apple: nenhum candidato passou pelos filtros"
                     )
                     stats["apple_not_found"] += 1
-
 
                 else:
                     cover_path = await _download_apple_cover(
@@ -465,7 +464,7 @@ async def retag_directory(directory_path, client, settings):
             try:
                 await loop.run_in_executor(
                     None,
-                    functools.partial( 
+                    functools.partial(
                         tag_function,
                         file_path,
                         root_dir,
@@ -509,7 +508,9 @@ async def retag_directory(directory_path, client, settings):
 
             if before == after:
                 stats["unchanged"] += 1
-                ui.skip(f"{label} {name} (sem alterações nas tags/capa; {result_message})")
+                ui.skip(
+                    f"{label} {name} (sem alterações nas tags/capa; {result_message})"
+                )
             else:
                 stats["updated"] += 1
                 ui.ok(f"{label} {name} (atualizada; {result_message})")
@@ -530,8 +531,12 @@ async def retag_directory(directory_path, client, settings):
         ui.emit(f"{CYAN} • Já corretos               :{RESET} {stats['unchanged']}")
         ui.emit(f"{CYAN} • Sem ID Qobuz              :{RESET} {stats['no_id']}")
         ui.emit(f"{CYAN} • Não encontrados           :{RESET} {stats['not_found']}")
-        ui.emit(f"{CYAN} • Capas Apple embutidas     :{RESET} {stats['apple_embedded']}")
-        ui.emit(f"{CYAN} • Capas Apple não encontradas:{RESET} {stats['apple_not_found']}")
+        ui.emit(
+            f"{CYAN} • Capas Apple embutidas     :{RESET} {stats['apple_embedded']}"
+        )
+        ui.emit(
+            f"{CYAN} • Capas Apple não encontradas:{RESET} {stats['apple_not_found']}"
+        )
         ui.emit(f"{CYAN} • Falhas na etapa Apple     :{RESET} {stats['apple_failed']}")
         ui.emit(f"{CYAN} • Erros                     :{RESET} {stats['errors']}")
 

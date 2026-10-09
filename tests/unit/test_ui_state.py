@@ -61,7 +61,9 @@ class TestRawWidth:
     def test_columns_invalida_cai_para_o_terminal(self, monkeypatch, valor):
         monkeypatch.setenv("COLUMNS", valor)
         monkeypatch.setattr(
-            ui.shutil, "get_terminal_size", lambda fallback: types.SimpleNamespace(columns=77)
+            ui.shutil,
+            "get_terminal_size",
+            lambda fallback: types.SimpleNamespace(columns=77),
         )
         assert ui.raw_width() == 77
 
@@ -133,8 +135,15 @@ class _Stdout:
 class TestDetectUnicode:
     @pytest.mark.parametrize(
         "encoding, esperado",
-        [("utf-8", True), ("UTF-8", True), ("utf8", True), ("ascii", False),
-         ("cp1252", False), ("", False), (None, False)],
+        [
+            ("utf-8", True),
+            ("UTF-8", True),
+            ("utf8", True),
+            ("ascii", False),
+            ("cp1252", False),
+            ("", False),
+            (None, False),
+        ],
     )
     def test_pela_codificacao_do_stdout(self, monkeypatch, encoding, esperado):
         monkeypatch.setattr(sys, "stdout", _Stdout(encoding))
@@ -194,12 +203,18 @@ class TestGlifos:
     def test_unicode_ligado(self, estado_limpo):
         ui.configure(unicode=True)
         assert (ui.heavy_bar_char(), ui.light_bar_char(), ui.block_char()) == (
-            "\u2501", "\u2500", "\u2588",
+            "\u2501",
+            "\u2500",
+            "\u2588",
         )
 
     def test_unicode_desligado_cai_para_ascii(self, estado_limpo):
         ui.configure(unicode=False)
-        assert (ui.heavy_bar_char(), ui.light_bar_char(), ui.block_char()) == ("=", "-", "#")
+        assert (ui.heavy_bar_char(), ui.light_bar_char(), ui.block_char()) == (
+            "=",
+            "-",
+            "#",
+        )
 
     def test_glyph(self, estado_limpo):
         ui.configure(unicode=True)
@@ -245,7 +260,13 @@ class TestEmit:
 class TestMensagensComTag:
     @pytest.mark.parametrize(
         "funcao, tag",
-        [("ok", "[+]"), ("step", "[*]"), ("warn", "[!]"), ("error", "[!]"), ("skip", "[-]")],
+        [
+            ("ok", "[+]"),
+            ("step", "[*]"),
+            ("warn", "[!]"),
+            ("error", "[!]"),
+            ("skip", "[-]"),
+        ],
     )
     def test_prefixo(self, estado_limpo, saida, funcao, tag):
         ui.configure(color=False)
@@ -304,7 +325,9 @@ class TestDetail:
         ui.detail("sub", indent=2)
         assert saida == ["  sub"]
 
-    def test_detail_longo_quebra_respeitando_o_recuo(self, estado_limpo, saida, colunas):
+    def test_detail_longo_quebra_respeitando_o_recuo(
+        self, estado_limpo, saida, colunas
+    ):
         colunas(40)
         ui.configure(color=False)
         ui.detail("palavra " * 10)
@@ -378,7 +401,9 @@ class TestKvEHeader:
         ui.kv("Rotulo", "valor", label_width=10)
         assert saida == ["  Rotulo      valor"]
 
-    def test_kv_estreito_fica_na_mesma_linha_quando_cabe(self, estado_limpo, saida, colunas):
+    def test_kv_estreito_fica_na_mesma_linha_quando_cabe(
+        self, estado_limpo, saida, colunas
+    ):
         colunas(40)
         ui.configure(color=False)
         ui.kv("Rotulo", "valor")
@@ -391,7 +416,9 @@ class TestKvEHeader:
         assert saida[0] == "  Rotulo:"
         assert len(saida) > 2 and all(l.startswith("    ") for l in saida[1:])
 
-    def test_kv_largo_com_valor_longo_quebra_em_bloco(self, estado_limpo, saida, colunas):
+    def test_kv_largo_com_valor_longo_quebra_em_bloco(
+        self, estado_limpo, saida, colunas
+    ):
         colunas(100)
         ui.configure(color=False)
         ui.kv("Rotulo", "palavra " * 20, label_width=10)
@@ -491,7 +518,10 @@ class TestWriteLocked:
 def logging_restaurado():
     raiz = logging.getLogger()
     handlers, nivel = list(raiz.handlers), raiz.level
-    ruidosos = {n: logging.getLogger(n).level for n in ("httpx", "httpcore", "urllib3", "asyncio", "PIL")}
+    ruidosos = {
+        n: logging.getLogger(n).level
+        for n in ("httpx", "httpcore", "urllib3", "asyncio", "PIL")
+    }
     yield raiz
     for h in list(raiz.handlers):
         raiz.removeHandler(h)
@@ -528,7 +558,9 @@ class TestTqdmLoggingHandler:
 
     def test_erro_de_formatacao_nao_propaga(self, estado_limpo, saida, monkeypatch):
         h = ui.TqdmLoggingHandler()
-        monkeypatch.setattr(h, "format", lambda r: (_ for _ in ()).throw(ValueError("x")))
+        monkeypatch.setattr(
+            h, "format", lambda r: (_ for _ in ()).throw(ValueError("x"))
+        )
         monkeypatch.setattr(h, "handleError", lambda r: saida.append("tratado"))
         h.emit(_registro(logging.INFO))
         assert saida == ["tratado"]
@@ -551,7 +583,9 @@ class TestInstallLogging:
         ui.install_logging()
         assert logging_restaurado.level == logging.DEBUG
 
-    def test_nivel_explicito_vence_e_libera_o_quiet(self, estado_limpo, logging_restaurado):
+    def test_nivel_explicito_vence_e_libera_o_quiet(
+        self, estado_limpo, logging_restaurado
+    ):
         ui.configure(quiet=True)
         h = ui.install_logging(level=logging.DEBUG)
         assert logging_restaurado.level == logging.DEBUG

@@ -50,6 +50,7 @@ class FakeFLAC(dict):
     def clear_pictures(self):
         self.pictures.clear()
 
+
 class FakeID3(dict):
     def __init__(self, filename=None):
         super().__init__()

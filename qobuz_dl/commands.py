@@ -322,7 +322,7 @@ def tags_args(subparsers, default_folder=None):
     multi.add_argument(
         "--no-multi-tags",
         action="store_true",
-        help="grava artistas, compositores e gêneros como texto único \"A, B\" (sobrescreve config.ini)",
+        help='grava artistas, compositores e gêneros como texto único "A, B" (sobrescreve config.ini)',
     )
     return tags
 

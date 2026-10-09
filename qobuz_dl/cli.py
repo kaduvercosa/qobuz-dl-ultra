@@ -1511,7 +1511,9 @@ async def async_main():
         informed_dir = getattr(arguments, "DIR", None)
         target_dir = resolve_library_dir(informed_dir or default_folder)
         if not informed_dir:
-            ui.step(f"Nenhuma pasta informada: usando a pasta padrão do config.ini ({target_dir})")
+            ui.step(
+                f"Nenhuma pasta informada: usando a pasta padrão do config.ini ({target_dir})"
+            )
         tags_settings = QobuzDLSettings.from_arguments_configparser(arguments, config)
         tags_settings.default_folder = target_dir
         try:

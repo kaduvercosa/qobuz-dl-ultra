@@ -65,7 +65,9 @@ async def test_process_track_nao_streamable(monkeypatch, tmp_path, no_http_sessi
     monkeypatch.setattr(
         downloader,
         "create_missing_placeholder",
-        lambda item, directory, reason, media_count=1: placeholders.append((item, directory, reason)),
+        lambda item, directory, reason, media_count=1: placeholders.append(
+            (item, directory, reason)
+        ),
     )
 
     async def report_track(*args, **kwargs):

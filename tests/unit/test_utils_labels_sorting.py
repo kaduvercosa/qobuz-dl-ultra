@@ -54,7 +54,10 @@ class TestNormalizeLabelFilter:
             ("   ", None),
             ("Blue Note", "Blue Note"),
             ("  123  ", "123"),
-            ("https://www.qobuz.com/br-pt/label/blue-note/download-streaming/123", "123"),
+            (
+                "https://www.qobuz.com/br-pt/label/blue-note/download-streaming/123",
+                "123",
+            ),
             ("https://www.qobuz.com/us-en/label/blue-note/456/", "456"),
             ("https://play.qobuz.com/label/789?ref=abc", "789"),
         ],
@@ -124,7 +127,9 @@ class TestReleaseDate:
         item = {"album": {"release_date": "2002-03-04"}}
         assert utils.release_date_key(item) == "2002-03-04"
 
-    @pytest.mark.parametrize("item", [{}, None, "texto", 5, {"album": "x"}, {"album": None}])
+    @pytest.mark.parametrize(
+        "item", [{}, None, "texto", 5, {"album": "x"}, {"album": None}]
+    )
     def test_sem_data_ou_formato_inesperado(self, item):
         assert utils.release_date_key(item) == ""
 
@@ -152,7 +157,10 @@ class TestReleaseDate:
 
 class TestPartialFormatter:
     def test_campo_presente(self):
-        assert PartialFormatter().format("{artist} - {title}", artist="A", title="B") == "A - B"
+        assert (
+            PartialFormatter().format("{artist} - {title}", artist="A", title="B")
+            == "A - B"
+        )
 
     def test_campo_ausente_vira_missing(self):
         assert PartialFormatter().format("{artist} - {title}", artist="A") == "A - n/a"

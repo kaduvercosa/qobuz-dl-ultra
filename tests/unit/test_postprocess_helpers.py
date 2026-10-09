@@ -85,7 +85,11 @@ class TestNormId:
 class TestTrackSortKey:
     def test_numeros_ordenam_numericamente_nao_como_texto(self):
         faixas = [{"numero": 10}, {"numero": 2}, {"numero": 1}]
-        assert [f["numero"] for f in sorted(faixas, key=pp._track_sort_key)] == [1, 2, 10]
+        assert [f["numero"] for f in sorted(faixas, key=pp._track_sort_key)] == [
+            1,
+            2,
+            10,
+        ]
 
     def test_numero_em_texto_vira_inteiro(self):
         assert pp._track_sort_key({"numero": "03"}) == (0, 3)
@@ -119,12 +123,23 @@ class TestOrdenar:
 # ---------------------------------------------------------------------------
 class TestSkeleton:
     def test_esqueleto_basico(self):
-        r = pp._skeleton("album", "Disco", ["A", "B"], "42", {"url": "u", "upc": "9"},
-                         {"formato": "FLAC", "bit_depth": 24}, "Album")
+        r = pp._skeleton(
+            "album",
+            "Disco",
+            ["A", "B"],
+            "42",
+            {"url": "u", "upc": "9"},
+            {"formato": "FLAC", "bit_depth": 24},
+            "Album",
+        )
         assert r["tipo"] == "album"
         assert r["identificacao"] == {
-            "titulo": "Disco", "artista": "A, B", "tipo_lancamento": "Album",
-            "id": "42", "upc": "9", "url": "u",
+            "titulo": "Disco",
+            "artista": "A, B",
+            "tipo_lancamento": "Album",
+            "id": "42",
+            "upc": "9",
+            "url": "u",
         }
         assert r["qualidade"]["formato"] == "FLAC"
         assert r["qualidade"]["bit_depth"] == 24
@@ -134,7 +149,9 @@ class TestSkeleton:
         assert r["faixas"] == []
 
     def test_upc_explicito_vence_o_do_extra(self):
-        r = pp._skeleton("album", "D", "A", "1", {"upc": "extra"}, None, upc="explicito")
+        r = pp._skeleton(
+            "album", "D", "A", "1", {"upc": "extra"}, None, upc="explicito"
+        )
         assert r["identificacao"]["upc"] == "explicito"
 
     def test_entradas_none(self):
@@ -146,11 +163,19 @@ class TestSkeleton:
 
 class TestCriarFaixaPendente:
     def test_faixa_completa(self):
-        r = pp._criar_faixa_pendente({
-            "numero": 3, "id": 77, "titulo": "Musica",
-            "artista": "A, B", "artista_album": ["A"], "album": "Disco",
-            "tipo_lancamento": "EP", "isrc": "X1", "compositor": ["C1", "C2"],
-        })
+        r = pp._criar_faixa_pendente(
+            {
+                "numero": 3,
+                "id": 77,
+                "titulo": "Musica",
+                "artista": "A, B",
+                "artista_album": ["A"],
+                "album": "Disco",
+                "tipo_lancamento": "EP",
+                "isrc": "X1",
+                "compositor": ["C1", "C2"],
+            }
+        )
         assert r["numero"] == 3 and r["id"] == "77"
         ident = r["identificacao"]
         assert ident["main_artists"] == ["A", "B"]
@@ -158,7 +183,10 @@ class TestCriarFaixaPendente:
         assert ident["artista_album"] == "A"
         assert ident["compositor"] == "C1, C2"
         assert r["download"] == {
-            "situacao": "pendente", "motivo": "", "checksum": None, "atualizado_em": None,
+            "situacao": "pendente",
+            "motivo": "",
+            "checksum": None,
+            "atualizado_em": None,
         }
         assert r["letras"] == {}
 
@@ -177,16 +205,22 @@ class TestGarantirEstrutura:
         for chave in ("titulo", "artista", "tipo_lancamento", "id", "upc", "url"):
             assert r["identificacao"][chave] == ""
         assert r["qualidade"] == {
-            "formato": "", "bit_depth": None, "sampling_rate": None, "alvo_atingida": None,
+            "formato": "",
+            "bit_depth": None,
+            "sampling_rate": None,
+            "alvo_atingida": None,
         }
         assert r["progresso"]["estado"]["situacao"] == "em_andamento"
         assert r["progresso"]["resumo"] == {}
         assert r["faixas"] == []
 
     def test_nao_sobrescreve_o_que_ja_existe(self):
-        r = {"tipo": "album", "identificacao": {"titulo": "X"},
-             "qualidade": {"formato": "MP3"},
-             "progresso": {"estado": {"situacao": "completo"}}}
+        r = {
+            "tipo": "album",
+            "identificacao": {"titulo": "X"},
+            "qualidade": {"formato": "MP3"},
+            "progresso": {"estado": {"situacao": "completo"}},
+        }
         pp._garantir_estrutura_item(r)
         assert r["tipo"] == "album"
         assert r["identificacao"]["titulo"] == "X"
@@ -215,13 +249,23 @@ def _faixa(situacao, **ident):
 
 class TestRecalcResumo:
     def test_conta_cada_situacao(self):
-        r = {"faixas": [
-            _faixa("concluido"), _faixa("concluido"), _faixa("pulada"),
-            _faixa("falha"), _faixa("pendente"), _faixa("pendente"),
-        ]}
+        r = {
+            "faixas": [
+                _faixa("concluido"),
+                _faixa("concluido"),
+                _faixa("pulada"),
+                _faixa("falha"),
+                _faixa("pendente"),
+                _faixa("pendente"),
+            ]
+        }
         pp._recalc_resumo(r)
         assert r["progresso"]["resumo"] == {
-            "total": 6, "concluidas": 2, "puladas": 1, "falhas": 1, "pendentes": 2,
+            "total": 6,
+            "concluidas": 2,
+            "puladas": 1,
+            "falhas": 1,
+            "pendentes": 2,
         }
 
     def test_sem_faixas_zera_tudo(self):
@@ -250,52 +294,75 @@ def test_atualizar_progresso_muda_so_o_atualizado_em(monkeypatch):
 class TestCabecalhoDinamico:
     @staticmethod
     def _relatorio(tipo, faixas):
-        r = {"tipo": tipo, "identificacao": {"artista": "", "tipo_lancamento": ""},
-             "faixas": faixas}
+        r = {
+            "tipo": tipo,
+            "identificacao": {"artista": "", "tipo_lancamento": ""},
+            "faixas": faixas,
+        }
         return r
 
     def test_album_nunca_e_recalculado(self):
-        r = self._relatorio("album", [_faixa("ok", artista_album="Outro", tipo_lancamento="EP")])
+        r = self._relatorio(
+            "album", [_faixa("ok", artista_album="Outro", tipo_lancamento="EP")]
+        )
         r["identificacao"]["artista"] = "Original"
         pp._recalc_cabecalho_dinamico(r)
         assert r["identificacao"]["artista"] == "Original"
         assert r["identificacao"]["tipo_lancamento"] == ""
 
     def test_um_unico_artista_vira_o_artista_do_cabecalho(self):
-        r = self._relatorio("playlist", [
-            _faixa("ok", artista_album="Banda", artista="Banda, Convidado"),
-            _faixa("ok", artista_album="Banda", artista="Banda"),
-        ])
+        r = self._relatorio(
+            "playlist",
+            [
+                _faixa("ok", artista_album="Banda", artista="Banda, Convidado"),
+                _faixa("ok", artista_album="Banda", artista="Banda"),
+            ],
+        )
         pp._recalc_cabecalho_dinamico(r)
         assert r["identificacao"]["artista"] == "Banda"
 
     def test_artista_da_faixa_so_e_fallback(self):
         # feat. pontual no performer NÃO pode gerar "Vários Artistas".
-        r = self._relatorio("faixa", [
-            _faixa("ok", artista_album="Banda", artista="Banda, Convidado"),
-            _faixa("ok", artista="Banda"),
-        ])
+        r = self._relatorio(
+            "faixa",
+            [
+                _faixa("ok", artista_album="Banda", artista="Banda, Convidado"),
+                _faixa("ok", artista="Banda"),
+            ],
+        )
         pp._recalc_cabecalho_dinamico(r)
         assert r["identificacao"]["artista"] == "Banda"
 
     def test_varios_artistas(self):
-        r = self._relatorio("playlist", [
-            _faixa("ok", artista_album="A"), _faixa("ok", artista_album="B"),
-        ])
+        r = self._relatorio(
+            "playlist",
+            [
+                _faixa("ok", artista_album="A"),
+                _faixa("ok", artista_album="B"),
+            ],
+        )
         pp._recalc_cabecalho_dinamico(r)
         assert r["identificacao"]["artista"] == "Vários Artistas"
 
     def test_tipo_de_lancamento_unico(self):
-        r = self._relatorio("playlist", [
-            _faixa("ok", tipo_lancamento="Single"), _faixa("ok", tipo_lancamento="Single"),
-        ])
+        r = self._relatorio(
+            "playlist",
+            [
+                _faixa("ok", tipo_lancamento="Single"),
+                _faixa("ok", tipo_lancamento="Single"),
+            ],
+        )
         pp._recalc_cabecalho_dinamico(r)
         assert r["identificacao"]["tipo_lancamento"] == "Single"
 
     def test_tipos_diferentes_viram_diversos(self):
-        r = self._relatorio("playlist", [
-            _faixa("ok", tipo_lancamento="Single"), _faixa("ok", tipo_lancamento="EP"),
-        ])
+        r = self._relatorio(
+            "playlist",
+            [
+                _faixa("ok", tipo_lancamento="Single"),
+                _faixa("ok", tipo_lancamento="EP"),
+            ],
+        )
         pp._recalc_cabecalho_dinamico(r)
         assert r["identificacao"]["tipo_lancamento"] == "Diversos"
 
@@ -318,7 +385,10 @@ class TestCompatibilidadeLegada:
     def test_aliases_planos_do_item(self):
         r = {
             "identificacao": {"titulo": "T", "artista": "A", "id": "9"},
-            "progresso": {"estado": {"situacao": "completo"}, "resumo": {"concluidas": 4, "total": 5}},
+            "progresso": {
+                "estado": {"situacao": "completo"},
+                "resumo": {"concluidas": 4, "total": 5},
+            },
             "qualidade": {"alvo_atingida": True},
             "faixas": [],
         }
@@ -336,12 +406,21 @@ class TestCompatibilidadeLegada:
         assert r["qualidade_atingida"] is None
 
     def test_status_legado_das_faixas(self):
-        r = {"faixas": [
-            {"download": {"situacao": "concluido", "motivo": ""},
-             "identificacao": {"isrc": "X", "titulo": "M", "artista": "A", "compositor": "C"}},
-            {"download": {"situacao": "falha", "motivo": "erro de rede"}},
-            {},
-        ]}
+        r = {
+            "faixas": [
+                {
+                    "download": {"situacao": "concluido", "motivo": ""},
+                    "identificacao": {
+                        "isrc": "X",
+                        "titulo": "M",
+                        "artista": "A",
+                        "compositor": "C",
+                    },
+                },
+                {"download": {"situacao": "falha", "motivo": "erro de rede"}},
+                {},
+            ]
+        }
         pp._aplicar_compatibilidade_legada(r)
         f1, f2, f3 = r["faixas"]
         assert f1["status"] == "ok" and f1["isrc"] == "X" and f1["compositor"] == "C"
@@ -438,10 +517,22 @@ class TestIndiceDaColecao:
         db = str(tmp_path / "qobuz_dl.db")
         for i in (1, 2):
             pp.generate_index_entry(
-                db, f"id{i}", f"Álbum {i}", "Artista", str(tmp_path / f"a{i}"),
-                "FLAC", 24, 96.0, "2025-01-01", f"https://x/{i}",
+                db,
+                f"id{i}",
+                f"Álbum {i}",
+                "Artista",
+                str(tmp_path / f"a{i}"),
+                "FLAC",
+                24,
+                96.0,
+                "2025-01-01",
+                f"https://x/{i}",
             )
-        linhas = (tmp_path / "collection_index.jsonl").read_text(encoding="utf-8").splitlines()
+        linhas = (
+            (tmp_path / "collection_index.jsonl")
+            .read_text(encoding="utf-8")
+            .splitlines()
+        )
         assert len(linhas) == 2
         primeira = json.loads(linhas[0])
         assert primeira["album_id"] == "id1"
@@ -452,21 +543,38 @@ class TestIndiceDaColecao:
 
     def test_nao_escapa_acentos(self, tmp_path):
         pp.generate_index_entry(
-            str(tmp_path / "db"), "1", "Coração", "A", "x", "FLAC", 16, 44.1, "", "",
+            str(tmp_path / "db"),
+            "1",
+            "Coração",
+            "A",
+            "x",
+            "FLAC",
+            16,
+            44.1,
+            "",
+            "",
         )
-        assert "Coração" in (tmp_path / "collection_index.jsonl").read_text(encoding="utf-8")
+        assert "Coração" in (tmp_path / "collection_index.jsonl").read_text(
+            encoding="utf-8"
+        )
 
 
 class TestRelatorioDaColecao:
     def _stats(self, **extra):
         base = {
-            "albums": 3, "tracks": 30, "hires": 2, "flac": 28, "mp3": 2,
-            "quality_met": 25, "quality_not_met": 5,
+            "albums": 3,
+            "tracks": 30,
+            "hires": 2,
+            "flac": 28,
+            "mp3": 2,
+            "quality_met": 25,
+            "quality_not_met": 5,
             "formats": {"FLAC": 28, "MP3": 2},
             "bit_depths": {"24": 2, "16": 1},
             "sample_rates": {"96.0": 2},
             "top_artists": [(f"Artista {i}", 15 - i) for i in range(12)],
-            "oldest": "1999-01-01", "newest": "2026-01-01",
+            "oldest": "1999-01-01",
+            "newest": "2026-01-01",
         }
         base.update(extra)
         return base
@@ -495,7 +603,9 @@ class TestRelatorioDaColecao:
         pp.update_collection_report(
             str(tmp_path / "db"), self._stats(oldest=None, newest=None)
         )
-        assert "## Periodo" not in (tmp_path / "collection_report.md").read_text(encoding="utf-8")
+        assert "## Periodo" not in (tmp_path / "collection_report.md").read_text(
+            encoding="utf-8"
+        )
 
     def test_so_um_dos_extremos(self, tmp_path):
         pp.update_collection_report(str(tmp_path / "db"), self._stats(oldest=None))

@@ -7,7 +7,6 @@ subcomandos/flags usadas na tela de ajuda.
 """
 
 import configparser
-import os
 import sys
 from datetime import datetime
 
@@ -176,8 +175,19 @@ class TestValidateConfigFormats:
 
     @pytest.mark.parametrize(
         "variavel",
-        ["artist", "album", "upc", "isrc", "bit_depth", "sampling_rate",
-         "track_number", "disc_number", "release_type", "ExplicitFlag", "label"],
+        [
+            "artist",
+            "album",
+            "upc",
+            "isrc",
+            "bit_depth",
+            "sampling_rate",
+            "track_number",
+            "disc_number",
+            "release_type",
+            "ExplicitFlag",
+            "label",
+        ],
     )
     def test_variaveis_documentadas_sao_aceitas(self, variavel):
         cli.validate_config_formats({"x": "{" + variavel + "}"})
@@ -329,7 +339,10 @@ def parser():
 
 class TestExtracaoDoParser:
     def test_subcomandos_trazem_nome_alias_e_ajuda(self, parser):
-        por_nome = {nome: (alias, ajuda) for nome, alias, ajuda in cli._extract_subcommands(parser)}
+        por_nome = {
+            nome: (alias, ajuda)
+            for nome, alias, ajuda in cli._extract_subcommands(parser)
+        }
         for esperado in ("dl", "lucky", "lyrics", "tags", "scan", "doctor", "stats"):
             assert esperado in por_nome
         alias, ajuda = por_nome["sync-playlist"]

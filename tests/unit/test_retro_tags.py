@@ -59,13 +59,32 @@ class TestFindAudioFiles:
 @pytest.mark.parametrize("multi", [True, False])
 class TestRetagDirectory:
     def _preparar(self, monkeypatch, biblioteca):
-        ids = {"a.flac": "1", "b.flac": "2", "c.flac": None, "d.mp3": "404", "e.flac": "1"}
+        ids = {
+            "a.flac": "1",
+            "b.flac": "2",
+            "c.flac": None,
+            "d.mp3": "404",
+            "e.flac": "1",
+        }
         chamadas = []
         estado = {}
 
-        def fake_flac(filename, root, final, item, album, istrack, em_image, settings=None, **kw):
-            chamadas.append((filename, final, item["id"], istrack, em_image, settings.multi_value_tags))
-            estado[filename] = {"ARTIST": ["A", "B"] if settings.multi_value_tags else ["A, B"]}
+        def fake_flac(
+            filename, root, final, item, album, istrack, em_image, settings=None, **kw
+        ):
+            chamadas.append(
+                (
+                    filename,
+                    final,
+                    item["id"],
+                    istrack,
+                    em_image,
+                    settings.multi_value_tags,
+                )
+            )
+            estado[filename] = {
+                "ARTIST": ["A", "B"] if settings.multi_value_tags else ["A, B"]
+            }
 
         monkeypatch.setattr(retro_tags.metadata, "tag_flac", fake_flac)
         monkeypatch.setattr(
@@ -73,11 +92,15 @@ class TestRetagDirectory:
         )
         monkeypatch.setattr(retro_tags, "extract_album_id", lambda p: None)
         monkeypatch.setattr(
-            retro_tags, "snapshot_tags", lambda p: {k: list(v) for k, v in estado.get(p, {}).items()}
+            retro_tags,
+            "snapshot_tags",
+            lambda p: {k: list(v) for k, v in estado.get(p, {}).items()},
         )
         return chamadas
 
-    def test_modo_multi_tags_chega_nas_funcoes_de_tag(self, monkeypatch, biblioteca, multi):
+    def test_modo_multi_tags_chega_nas_funcoes_de_tag(
+        self, monkeypatch, biblioteca, multi
+    ):
         chamadas = self._preparar(monkeypatch, biblioteca)
         client = _FakeClient()
         stats = asyncio.run(
@@ -90,7 +113,9 @@ class TestRetagDirectory:
         assert stats["errors"] == 1  # d (404)
         assert all(c[5] is multi for c in chamadas)
 
-    def test_tagueia_no_proprio_arquivo_sem_mexer_na_capa(self, monkeypatch, biblioteca, multi):
+    def test_tagueia_no_proprio_arquivo_sem_mexer_na_capa(
+        self, monkeypatch, biblioteca, multi
+    ):
         chamadas = self._preparar(monkeypatch, biblioteca)
         asyncio.run(
             retro_tags.retag_directory(str(biblioteca), _FakeClient(), _Settings(multi))
@@ -109,7 +134,9 @@ class TestRetagDirectory:
         asyncio.run(retro_tags.retag_directory(str(biblioteca), client, settings))
         assert client.album_calls == 1
 
-        stats = asyncio.run(retro_tags.retag_directory(str(biblioteca), client, settings))
+        stats = asyncio.run(
+            retro_tags.retag_directory(str(biblioteca), client, settings)
+        )
         assert stats["updated"] == 0
         assert stats["unchanged"] == 3
 
@@ -117,7 +144,9 @@ class TestRetagDirectory:
 def test_pasta_inexistente_no_dispositivo_nao_quebra(tmp_path):
     inexistente = str(tmp_path / "nao_existe")
     assert (
-        asyncio.run(retro_tags.retag_directory(inexistente, _FakeClient(), _Settings(True)))
+        asyncio.run(
+            retro_tags.retag_directory(inexistente, _FakeClient(), _Settings(True))
+        )
         is None
     )
 

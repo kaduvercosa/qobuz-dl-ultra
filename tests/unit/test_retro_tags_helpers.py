@@ -182,7 +182,10 @@ class TestResolveMetadata:
 @pytest.fixture
 def apple(monkeypatch):
     """Substitui a busca Apple e guarda os argumentos recebidos."""
-    estado = {"args": None, "retorno": ("https://x/10000x10000bb.jpg", "Apple/iTunes", None)}
+    estado = {
+        "args": None,
+        "retorno": ("https://x/10000x10000bb.jpg", "Apple/iTunes", None),
+    }
 
     async def falsa(**kw):
         estado["args"] = kw
@@ -222,7 +225,9 @@ class TestFetchAppleCoverForTrack:
             ("MUSICA (RADIO EDIT)", "radio edit"),
         ],
     )
-    async def test_nao_duplica_versao_que_ja_esta_no_titulo(self, apple, titulo, versao):
+    async def test_nao_duplica_versao_que_ja_esta_no_titulo(
+        self, apple, titulo, versao
+    ):
         await retro_tags._fetch_apple_cover_for_track(
             {"title": titulo, "version": versao}, {}, object()
         )

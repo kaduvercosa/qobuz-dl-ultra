@@ -20,8 +20,17 @@ from qobuz_dl.library_db import LibraryDB
 pytestmark = pytest.mark.unit
 
 
-def _album(id_, artist, title, *, source="qobuz", sid=None, upc=None,
-           bit_depth=24, track_count=10):
+def _album(
+    id_,
+    artist,
+    title,
+    *,
+    source="qobuz",
+    sid=None,
+    upc=None,
+    bit_depth=24,
+    track_count=10,
+):
     return {
         "id": id_,
         "source": source,
@@ -34,8 +43,17 @@ def _album(id_, artist, title, *, source="qobuz", sid=None, upc=None,
     }
 
 
-def _meta(artist="Daft Punk", album="Discovery", *, bit_depth=24, tracks=10,
-          state="ok", sid=None, upc=None, folder="/m/x"):
+def _meta(
+    artist="Daft Punk",
+    album="Discovery",
+    *,
+    bit_depth=24,
+    tracks=10,
+    state="ok",
+    sid=None,
+    upc=None,
+    folder="/m/x",
+):
     return ls.FolderMeta(
         folder=Path(folder),
         artist=artist,
@@ -252,8 +270,13 @@ class TestCompatibilidade:
 
     @pytest.mark.parametrize(
         "local, catalogo, ok",
-        [(10, 10, True), (9, 10, False), (0, 10, True), (10, 0, True),
-         (None, None, True)],
+        [
+            (10, 10, True),
+            (9, 10, False),
+            (0, 10, True),
+            (10, 0, True),
+            (None, None, True),
+        ],
     )
     def test_contagem_de_faixas(self, local, catalogo, ok):
         assert ls._track_count_matches(local, catalogo) is ok
@@ -338,7 +361,9 @@ class TestClassifyPorUpc:
     def test_edicoes_com_o_mesmo_nome_normalizado_ficam_para_revisao(self):
         # "(Deluxe)" é removido na normalização: "B" e "B (Deluxe)" colidem de
         # propósito, então nunca auto-marca -- o usuário escolhe a edição.
-        idx = _index(_album(3, "A", "B", upc="77"), _album(4, "A", "B (Deluxe)", upc="77"))
+        idx = _index(
+            _album(3, "A", "B", upc="77"), _album(4, "A", "B (Deluxe)", upc="77")
+        )
         r = ls.classify(_meta(artist="A", album="B", upc="77"), idx)
         assert r.kind == "review"
         assert {c.album_id for c in r.candidates} == {3, 4}
@@ -384,9 +409,7 @@ class TestClassifyPorNome:
         assert all("multiple_candidates" in c.reason for c in r.candidates)
 
     def test_contagem_divergente_vai_para_revisao(self):
-        r = ls.classify(
-            _meta(tracks=4), _index(_album(1, "Daft Punk", "Discovery"))
-        )
+        r = ls.classify(_meta(tracks=4), _index(_album(1, "Daft Punk", "Discovery")))
         assert r.kind == "review"
         assert "track_count_mismatch" in r.candidates[0].reason
         assert r.candidates[0].score == 0.9
@@ -462,7 +485,8 @@ class TestClassifyFuzzy:
 
     def test_nada_parecido_e_unmatched(self):
         r = ls.classify(
-            _meta(artist="Zzz", album="Qqq"), _index(_album(1, "Daft Punk", "Discovery"))
+            _meta(artist="Zzz", album="Qqq"),
+            _index(_album(1, "Daft Punk", "Discovery")),
         )
         assert r.kind == "unmatched" and r.candidates == ()
 

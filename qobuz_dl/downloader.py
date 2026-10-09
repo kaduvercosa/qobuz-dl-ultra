@@ -613,7 +613,7 @@ class Download:
             if self.settings.no_cover:
                 ui.skip("Pulando capa")
 
-            cover_source=None
+            cover_source = None
             if self.settings.no_cover and not self.settings.embed_art:
                 pass
             else:
@@ -1086,7 +1086,7 @@ class Download:
                 save_cover_now = not skip_saved_cover and not self.settings.no_cover
                 if save_cover_now or self.settings.embed_art:
                     async with _get_dir_lock(dirn):
-                        cover_source="Qobuz"
+                        cover_source = "Qobuz"
                         await _get_cover_and_embed(
                             track_meta["album"]["image"]["large"],
                             dirn,

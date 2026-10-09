@@ -62,7 +62,9 @@ class TestGetCoverSource:
         assert metadata._get_cover_source({"COVER_SOURCE": "  Qobuz  "}) == "Qobuz"
 
     def test_tag_ausente_com_outras_tags(self):
-        assert metadata._get_cover_source({"TITLE": "x"}) == metadata.COVER_SOURCE_UNKNOWN
+        assert (
+            metadata._get_cover_source({"TITLE": "x"}) == metadata.COVER_SOURCE_UNKNOWN
+        )
 
 
 class TestSetCoverSource:

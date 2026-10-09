@@ -314,6 +314,7 @@ def _shrink_image_to_fit(image_path, max_bytes):
         logger.error(f"Falha ao recompactar a capa: {e}", exc_info=True)
         return None
 
+
 def _get_cover_source(tags) -> str:
     """Lê a origem da capa armazenada nas tags"""
     if not tags:
@@ -326,6 +327,7 @@ def _get_cover_source(tags) -> str:
 
     return str(value or COVER_SOURCE_UNKNOWN).strip()
 
+
 def _set_cover_source(tags, source: Optional[str]) -> str:
     """Grava ou remove a origem da capa"""
     if source:
@@ -333,9 +335,11 @@ def _set_cover_source(tags, source: Optional[str]) -> str:
     else:
         tags.pop(COVER_SOURCE_TAG, None)
 
+
 def _cover_comment_line(source: Optional[str]):
     """Gera a linha legível da origem da capa"""
     return f"Capa: {source or COVER_SOURCE_UNKNOWN}"
+
 
 # # Embute a capa no FLAC; se necessário, usa uma cópia recompactada sem alterar cover.jpg.
 def _embed_flac_img(root_dir, audio: FLAC, cover_override=None):
@@ -359,17 +363,13 @@ def _embed_flac_img(root_dir, audio: FLAC, cover_override=None):
         # # O arquivo salvo continua original; somente os bytes enviados ao embed são reduzidos.
         if original_size > FLAC_MAX_BLOCKSIZE:
             logger.info(
-                f"Capa ({humanize.naturalsize(original_size, binary=True)}) "                "excede o limite de 16MB de embed do FLAC -- recompactando apenas "
+                f"Capa ({humanize.naturalsize(original_size, binary=True)}) "
+                "excede o limite de 16MB de embed do FLAC -- recompactando apenas "
                 "os bytes enviados ao embed."
             )
-            image_data = _shrink_image_to_fit(
-                cover_image,
-                FLAC_MAX_BLOCKSIZE
-            )
+            image_data = _shrink_image_to_fit(cover_image, FLAC_MAX_BLOCKSIZE)
             if image_data is None:
-                raise RuntimeError(
-                    "falha ao recompactar a capa para o limite do FLAC"
-                )
+                raise RuntimeError("falha ao recompactar a capa para o limite do FLAC")
         else:
             with open(cover_image, "rb") as image_file:
                 image_data = image_file.read()
@@ -381,10 +381,7 @@ def _embed_flac_img(root_dir, audio: FLAC, cover_override=None):
         image.data = image_data
         audio.add_picture(image)
     except Exception as e:
-        logger.error(
-            f"Erro ao substituir capa no FLAC: {e}",
-            exc_info=True
-        )
+        logger.error(f"Erro ao substituir capa no FLAC: {e}", exc_info=True)
 
 
 # # Adiciona a capa como frame APIC no ID3 do MP3.
@@ -658,7 +655,8 @@ def tag_mp3(
             req_size = getattr(settings, "embedded_art_size", "unknown")
             is_org = "YES" if req_size == "org" else "NO"
             base_comment += (
-                f" | Cover: {humanize.naturalsize(img_size_bytes, binary=True)}"                f" (Req: {req_size}, Org: {is_org})"
+                f" | Cover: {humanize.naturalsize(img_size_bytes, binary=True)}"
+                f" (Req: {req_size}, Org: {is_org})"
             )
         if cover_source:
             base_comment += f" | Capa: {cover_source}"
