@@ -841,6 +841,8 @@ def extrair_essencia(texto: str) -> str:
         .decode("utf-8")
         .lower()
     )
+    # A Apple acrescenta " - Single"/" - EP" ao titulo do album; a Qobuz nao.
+    texto = re.sub(r"\s+-\s+(?:single|ep)\s*$", "", texto)
     texto = re.sub(r"[\(\[].*?[\)\]]", "", texto)
     texto = re.sub(r"[^\w\s]", " ", texto)
     return " ".join(texto.split())
@@ -862,8 +864,51 @@ def extrair_titulo_completo(texto: str) -> str:
         .lower()
     )
     texto = texto.replace("[", "(").replace("]", ")")
+    # Participacoes ("feat."/"with") nao mudam a edicao da musica, e Apple e
+    # Qobuz nem sempre concordam em coloca-las no titulo.
+    texto = re.sub(
+        r"\s*\((?:feat|ft|featuring|with|com)\b[^)]*\)", " ", texto
+    )
     texto = re.sub(r"[^\w\s\(\)]", " ", texto)
-    return re.sub(r"\s+", " ", texto).strip()
+    texto = re.sub(r"\s+", " ", texto).strip()
+
+    # Sufixos editorial frequente no Apple Music. Ele identifica o formato
+    # do release, não uma edição artística diferente da música.
+    texto = re.sub(r"[-\s]*single\s*$", "", texto).strip()
+
+    return texto
+
+# Separadores que a Apple usa para listar varios artistas no mesmo campo
+# (ex.: "Cardi B & Bruno Mars", "J Balvin, Dua Lipa, Bad Bunny & Tainy").
+_SEPARADORES_ARTISTAS = re.compile(
+    r"\s*(?:,|;|&|\+|/|\band\b|\be\b|\by\b|\bx\b|\bfeat\.?|\bft\.?"
+    r"|\bfeaturing\b|\bwith\b|\bcom\b)\s*",
+    re.IGNORECASE,
+)
+
+
+def _partes_artista(texto: str) -> set:
+    # Devolve o artista inteiro + cada artista individual (normalizados).
+    partes = {extrair_essencia(texto)}
+    for parte in _SEPARADORES_ARTISTAS.split(texto or ""):
+        partes.add(extrair_essencia(parte))
+    partes.discard("")
+    return partes
+
+
+def score_artista(pedido: str, candidato: str) -> float:
+    # A Qobuz costuma guardar so' o artista principal ("Cardi B") enquanto a
+    # Apple lista todos ("Cardi B & Bruno Mars"). Comparar as strings inteiras
+    # derrubava o score (0.56) e rejeitava a musica certa. Aqui comparamos
+    # cada artista individual dos dois lados e ficamos com o melhor par.
+    """Best similarity between any artist of the request and of the candidate."""
+    if not extrair_essencia(pedido):
+        return 1.0
+    melhor = 0.0
+    for q in _partes_artista(pedido):
+        for c in _partes_artista(candidato):
+            melhor = max(melhor, difflib.SequenceMatcher(None, q, c).ratio())
+    return melhor
 
 
 async def get_apple_hq_cover(
@@ -873,17 +918,16 @@ async def get_apple_hq_cover(
     artist: Optional[str] = None,
     album: Optional[str] = None,
     track_title: Optional[str] = None,
-) -> str:
-    # Busca uma capa em alta resolucao (ate 10000x10000) na API do
-    # iTunes, validando o resultado por similaridade de texto antes de
-    # devolver -- pra nunca arriscar trocar a capa certa por uma errada.
-    #
-    # Ordem de tentativa: 1) lookup direto por UPC/ISRC (mais confiavel,
-    # quando disponivel); 2) busca por texto (artista + album/faixa) como
-    # fallback. `session`, quando fornecido, reaproveita o
-    # httpx.AsyncClient existente (ex.: self.http_session do Downloader)
-    # em vez de abrir uma conexao nova so' pra isso.
-    """Fetch high-quality album artwork from Apple Music."""
+) -> tuple[Optional[str], Optional[str], Optional[str]]:
+    """Busca uma capa Apple e devolve URL, fonte e motivo se não encontrar.
+
+    Resultado: (url, fonte, motivo). Em sucesso, motivo é None. Em falha,
+    url/fonte são None e motivo explica a principal causa da rejeição.
+
+    UPC/ISRC são identificadores exatos: quando a Apple devolve um resultado
+    por UPC (ou por ISRC no mesmo álbum), ele é aceito sem a checagem fuzzy de
+    artista/título, que só vale para a busca textual.
+    """
     import httpx
 
     headers = {
@@ -892,169 +936,265 @@ async def get_apple_hq_cover(
             "(KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36"
         )
     }
+    countries = ("br", "us")
+    resolutions = ("10000x10000bb", "3000x3000bb", "1400x1400bb")
+    thresholds = {"artist": 0.85, "album": 0.80, "track": 0.80,
+                  "full_album": 0.87, "full_track": 0.85}
 
-    q_artist_puro = extrair_essencia(artist or "")
-    q_album_puro = extrair_essencia(album or "")
-    q_track_puro = extrair_essencia(track_title) if track_title else ""
+    q_artist = extrair_essencia(artist or "")
+    q_album = extrair_essencia(album or "")
+    q_track = extrair_essencia(track_title or "")
+    q_album_full = extrair_titulo_completo(album or "")
+    q_track_full = extrair_titulo_completo(track_title or "")
 
-    # Titulo completo (com a edicao/versao preservada) -- usado como trava final.
-    q_album_completo = extrair_titulo_completo(album or "")
-    q_track_completo = extrair_titulo_completo(track_title) if track_title else ""
+    # (proximidade, motivo, descricao do candidato) de cada rejeicao. A
+    # proximidade permite explicar a falha pelo candidato MAIS PARECIDO, em
+    # vez do motivo mais frequente (que vinha de faixas de outros albuns).
+    rejections: list[tuple[float, str, str]] = []
+    search_had_results = False
+    network_errors: list[str] = []
 
-    # Limiares de similaridade pro titulo COMPLETO (com versao). Quanto
-    # mais alto, mais rigido contra misturar edicoes diferentes.
-    LIMIAR_VERSAO_ALBUM = 0.87
-    LIMIAR_VERSAO_TRACK = 0.85
+    def reject(reason: str, candidate: str = "", closeness: float = 0.0) -> None:
+        rejections.append((closeness, reason, candidate))
 
-    def avaliar_resultados(data):
-        """Evaluate search results and score them for relevance."""
-        melhor_capa = None
-        maior_media = 0.0
-
-        for result in data.get("results", []):
-            a_artist = result.get("artistName", "")
-            a_album = result.get("collectionName", "")
-            a_track = result.get("trackName", "")
-
-            if not a_album:
-                continue
-
-            # Filtro 1: corta lixo (karaoke, tributo, instrumental etc.
-            # que a Qobuz nao pediu).
-            palavras_lixo = [
-                "karaoke",
-                "tribute",
-                "cover",
-                "instrumental",
-                "mixed",
-                "remix",
-            ]
-            is_lixo = False
-            if album:
-                is_lixo = any(
-                    lixo in a_album.lower() and lixo not in album.lower()
-                    for lixo in palavras_lixo
-                )
-            if track_title and not is_lixo:
-                is_lixo = any(
-                    lixo in a_track.lower() and lixo not in track_title.lower()
-                    for lixo in palavras_lixo
-                )
-            if is_lixo:
-                continue
-
-            # Filtro 1.5: trava de versao completa (generica, sem
-            # whitelist) -- compara o titulo inteiro (com parenteses).
-            # Qualquer edicao diferente da pedida (Deluxe, Live, Tour
-            # Edition, seja o que for) derruba o score sozinha, mesmo sem
-            # estar numa lista fixa.
-            a_album_completo = extrair_titulo_completo(a_album)
-            score_versao_album = difflib.SequenceMatcher(
-                None, q_album_completo, a_album_completo
-            ).ratio()
-            if score_versao_album < LIMIAR_VERSAO_ALBUM:
-                continue
-
-            if track_title and a_track:
-                a_track_completo = extrair_titulo_completo(a_track)
-                score_versao_track = difflib.SequenceMatcher(
-                    None, q_track_completo, a_track_completo
-                ).ratio()
-                if score_versao_track < LIMIAR_VERSAO_TRACK:
-                    continue
-
-            # Filtro 2: avalia artista e album na essencia pura (achar o
-            # candidato certo, ignorando qual edicao e').
-            a_artist_puro = extrair_essencia(a_artist)
-            a_album_puro = extrair_essencia(a_album)
-
-            score_artista = (
-                difflib.SequenceMatcher(None, q_artist_puro, a_artist_puro).ratio()
-                if q_artist_puro
-                else 1.0
+    def final_reason() -> str:
+        if not search_had_results:
+            if network_errors:
+                return "Apple API sem resposta válida: " + "; ".join(network_errors[:2])
+            return "Apple não retornou resultados nas lojas BR/US para UPC/ISRC e busca textual"
+        if rejections:
+            ordered = sorted(rejections, key=lambda item: item[0], reverse=True)
+            detail = (
+                f"{ordered[0][1]} (candidato mais próximo; "
+                f"{len(rejections)} rejeitado(s) no total)"
             )
-            score_album = (
-                difflib.SequenceMatcher(None, q_album_puro, a_album_puro).ratio()
-                if q_album_puro
-                else 1.0
-            )
+            examples = [f"{reason}: {label}" for _, reason, label in ordered[:3] if label]
+            if examples:
+                detail += "; exemplos: " + " | ".join(examples)
+            return detail
+        return "Apple retornou resultados, mas nenhum tinha capa em resolução acessível"
 
-            if score_artista < 0.85 or score_album < 0.80:
-                continue
-
-            # Filtro 3: avalia o nome da musica (essencia), quando houver.
-            score_track = 1.0
-            se_tem_faixa = 1 if track_title else 0
-
-            if track_title and a_track:
-                a_track_puro = extrair_essencia(a_track)
-                score_track = difflib.SequenceMatcher(
-                    None, q_track_puro, a_track_puro
-                ).ratio()
-                if score_track < 0.80:
-                    continue
-
-            divisor = 2.0 + se_tem_faixa
-            media = (
-                score_artista + score_album + (score_track * se_tem_faixa)
-            ) / divisor
-
-            if media > maior_media:
-                maior_media = media
-                url_arte = result.get("artworkUrl100", "")
-                if url_arte:
-                    melhor_capa = url_arte.replace("100x100bb", "10000x10000bb")
-
-        if maior_media >= 0.80 and melhor_capa:
-            return melhor_capa
-        return None
-
-    async def _buscar(client):
-        """Search for tracks using multiple strategies (ISRC, fuzzy title matching)."""
-        for codigo, tipo in [(upc, "upc"), (isrc, "isrc")]:
-            if codigo and codigo.lower() != "n/a":
-                try:
-                    r = await client.get(
-                        f"https://itunes.apple.com/lookup?{tipo}={codigo}",
-                        headers=headers,
-                        timeout=5,
-                    )
-                    if r.status_code == 200:
-                        data = r.json()
-                        if data.get("resultCount", 0) > 0:
-                            capa = avaliar_resultados(data)
-                            if capa:
-                                return capa
-                except Exception as e:
-                    logger.debug(f"Falha no lookup Apple por {tipo}={codigo}: {e}")
-
-        if artist and album:
-            search_entity = "song" if track_title else "album"
-            query_str = (
-                f"{artist} {track_title}" if track_title else f"{artist} {album}"
-            )
-            clean_query = urllib.parse.quote(query_str)
-            url = f"https://itunes.apple.com/search?term={clean_query}&entity={search_entity}&limit=10"
-
+    async def artwork_url(client, artwork: str) -> tuple[Optional[str], Optional[str]]:
+        if not artwork:
+            return None, "resultado sem artworkUrl100"
+        for resolution in resolutions:
+            url = artwork.replace("100x100bb", resolution)
             try:
-                r = await client.get(url, headers=headers, timeout=5)
-                if r.status_code == 200:
-                    data = r.json()
-                    if data.get("resultCount", 0) > 0:
-                        capa = avaliar_resultados(data)
-                        if capa:
-                            return capa
-            except Exception as e:
-                logger.debug(f"Falha na busca Apple por texto ({query_str}): {e}")
+                response = await client.head(
+                    url, headers=headers, timeout=5, follow_redirects=True
+                )
+                if response.status_code == 200:
+                    return url, None
+                last_error = f"HTTP {response.status_code} em {resolution}"
+            except Exception as exc:
+                last_error = f"{type(exc).__name__} em {resolution}"
+        return None, last_error
 
-        return None
+    async def evaluate(data, client, exact: str = "") -> Optional[str]:
+        # exact: "" = busca textual (fuzzy), "upc" ou "isrc" = lookup exato.
+        nonlocal search_had_results
+        results = data.get("results", [])
+        if results:
+            search_had_results = True
+
+        best_url = None
+        best_score = 0.0
+        junk_words = ("karaoke", "tribute", "cover", "instrumental", "mixed", "remix")
+
+        for result in results:
+            candidate_artist = str(result.get("artistName") or "")
+            candidate_album = str(result.get("collectionName") or "")
+            candidate_track = str(result.get("trackName") or "")
+            label = (
+                f"artist={candidate_artist!r}, album={candidate_album!r}, "
+                f"track={candidate_track!r}"
+            )
+
+            if not candidate_album:
+                reject("resultado sem collectionName", label)
+                continue
+
+            candidate_album_norm = extrair_essencia(candidate_album)
+            candidate_track_norm = extrair_essencia(candidate_track)
+            artist_score = score_artista(artist or "", candidate_artist) if q_artist else 1.0
+            album_score = (
+                difflib.SequenceMatcher(None, q_album, candidate_album_norm).ratio()
+                if q_album else 1.0
+            )
+            compare_track = bool(track_title and candidate_track)
+            track_full_score = track_score = 1.0
+            if compare_track:
+                track_full_score = difflib.SequenceMatcher(
+                    None, q_track_full, extrair_titulo_completo(candidate_track)
+                ).ratio()
+                track_score = difflib.SequenceMatcher(
+                    None, q_track, candidate_track_norm
+                ).ratio()
+            scores = [artist_score, album_score] + ([track_full_score] if compare_track else [])
+            closeness = sum(scores) / len(scores)
+
+            # --- Lookup exato por UPC/ISRC: o identificador ja' diz que e' a
+            # mesma release/gravacao, entao nao reprovamos por artista/titulo
+            # (colaboracoes, "- Single", versao no titulo etc.).
+            if exact:
+                if exact == "isrc" and q_album and album_score < 0.45:
+                    # O mesmo ISRC pode aparecer em coletaneas: nesse caso so'
+                    # aceitamos se o album tiver pelo menos alguma relacao.
+                    reject(
+                        f"ISRC encontrado em outro álbum ({album_score:.2f} < 0.45; "
+                        f"pedido={album!r}, Apple={candidate_album!r})",
+                        label, closeness,
+                    )
+                    continue
+                valid_url, url_error = await artwork_url(
+                    client, str(result.get("artworkUrl100") or "")
+                )
+                if not valid_url:
+                    reject(f"URL da imagem não validada ({url_error})", label, closeness)
+                    continue
+                score = (artist_score + album_score) / 2.0
+                if score > best_score or best_url is None:
+                    best_score = score
+                    best_url = valid_url
+                continue
+
+            # --- Busca textual (fuzzy): mantem todas as travas.
+            haystack = f"{candidate_album} {candidate_track}".casefold()
+            requested_text = f"{album or ''} {track_title or ''}".casefold()
+            junk = [word for word in junk_words
+                    if word in haystack and word not in requested_text]
+            if junk:
+                reject(f"termo indesejado {junk[0]!r}", label, closeness)
+                continue
+
+            if compare_track:
+                if track_full_score < thresholds["full_track"]:
+                    reject(
+                        f"título completo da faixa incompatível "
+                        f"({track_full_score:.2f} < {thresholds['full_track']:.2f}; "
+                        f"pedido={track_title!r}, Apple={candidate_track!r})",
+                        label, closeness,
+                    )
+                    continue
+                if track_score < thresholds["track"]:
+                    reject(
+                        f"similaridade da faixa insuficiente "
+                        f"({track_score:.2f} < {thresholds['track']:.2f})",
+                        label, closeness,
+                    )
+                    continue
+            else:
+                track_score = 1.0
+                if not track_title:
+                    album_full_score = difflib.SequenceMatcher(
+                        None, q_album_full,
+                        extrair_titulo_completo(candidate_album),
+                    ).ratio()
+                    if album_full_score < thresholds["full_album"]:
+                        reject(
+                            f"edição/título do álbum incompatível "
+                            f"({album_full_score:.2f} < {thresholds['full_album']:.2f})",
+                            label, closeness,
+                        )
+                        continue
+
+            if artist_score < thresholds["artist"]:
+                reject(
+                    f"artista incompatível ({artist_score:.2f} < "
+                    f"{thresholds['artist']:.2f}; pedido={artist!r}, "
+                    f"Apple={candidate_artist!r})",
+                    label, closeness,
+                )
+                continue
+
+            if track_title:
+                if album_score < 0.45:
+                    reject(
+                        f"álbum muito diferente ({album_score:.2f} < 0.45; "
+                        f"pedido={album!r}, Apple={candidate_album!r})",
+                        label, closeness,
+                    )
+                    continue
+            elif album_score < thresholds["album"]:
+                reject(
+                    f"álbum incompatível ({album_score:.2f} < "
+                    f"{thresholds['album']:.2f}; pedido={album!r}, "
+                    f"Apple={candidate_album!r})",
+                    label, closeness,
+                )
+                continue
+
+            divisor = 3.0 if track_title else 2.0
+            score = (artist_score + album_score + (track_score if track_title else 0)) / divisor
+            if score < 0.80:
+                reject(f"pontuação combinada baixa ({score:.2f} < 0.80)", label, closeness)
+                continue
+
+            valid_url, url_error = await artwork_url(
+                client, str(result.get("artworkUrl100") or "")
+            )
+            if not valid_url:
+                reject(f"URL da imagem não validada ({url_error})", label, closeness)
+                continue
+
+            if score > best_score:
+                best_score = score
+                best_url = valid_url
+
+        return best_url
+
+    async def search(client) -> tuple[Optional[str], Optional[str], Optional[str]]:
+        # Primeiro lookup exato por UPC/ISRC.
+        for code, kind in ((upc, "upc"), (isrc, "isrc")):
+            if not code or str(code).strip().lower() in ("n/a", "none"):
+                continue
+            for country in countries:
+                try:
+                    response = await client.get(
+                        f"https://itunes.apple.com/lookup?{kind}="
+                        f"{urllib.parse.quote(str(code))}&country={country}",
+                        headers=headers,
+                        timeout=8,
+                    )
+                    if response.status_code != 200:
+                        network_errors.append(f"lookup {kind}/{country}: HTTP {response.status_code}")
+                        continue
+                    data = response.json()
+                    url = await evaluate(data, client, exact=kind)
+                    if url:
+                        return url, "Apple/iTunes", None
+                except Exception as exc:
+                    network_errors.append(f"lookup {kind}/{country}: {type(exc).__name__}: {exc}")
+
+        # Busca textual por faixa ou álbum.
+        query = f"{artist or ''} {track_title if track_title else album or ''}".strip()
+        if query:
+            entity = "song" if track_title else "album"
+            for country in countries:
+                try:
+                    response = await client.get(
+                        "https://itunes.apple.com/search",
+                        params={"term": query, "entity": entity,
+                                "country": country, "limit": 25},
+                        headers=headers,
+                        timeout=8,
+                    )
+                    if response.status_code != 200:
+                        network_errors.append(f"search {country}: HTTP {response.status_code}")
+                        continue
+                    url = await evaluate(response.json(), client)
+                    if url:
+                        return url, "Apple/iTunes", None
+                except Exception as exc:
+                    network_errors.append(f"search {country}: {type(exc).__name__}: {exc}")
+
+        return None, None, final_reason()
 
     if session is not None:
-        return await _buscar(session)
+        return await search(session)
 
     async with httpx.AsyncClient() as client:
-        return await _buscar(client)
-
+        return await search(client)
 
 def get_config_paths():
     # Resolve o diretório de configuração multiplataforma (Windows,

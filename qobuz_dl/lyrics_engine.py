@@ -678,7 +678,7 @@ class LyricsEngine:
         faixa uma linha de resultado ("injetado!"/"sem traducao") pertence
         quando ela aparece longe da linha "Procurando letras para: "
         que a precedeu (misturada com outras linhas de progresso de
-        download no meio). Mesma numeracao usada em "Em Progresso: NN. ...".
+        download no meio). Mesma numeracao usada em "Em Progresso: [NN] ...".
 
         `isrc` e `duration` (segundos) sao opcionais; sem a duracao a fonte
         BiniLyrics e' ignorada.

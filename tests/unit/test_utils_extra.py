@@ -409,16 +409,26 @@ class _Resp:
 
 
 class _Sessao:
-    def __init__(self, respostas):
+    def __init__(self, respostas, head_status=200):
         self.respostas = list(respostas)
         self.urls = []
+        self.params = []
+        self.heads = []
+        self.head_status = head_status
 
     async def get(self, url, **_kw):
         self.urls.append(url)
+        # A busca textual manda a consulta em `params=`, não na própria URL.
+        self.params.append(_kw.get("params"))
         r = self.respostas.pop(0)
         if isinstance(r, Exception):
             raise r
         return r
+
+    async def head(self, url, **_kw):
+        # get_apple_hq_cover valida a URL da imagem com HEAD antes de aceitá-la.
+        self.heads.append(url)
+        return _Resp({}, status=self.head_status)
 
 
 def _res(artista="Banda", album="Disco", faixa=None, capa="http://x/100x100bb.jpg"):
@@ -431,13 +441,16 @@ def _res(artista="Banda", album="Disco", faixa=None, capa="http://x/100x100bb.jp
 async def test_apple_cover_por_upc():
     s = _Sessao([_Resp({"resultCount": 1, "results": [_res()]})])
     r = await utils.get_apple_hq_cover(s, upc="123", artist="Banda", album="Disco")
-    assert r == "http://x/10000x10000bb.jpg"
+    assert r == ("http://x/10000x10000bb.jpg", "Apple/iTunes", None)
     assert "lookup?upc=123" in s.urls[0]
 
 
 async def test_apple_cover_fallback_isrc_e_busca_por_texto():
+    # Ordem das requisições: UPC (br, us), ISRC (br, us), busca textual (br).
     s = _Sessao(
         [
+            _Resp({"resultCount": 0}),
+            RuntimeError("falhou"),
             _Resp({"resultCount": 0}),
             RuntimeError("falhou"),
             _Resp({"resultCount": 1, "results": [_res()]}),
@@ -446,9 +459,11 @@ async def test_apple_cover_fallback_isrc_e_busca_por_texto():
     r = await utils.get_apple_hq_cover(
         s, upc="1", isrc="2", artist="Banda", album="Disco"
     )
-    assert r == "http://x/10000x10000bb.jpg"
-    assert "search?term=" in s.urls[-1]
-    assert "entity=album" in s.urls[-1]
+    assert r == ("http://x/10000x10000bb.jpg", "Apple/iTunes", None)
+    assert "lookup?upc=1" in s.urls[0] and "lookup?isrc=2" in s.urls[2]
+    assert s.urls[-1].endswith("/search")
+    assert s.params[-1]["term"] == "Banda Disco"
+    assert s.params[-1]["entity"] == "album"
 
 
 async def test_apple_cover_busca_de_faixa_valida_titulo():
@@ -456,8 +471,9 @@ async def test_apple_cover_busca_de_faixa_valida_titulo():
     r = await utils.get_apple_hq_cover(
         s, artist="Banda", album="Disco", track_title="Musica"
     )
-    assert r.endswith("10000x10000bb.jpg")
-    assert "entity=song" in s.urls[0]
+    assert r[0].endswith("10000x10000bb.jpg")
+    assert s.params[0]["entity"] == "song"
+    assert s.params[0]["term"] == "Banda Musica"
 
 
 @pytest.mark.parametrize(
@@ -473,28 +489,33 @@ async def test_apple_cover_busca_de_faixa_valida_titulo():
 )
 async def test_apple_cover_rejeita_candidatos_ruins(resultado):
     s = _Sessao([_Resp({"resultCount": 1, "results": [resultado]})])
-    assert await utils.get_apple_hq_cover(s, artist="Banda", album="Disco") is None
+    url, fonte, motivo = await utils.get_apple_hq_cover(
+        s, artist="Banda", album="Disco"
+    )
+    assert url is None and fonte is None
+    assert isinstance(motivo, str) and motivo
 
 
 async def test_apple_cover_rejeita_faixa_diferente():
     s = _Sessao([_Resp({"resultCount": 1, "results": [_res(faixa="Outra Coisa")]})])
-    assert (
-        await utils.get_apple_hq_cover(
-            s, artist="Banda", album="Disco", track_title="Musica"
-        )
-        is None
+    url, _fonte, motivo = await utils.get_apple_hq_cover(
+        s, artist="Banda", album="Disco", track_title="Musica"
     )
+    assert url is None
+    assert "faixa incompatível" in motivo
 
 
 async def test_apple_cover_sem_dados_e_status_ruim():
     s = _Sessao([_Resp({}, status=500), _Resp({}, status=500)])
-    assert (
-        await utils.get_apple_hq_cover(s, upc="1", artist="Banda", album="Disco")
-        is None
+    url, fonte, motivo = await utils.get_apple_hq_cover(
+        s, upc="1", artist="Banda", album="Disco"
     )
-    assert await utils.get_apple_hq_cover(_Sessao([])) is None
+    assert (url, fonte) == (None, None)
+    assert "HTTP 500" in motivo
+    # Sem nenhum dado para buscar: falha com motivo, sem levantar exceção.
+    assert (await utils.get_apple_hq_cover(_Sessao([])))[0] is None
     s2 = _Sessao([_Resp({}, 200)])
-    assert await utils.get_apple_hq_cover(s2, upc="n/a") is None
+    assert (await utils.get_apple_hq_cover(s2, upc="n/a"))[0] is None
     assert s2.urls == []
 
 
@@ -511,7 +532,7 @@ async def test_apple_cover_cria_cliente_quando_sem_sessao(monkeypatch):
     cli = Cliente([_Resp({"resultCount": 1, "results": [_res()]})])
     monkeypatch.setattr(httpx, "AsyncClient", lambda: cli)
     r = await utils.get_apple_hq_cover(artist="Banda", album="Disco")
-    assert r.endswith("10000x10000bb.jpg")
+    assert r[0].endswith("10000x10000bb.jpg")
 
 
 def test_get_config_paths_variaveis_de_ambiente(monkeypatch, tmp_path):

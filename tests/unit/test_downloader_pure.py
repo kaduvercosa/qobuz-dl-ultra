@@ -14,8 +14,10 @@ from qobuz_dl.downloader import (
     _desc_budget,
     _PositionPool,
     _safe_get,
+    _short_track_name,
     create_missing_placeholder,
     format_release_type,
+    format_track_label,
     is_track_streamable,
     process_folder_format_with_subdirs,
 )
@@ -52,6 +54,49 @@ class TestIsTrackStreamable:
         # False em todas as três flags.
         ok, motivo = is_track_streamable({})
         assert ok is False
+
+
+# --------------------------------------------------------------------
+# format_track_label
+# --------------------------------------------------------------------
+class TestFormatTrackLabel:
+    def test_disco_unico_so_numero_da_faixa(self):
+        assert format_track_label({"track_number": 3, "media_number": 1}, 1) == "03"
+
+    def test_varios_discos_usa_disco_ponto_faixa(self):
+        assert format_track_label({"track_number": 3, "media_number": 1}, 2) == "01.03"
+        assert format_track_label({"track_number": 1, "media_number": 2}, 2) == "02.01"
+
+    def test_media_count_ausente_ou_invalido_vale_um_disco(self):
+        assert format_track_label({"track_number": 5, "media_number": 2}, None) == "05"
+        assert format_track_label({"track_number": 5, "media_number": 2}, "x") == "05"
+
+    def test_campos_ausentes_usam_default(self):
+        assert format_track_label({}, 3, default=4) == "01.04"
+
+    def test_placeholder_em_multidisco_nao_colide_entre_discos(self, tmp_path):
+        d1 = {"track_number": 1, "media_number": 1, "title": "A", "duration": 1}
+        d2 = {"track_number": 1, "media_number": 2, "title": "B", "duration": 1}
+        create_missing_placeholder(d1, str(tmp_path), "m", 2)
+        create_missing_placeholder(d2, str(tmp_path), "m", 2)
+        assert (tmp_path / "01.01. A [INDISPONÍVEL].missing.txt").exists()
+        assert (tmp_path / "02.01. B [INDISPONÍVEL].missing.txt").exists()
+
+
+class TestShortTrackName:
+    def test_cabe_nao_corta(self):
+        assert _short_track_name("[01.02] Abc", 30) == "[01.02] Abc"
+
+    def test_corta_titulo_preservando_indice(self):
+        r = _short_track_name("[01.02] Um titulo bem longo", 14)
+        assert r.startswith("[01.02] ") and r.endswith("...") and len(r) <= 14
+
+    def test_sem_espaco_pra_titulo_mantem_indice_inteiro(self):
+        assert _short_track_name("[01.02] Um titulo bem longo", 6) == "[01.02]"
+        assert _short_track_name("[03] Um titulo bem longo", 6) == "[03]"
+
+    def test_nome_sem_indice_corta_normal(self):
+        assert _short_track_name("Titulo muito longo mesmo", 10) == "Titulo ..."
 
 
 # --------------------------------------------------------------------

@@ -17,6 +17,7 @@
 # ============================================================================
 import logging
 import os
+import re
 import threading
 
 from pathvalidate import sanitize_filepath
@@ -47,12 +48,54 @@ def is_track_streamable(track: dict) -> tuple[bool, str]:
     return True, ""
 
 
-def create_missing_placeholder(track: dict, folder_path: str, reason: str):
+def format_track_label(track: dict, media_count=1, default=0) -> str:
+    """Rótulo de exibição da faixa: "NN" ou, em álbum com vários CDs, "DD.NN".
+
+    Ex.: álbum de 1 disco -> "03"; álbum de 2+ discos -> "01.03" (disco 1,
+    faixa 3) e "02.01" (disco 2, faixa 1). Só serve pra mostrar/nomear
+    (progresso, mensagens, tracklist, .missing.txt) -- a tag
+    TRACKNUMBER/DISCNUMBER e o relatório continuam com o número puro.
+    """
+
+    def _to_int(value, fallback):
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return fallback
+
+    faixa = _to_int(track.get("track_number"), default)
+    label = f"{faixa:02d}"
+    if _to_int(media_count, 1) > 1:
+        disco = _to_int(track.get("media_number"), 1)
+        label = f"{disco:02d}.{label}"
+    return label
+
+
+def _short_track_name(track_name: str, desc_len: int) -> str:
+    """Encurta o nome da faixa pra caber na barra paralela, sem perder o índice.
+
+    O índice ("[01]" / "[01.02]") fica no começo do nome; um corte cego em
+    `desc_len - 3` pode mutilar ele ("[01...") quando o terminal é estreito
+    e o orçamento é pequeno. Se não sobra espaço pra título, mostra só o
+    índice inteiro.
+    """
+    if len(track_name) <= desc_len:
+        return track_name
+    m = re.match(r"^\[[\d.]+\]\s*", track_name)
+    prefix = m.group(0).rstrip() if m else ""
+    if prefix and desc_len - 3 <= len(prefix):
+        return prefix
+    return track_name[: desc_len - 3] + "..."
+
+
+def create_missing_placeholder(
+    track: dict, folder_path: str, reason: str, media_count=1
+):
     """
     [OPÇÃO B] Cria o arquivo .missing.txt na pasta do álbum
     """
     try:
-        track_num = str(track.get("track_number", 0)).zfill(2)
+        track_num = format_track_label(track, media_count)
         title = track.get("title", "Faixa").replace("/", "-").replace("\\", "-")
         artist = track.get("performer", {}).get(
             "name", track.get("artist", {}).get("name", "Desconhecido")

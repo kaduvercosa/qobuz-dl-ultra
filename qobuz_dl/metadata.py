@@ -104,6 +104,10 @@ ID3_LEGEND = {
 }
 
 EMB_COVER_NAME = "embed_cover.jpg"
+COVER_SOURCE_TAG = "COVER_SOURCE"
+COVER_SOURCE_APPLE = "Apple/Itunes"
+COVER_SOURCE_QOBUZ = "Qobuz"
+COVER_SOURCE_UNKNOWN = "Desconhecida"
 
 # # Limite máximo de um bloco de metadados FLAC: 0xFFFFFF bytes.
 LOCAL_GENRE_MAP = {
@@ -310,6 +314,28 @@ def _shrink_image_to_fit(image_path, max_bytes):
         logger.error(f"Falha ao recompactar a capa: {e}", exc_info=True)
         return None
 
+def _get_cover_source(tags) -> str:
+    """Lê a origem da capa armazenada nas tags"""
+    if not tags:
+        return COVER_SOURCE_UNKNOWN
+
+    value = tags.get(COVER_SOURCE_TAG)
+
+    if isinstance(value, (list, tuple)):
+        value = value[0] if value else ""
+
+    return str(value or COVER_SOURCE_UNKNOWN).strip()
+
+def _set_cover_source(tags, source: Optional[str]) -> str:
+    """Grava ou remove a origem da capa"""
+    if source:
+        tags[COVER_SOURCE_TAG] = str(source).strip()
+    else:
+        tags.pop(COVER_SOURCE_TAG, None)
+
+def _cover_comment_line(source: Optional[str]):
+    """Gera a linha legível da origem da capa"""
+    return f"Capa: {source or COVER_SOURCE_UNKNOWN}"
 
 # # Embute a capa no FLAC; se necessário, usa uma cópia recompactada sem alterar cover.jpg.
 def _embed_flac_img(root_dir, audio: FLAC, cover_override=None):
@@ -324,26 +350,29 @@ def _embed_flac_img(root_dir, audio: FLAC, cover_override=None):
         return
 
     try:
+        # Remove imagens anteriores para não acumular capas duplicadas
+        audio.clear_pictures()
+
         original_size = os.path.getsize(cover_image)
         image_data = None
 
         # # O arquivo salvo continua original; somente os bytes enviados ao embed são reduzidos.
         if original_size > FLAC_MAX_BLOCKSIZE:
             logger.info(
-                f"Capa ({humanize.naturalsize(original_size, binary=True)}) excede o limite de "
-                f"16MB de embed do FLAC -- recompactando so' o suficiente pra caber "
-                f"(o arquivo salvo em disco continua em qualidade original)."
+                f"Capa ({humanize.naturalsize(original_size, binary=True)}) "                "excede o limite de 16MB de embed do FLAC -- recompactando apenas "
+                "os bytes enviados ao embed."
             )
-            image_data = _shrink_image_to_fit(cover_image, FLAC_MAX_BLOCKSIZE)
+            image_data = _shrink_image_to_fit(
+                cover_image,
+                FLAC_MAX_BLOCKSIZE
+            )
             if image_data is None:
-                raise Exception(
-                    "capa muito grande pra embutir e a recompactacao automatica "
-                    "falhou (Pillow ausente ou imagem ilegivel) -- pulando embed "
-                    "dessa faixa, mas o download continua normalmente."
+                raise RuntimeError(
+                    "falha ao recompactar a capa para o limite do FLAC"
                 )
         else:
-            with open(cover_image, "rb") as img:
-                image_data = img.read()
+            with open(cover_image, "rb") as image_file:
+                image_data = image_file.read()
 
         image = Picture()
         image.type = 3
@@ -352,7 +381,10 @@ def _embed_flac_img(root_dir, audio: FLAC, cover_override=None):
         image.data = image_data
         audio.add_picture(image)
     except Exception as e:
-        logger.error(f"Error embedding image: {e}", exc_info=True)
+        logger.error(
+            f"Erro ao substituir capa no FLAC: {e}",
+            exc_info=True
+        )
 
 
 # # Adiciona a capa como frame APIC no ID3 do MP3.
@@ -368,8 +400,20 @@ def _embed_id3_img(root_dir, audio: id3.ID3, cover_override=None):
         return
 
     try:
-        with open(cover_image, "rb") as cover:
-            audio.add(id3.APIC(3, "image/jpeg", 3, "", cover.read()))
+        for key in list(audio.keys()):
+            if key.startswith("APIC"):
+                del audio[key]
+
+        with open(cover_image, "rb") as cover_file:
+            audio.add(
+                id3.APIC(
+                    encoding=3,
+                    mime="image/jpeg",
+                    type=3,
+                    desc="cover",
+                    data=cover_file.read(),
+                )
+            )
     except OSError as e:
         logger.warning(f"Capa não embutida: falha ao ler '{cover_image}': {e}")
 
@@ -386,6 +430,7 @@ def tag_flac(
     settings: Optional[QobuzDLSettings] = None,
     embed_cover_path=None,
     musicbrainz_ids=None,
+    cover_source: Optional[str] = None,
 ):
     """Apply tags to FLAC file."""
     audio = FLAC(filename)
@@ -403,6 +448,8 @@ def tag_flac(
     tags = _get_tags_to_add(
         qobuz_album, qobuz_item, settings=settings, musicbrainz_ids=musicbrainz_ids
     )
+    if em_image:
+        _set_cover_source(tags, cover_source)
 
     if not settings.no_track_number_tag:
         tags["TRACKNUMBER"] = str(qobuz_item.get("track_number", "1"))
@@ -483,7 +530,8 @@ def tag_flac(
                 f" | {cover_kind}"
                 f" | Solicitada: {req_size}"
             )
-
+        if cover_source:
+            comment_lines.append(_cover_comment_line(cover_source))
     tags["COMMENT"] = "\n".join(comment_lines)
 
     # # Só grava valores preenchidos. Com multi_value_tags, ARTIST/COMPOSER/
@@ -517,7 +565,9 @@ def tag_flac(
         audio.tags.vendor = ""
 
     audio.save(padding=lambda info: 8192)
-    os.rename(filename, final_name)
+    # Origem == destino quando o arquivo e' retagueado no lugar (retro_tags).
+    if os.path.abspath(filename) != os.path.abspath(final_name):
+        os.rename(filename, final_name)
 
 
 # # Aplica frames ID3, comentário técnico, capa e salva o MP3 final.
@@ -532,6 +582,7 @@ def tag_mp3(
     settings: Optional[QobuzDLSettings] = None,
     embed_cover_path=None,
     musicbrainz_ids=None,
+    cover_source: Optional[str] = None,
 ):
     """Apply tags to MP3 file."""
     try:
@@ -550,6 +601,8 @@ def tag_mp3(
     tags = _get_tags_to_add(
         qobuz_album, qobuz_item, settings=settings, musicbrainz_ids=musicbrainz_ids
     )
+    if em_image:
+        _set_cover_source(tags, cover_source)
 
     _bit = qobuz_item.get("maximum_bit_depth", 16)
     _rate = qobuz_item.get("maximum_sampling_rate", 44.1)
@@ -596,12 +649,19 @@ def tag_mp3(
     )
 
     if em_image:
-        cover_path = _get_cover_path(root_dir, override=embed_cover_path)
+        cover_path = _get_cover_path(
+            root_dir,
+            override=embed_cover_path,
+        )
         if cover_path:
             img_size_bytes = os.path.getsize(cover_path)
             req_size = getattr(settings, "embedded_art_size", "unknown")
             is_org = "YES" if req_size == "org" else "NO"
-            base_comment += f" | Cover: {humanize.naturalsize(img_size_bytes, binary=True)} (Req: {req_size}, Org: {is_org})"
+            base_comment += (
+                f" | Cover: {humanize.naturalsize(img_size_bytes, binary=True)}"                f" (Req: {req_size}, Org: {is_org})"
+            )
+        if cover_source:
+            base_comment += f" | Capa: {cover_source}"
 
     tags["COMMENT"] = base_comment
 
@@ -676,7 +736,9 @@ def tag_mp3(
         filename,
         v2_version=4 if getattr(settings, "multi_value_tags", False) else 3,
     )
-    os.rename(filename, final_name)
+    # Origem == destino quando o arquivo e' retagueado no lugar (retro_tags).
+    if os.path.abspath(filename) != os.path.abspath(final_name):
+        os.rename(filename, final_name)
 
 
 # # Constrói o dicionário unificado de tags a partir dos metadados Qobuz.

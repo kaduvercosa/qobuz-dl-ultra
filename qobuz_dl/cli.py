@@ -1029,6 +1029,7 @@ _COMMAND_DESCRIPTIONS_PT = {
     "interactive": "Busca interativa: procura faixas/álbuns e escolhe o que baixar na hora.",
     "lucky": "Baixa os N primeiros resultados de uma busca no Qobuz, sem passar URL.",
     "lyrics": "Varre uma pasta já baixada e injeta letras/traduções que estejam faltando.",
+    "tags": "Varre uma pasta já baixada, regrava/corrige as tags de metadados (com ou sem multi-tags) e troca a capa pela da Apple/iTunes quando validada.",
     "sync-playlist": "Sincroniza uma pasta local com uma playlist do Qobuz (baixa o que falta, remove o que saiu).",
     "sync-favorites": "Sincroniza os favoritos da conta com o catálogo local (novos/removidos) e baixa o que falta.",
     "scan": "Casa sua pasta de música com o catálogo (tag de ID, UPC, nome, fuzzy) e grava sentinelas.",
@@ -1499,6 +1500,39 @@ async def async_main():
         finally:
             if lyrics_client:
                 await lyrics_client.close()
+        sys.exit(0)
+
+    if arguments.command == "tags":
+        from qobuz_dl.qopy import Client
+        from qobuz_dl.retro_tags import resolve_library_dir, retag_directory
+
+        # Sem pasta no comando, usa a pasta padrão do config.ini (chave
+        # "directory"), a mesma que os downloads já usam.
+        informed_dir = getattr(arguments, "DIR", None)
+        target_dir = resolve_library_dir(informed_dir or default_folder)
+        if not informed_dir:
+            ui.step(f"Nenhuma pasta informada: usando a pasta padrão do config.ini ({target_dir})")
+        tags_settings = QobuzDLSettings.from_arguments_configparser(arguments, config)
+        tags_settings.default_folder = target_dir
+        try:
+            tags_client = await Client.create(
+                email,
+                password,
+                app_id,
+                secrets,
+                user_auth_token=token,
+                force_english=force_english,
+            )
+        except Exception as e:
+            ui.error(f"Não foi possível autenticar no Qobuz para corrigir as tags: {e}")
+            sys.exit(1)
+        try:
+            await retag_directory(target_dir, tags_client, tags_settings)
+        except KeyboardInterrupt:
+            ui.error("Operação interrompida manualmente pelo usuário (CTRL+C).")
+            ui.warn("Os arquivos já processados estão seguros. Saindo...")
+        finally:
+            await tags_client.close()
         sys.exit(0)
 
     directory_to_use = (

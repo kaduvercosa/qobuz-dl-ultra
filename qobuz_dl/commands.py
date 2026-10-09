@@ -287,6 +287,47 @@ def lyrics_args(subparsers, default_folder=None):
 
 
 # ----------------------------------------------------------------------------
+# Subcomando: "tags"
+# ----------------------------------------------------------------------------
+def tags_args(subparsers, default_folder=None):
+    """Define the 'tags' subcommand (retroactive metadata tag correction)."""
+    tags = subparsers.add_parser(
+        "tags",
+        usage="qobuz-dl tags [opções] [DIR]",
+        description=(
+            "Escaneia retroativamente um diretório e regrava as tags de metadados "
+            "(artista, álbum, compositor, gênero, data, faixa/disco, IDs...) dos "
+            "arquivos de áudio que EXISTEM no dispositivo, a partir dos metadados "
+            "atuais do Qobuz. Também tenta trocar a capa embutida por uma capa "
+            "em alta resolução da Apple/iTunes, mas só quando a correspondência "
+            "é validada (sem certeza, a capa atual é mantida). Não mexe em letras."
+        ),
+        help="modo de correção retroativa de tags de metadados",
+    )
+    tags.add_argument(
+        "DIR",
+        metavar="DIRECTORY",
+        nargs="?",
+        default=None,
+        help=f'O diretório local contendo os arquivos a serem corrigidos (padrão: a pasta do config.ini, atualmente "{default_folder}")',
+    )
+    multi = tags.add_mutually_exclusive_group()
+    multi.add_argument(
+        "--multi-tags",
+        dest="multi_value_tags",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help="grava artistas, compositores e gêneros como tags múltiplas de verdade (sobrescreve config.ini)",
+    )
+    multi.add_argument(
+        "--no-multi-tags",
+        action="store_true",
+        help="grava artistas, compositores e gêneros como texto único \"A, B\" (sobrescreve config.ini)",
+    )
+    return tags
+
+
+# ----------------------------------------------------------------------------
 # Subcomando: "sync-playlist" (alias: "sp")
 # ----------------------------------------------------------------------------
 def sync_playlist_args(subparsers):
@@ -1063,6 +1104,7 @@ def qobuz_dl_args(default_quality=6, default_limit=20, default_folder=None):
     import_playlist = import_playlist_args(subparsers)
     lucky = lucky_args(subparsers)
     lyrics_cmd = lyrics_args(subparsers, default_folder=default_folder)
+    tags_cmd = tags_args(subparsers, default_folder=default_folder)
     sync_pl_cmd = sync_playlist_args(subparsers)
     stats = stats_args(subparsers)
     inspect_cmd = inspect_args(subparsers)
@@ -1082,6 +1124,7 @@ def qobuz_dl_args(default_quality=6, default_limit=20, default_folder=None):
         import_playlist,
         lucky,
         lyrics_cmd,
+        tags_cmd,
         sync_pl_cmd,
         stats,
         inspect_cmd,

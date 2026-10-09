@@ -47,6 +47,8 @@ class FakeFLAC(dict):
     def add_picture(self, picture):
         self.pictures.append(picture)
 
+    def clear_pictures(self):
+        self.pictures.clear()
 
 class FakeID3(dict):
     def __init__(self, filename=None):

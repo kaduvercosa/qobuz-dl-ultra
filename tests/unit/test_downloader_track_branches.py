@@ -65,7 +65,7 @@ async def test_process_track_nao_streamable(monkeypatch, tmp_path, no_http_sessi
     monkeypatch.setattr(
         downloader,
         "create_missing_placeholder",
-        lambda item, directory, reason: placeholders.append((item, directory, reason)),
+        lambda item, directory, reason, media_count=1: placeholders.append((item, directory, reason)),
     )
 
     async def report_track(*args, **kwargs):
@@ -100,7 +100,7 @@ async def test_process_track_erro_de_api(monkeypatch, tmp_path, no_http_session)
     monkeypatch.setattr(
         downloader,
         "create_missing_placeholder",
-        lambda item, directory, reason: placeholders.append(reason),
+        lambda item, directory, reason, media_count=1: placeholders.append(reason),
     )
 
     async def get_track_url(*args, **kwargs):
@@ -140,7 +140,7 @@ async def test_process_track_apenas_sample(monkeypatch, tmp_path, no_http_sessio
     monkeypatch.setattr(
         downloader,
         "create_missing_placeholder",
-        lambda item, directory, reason: placeholders.append(reason),
+        lambda item, directory, reason, media_count=1: placeholders.append(reason),
     )
     obj.client.get_track_url = lambda *args, **kwargs: None
 

@@ -93,6 +93,7 @@ class TestParserPrincipal:
             "lucky": ["termo de busca"],
             "import-playlist": ["/caminho/playlist.m3u"],
             "lyrics": [],
+            "tags": [],
             "sync-playlist": ["https://play.qobuz.com/playlist/12345"],
             "stats": [],
             "inspect": [],
@@ -102,6 +103,21 @@ class TestParserPrincipal:
         for comando, args_extra in minimos.items():
             resultado = parser.parse_args([comando, *args_extra])
             assert resultado.command == comando, f"subcomando '{comando}' não registrou"
+
+    def test_tags_multi_tags_e_no_multi_tags(self, parser):
+        sem_flag = parser.parse_args(["tags"])
+        assert not hasattr(sem_flag, "multi_value_tags")  # cai no config.ini
+        assert sem_flag.no_multi_tags is False
+
+        ligado = parser.parse_args(["tags", "--multi-tags", "/musicas"])
+        assert ligado.multi_value_tags is True
+        assert ligado.DIR == "/musicas"
+
+        desligado = parser.parse_args(["tags", "--no-multi-tags"])
+        assert desligado.no_multi_tags is True
+
+        with pytest.raises(SystemExit):  # as duas juntas se contradizem
+            parser.parse_args(["tags", "--multi-tags", "--no-multi-tags"])
 
     def test_flags_de_nivel_superior_existem(self, parser):
         args = parser.parse_args(["--reset", "dl", "URL"])

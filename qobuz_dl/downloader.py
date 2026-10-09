@@ -71,6 +71,8 @@ def _flatten_artists(artist_data):
 from qobuz_dl.download_utils import (
     is_track_streamable,
     create_missing_placeholder,
+    format_track_label,
+    _short_track_name,
     _get_safe_ncols,
     _desc_budget,  # noqa: F401 -- usado só em testes
     _PositionPool,
@@ -373,6 +375,7 @@ class Download:
         position_pool,
         semaphore,
         report_track,
+        cover_source=None,
     ):
         """Processa e baixa UMA faixa do álbum.
 
@@ -394,20 +397,22 @@ class Download:
             return False
         async with semaphore:
             t_num = str(i.get("track_number", idx + 1)).zfill(2)
+            _media_count = album_meta.get("media_count", 1)
+            t_label = format_track_label(i, _media_count, default=idx + 1)
             t_title = i.get("title", "Faixa Desconhecida")
 
             streamable, reason = is_track_streamable(i)
             if not streamable:
-                ui.skip(f"Faixa {t_num} - {t_title} ({reason})")
-                create_missing_placeholder(i, dirn, reason)
+                ui.skip(f"Faixa [{t_label}] - {t_title} ({reason})")
+                create_missing_placeholder(i, dirn, reason, _media_count)
                 await report_track(i, t_num, "pulada", reason)
                 return "skipped"
 
             try:
                 parse = await self.client.get_track_url(i["id"], fmt_id=self.quality)
             except Exception as e:
-                ui.error(f"Erro de API na faixa {t_num} (ID: {i['id']}): {e}")
-                create_missing_placeholder(i, dirn, f"Erro de API: {e}")
+                ui.error(f"Erro de API na faixa [{t_label}] (ID: {i['id']}): {e}")
+                create_missing_placeholder(i, dirn, f"Erro de API: {e}", _media_count)
                 await report_track(i, t_num, "falha", f"Erro de API: {e}")
                 return False
 
@@ -426,6 +431,7 @@ class Download:
                     is_parallel=is_parallel,
                     position_pool=position_pool,
                     letras_out=letras_info,
+                    cover_source=cover_source,
                 )
                 status = "ok" if res is True else "falha"
                 motivo = (
@@ -436,8 +442,10 @@ class Download:
                 await report_track(i, t_num, status, motivo, letras=letras_info)
                 return res
             else:
-                ui.skip(f"Faixa {t_num} - {t_title} (Apenas amostra/demo)")
-                create_missing_placeholder(i, dirn, "Apenas amostra/demo (30s)")
+                ui.skip(f"Faixa [{t_label}] - {t_title} (Apenas amostra/demo)")
+                create_missing_placeholder(
+                    i, dirn, "Apenas amostra/demo (30s)", _media_count
+                )
                 await report_track(i, t_num, "pulada", "Apenas amostra/demo (30s)")
                 return "skipped"
 
@@ -605,9 +613,12 @@ class Download:
             if self.settings.no_cover:
                 ui.skip("Pulando capa")
 
+            cover_source=None
             if self.settings.no_cover and not self.settings.embed_art:
                 pass
             else:
+                cover_source = "Qobuz"
+
                 await _get_cover_and_embed(
                     album_meta["image"]["large"],
                     dirn,
@@ -688,6 +699,7 @@ class Download:
                     position_pool=position_pool,
                     semaphore=semaphore,
                     report_track=_report_track,
+                    cover_source=cover_source,
                 )
 
             faixas_previstas = []
@@ -1070,9 +1082,11 @@ class Download:
                 else:
                     ui.skip("Pulando arte incorporada")
 
+                cover_source = None
                 save_cover_now = not skip_saved_cover and not self.settings.no_cover
                 if save_cover_now or self.settings.embed_art:
                     async with _get_dir_lock(dirn):
+                        cover_source="Qobuz"
                         await _get_cover_and_embed(
                             track_meta["album"]["image"]["large"],
                             dirn,
@@ -1116,6 +1130,7 @@ class Download:
                     position_pool=position_pool,
                     embed_cover_path=embed_cover_path,
                     letras_out=letras_info,
+                    cover_source=cover_source,
                 )
 
                 if embed_cover_path and os.path.isfile(embed_cover_path):
@@ -1240,6 +1255,7 @@ class Download:
         position_pool=None,
         embed_cover_path=None,
         letras_out: Optional[dict] = None,
+        cover_source=None,
     ) -> bool:
         """Download audio file and apply ID3/FLAC tags."""
         extension = ".mp3" if is_mp3 else ".flac"
@@ -1361,8 +1377,8 @@ class Download:
 
         filename = os.path.join(root_dir, f"~tmp_{tmp_count:02}.tmp")
         track_title = _get_title(track_metadata)
-        track_no = str(track_metadata.get("track_number", 0)).zfill(2)
-        desc = f"{track_no}. {track_title}"
+        track_no = format_track_label(track_metadata, total_discs)
+        desc = f"[{track_no}] {track_title}"
 
         FALLBACK_TIERS_LOCAL = [27, 7, 6, 5]
         TIER_NAMES = {
@@ -1402,10 +1418,13 @@ class Download:
 
                 if fresh_track_dict.get("sample") is True:
                     ui.skip(
-                        f"Faixa {track_no} - {track_title} (URL retornada e apenas amostra)"
+                        f"Faixa [{track_no}] - {track_title} (URL retornada e apenas amostra)"
                     )
                     create_missing_placeholder(
-                        track_metadata, root_dir, "URL retornada é apenas amostra"
+                        track_metadata,
+                        root_dir,
+                        "URL retornada é apenas amostra",
+                        total_discs,
                     )
                     return False
 
@@ -1494,7 +1513,7 @@ class Download:
 
         if not success and not abort_event.is_set():
             ui.error(
-                f"FAIXA {track_no} DESCARTADA DEFINITIVAMENTE APOS TODOS OS DOWNGRADES."
+                f"FAIXA [{track_no}] DESCARTADA DEFINITIVAMENTE APOS TODOS OS DOWNGRADES."
             )
             ui.skip("Pulando para a proxima faixa...")
             return False
@@ -1519,6 +1538,7 @@ class Download:
                     self.embed_art,
                     settings=self.settings,
                     embed_cover_path=embed_cover_path,
+                    cover_source=cover_source,
                 ),
             )
         except Exception as e:
@@ -2027,7 +2047,8 @@ class Download:
 
                 tracks = meta.get("tracks", {}).get("items", [])
                 total_discs = max(
-                    (track.get("media_number", 1) for track in tracks), default=1
+                    meta.get("media_count") or 1,
+                    max((track.get("media_number", 1) for track in tracks), default=1),
                 )
                 current_disc = None
 
@@ -2039,7 +2060,7 @@ class Download:
                         f.write(f"--- DISC {disc_num} ---\n\n")
                         current_disc = disc_num
 
-                    t_num = str(track.get("track_number", 0)).zfill(2)
+                    t_num = format_track_label(track, total_discs)
                     t_title_base = track.get("title", "Unknown Title")
                     explicit_flag = " [E]" if track.get("parental_warning") else ""
                     t_title = f"{t_title_base}{explicit_flag}"
@@ -2048,7 +2069,7 @@ class Download:
                     mins, secs = divmod(duration, 60)
                     dur_str = f"[{mins:02}:{secs:02}]"
 
-                    f.write(f"{f'{t_num}. {t_title}':<60} {dur_str}\n")
+                    f.write(f"{f'[{t_num}] {t_title}':<60} {dur_str}\n")
 
                     performers_raw = track.get("performers", "")
                     if performers_raw:
@@ -2180,11 +2201,7 @@ async def tqdm_download(
         dynamic_ncols = True
     else:
         desc_len = position_pool.desc_len if position_pool else 14
-        short_name = (
-            track_name
-            if len(track_name) <= desc_len
-            else track_name[: desc_len - 3] + "..."
-        )
+        short_name = _short_track_name(track_name, desc_len)
         tqdm_desc = f" {short_name}"
         b_format = "{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt}"
         ncols = position_pool.ncols if position_pool else _get_safe_ncols()
@@ -2525,7 +2542,7 @@ async def _try_apple_cover_bytes(
         return None
 
     try:
-        apple_url = await get_apple_hq_cover(
+        resultado = await get_apple_hq_cover(
             session=session,
             upc=upc,
             isrc=isrc,
@@ -2537,7 +2554,18 @@ async def _try_apple_cover_bytes(
         logger.debug(f"Busca de capa na Apple falhou, indo pra Qobuz: {e}")
         return None
 
-    if not apple_url:
+    # get_apple_hq_cover devolve (url, fonte, motivo); tratar o retorno como
+    # texto fazia re.sub() levantar TypeError e derrubava a etapa de capa.
+    # O formato antigo (so' a URL, ou None) continua aceito.
+    if isinstance(resultado, tuple):
+        apple_url = resultado[0] if resultado else None
+        motivo = resultado[2] if len(resultado) > 2 else None
+    else:
+        apple_url, motivo = resultado, None
+
+    if not isinstance(apple_url, str) or not apple_url.strip():
+        if motivo:
+            logger.debug(f"Capa da Apple nao usada, indo pra Qobuz: {motivo}")
         return None
 
     for tamanho in _APPLE_COVER_SIZES:
@@ -2726,11 +2754,7 @@ async def tqdm_download_segments(
         size_mb = total_size / (1024 * 1024) if total_size else 0
         ui.step(f"Em progresso: {track_name} [{size_mb:.1f} MB]")
         desc_len = position_pool.desc_len if position_pool else 14
-        short_name = (
-            track_name
-            if len(track_name) <= desc_len
-            else track_name[: desc_len - 3] + "..."
-        )
+        short_name = _short_track_name(track_name, desc_len)
         tqdm_desc = f" {short_name}"
         b_format = "{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt}"
         ncols = position_pool.ncols if position_pool else _get_safe_ncols()
