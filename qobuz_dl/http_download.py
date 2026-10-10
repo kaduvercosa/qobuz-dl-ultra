@@ -179,7 +179,9 @@ def make_client(
     if http2 is None:
         http2 = h2_disponivel
     elif http2 and not h2_disponivel:
-        logger.debug("http2 pedido mas o pacote 'h2' não está instalado; usando HTTP/1.1")
+        logger.debug(
+            "http2 pedido mas o pacote 'h2' não está instalado; usando HTTP/1.1"
+        )
         http2 = False
 
     limits = httpx.Limits(
@@ -218,7 +220,9 @@ def make_sync_client(
     if http2 is None:
         http2 = h2_disponivel
     elif http2 and not h2_disponivel:
-        logger.debug("http2 pedido mas o pacote 'h2' não está instalado; usando HTTP/1.1")
+        logger.debug(
+            "http2 pedido mas o pacote 'h2' não está instalado; usando HTTP/1.1"
+        )
         http2 = False
 
     limits = httpx.Limits(

@@ -88,8 +88,10 @@ async def lookup_by_isrc(
         try:
             own_session = session is None
             client = session or make_client(
-                headers=_MB_HEADERS, timeout=httpx.Timeout(10.0, connect=5.0),
-                max_connections=1, max_keepalive_connections=1,
+                headers=_MB_HEADERS,
+                timeout=httpx.Timeout(10.0, connect=5.0),
+                max_connections=1,
+                max_keepalive_connections=1,
             )
 
             try:

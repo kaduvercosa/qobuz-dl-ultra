@@ -917,7 +917,12 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
         compact_mobile = columns <= 72
         if options_dicts:
             if compact_mobile and is_multi:
-                res.append(("class:meta", f" Item {cursor_pos + 1}/{len(options_dicts)} · Selecionados: {len(selected_indices)}\n"))
+                res.append(
+                    (
+                        "class:meta",
+                        f" Item {cursor_pos + 1}/{len(options_dicts)} · Selecionados: {len(selected_indices)}\n",
+                    )
+                )
             else:
                 res.append(
                     ("class:meta", f" Item {cursor_pos + 1} de {len(options_dicts)}\n")
@@ -928,11 +933,23 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
                 res.append(
                     ("class:checkbox", f" * Selecionados: {len(selected_indices)}\n")
                 )
-            footer_msg = (" [↑↓/jk] Mover [Espaço] Marcar [t] Todos [Enter] OK" if compact_mobile else " [↑↓/jk] Mover   [Espaço] Selecionar   [t] Todos   [1-9] Ir para   [Enter] Confirmar")
+            footer_msg = (
+                " [↑↓/jk] Mover [Espaço] Marcar [t] Todos [Enter] OK"
+                if compact_mobile
+                else " [↑↓/jk] Mover   [Espaço] Selecionar   [t] Todos   [1-9] Ir para   [Enter] Confirmar"
+            )
         elif item_category == "artist":
-            footer_msg = " [↑↓/jk] Mover [Enter] Abrir" if compact_mobile else " [↑↓/jk] Mover   [1-9] Ir para   [Enter] Abrir artista"
+            footer_msg = (
+                " [↑↓/jk] Mover [Enter] Abrir"
+                if compact_mobile
+                else " [↑↓/jk] Mover   [1-9] Ir para   [Enter] Abrir artista"
+            )
         else:
-            footer_msg = " [↑↓/jk] Mover [Enter] OK" if compact_mobile else " [↑↓/jk] Mover   [1-9] Ir para   [Enter] Confirmar"
+            footer_msg = (
+                " [↑↓/jk] Mover [Enter] OK"
+                if compact_mobile
+                else " [↑↓/jk] Mover   [1-9] Ir para   [Enter] Confirmar"
+            )
 
         if get_cwidth(footer_msg) > columns:
             trunc_msg = ""

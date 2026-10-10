@@ -346,6 +346,7 @@ def _image_dimensions(image_data):
     """Retorna (largura, altura) de bytes de imagem; None se inválidos."""
     try:
         from PIL import Image
+
         with Image.open(io.BytesIO(image_data)) as image:
             return image.size
     except Exception:
@@ -374,7 +375,8 @@ def should_replace_embedded_cover(filename, candidate_path):
             try:
                 existing_tags = id3.ID3(filename)
                 existing_images = [
-                    frame.data for frame in existing_tags.values()
+                    frame.data
+                    for frame in existing_tags.values()
                     if isinstance(frame, id3.APIC) and getattr(frame, "data", None)
                 ]
             except (ID3NoHeaderError, OSError):
@@ -382,7 +384,9 @@ def should_replace_embedded_cover(filename, candidate_path):
         else:
             try:
                 existing_audio = FLAC(filename)
-                existing_images = [pic.data for pic in existing_audio.pictures if pic.data]
+                existing_images = [
+                    pic.data for pic in existing_audio.pictures if pic.data
+                ]
             except Exception:
                 existing_images = []
 

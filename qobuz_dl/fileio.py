@@ -275,9 +275,7 @@ def sha256_file(path: PathLike, *, chunk_size: int = DEFAULT_CHUNK_SIZE) -> str:
     return file_digest(path, "sha256", chunk_size=chunk_size)
 
 
-def verify_digest(
-    path: PathLike, expected: str, algorithm: str = "sha256"
-) -> bool:
+def verify_digest(path: PathLike, expected: str, algorithm: str = "sha256") -> bool:
     """True se o digest atual do arquivo bate com ``expected``.
 
     Arquivo ausente ou ilegível conta como "não bate" (False).

@@ -22,7 +22,6 @@ import time
 from datetime import datetime
 from typing import Optional
 
-import httpx
 
 from qobuz_dl.http_download import make_sync_client
 import keyring

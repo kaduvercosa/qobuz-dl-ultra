@@ -17,7 +17,6 @@ import os
 import re
 from dataclasses import dataclass
 
-import httpx
 
 from qobuz_dl.http_download import make_sync_client
 from mutagen.flac import FLAC

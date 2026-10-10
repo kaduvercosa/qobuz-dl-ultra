@@ -928,7 +928,6 @@ async def get_apple_hq_cover(
     por UPC (ou por ISRC no mesmo álbum), ele é aceito sem a checagem fuzzy de
     artista/título, que só vale para a busca textual.
     """
-    import httpx
 
     headers = {
         "User-Agent": (

@@ -1016,7 +1016,9 @@ class Client:
         sobrecarregar a API e cancelamos as tentativas restantes assim que um
         segredo válido for encontrado.
         """
-        secrets = list(dict.fromkeys(secret for secret in (self.secrets or []) if secret))
+        secrets = list(
+            dict.fromkeys(secret for secret in (self.secrets or []) if secret)
+        )
         if not secrets:
             raise InvalidAppSecretError("Nenhum segredo encontrado.")
 

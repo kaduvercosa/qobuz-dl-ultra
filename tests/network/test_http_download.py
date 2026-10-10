@@ -106,9 +106,7 @@ def servidor(
             status = 200
         else:
             status = 206
-            cabecalhos["content-range"] = (
-                f"bytes {inicio}-{len(data) - 1}/{len(data)}"
-            )
+            cabecalhos["content-range"] = f"bytes {inicio}-{len(data) - 1}/{len(data)}"
         if ignora_range:
             corpo, status = data, 200
             cabecalhos["content-length"] = str(len(data))
@@ -199,9 +197,7 @@ async def test_conexao_que_cai_no_meio_e_retomada_por_range(tmp_path):
     destino = tmp_path / "faixa.bin"
     cliente = servidor(falhas={1: ("cai", 3000)})
 
-    resultado = await hd.download_file(
-        cliente, "http://x/f", destino, sleep=Dormidas()
-    )
+    resultado = await hd.download_file(cliente, "http://x/f", destino, sleep=Dormidas())
 
     assert destino.read_bytes() == DADOS
     assert resultado.attempts == 2
@@ -215,9 +211,7 @@ async def test_resposta_que_termina_cedo_sem_erro_e_retomada(tmp_path):
     destino = tmp_path / "faixa.bin"
     cliente = servidor(falhas={1: ("trunca", 4500)})
 
-    resultado = await hd.download_file(
-        cliente, "http://x/f", destino, sleep=Dormidas()
-    )
+    resultado = await hd.download_file(cliente, "http://x/f", destino, sleep=Dormidas())
 
     assert destino.read_bytes() == DADOS
     assert resultado.attempts == 2
@@ -277,9 +271,7 @@ async def test_416_com_parcial_ja_completo_finaliza_sem_rebaixar(tmp_path):
     # 1ª tentativa entrega TUDO mas a conexão quebra no fim; a 2ª recebe 416.
     cliente = servidor(falhas={1: ("cai", len(DADOS))})
 
-    resultado = await hd.download_file(
-        cliente, "http://x/f", destino, sleep=Dormidas()
-    )
+    resultado = await hd.download_file(cliente, "http://x/f", destino, sleep=Dormidas())
 
     assert destino.read_bytes() == DADOS
     assert resultado.attempts == 2
@@ -289,9 +281,7 @@ async def test_416_com_parcial_ja_completo_finaliza_sem_rebaixar(tmp_path):
 async def test_sem_content_length_informa_que_nao_verificou(tmp_path):
     destino = tmp_path / "faixa.bin"
 
-    resultado = await hd.download_file(
-        servidor(sem_length=True), "http://x/f", destino
-    )
+    resultado = await hd.download_file(servidor(sem_length=True), "http://x/f", destino)
 
     assert destino.read_bytes() == DADOS
     assert resultado.size_verified is False  # chamador deve verificar o áudio
@@ -427,9 +417,7 @@ async def test_url_pode_ser_funcao_chamada_a_cada_tentativa(tmp_path):
         return f"http://x/f?token={len(chamadas)}"
 
     cliente = servidor(falhas={1: ("cai", 2000)})
-    await hd.download_file(
-        cliente, nova_url, tmp_path / "f.bin", sleep=Dormidas()
-    )
+    await hd.download_file(cliente, nova_url, tmp_path / "f.bin", sleep=Dormidas())
 
     assert [r["url"] for r in cliente.requests] == [
         "http://x/f?token=1",
@@ -456,9 +444,7 @@ async def test_abort_interrompe_e_limpa(tmp_path):
         return chamadas["n"] > 3  # deixa passar a 1ª tentativa, aborta no meio
 
     with pytest.raises(hd.DownloadAborted):
-        await hd.download_file(
-            servidor(), "http://x/f", destino, should_abort=abortar
-        )
+        await hd.download_file(servidor(), "http://x/f", destino, should_abort=abortar)
 
     assert not destino.exists()
     assert _sobras(tmp_path) == []

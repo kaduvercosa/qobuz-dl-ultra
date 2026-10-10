@@ -305,18 +305,24 @@ async def _download_apple_cover(
         return None
 
 
-def _display_track_name(item: dict, album: dict, file_path: str, limit: int = 54) -> str:
+def _display_track_name(
+    item: dict, album: dict, file_path: str, limit: int = 54
+) -> str:
     """Retorna apenas artista e título/versão, sem pastas, faixa ou extensão."""
     item = item or {}
     album = album or {}
     album_data = item.get("album") or album
 
-    performer = item.get("performer") or album_data.get("artist") or album.get("artist") or {}
+    performer = (
+        item.get("performer") or album_data.get("artist") or album.get("artist") or {}
+    )
     if isinstance(performer, dict):
         artist = performer.get("name") or performer.get("title") or ""
     elif isinstance(performer, (list, tuple)):
         artist = ", ".join(
-            str(entry.get("name", "")).strip() if isinstance(entry, dict) else str(entry).strip()
+            str(entry.get("name", "")).strip()
+            if isinstance(entry, dict)
+            else str(entry).strip()
             for entry in performer
             if entry
         )
@@ -333,7 +339,11 @@ def _display_track_name(item: dict, album: dict, file_path: str, limit: int = 54
         title = os.path.splitext(os.path.basename(file_path))[0]
         title = re.sub(r"^\d{1,3}\s*[-_. ]\s*", "", title)
     if not artist:
-        artist = str(album_data.get("artist", "") if isinstance(album_data.get("artist"), str) else "").strip()
+        artist = str(
+            album_data.get("artist", "")
+            if isinstance(album_data.get("artist"), str)
+            else ""
+        ).strip()
 
     display = f"{artist} - {title}" if artist else title
     display = re.sub(r"\s+", " ", display).strip()
