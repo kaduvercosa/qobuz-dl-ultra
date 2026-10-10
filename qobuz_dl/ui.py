@@ -27,10 +27,11 @@
 
 import logging
 import os
+import re
 import shutil
 import sys
-import textwrap
 import threading
+import unicodedata
 
 from qobuz_dl.color import (
     ACCENT_DARK,
@@ -61,6 +62,7 @@ FALLBACK = (80, 24)
 # Breakpoints responsivos unificados.
 NARROW = 60  # celular / a-Shell no iPhone / Split View estreito
 MEDIUM = 90  # iPad retrato, terminal de meia tela
+COMPACT_WIDTH = 72  # abaixo/igual: atalhos e metadados compactos na TUI
 # acima de MEDIUM -> "wide" (desktop, iPad paisagem)
 
 LAYOUT_NARROW = "narrow"
@@ -69,17 +71,24 @@ LAYOUT_WIDE = "wide"
 
 
 def raw_width():
-    # Largura real do terminal, sem teto nem piso aplicados.
-    # Respeita a variável de ambiente COLUMNS quando definida (útil em CI
-    # e para forçar uma largura específica em testes).
-    """Return terminal width in characters without clamping."""
+    """Return the current terminal width without clamping.
+
+    Prefer the live TTY size so resizing a terminal is reflected immediately.
+    For redirected output and tests, honor ``COLUMNS`` before using a fallback.
+    """
+    try:
+        if hasattr(sys.stdout, "isatty") and sys.stdout.isatty():
+            return os.get_terminal_size(sys.stdout.fileno()).columns
+    except (OSError, ValueError, AttributeError):
+        pass
+
     env = os.environ.get("COLUMNS")
     if env:
         try:
             value = int(env)
             if value > 0:
                 return value
-        except ValueError:
+        except (TypeError, ValueError):
             pass
     try:
         return shutil.get_terminal_size(fallback=FALLBACK).columns
@@ -91,7 +100,7 @@ def width(max_width=MAX_WIDTH, min_width=MIN_WIDTH):
     # Largura utilizável para desenhar blocos de texto, já com teto e piso
     # aplicados. Função única que substitui os cálculos redundantes que
     # existiam espalhados por vários arquivos do projeto.
-    """Return terminal width, clamped to 200 for ultra-wide displays."""
+    """Return terminal width clamped to the requested minimum and maximum."""
     return max(min(raw_width(), max_width), min_width)
 
 
@@ -110,7 +119,7 @@ def layout():
 
 def is_narrow():
     # Atalho para checagens rápidas de "estou em tela estreita?".
-    """Check if terminal is narrow (width < 80)."""
+    """Check whether the terminal is below the narrow-layout breakpoint."""
     return layout() == LAYOUT_NARROW
 
 
@@ -476,11 +485,66 @@ def bar_gauge(value, peak, max_blocks=None):
     return f"{c(HIGHLIGHT)}{block_char() * length}{c(RESET)}"
 
 
+_ANSI_ESCAPE = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\))")
+
+
+def _cell_width(text):
+    """Measure terminal cells, ignoring ANSI control sequences."""
+    clean = _ANSI_ESCAPE.sub("", str(text))
+    try:
+        from prompt_toolkit.utils import get_cwidth
+
+        return get_cwidth(clean)
+    except ImportError:
+        total = 0
+        for char in clean:
+            if unicodedata.combining(char) or char in "\u200d\ufe0f":
+                continue
+            total += 2 if unicodedata.east_asian_width(char) in {"W", "F"} else 1
+        return total
+
+
 def _wrap_lines(text, limit):
-    # Wrapper fino sobre textwrap.wrap: garante um piso mínimo de largura
-    # e sempre devolve pelo menos uma linha (mesmo que vazia).
-    """Wrap long text to fit terminal width."""
-    return textwrap.wrap(str(text), width=max(int(limit), 12)) or [""]
+    """Wrap text by terminal-cell width, including wide Unicode characters.
+
+    Words are kept intact where possible; a single overlong token is split by
+    display width so it cannot force a terminal line past the available width.
+    """
+    text = str(text)
+    limit = max(int(limit), 12)
+    if not text:
+        return [""]
+
+    lines = []
+    for paragraph in text.splitlines() or [""]:
+        words = paragraph.split()
+        if not words:
+            lines.append("")
+            continue
+        current = ""
+        for word in words:
+            if _cell_width(word) > limit:
+                if current:
+                    lines.append(current)
+                    current = ""
+                piece = ""
+                for char in word:
+                    if piece and _cell_width(piece + char) > limit:
+                        lines.append(piece)
+                        piece = char
+                    else:
+                        piece += char
+                current = piece
+                continue
+            candidate = f"{current} {word}" if current else word
+            if current and _cell_width(candidate) > limit:
+                lines.append(current)
+                current = word
+            else:
+                current = candidate
+        if current:
+            lines.append(current)
+    return lines or [""]
 
 
 def wrapped(text, indent=0, cols=None):
@@ -496,15 +560,26 @@ def wrapped(text, indent=0, cols=None):
 
 
 def truncate(text, limit):
-    # Encurta uma string preservando o início, adicionando reticências
-    # quando o limite é ultrapassado.
-    """Truncate text to fit terminal width with ellipsis."""
+    """Truncate text by terminal-cell width, adding an ellipsis if needed."""
     text = str(text)
-    if len(text) <= limit:
+    limit = max(0, int(limit))
+    if _cell_width(text) <= limit:
         return text
     if limit <= 3:
-        return text[:limit]
-    return text[: limit - 3] + "..."
+        result = ""
+        for char in text:
+            if _cell_width(result + char) > limit:
+                break
+            result += char
+        return result
+
+    target = limit - 3
+    result = ""
+    for char in text:
+        if _cell_width(result + char) > target:
+            break
+        result += char
+    return result + "..."
 
 
 # --------------------------------------------------------------------------

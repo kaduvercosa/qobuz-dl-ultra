@@ -270,7 +270,7 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
         except Exception:
             columns, _ = shutil.get_terminal_size((80, 24))
 
-        table_columns = max(40, columns - 2)
+        table_columns = max(32, columns - 2)
 
         is_table, widths, headers, borders = _get_table_layout(
             table_columns, is_multi, item_category
@@ -279,7 +279,13 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
         prefix_len = 5 if is_multi else 3
         hdr_pref = " " * prefix_len
 
-        res = [("class:title", f"\n === {title} ===\n")]
+        # Em terminais estreitos, o título não pode empurrar o cabeçalho
+        # para fora da área útil. Trunca pela largura visual (Unicode-aware).
+        title_line = f"=== {title} ==="
+        title_width = max(4, columns - 2)
+        if get_cwidth(title_line) > title_width:
+            title_line = _align_text(title_line, title_width).rstrip()
+        res = [("class:title", f"\n {title_line}\n")]
 
         if is_table:
             res.append(("class:meta", hdr_pref + borders["top"] + "\n"))
@@ -323,7 +329,7 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
         except Exception:
             columns, _ = shutil.get_terminal_size((80, 24))
 
-        table_columns = max(40, columns - 2)
+        table_columns = max(32, columns - 2)
         # Em terminais estreitos (celulares), reduzir os detalhes do item
         # focado e do rodapé para preservar a área útil da lista.
         compact_mobile = columns <= 72
@@ -700,18 +706,89 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
                                 fill_bg=False,
                             )
                     else:
-                        l1 = [(tit_st, f"{prefix}{tit_str}")]
-                        ql_str = f"[{ql}]"
-                        pad_len = inner_w - get_cwidth(l1[0][1]) - get_cwidth(ql_str)
-                        if pad_len > 0:
-                            l1.append(("", " " * pad_len))
-                            l1.append((ql_st, ql_str))
+                        # Ex.: "24b/44.1kHz" -> "[24/44.1]"
+                        # Mantém somente profundidade de bits e taxa de amostragem.
+                        quality_match = re.search(
+                            r"(\d+)\s*b(?:it)?\s*/\s*(\d+(?:[.,]\d+)?)\s*kHz",
+                            ql,
+                            flags=re.IGNORECASE,
+                        )
+
+                        if quality_match:
+                            bit_depth = quality_match.group(1)
+                            sample_rate = quality_match.group(2).replace(",", ".")
+                            ql_short = f"[{bit_depth}/{sample_rate}]"
+                        else:
+                            # Fallback seguro caso a API mude o formato da qualidade.
+                            ql_short = f"[{ql}]"
+
+                        # O prefixo já pertence à coluna da seleção/cursor.
+                        # Aqui, o título e a qualidade dividem a largura interna do cartão.
+                        title_prefix = f"{prefix}{tit_str}"
+                        quality_width = get_cwidth(ql_short)
+
+                        # Uma separação mínima entre o título e a qualidade.
+                        gap_width = 1
+
+                        # Não use max(1, ...): se a conta estiver errada ele mascara o erro,
+                        # resultando em títulos de apenas uma letra.
+                        max_title_width = inner_w - quality_width - gap_width
+
+                        if max_title_width < 8:
+                            # Em terminais extremamente estreitos, prioriza o título;
+                            # a qualidade irá para a próxima linha.
+                            title_display = title_prefix
+                            quality_on_next_line = True
+                        else:
+                            quality_on_next_line = False
+                            title_display = title_prefix
+
+                            if get_cwidth(title_display) > max_title_width:
+                                ellipsis = "…"
+                                usable_width = max_title_width - get_cwidth(ellipsis)
+
+                                truncated = ""
+                                used_width = 0
+
+                                for char in title_display:
+                                    char_width = get_cwidth(char)
+
+                                    if used_width + char_width > usable_width:
+                                        break
+
+                                    truncated += char
+                                    used_width += char_width
+
+                                title_display = f"{truncated}{ellipsis}"
+
+                        if quality_on_next_line:
+                            l1 = [(tit_st, title_display)]
+                        else:
+                            pad_len = max(
+                                gap_width,
+                                inner_w - get_cwidth(title_display) - quality_width,
+                            )
+
+                            l1 = [
+                                (tit_st, title_display),
+                                ("", " " * pad_len),
+                                (ql_st, ql_short),
+                            ]
+
                         add_card_line(
                             l1,
                             hovered=hovered,
                             is_checked=checked,
                             border_style=border_st,
                         )
+
+                        if quality_on_next_line:
+                            add_card_line(
+                                [(ql_st, ql_short)],
+                                hovered=hovered,
+                                is_checked=checked,
+                                border_style=border_st,
+                            )
 
                         if hovered:
                             if compact_mobile:
@@ -723,7 +800,7 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
                                     border_style=border_st,
                                 )
                                 add_card_line(
-                                    [(row_st, f"   📀 {typ} · ⏱ {dur} · 🎚 {ql}")],
+                                    [(row_st, f"   📀 {typ} · ⏱ {dur}")],
                                     hovered=hovered,
                                     is_checked=checked,
                                     border_style=border_st,
@@ -892,8 +969,9 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
                 edge = borders["bot"] if i == visible[-1] else borders["mid"]
                 add_line([("class:meta", empty_prefix + edge)], fill_bg=False)
 
-        if not is_table:
-            res.append(("", " \n" * 8))
+        # Não acrescentar linhas vazias artificiais ao fim dos cartões:
+        # isso aumenta a área rolável e pode deixar o último cartão parcialmente
+        # oculto atrás do rodapé em terminais baixos (a-Shell/Split View).
 
         if res and res[-1][1].endswith("\n"):
             res[-1] = (res[-1][0], res[-1][1][:-1])
@@ -910,17 +988,19 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
             columns, _ = shutil.get_terminal_size((80, 24))
 
         is_table, widths, headers, borders = _get_table_layout(
-            max(40, columns - 2), is_multi, item_category
+            max(32, columns - 2), is_multi, item_category
         )
         res = []
 
         compact_mobile = columns <= 72
+        ultra_narrow = columns <= 48
         if options_dicts:
             if compact_mobile and is_multi:
+                # Contador curto e estável em telas estreitas.
                 res.append(
                     (
                         "class:meta",
-                        f" Item {cursor_pos + 1}/{len(options_dicts)} · Selecionados: {len(selected_indices)}\n",
+                        f" Item {cursor_pos + 1}/{len(options_dicts)} · Sel.: {len(selected_indices)}\n",
                     )
                 )
             else:
@@ -933,20 +1013,27 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
                 res.append(
                     ("class:checkbox", f" * Selecionados: {len(selected_indices)}\n")
                 )
-            footer_msg = (
-                " [↑↓/jk] Mover [Espaço] Marcar [t] Todos [Enter] OK"
-                if compact_mobile
-                else " [↑↓/jk] Mover   [Espaço] Selecionar   [t] Todos   [1-9] Ir para   [Enter] Confirmar"
-            )
+            if ultra_narrow:
+                footer_msg = " [↑↓]Mover [Esp]Marcar [t]Todos [↵]OK"
+            else:
+                footer_msg = (
+                    " [↑↓/jk] Mover [Espaço] Marcar [t] Todos [Enter] OK"
+                    if compact_mobile
+                    else " [↑↓/jk] Mover   [Espaço] Selecionar   [t] Todos   [1-9] Ir para   [Enter] Confirmar"
+                )
         elif item_category == "artist":
             footer_msg = (
-                " [↑↓/jk] Mover [Enter] Abrir"
+                " [↑↓]Mover [↵]Abrir"
+                if ultra_narrow
+                else " [↑↓/jk] Mover [Enter] Abrir"
                 if compact_mobile
                 else " [↑↓/jk] Mover   [1-9] Ir para   [Enter] Abrir artista"
             )
         else:
             footer_msg = (
-                " [↑↓/jk] Mover [Enter] OK"
+                " [↑↓]Mover [↵]OK"
+                if ultra_narrow
+                else " [↑↓/jk] Mover [Enter] OK"
                 if compact_mobile
                 else " [↑↓/jk] Mover   [1-9] Ir para   [Enter] Confirmar"
             )
@@ -967,16 +1054,27 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
         return res
 
     header_window = Window(
-        content=FormattedTextControl(text=get_header_text), dont_extend_height=True
+        content=FormattedTextControl(text=get_header_text),
+        dont_extend_height=True,
+        # O título ocupa duas linhas no modo cartão e até cinco no modo tabela.
+        # Limitar a altura impede que o cabeçalho roube espaço da lista.
+        height=Dimension(min=2, max=_HEADER_LINES),
     )
 
     list_window = Window(
         content=FormattedTextControl(text=get_list_text, focusable=True),
+        # A lista é a única região flexível da tela. Sem peso explícito, alguns
+        # terminais calculam sua altura a partir do conteúdo formatado e o
+        # rodapé acaba visualmente sobrepondo o último cartão.
+        height=Dimension(min=0, weight=1),
         # No modo tabela a rolagem é feita em get_list_text (fatia de itens),
         # então o Window não deve aplicar margens próprias.
         scroll_offsets=ScrollOffsets(
+            # Cartões têm várias linhas por item. Uma margem inferior maior
+            # evita que o item focado encoste no rodapé e fique visualmente
+            # cortado quando a janela do terminal é baixa.
             top=lambda: 0 if _table_is_active() else 1,
-            bottom=lambda: 0 if _table_is_active() else 2,
+            bottom=lambda: 0 if _table_is_active() else 4,
         ),
         wrap_lines=False,
     )
@@ -987,7 +1085,7 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
         except Exception:
             columns, _ = shutil.get_terminal_size((80, 24))
 
-        table_columns = max(40, columns - 2)
+        table_columns = max(32, columns - 2)
 
         is_table, widths, headers, borders = _get_table_layout(
             table_columns, is_multi, item_category
@@ -1013,6 +1111,16 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
         height=Dimension.exact(_FOOTER_LINES),
     )
 
+    # Alguns terminais móveis (incluindo a-Shell com a barra de atalhos aberta)
+    # anunciam mais linhas do que as que ficam realmente visíveis. Uma linha
+    # vazia de segurança mantém o rodapé fora da área coberta pela barra inferior.
+    bottom_safe_area = Window(
+        content=FormattedTextControl(text=" "),
+        height=Dimension.exact(1),
+        dont_extend_height=True,
+        style="class:background",
+    )
+
     def _table_is_active() -> bool:
         """Avalia a cada redesenho se a tela comporta o layout em tabela"""
         try:
@@ -1020,7 +1128,7 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
         except Exception:
             columns, _ = shutil.get_terminal_size((80, 24))
 
-        table_columns = max(40, columns - 2)
+        table_columns = max(32, columns - 2)
 
         table_enabled, _, _, _ = _get_table_layout(
             table_columns, is_multi, item_category
@@ -1036,6 +1144,7 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
                 header_window,
                 list_window,
                 footer_window,
+                bottom_safe_area,
             ]
         )
     )

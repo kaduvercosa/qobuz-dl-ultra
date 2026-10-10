@@ -137,7 +137,9 @@ class Client:
         """Fabrica assincrona."""
         total_started = time.perf_counter()
         self = cls()
-        print(f"{YELLOW}Logando...{OFF}", end="", flush=True)
+        # Use the shared UI writer so login output does not collide with logs
+        # or progress bars, and always terminates the status line cleanly.
+        ui.step("Logando...")
         self.secrets = secrets
         # Usa o App ID padrão quando a configuração não define outro.
         # Não comparar o ID padrão com uma condição especial para baixar bundle:
