@@ -26,8 +26,12 @@ def _meta(**extra):
         "tracks": {
             "items": [
                 {"track_number": 1, "title": "One More Time", "duration": 320},
-                {"track_number": 2, "title": "Aerodynamic", "duration": 212,
-                 "parental_warning": True},
+                {
+                    "track_number": 2,
+                    "title": "Aerodynamic",
+                    "duration": 212,
+                    "parental_warning": True,
+                },
             ]
         },
     }
@@ -74,7 +78,9 @@ class TestCabecalho:
     def test_genero_e_traduzido_pelo_mapa_local(self, tmp_path):
         origem, destino = next(iter(downloader.metadata.LOCAL_GENRE_MAP.items()))
         meta = _meta(genre={"name": origem})
-        assert f"GÊNERO : {destino}" in _gerar(tmp_path, meta).read_text(encoding="utf-8")
+        assert f"GÊNERO : {destino}" in _gerar(tmp_path, meta).read_text(
+            encoding="utf-8"
+        )
 
     def test_genero_fora_do_mapa_fica_como_veio(self, tmp_path):
         meta = _meta(genre={"name": "Genero Inventado XYZ"})
@@ -83,7 +89,9 @@ class TestCabecalho:
         )
 
     def test_album_explicito(self, tmp_path):
-        texto = _gerar(tmp_path, _meta(parental_warning=True)).read_text(encoding="utf-8")
+        texto = _gerar(tmp_path, _meta(parental_warning=True)).read_text(
+            encoding="utf-8"
+        )
         assert "ÁLBUM : Discovery [E]" in texto
 
 
@@ -130,9 +138,24 @@ class TestVariosDiscos:
             media_count=2,
             tracks={
                 "items": [
-                    {"track_number": 1, "media_number": 1, "title": "A1", "duration": 60},
-                    {"track_number": 2, "media_number": 1, "title": "A2", "duration": 60},
-                    {"track_number": 1, "media_number": 2, "title": "B1", "duration": 60},
+                    {
+                        "track_number": 1,
+                        "media_number": 1,
+                        "title": "A1",
+                        "duration": 60,
+                    },
+                    {
+                        "track_number": 2,
+                        "media_number": 1,
+                        "title": "A2",
+                        "duration": 60,
+                    },
+                    {
+                        "track_number": 1,
+                        "media_number": 2,
+                        "title": "B1",
+                        "duration": 60,
+                    },
                 ]
             },
         )
@@ -156,7 +179,9 @@ class TestVariosDiscos:
 class TestDescricao:
     def test_html_e_limpo_e_quebrado_em_70_colunas(self, tmp_path):
         meta = _meta(
-            description="<p>Primeiro</p><br/>" + ("palavra " * 30) + "<br>Fim <b>negrito</b>"
+            description="<p>Primeiro</p><br/>"
+            + ("palavra " * 30)
+            + "<br>Fim <b>negrito</b>"
         )
         texto = _gerar(tmp_path, meta).read_text(encoding="utf-8")
         assert "ÁLBUM REVIEW / NOTES" in texto

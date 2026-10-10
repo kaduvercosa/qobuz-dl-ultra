@@ -13,7 +13,6 @@ Nada toca rede nem disco real além de `tmp_path`.
 """
 
 import asyncio
-import os
 from types import SimpleNamespace
 
 import pytest
@@ -67,7 +66,9 @@ def capa(monkeypatch):
 
     monkeypatch.setattr(downloader, "_try_apple_cover_bytes", fake_apple)
     monkeypatch.setattr(downloader, "_fetch_qobuz_cover_bytes", fake_qobuz)
-    monkeypatch.setattr(downloader, "_resolve_art_url", lambda item, t: estado["url"](item, t))
+    monkeypatch.setattr(
+        downloader, "_resolve_art_url", lambda item, t: estado["url"](item, t)
+    )
     monkeypatch.setattr(
         downloader, "aiofiles", SimpleNamespace(open=lambda c, m: _ArquivoAssincrono(c))
     )
@@ -78,8 +79,15 @@ def capa(monkeypatch):
     downloader._COVER_SOURCES.clear()
 
 
-async def _obter(tmp_path, *, salvar=True, embutir=True, embed_name=".embed.jpg",
-                 saved_art_size="large", embedded_art_size="large"):
+async def _obter(
+    tmp_path,
+    *,
+    salvar=True,
+    embutir=True,
+    embed_name=".embed.jpg",
+    saved_art_size="large",
+    embedded_art_size="large",
+):
     return await downloader._get_cover_and_embed(
         {"image": {}},
         str(tmp_path),
@@ -252,10 +260,15 @@ FAIXA = {"id": 1, "track_number": 1, "title": "Musica", "streamable": True}
 
 
 class TestProcessTrackRepassaCoverSource:
-    async def test_sem_cover_source_nao_levanta_e_repassa_none(self, faixa_ok, tmp_path):
+    async def test_sem_cover_source_nao_levanta_e_repassa_none(
+        self, faixa_ok, tmp_path
+    ):
         s, report, recebido = faixa_ok
         # Regressão: antes disto era NameError ("cover_source" não definida).
-        assert await Download._process_track(s, 0, FAIXA, **_kwargs(tmp_path, report)) is True
+        assert (
+            await Download._process_track(s, 0, FAIXA, **_kwargs(tmp_path, report))
+            is True
+        )
         assert recebido["kwargs"]["cover_source"] is None
         assert recebido["status"] == "ok"
 

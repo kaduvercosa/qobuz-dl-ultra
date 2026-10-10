@@ -130,7 +130,9 @@ class TestMultiMeta:
             {"albums": {"items": [{"id": 1}, {"id": 2}], "total": 3}},
             {"albums": {"items": [{"id": 3}], "total": 3}},
         )
-        paginas = await _coletar(cliente.multi_meta("artist/get", "albums_count", "9", None))
+        paginas = await _coletar(
+            cliente.multi_meta("artist/get", "albums_count", "9", None)
+        )
         assert len(paginas) == 2
         # Segunda chamada avança o offset pelo que veio na primeira.
         assert fake.chamadas[0][1]["offset"] == 0
@@ -151,15 +153,15 @@ class TestMultiMeta:
         assert len(paginas) == 1
 
     async def test_type_aninha_a_resposta(self, cliente):
-        cliente.instalar(
-            {"label": {"albums": {"items": [{"id": 1}], "total": 1}}}
-        )
+        cliente.instalar({"label": {"albums": {"items": [{"id": 1}], "total": 1}}})
         paginas = await _coletar(cliente.multi_meta("label/get", "k", "9", "label"))
         assert paginas == [{"albums": {"items": [{"id": 1}], "total": 1}}]
 
     async def test_total_ausente_usa_a_chave_de_contagem(self, cliente):
         cliente.instalar({"albums": {"items": [{"id": 1}]}, "albums_count": 1})
-        paginas = await _coletar(cliente.multi_meta("artist/get", "albums_count", "9", None))
+        paginas = await _coletar(
+            cliente.multi_meta("artist/get", "albums_count", "9", None)
+        )
         assert len(paginas) == 1
 
     async def test_resposta_sem_itens_nao_gera_paginas(self, cliente):

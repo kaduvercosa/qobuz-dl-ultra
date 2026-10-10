@@ -57,7 +57,9 @@ class TestInside:
     def test_nao_resolve_dotdot_sozinho(self, tmp_path):
         # A função compara caminhos como estão: quem a chama deve resolver.
         assert sentinel._inside(tmp_path / "lib" / ".." / "fora", tmp_path / "lib")
-        assert not sentinel._inside((tmp_path / "lib" / ".." / "fora").resolve(), tmp_path / "lib")
+        assert not sentinel._inside(
+            (tmp_path / "lib" / ".." / "fora").resolve(), tmp_path / "lib"
+        )
 
 
 class TestPositiveInt:
@@ -85,7 +87,9 @@ class TestPositiveInt:
             sentinel._positive_int({"n": valor}, "n")
 
     def test_mensagem_cita_a_chave(self):
-        with pytest.raises(sentinel.SentinelValidationError, match="bit_depth inválido"):
+        with pytest.raises(
+            sentinel.SentinelValidationError, match="bit_depth inválido"
+        ):
             sentinel._positive_int({"bit_depth": "x"}, "bit_depth")
 
 
