@@ -200,7 +200,7 @@ def _create_compatible_client(client_class, kwargs: dict[str, Any]):
                     os.environ.get("SSL_CERT_DIR") or None,
                 )
             except Exception:
-                raise exc
+                raise exc from None
             return client_class(**{**kwargs, "verify": context})
 
     parameters = signature.parameters.values()
@@ -224,7 +224,7 @@ def _create_compatible_client(client_class, kwargs: dict[str, Any]):
                 os.environ.get("SSL_CERT_DIR") or None,
             )
         except Exception:
-            raise exc
+            raise exc from None
 
         fallback_kwargs = {**kwargs, "verify": context}
         fallback_filtered = (
