@@ -3,6 +3,7 @@
 Sem chamadas à rede e sem autenticação real. Estes casos complementam a suíte
 existente focando caminhos de erro/telemetria que podem regredir silenciosamente.
 """
+
 from types import SimpleNamespace
 
 import httpx
@@ -64,6 +65,7 @@ def test_get_format_rejeita_lancamento_sem_faixas():
     with pytest.raises(NonStreamable, match="nao tem faixas disponiveis"):
         # Chama o método sem construir a classe Download ou criar sessão HTTP.
         import asyncio
+
         asyncio.run(downloader.Download._get_format(obj, {"tracks": {"items": []}}))
 
 
@@ -76,8 +78,11 @@ def test_get_format_reconhece_downgrade_de_qualidade():
             "restrictions": [{"code": downloader.QL_DOWNGRADE}],
         }
 
-    obj = SimpleNamespace(client=SimpleNamespace(get_track_url=get_track_url), quality=27)
+    obj = SimpleNamespace(
+        client=SimpleNamespace(get_track_url=get_track_url), quality=27
+    )
     import asyncio
+
     result = asyncio.run(
         downloader.Download._get_format(obj, {"tracks": {"items": [{"id": "track-1"}]}})
     )
@@ -88,12 +93,13 @@ def test_get_format_mp3_sem_restricao():
     async def get_track_url(track_id, fmt_id):
         return {"bit_depth": 16, "sampling_rate": 44.1, "restrictions": []}
 
-    obj = SimpleNamespace(client=SimpleNamespace(get_track_url=get_track_url), quality=5)
+    obj = SimpleNamespace(
+        client=SimpleNamespace(get_track_url=get_track_url), quality=5
+    )
     import asyncio
+
     result = asyncio.run(
-        downloader.Download._get_format(
-            obj, {"id": "track-2"}, is_track_id=True
-        )
+        downloader.Download._get_format(obj, {"id": "track-2"}, is_track_id=True)
     )
     assert result == ("MP3", True, 16, 44.1)
 
@@ -107,8 +113,11 @@ def test_get_format_falha_de_metadados_retorna_unknown(mode):
             return {}
         return {"sampling_rate": 96}
 
-    obj = SimpleNamespace(client=SimpleNamespace(get_track_url=get_track_url), quality=7)
+    obj = SimpleNamespace(
+        client=SimpleNamespace(get_track_url=get_track_url), quality=7
+    )
     import asyncio
+
     result = asyncio.run(
         downloader.Download._get_format(obj, {"id": "track-3"}, is_track_id=True)
     )

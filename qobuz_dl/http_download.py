@@ -142,9 +142,7 @@ class _State:
 
 
 @lru_cache(maxsize=4)
-def _ssl_context_from_memory(
-    ca_file: str | None, ca_dir: str | None
-) -> ssl.SSLContext:
+def _ssl_context_from_memory(ca_file: str | None, ca_dir: str | None) -> ssl.SSLContext:
     """Carrega CAs em memória como fallback para falhas EMFILE no OpenSSL.
 
     Alguns ambientes móveis conseguem abrir o bundle PEM, mas falham quando
@@ -204,9 +202,7 @@ def _create_compatible_client(client_class, kwargs: dict[str, Any]):
             return client_class(**{**kwargs, "verify": context})
 
     parameters = signature.parameters.values()
-    accepts_kwargs = any(
-        p.kind is inspect.Parameter.VAR_KEYWORD for p in parameters
-    )
+    accepts_kwargs = any(p.kind is inspect.Parameter.VAR_KEYWORD for p in parameters)
     accepted = signature.parameters
     filtered = (
         dict(kwargs)
@@ -231,9 +227,7 @@ def _create_compatible_client(client_class, kwargs: dict[str, Any]):
             fallback_kwargs
             if accepts_kwargs
             else {
-                key: value
-                for key, value in fallback_kwargs.items()
-                if key in accepted
+                key: value for key, value in fallback_kwargs.items() if key in accepted
             }
         )
         if "verify" not in fallback_filtered:
