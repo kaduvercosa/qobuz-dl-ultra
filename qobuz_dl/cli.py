@@ -62,7 +62,10 @@ def _startup_timing(stage: str, started: float | None = None) -> None:
     das requisições; serve para localizar gargalos sem poluir o uso normal.
     """
     if os.environ.get("QOBUZ_DL_STARTUP_TIMING", "").strip().lower() not in {
-        "1", "true", "yes", "on"
+        "1",
+        "true",
+        "yes",
+        "on",
     }:
         return
     elapsed = time.perf_counter() - started if started is not None else None

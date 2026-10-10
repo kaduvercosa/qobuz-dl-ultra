@@ -97,7 +97,10 @@ def _resolve_user_auth_token(client, token=None):
 def _startup_timing_enabled() -> bool:
     """Ativa métricas de inicialização sem alterar o comportamento normal."""
     return os.environ.get("QOBUZ_DL_STARTUP_TIMING", "").strip().lower() in {
-        "1", "true", "yes", "on"
+        "1",
+        "true",
+        "yes",
+        "on",
     }
 
 
@@ -156,14 +159,18 @@ class Client:
             """
             nonlocal bundle_refreshed
             if not Bundle:
-                logger.warning("Bundle indisponível; não foi possível atualizar a configuração.")
+                logger.warning(
+                    "Bundle indisponível; não foi possível atualizar a configuração."
+                )
                 return False
             try:
                 b = await Bundle.create()
                 fresh_id = str(b.get_app_id() or "").strip()
-                fresh_secrets = list(dict.fromkeys(
-                    secret for secret in b.get_secrets().values() if secret
-                ))
+                fresh_secrets = list(
+                    dict.fromkeys(
+                        secret for secret in b.get_secrets().values() if secret
+                    )
+                )
             except Exception as exc:
                 logger.warning(
                     "Falha ao atualizar App ID/segredos pelo bundle (%s).",
@@ -192,8 +199,12 @@ class Client:
         if force_bundle_refresh:
             await refresh_bundle("forçada")
         else:
-            logger.debug("Usando App ID %s; bundle adiado até uma rejeição da API.", self.id)
-        _log_startup_timing("bundle/App ID inicial", time.perf_counter() - bundle_started)
+            logger.debug(
+                "Usando App ID %s; bundle adiado até uma rejeição da API.", self.id
+            )
+        _log_startup_timing(
+            "bundle/App ID inicial", time.perf_counter() - bundle_started
+        )
 
         headers = {}
         if self.force_english:
@@ -229,7 +240,9 @@ class Client:
             max_connections=50,
             max_keepalive_connections=10,
         )
-        _log_startup_timing("criação do cliente HTTP", time.perf_counter() - http_client_started)
+        _log_startup_timing(
+            "criação do cliente HTTP", time.perf_counter() - http_client_started
+        )
         self.base = "https://www.qobuz.com/api.json/0.2/"
         self.sec = None
         self.session_id = None
@@ -252,14 +265,18 @@ class Client:
                 # disparam uma busca lenta e desnecessária pelo bundle.
                 if not _is_app_id_rejection(exc) or bundle_refreshed:
                     raise
-                refreshed = await refresh_bundle("rejeição explícita do App ID durante autenticação")
+                refreshed = await refresh_bundle(
+                    "rejeição explícita do App ID durante autenticação"
+                )
                 if not refreshed:
                     raise
                 self.session.headers.update({"X-App-Id": self.id})
                 self.uat = None
                 self.user_auth_token = None
                 await self.auth(email, pwd, user_auth_token)
-            _log_startup_timing("auth total (login + perfil)", time.perf_counter() - auth_started)
+            _log_startup_timing(
+                "auth total (login + perfil)", time.perf_counter() - auth_started
+            )
 
             cfg_started = time.perf_counter()
             try:
@@ -275,14 +292,19 @@ class Client:
                 self.session.headers.update({"X-App-Id": self.id})
                 await self.cfg_setup()
             else:
-                if getattr(self, "_secret_validation_all_invalid", False) and not bundle_refreshed:
+                if (
+                    getattr(self, "_secret_validation_all_invalid", False)
+                    and not bundle_refreshed
+                ):
                     # Só atualizar se todos os segredos foram rejeitados
                     # explicitamente; falhas de rede não disparam scraping.
                     refreshed = await refresh_bundle("segredos locais rejeitados")
                     if refreshed:
                         self.session.headers.update({"X-App-Id": self.id})
                         await self.cfg_setup()
-            _log_startup_timing("cfg_setup/validação dos segredos", time.perf_counter() - cfg_started)
+            _log_startup_timing(
+                "cfg_setup/validação dos segredos", time.perf_counter() - cfg_started
+            )
         except BaseException:
             await self.close()
             raise
@@ -335,7 +357,9 @@ class Client:
         else:
             login_request_started = time.perf_counter()
             usr_info = await self.api_call("user/login", email=email, pwd=pwd)
-            _log_startup_timing("requisição user/login", time.perf_counter() - login_request_started)
+            _log_startup_timing(
+                "requisição user/login", time.perf_counter() - login_request_started
+            )
             if not usr_info.get("user", {}).get("credential", {}).get("parameters"):
                 logger.info(
                     f"{YELLOW}[!] Conta gratuita detectada ou validacao ignorada.{OFF}"
@@ -710,8 +734,12 @@ class Client:
                     # como "invalid app_id" deve continuar como HTTPStatusError
                     # para permitir a recuperação pontual via bundle.
                     credential_markers = (
-                        "credential", "email", "password", "username",
-                        "user_auth_token", "invalid login",
+                        "credential",
+                        "email",
+                        "password",
+                        "username",
+                        "user_auth_token",
+                        "invalid login",
                     )
                     if "invalid" in text and any(
                         marker in text for marker in credential_markers

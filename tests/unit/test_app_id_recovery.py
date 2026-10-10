@@ -3,6 +3,7 @@
 Estes testes não fazem chamadas reais à API do Qobuz; todas as operações de
 rede e autenticação são simuladas.
 """
+
 import asyncio
 
 import httpx
@@ -45,7 +46,9 @@ def http_error(status=401, body="invalid app_id"):
 
 
 def setup_client_mocks(monkeypatch):
-    monkeypatch.setattr(qopy, "make_client", lambda **kwargs: FakeSession(kwargs.get("headers")))
+    monkeypatch.setattr(
+        qopy, "make_client", lambda **kwargs: FakeSession(kwargs.get("headers"))
+    )
     monkeypatch.setattr(qopy, "Bundle", FakeBundle)
     FakeBundle.calls = 0
     FakeBundle.app_id = "987654321"
@@ -66,7 +69,9 @@ def test_uses_default_app_id_without_bundle_on_normal_startup(monkeypatch):
         seen_ids.append(self.id)
 
     monkeypatch.setattr(qopy.Client, "auth", auth)
-    client = asyncio.run(qopy.Client.create("user@example.com", "password", None, ["local-secret"]))
+    client = asyncio.run(
+        qopy.Client.create("user@example.com", "password", None, ["local-secret"])
+    )
     try:
         assert client.id == "798273057"
         assert seen_ids == ["798273057"]
@@ -85,7 +90,9 @@ def test_rejected_app_id_refreshes_bundle_and_retries_once(monkeypatch):
             raise http_error(401, "invalid app_id")
 
     monkeypatch.setattr(qopy.Client, "auth", auth)
-    client = asyncio.run(qopy.Client.create("user@example.com", "password", "798273057", ["old-secret"]))
+    client = asyncio.run(
+        qopy.Client.create("user@example.com", "password", "798273057", ["old-secret"])
+    )
     try:
         assert seen_ids == ["798273057", "987654321"]
         assert client.id == "987654321"
@@ -104,7 +111,11 @@ def test_bad_credentials_do_not_trigger_bundle_refresh(monkeypatch):
 
     monkeypatch.setattr(qopy.Client, "auth", auth)
     with pytest.raises(AuthenticationError):
-        asyncio.run(qopy.Client.create("user@example.com", "wrong-password", "798273057", ["local-secret"]))
+        asyncio.run(
+            qopy.Client.create(
+                "user@example.com", "wrong-password", "798273057", ["local-secret"]
+            )
+        )
     assert FakeBundle.calls == 0
 
 
@@ -119,9 +130,14 @@ def test_failed_retry_does_not_loop_or_fetch_bundle_twice(monkeypatch):
 
     monkeypatch.setattr(qopy.Client, "auth", auth)
     with pytest.raises(httpx.HTTPStatusError):
-        asyncio.run(qopy.Client.create("user@example.com", "password", "798273057", ["old-secret"]))
+        asyncio.run(
+            qopy.Client.create(
+                "user@example.com", "password", "798273057", ["old-secret"]
+            )
+        )
     assert calls == 2
     assert FakeBundle.calls == 1
+
 
 @pytest.mark.parametrize(
     ("status", "body"),
