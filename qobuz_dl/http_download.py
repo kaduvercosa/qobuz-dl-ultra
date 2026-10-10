@@ -30,13 +30,16 @@
 from __future__ import annotations
 
 import asyncio
+import errno
 import importlib.util
 import inspect
 import logging
 import os
 import random
 import re
+import ssl
 from dataclasses import dataclass, replace
+from functools import lru_cache
 from typing import Any, Awaitable, Callable, Mapping, Optional, Union
 
 import httpx
@@ -138,24 +141,104 @@ class _State:
 # ----------------------------------------------------------------------------
 
 
-def _create_compatible_client(client_class, kwargs: dict[str, Any]):
-    """Cria clientes HTTP respeitando fábricas substituídas em testes.
+@lru_cache(maxsize=4)
+def _ssl_context_from_memory(
+    ca_file: str | None, ca_dir: str | None
+) -> ssl.SSLContext:
+    """Carrega CAs em memória como fallback para falhas EMFILE no OpenSSL.
 
-    httpx aceita estes parâmetros, mas alguns testes/integradores substituem
-    AsyncClient/Client por fábricas simples com assinatura reduzida. Filtrar
-    somente nesses casos mantém a configuração completa no httpx real e evita
-    quebrar essas fábricas compatíveis.
+    Alguns ambientes móveis conseguem abrir o bundle PEM, mas falham quando
+    o OpenSSL tenta carregá-lo pelo caminho (EMFILE). Extrair somente os blocos
+    PEM evita que comentários/bytes não ASCII do bundle interfiram no cadata.
+    A validação de certificados continua obrigatória.
+    """
+    if ca_file:
+        source = ca_file
+    elif not ca_dir:
+        # O HTTPX usa certifi quando SSL_CERT_FILE/SSL_CERT_DIR não estão definidos.
+        import certifi
+
+        source = certifi.where()
+    else:
+        source = None
+
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    if source is not None:
+        with open(source, "rb") as bundle_file:
+            bundle = bundle_file.read()
+        certificates = re.findall(
+            rb"-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----",
+            bundle,
+            re.DOTALL,
+        )
+        if not certificates:
+            raise ValueError(f"Nenhum certificado PEM encontrado em {source!r}")
+        context.load_verify_locations(cadata=b"\\n".join(certificates).decode("ascii"))
+
+    if ca_dir:
+        context.load_verify_locations(capath=ca_dir)
+    return context
+
+
+def _create_compatible_client(client_class, kwargs: dict[str, Any]):
+    """Cria clientes HTTP compatíveis com fábricas reduzidas usadas em testes.
+
+    Primeiro mantém o caminho padrão do HTTPX. Somente se o carregamento de
+    certificados falhar com EMFILE, tenta novamente com as CAs PEM em memória.
     """
     try:
         signature = inspect.signature(client_class)
     except (TypeError, ValueError):
-        return client_class(**kwargs)
+        try:
+            return client_class(**kwargs)
+        except OSError as exc:
+            if exc.errno != errno.EMFILE or "verify" in kwargs:
+                raise
+            try:
+                context = _ssl_context_from_memory(
+                    os.environ.get("SSL_CERT_FILE") or None,
+                    os.environ.get("SSL_CERT_DIR") or None,
+                )
+            except Exception:
+                raise exc
+            return client_class(**{**kwargs, "verify": context})
+
     parameters = signature.parameters.values()
-    if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in parameters):
-        return client_class(**kwargs)
+    accepts_kwargs = any(
+        p.kind is inspect.Parameter.VAR_KEYWORD for p in parameters
+    )
     accepted = signature.parameters
-    filtered = {key: value for key, value in kwargs.items() if key in accepted}
-    return client_class(**filtered)
+    filtered = (
+        dict(kwargs)
+        if accepts_kwargs
+        else {key: value for key, value in kwargs.items() if key in accepted}
+    )
+    try:
+        return client_class(**filtered)
+    except OSError as exc:
+        if exc.errno != errno.EMFILE or "verify" in kwargs:
+            raise
+        try:
+            context = _ssl_context_from_memory(
+                os.environ.get("SSL_CERT_FILE") or None,
+                os.environ.get("SSL_CERT_DIR") or None,
+            )
+        except Exception:
+            raise exc
+
+        fallback_kwargs = {**kwargs, "verify": context}
+        fallback_filtered = (
+            fallback_kwargs
+            if accepts_kwargs
+            else {
+                key: value
+                for key, value in fallback_kwargs.items()
+                if key in accepted
+            }
+        )
+        if "verify" not in fallback_filtered:
+            raise exc
+        return client_class(**fallback_filtered)
 
 
 def make_client(

@@ -10,12 +10,12 @@
 coverage:
   precision: 2
   round: down
-  range: "60...100"
+  range: "75...100"
   status:
     project:
       default:
         enabled: true
-        target: 60%
+        target: 75%
         threshold: 0%
         if_ci_failed: error
         informational: false
@@ -23,7 +23,7 @@ coverage:
     patch:
       default:
         enabled: true
-        target: 60%
+        target: 75%
         threshold: 0%
         if_ci_failed: error
         informational: false
