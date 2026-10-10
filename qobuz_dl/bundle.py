@@ -20,7 +20,7 @@ import base64
 import logging
 import re
 from collections import OrderedDict
-import httpx
+import httpx  # noqa: F401
 
 from qobuz_dl.http_download import make_client, make_sync_client
 
