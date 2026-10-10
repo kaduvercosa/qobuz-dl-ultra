@@ -406,7 +406,7 @@ Você pode personalizar profundamente seu `config.ini` ou usar as flags CLI `-ff
 #### 📝 Tabela de Referência de Variáveis Completas
 
 | Categoria / Variável | Descrição | Exemplo de Saída |
-| :---| :—-- | :—-- |
+| :---| :--- | :--- |
 | **Artistas & Compositores** | | |
 | `{album_artist}` | O principal artista do álbum (lida com compilações graciosamente). | `Daft Punk` |
 | `{artist}` / `{track_artist}` | O artista performático da faixa específica. | `Pharrell Williams` |
