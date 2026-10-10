@@ -23,6 +23,7 @@ import logging
 import httpx
 
 from qobuz_dl import __version__
+from qobuz_dl.http_download import make_client
 
 logger = logging.getLogger(__name__)
 
@@ -86,8 +87,9 @@ async def lookup_by_isrc(
 
         try:
             own_session = session is None
-            client = session or httpx.AsyncClient(
-                headers=_MB_HEADERS, timeout=httpx.Timeout(10.0, connect=5.0)
+            client = session or make_client(
+                headers=_MB_HEADERS, timeout=httpx.Timeout(10.0, connect=5.0),
+                max_connections=1, max_keepalive_connections=1,
             )
 
             try:

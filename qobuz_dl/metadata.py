@@ -342,6 +342,70 @@ def _cover_comment_line(source: Optional[str]):
 
 
 # # Embute a capa no FLAC; se necessário, usa uma cópia recompactada sem alterar cover.jpg.
+def _image_dimensions(image_data):
+    """Retorna (largura, altura) de bytes de imagem; None se inválidos."""
+    try:
+        from PIL import Image
+        with Image.open(io.BytesIO(image_data)) as image:
+            return image.size
+    except Exception:
+        return None
+
+
+def should_replace_embedded_cover(filename, candidate_path):
+    """Decide se a capa candidata tem resolução superior à já embutida.
+
+    A política é conservadora: se já existe uma capa e não for possível
+    comparar as dimensões com segurança, preserva a existente. Uma candidata
+    só substitui a capa atual quando tem mais pixels (área total).
+    """
+    if not candidate_path or not os.path.isfile(candidate_path):
+        return False
+
+    try:
+        with open(candidate_path, "rb") as cover_file:
+            candidate_dimensions = _image_dimensions(cover_file.read())
+        if not candidate_dimensions:
+            return False
+
+        extension = os.path.splitext(filename)[1].lower()
+        existing_images = []
+        if extension == ".mp3":
+            try:
+                existing_tags = id3.ID3(filename)
+                existing_images = [
+                    frame.data for frame in existing_tags.values()
+                    if isinstance(frame, id3.APIC) and getattr(frame, "data", None)
+                ]
+            except (ID3NoHeaderError, OSError):
+                existing_images = []
+        else:
+            try:
+                existing_audio = FLAC(filename)
+                existing_images = [pic.data for pic in existing_audio.pictures if pic.data]
+            except Exception:
+                existing_images = []
+
+        # Sem capa atual, a candidata pode ser embutida normalmente.
+        if not existing_images:
+            return True
+
+        candidate_area = candidate_dimensions[0] * candidate_dimensions[1]
+        existing_areas = []
+        for image_data in existing_images:
+            dimensions = _image_dimensions(image_data)
+            if not dimensions:
+                # Não destrói uma capa existente cuja qualidade não pôde ser lida.
+                return False
+            existing_areas.append(dimensions[0] * dimensions[1])
+
+        # Só substitui se superar todas as capas já embutidas.
+        return candidate_area > max(existing_areas)
+    except Exception as exc:
+        logger.debug("Não foi possível comparar capas de '%s': %s", filename, exc)
+        return False
+
+
 def _embed_flac_img(root_dir, audio: FLAC, cover_override=None):
     """Embed cover art in FLAC file."""
     cover_image = _get_cover_path(root_dir, override=cover_override)

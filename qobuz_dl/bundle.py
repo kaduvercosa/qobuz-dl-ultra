@@ -23,6 +23,8 @@ from collections import OrderedDict
 
 import httpx
 
+from qobuz_dl.http_download import make_client, make_sync_client
+
 # Configuração do logger local para registrar eventos e depuração (debug)
 logger = logging.getLogger(__name__)
 
@@ -71,7 +73,7 @@ class Bundle:
         2. Faz o download do bundle.js.
         3. Armazena o código-fonte em self._bundle para processamento posterior.
         """
-        with httpx.Client() as client:
+        with make_sync_client() as client:
             logger.debug("Obtendo página de login para localizar o bundle.js")
             response = client.get(f"{_BASE_URL}/login")
             response.raise_for_status()
@@ -107,7 +109,7 @@ class Bundle:
         # bloqueante) -- por isso o corpo abaixo repete manualmente os passos
         # do __init__, mas usando await/AsyncClient.
         instance = cls.__new__(cls)
-        async with httpx.AsyncClient() as client:
+        async with make_client() as client:
             logger.debug("Obtendo página de login de forma assíncrona")
             response = await client.get(f"{_BASE_URL}/login", timeout=15.0)
             response.raise_for_status()

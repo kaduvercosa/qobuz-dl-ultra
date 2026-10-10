@@ -23,6 +23,8 @@ from datetime import datetime
 from typing import Optional
 
 import httpx
+
+from qobuz_dl.http_download import make_sync_client
 import keyring
 import send2trash
 from packaging.version import Version
@@ -1105,9 +1107,10 @@ def check_for_updates():
         from qobuz_dl import __version__
 
         url = "https://api.github.com/repos/kaduvercosa/qobuz-dl-ultra/releases/latest"
-        response = httpx.get(url, timeout=2)
-        response.raise_for_status()
-        payload = response.json()
+        with make_sync_client(timeout=2) as client:
+            response = client.get(url)
+            response.raise_for_status()
+            payload = response.json()
         latest_version_str = payload.get("tag_name", "").lstrip("vV")
         if not latest_version_str:
             return

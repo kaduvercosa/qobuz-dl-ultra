@@ -37,6 +37,7 @@ from pathvalidate import sanitize_filename
 from tqdm import tqdm
 
 import qobuz_dl.metadata as metadata
+from qobuz_dl.http_download import make_client
 from qobuz_dl import ui
 from qobuz_dl.color import (
     OFF,
@@ -301,7 +302,7 @@ class Download:
         self.no_credits = no_credits
         self.booklet_only = booklet_only
 
-        self.http_session = httpx.AsyncClient(
+        self.http_session = make_client(
             follow_redirects=True,
             headers={
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -2221,7 +2222,7 @@ async def tqdm_download(
 
     owns_session = session is None
     timeout_cfg = httpx.Timeout(60.0, connect=10.0)
-    http = session or httpx.AsyncClient(follow_redirects=True)
+    http = session or make_client(follow_redirects=True, timeout=timeout_cfg)
 
     try:
         try:
@@ -2496,7 +2497,7 @@ async def _download_bytes_with_limit(url, session, max_bytes, headers=None):
     de tqdm_download (com retry/resume por Range).
     """
     owns_session = session is None
-    http = session or httpx.AsyncClient(follow_redirects=True)
+    http = session or make_client(follow_redirects=True)
     try:
         async with http.stream(
             "GET", url, headers=headers, timeout=httpx.Timeout(20.0, connect=10.0)
@@ -2750,7 +2751,7 @@ async def tqdm_download_segments(
 
     owns_session = session is None
     timeout_cfg = httpx.Timeout(60.0, connect=10.0)
-    http = session or httpx.AsyncClient(follow_redirects=True, timeout=timeout_cfg)
+    http = session or make_client(follow_redirects=True, timeout=timeout_cfg)
 
     async def get_seg_size(seg_num):
         """Get optimal segment size for segmented downloads."""

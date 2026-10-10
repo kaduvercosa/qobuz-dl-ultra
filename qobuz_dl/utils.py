@@ -20,6 +20,7 @@ import platformdirs
 from qobuz_dl.color import INFO as CYAN
 from qobuz_dl.color import OFF, RED
 from qobuz_dl.color import WARNING as YELLOW
+from qobuz_dl.http_download import make_client
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -1233,7 +1234,7 @@ async def get_apple_hq_cover(
     if session is not None:
         return await search(session)
 
-    async with httpx.AsyncClient() as client:
+    async with make_client() as client:
         return await search(client)
 
 

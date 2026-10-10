@@ -31,6 +31,7 @@ except ImportError:
     _CRYPTO_AVAILABLE = False
 
 from qobuz_dl import ui
+from qobuz_dl.http_download import make_client
 from qobuz_dl.color import GREEN, OFF, RED, RESET
 from qobuz_dl.color import INFO as CYAN
 from qobuz_dl.color import WARNING as YELLOW
@@ -142,10 +143,11 @@ class Client:
             )
 
         client_timeout = httpx.Timeout(None, connect=15.0, read=90.0)
-        limits = httpx.Limits(max_keepalive_connections=10, max_connections=50)
-
-        self.session = httpx.AsyncClient(
-            headers=headers, timeout=client_timeout, limits=limits
+        self.session = make_client(
+            headers=headers,
+            timeout=client_timeout,
+            max_connections=50,
+            max_keepalive_connections=10,
         )
         self.base = "https://www.qobuz.com/api.json/0.2/"
         self.sec = None
@@ -1008,16 +1010,52 @@ class Client:
         return await self.api_call("album/get", id=id)
 
     async def cfg_setup(self):
-        for secret in self.secrets:
+        """Valida os segredos em paralelo para reduzir a espera de inicialização.
+
+        A validação é somente de leitura. Limitamos a concorrência para não
+        sobrecarregar a API e cancelamos as tentativas restantes assim que um
+        segredo válido for encontrado.
+        """
+        secrets = list(dict.fromkeys(secret for secret in (self.secrets or []) if secret))
+        if not secrets:
+            raise InvalidAppSecretError("Nenhum segredo encontrado.")
+
+        async def validate(secret):
             try:
                 await self.api_call(
                     "track/getFileUrl", id=5966783, fmt_id=5, sec=secret
                 )
-                self.sec = secret
-                break
+                return secret
+            except asyncio.CancelledError:
+                raise
             except Exception:
-                continue
-        if not self.sec and self.secrets:
-            self.sec = self.secrets[0]
+                return None
+
+        # Pequeno limite de concorrência: reduz a latência sem lançar todas as
+        # requisições de uma vez quando a lista de segredos for grande.
+        semaphore = asyncio.Semaphore(min(4, len(secrets)))
+
+        async def bounded_validate(secret):
+            async with semaphore:
+                return await validate(secret)
+
+        tasks = [asyncio.create_task(bounded_validate(secret)) for secret in secrets]
+        try:
+            for completed, task in enumerate(asyncio.as_completed(tasks), start=1):
+                candidate = await task
+                if candidate:
+                    self.sec = candidate
+                    break
+                logger.debug(
+                    "Validacao de segredo concluida (%d/%d)", completed, len(secrets)
+                )
+        finally:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Mantém o fallback anterior: algumas instalações podem usar segredos
+        # que não permitem esta chamada de teste, mas continuam configurados.
         if not self.sec:
-            raise InvalidAppSecretError("Nenhum segredo encontrado.")
+            self.sec = secrets[0]

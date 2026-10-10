@@ -21,6 +21,7 @@ import mutagen.id3 as id3
 from mutagen.flac import FLAC
 
 from qobuz_dl import metadata, ui
+from qobuz_dl.http_download import make_client
 from qobuz_dl.color import GREEN, OFF, RED, RESET
 from qobuz_dl.color import INFO as CYAN
 from qobuz_dl.color import WARNING as YELLOW
@@ -304,6 +305,43 @@ async def _download_apple_cover(
         return None
 
 
+def _display_track_name(item: dict, album: dict, file_path: str, limit: int = 54) -> str:
+    """Retorna apenas artista e título/versão, sem pastas, faixa ou extensão."""
+    item = item or {}
+    album = album or {}
+    album_data = item.get("album") or album
+
+    performer = item.get("performer") or album_data.get("artist") or album.get("artist") or {}
+    if isinstance(performer, dict):
+        artist = performer.get("name") or performer.get("title") or ""
+    elif isinstance(performer, (list, tuple)):
+        artist = ", ".join(
+            str(entry.get("name", "")).strip() if isinstance(entry, dict) else str(entry).strip()
+            for entry in performer
+            if entry
+        )
+    else:
+        artist = str(performer or "").strip()
+
+    title = str(item.get("title") or "").strip()
+    version = str(item.get("version") or "").strip()
+    if version and version.casefold() not in title.casefold():
+        title = f"{title} ({version})" if title else version
+
+    if not title:
+        # Fallback para o nome do arquivo, sem diretório, extensão ou prefixo de faixa.
+        title = os.path.splitext(os.path.basename(file_path))[0]
+        title = re.sub(r"^\d{1,3}\s*[-_. ]\s*", "", title)
+    if not artist:
+        artist = str(album_data.get("artist", "") if isinstance(album_data.get("artist"), str) else "").strip()
+
+    display = f"{artist} - {title}" if artist else title
+    display = re.sub(r"\s+", " ", display).strip()
+    if len(display) > limit:
+        display = display[: limit - 1].rstrip() + "…"
+    return display or os.path.splitext(os.path.basename(file_path))[0][:limit]
+
+
 def _cover_result_message(
     cover_source: Optional[str],
     cover_status: str,
@@ -353,7 +391,7 @@ async def retag_directory(directory_path, client, settings):
     album_cache: dict = {}
     width = len(str(len(files)))
 
-    http_session = httpx.AsyncClient(
+    http_session = make_client(
         follow_redirects=True,
         headers={
             "User-Agent": (
@@ -367,7 +405,7 @@ async def retag_directory(directory_path, client, settings):
     try:
         for index, file_path in enumerate(files, 1):
             label = f"[{index:0{width}d}/{len(files)}]"
-            name = os.path.relpath(file_path, directory_path)
+            name = os.path.basename(file_path)
 
             track_id = await loop.run_in_executor(
                 None,
@@ -404,6 +442,7 @@ async def retag_directory(directory_path, client, settings):
                 continue
 
             item, album, istrack = resolved
+            name = _display_track_name(item, album, file_path)
             extension = os.path.splitext(file_path)[1].lower()
             tag_function = (
                 metadata.tag_mp3 if extension == ".mp3" else metadata.tag_flac
@@ -459,6 +498,24 @@ async def retag_directory(directory_path, client, settings):
                     exc_info=True,
                 )
 
+            # Preserva a capa atual quando a candidata Apple não tem resolução
+            # superior. A comparação é conservadora: em caso de dúvida, não troca.
+            if cover_path and not await loop.run_in_executor(
+                None,
+                functools.partial(
+                    metadata.should_replace_embedded_cover,
+                    file_path,
+                    cover_path,
+                ),
+            ):
+                try:
+                    os.remove(cover_path)
+                except OSError:
+                    pass
+                cover_path = None
+                cover_source = None
+                cover_status = "Capa existente preservada (candidata não é superior)"
+
             before = await loop.run_in_executor(None, snapshot_tags, file_path)
 
             try:
@@ -501,28 +558,45 @@ async def retag_directory(directory_path, client, settings):
             if cover_source:
                 stats["apple_embedded"] += 1
 
-            result_message = _cover_result_message(
-                cover_source,
-                cover_status,
-            )
+            result_message = _cover_result_message(cover_source, cover_status)
+            # Os snapshots reais usam as chaves "text" e "art". Alguns
+            # chamadores/testes podem fornecer diretamente o mapa de tags;
+            # nesse caso, comparar .get("text") compara None com None e perde
+            # alterações reais.
+            before_text = before.get("text", before)
+            after_text = after.get("text", after)
+            tags_changed = before_text != after_text
+            cover_changed = before.get("art", []) != after.get("art", [])
 
-            if before == after:
-                stats["unchanged"] += 1
-                ui.skip(
-                    f"{label} {name} (sem alterações nas tags/capa; {result_message})"
-                )
+            if tags_changed and cover_changed:
+                action = "TAGS + CAPA ALTERADAS"
+                action_color = GREEN
+            elif tags_changed:
+                action = "SOMENTE TAGS ALTERADAS"
+                action_color = CYAN
+            elif cover_changed:
+                action = "SOMENTE CAPA ALTERADA"
+                action_color = YELLOW
             else:
+                action = "NENHUMA ALTERAÇÃO"
+                action_color = MUTED
+
+            if tags_changed or cover_changed:
                 stats["updated"] += 1
-                ui.ok(f"{label} {name} (atualizada; {result_message})")
-
-            # Detalhe separado da linha da música: não herda o verde/cinza
-            # emitido por ui.ok()/ui.skip().
-            if cover_source:
-                ui.emit(f"    {CYAN}↳ {result_message}{OFF}")
-            elif cover_status.startswith("Apple: nenhuma"):
-                ui.emit(f"    {MUTED}↳ {result_message}{OFF}")
             else:
-                ui.emit(f"    {YELLOW}↳ {result_message}{OFF}")
+                stats["unchanged"] += 1
+
+            # Linha principal neutra: somente o estado da operação recebe cor.
+            ui.emit(f"{label} {name} [{action_color}{action}{OFF}]")
+            ui.emit(
+                f"    {CYAN}↳ Tags:{OFF} "
+                f"{GREEN if tags_changed else MUTED}{'alteradas' if tags_changed else 'sem alteração'}{OFF}"
+            )
+            ui.emit(
+                f"    {CYAN}↳ Capa:{OFF} "
+                f"{YELLOW if cover_changed else MUTED}{'substituída' if cover_changed else 'preservada/inalterada'}{OFF}"
+                f" — {result_message}"
+            )
 
         ui.emit("")
         ui.emit(f"{GREEN}[+] Correção de tags concluída.{OFF}")

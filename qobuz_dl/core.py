@@ -324,6 +324,9 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
             columns, _ = shutil.get_terminal_size((80, 24))
 
         table_columns = max(40, columns - 2)
+        # Em terminais estreitos (celulares), reduzir os detalhes do item
+        # focado e do rodapé para preservar a área útil da lista.
+        compact_mobile = columns <= 72
 
         is_table, widths, headers, borders = _get_table_layout(
             table_columns, is_multi, item_category
@@ -711,30 +714,45 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
                         )
 
                         if hovered:
-                            add_card_line(
-                                [(row_st, f"   👤 {art}")],
-                                hovered=hovered,
-                                is_checked=checked,
-                                border_style=border_st,
-                            )
-                            add_card_line(
-                                [(row_st, f"   💿 {alb}")],
-                                hovered=hovered,
-                                is_checked=checked,
-                                border_style=border_st,
-                            )
-                            add_card_line(
-                                [(row_st, f"   📀 {typ} · ⏱ {dur}")],
-                                hovered=hovered,
-                                is_checked=checked,
-                                border_style=border_st,
-                            )
-                            add_card_line(
-                                [(row_st, f"   🎚 {ql}")],
-                                hovered=hovered,
-                                is_checked=checked,
-                                border_style=border_st,
-                            )
+                            if compact_mobile:
+                                # Duas linhas no celular: artista/álbum e tipo/duração.
+                                add_card_line(
+                                    [(row_st, f"   👤 {art} · 💿 {alb}")],
+                                    hovered=hovered,
+                                    is_checked=checked,
+                                    border_style=border_st,
+                                )
+                                add_card_line(
+                                    [(row_st, f"   📀 {typ} · ⏱ {dur} · 🎚 {ql}")],
+                                    hovered=hovered,
+                                    is_checked=checked,
+                                    border_style=border_st,
+                                )
+                            else:
+                                add_card_line(
+                                    [(row_st, f"   👤 {art}")],
+                                    hovered=hovered,
+                                    is_checked=checked,
+                                    border_style=border_st,
+                                )
+                                add_card_line(
+                                    [(row_st, f"   💿 {alb}")],
+                                    hovered=hovered,
+                                    is_checked=checked,
+                                    border_style=border_st,
+                                )
+                                add_card_line(
+                                    [(row_st, f"   📀 {typ} · ⏱ {dur}")],
+                                    hovered=hovered,
+                                    is_checked=checked,
+                                    border_style=border_st,
+                                )
+                                add_card_line(
+                                    [(row_st, f"   🎚 {ql}")],
+                                    hovered=hovered,
+                                    is_checked=checked,
+                                    border_style=border_st,
+                                )
                         else:
                             add_card_line(
                                 [
@@ -896,20 +914,25 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
         )
         res = []
 
+        compact_mobile = columns <= 72
         if options_dicts:
-            res.append(
-                ("class:meta", f" Item {cursor_pos + 1} de {len(options_dicts)}\n")
-            )
+            if compact_mobile and is_multi:
+                res.append(("class:meta", f" Item {cursor_pos + 1}/{len(options_dicts)} · Selecionados: {len(selected_indices)}\n"))
+            else:
+                res.append(
+                    ("class:meta", f" Item {cursor_pos + 1} de {len(options_dicts)}\n")
+                )
 
         if is_multi:
-            res.append(
-                ("class:checkbox", f" * Selecionados: {len(selected_indices)}\n")
-            )
-            footer_msg = " [↑↓/jk] Mover   [Espaço] Selecionar   [t] Todos   [1-9] Ir para   [Enter] Confirmar"
+            if not compact_mobile:
+                res.append(
+                    ("class:checkbox", f" * Selecionados: {len(selected_indices)}\n")
+                )
+            footer_msg = (" [↑↓/jk] Mover [Espaço] Marcar [t] Todos [Enter] OK" if compact_mobile else " [↑↓/jk] Mover   [Espaço] Selecionar   [t] Todos   [1-9] Ir para   [Enter] Confirmar")
         elif item_category == "artist":
-            footer_msg = " [↑↓/jk] Mover   [1-9] Ir para   [Enter] Abrir artista"
+            footer_msg = " [↑↓/jk] Mover [Enter] Abrir" if compact_mobile else " [↑↓/jk] Mover   [1-9] Ir para   [Enter] Abrir artista"
         else:
-            footer_msg = " [↑↓/jk] Mover   [1-9] Ir para   [Enter] Confirmar"
+            footer_msg = " [↑↓/jk] Mover [Enter] OK" if compact_mobile else " [↑↓/jk] Mover   [1-9] Ir para   [Enter] Confirmar"
 
         if get_cwidth(footer_msg) > columns:
             trunc_msg = ""

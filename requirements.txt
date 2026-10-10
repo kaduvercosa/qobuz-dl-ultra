@@ -14,6 +14,7 @@
 #   pip install "qobuz-dl-ultra[dev]"          # pytest, ruff
 pathvalidate
 httpx
+httpx[http2]
 aiosqlite
 send2trash
 humanize

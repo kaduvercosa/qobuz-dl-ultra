@@ -18,6 +18,8 @@ import re
 from dataclasses import dataclass
 
 import httpx
+
+from qobuz_dl.http_download import make_sync_client
 from mutagen.flac import FLAC
 from mutagen.id3 import ID3, TXXX, USLT, ID3NoHeaderError
 from tqdm import tqdm
@@ -93,7 +95,7 @@ class LyricsEngine:
 
         # Sessao HTTP sincrona separada (AsyncClient do downloader nao e' compativel)
         if session is None:
-            self.session = httpx.Client(follow_redirects=True)
+            self.session = make_sync_client(follow_redirects=True)
             self._owns_session = True
         else:
             self.session = session
