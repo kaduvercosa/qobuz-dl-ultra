@@ -239,6 +239,16 @@ _APPLE_COVER_SIZES = [
     "600x600bb",
 ]
 
+# Rotulos de origem da capa gravados nas tags ("Capa: ..."). Definidos em
+# metadata.py e iguais aos do comando `tags` (retro_tags).
+COVER_SOURCE_APPLE_LABEL = metadata.COVER_SOURCE_APPLE
+COVER_SOURCE_QOBUZ_LABEL = metadata.COVER_SOURCE_QOBUZ
+
+# Origem das capas ja' gravadas NESTA execucao, por caminho do arquivo (embed,
+# ou salva quando nao ha' embed). Faixas seguintes do mesmo album reaproveitam
+# o arquivo e precisam saber de onde ele veio.
+_COVER_SOURCES: dict = {}
+
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
@@ -613,13 +623,13 @@ class Download:
             if self.settings.no_cover:
                 ui.skip("Pulando capa")
 
+            # None = origem desconhecida/sem capa: nenhuma linha "Capa: ..." e'
+            # gravada (antes ficava sem valor e levantava NameError).
             cover_source = None
             if self.settings.no_cover and not self.settings.embed_art:
                 pass
             else:
-                cover_source = "Qobuz"
-
-                await _get_cover_and_embed(
+                cover_source = await _get_cover_and_embed(
                     album_meta["image"]["large"],
                     dirn,
                     save_cover=not self.settings.no_cover,
@@ -1082,12 +1092,11 @@ class Download:
                 else:
                     ui.skip("Pulando arte incorporada")
 
-                cover_source = None
                 save_cover_now = not skip_saved_cover and not self.settings.no_cover
+                cover_source = None
                 if save_cover_now or self.settings.embed_art:
                     async with _get_dir_lock(dirn):
-                        cover_source = "Qobuz"
-                        await _get_cover_and_embed(
+                        cover_source = await _get_cover_and_embed(
                             track_meta["album"]["image"]["large"],
                             dirn,
                             save_cover=save_cover_now,
@@ -2622,15 +2631,23 @@ async def _get_cover_and_embed(
     capa "salva" e a "de embed" sao resolvidas em uma unica tentativa e
     reaproveitadas uma pra outra sempre que possivel -- evita bater na
     Apple/Qobuz duas vezes pra' baixar essencialmente a mesma imagem.
+
+    Devolve a ORIGEM da imagem usada ("Apple/iTunes" ou "Qobuz") para
+    ser gravada nas tags (`Capa: ...`). Quando as capas ja' existiam em
+    disco, devolve a origem lembrada desta execucao; se nao ha' como
+    saber (arquivo de uma execucao anterior) ou nada foi gravado,
+    devolve None -- e nenhuma linha "Capa: ..." e' escrita, em vez de
+    afirmar uma origem que pode estar errada.
     """
     if abort_event.is_set():
-        return
+        return None
 
     if not save_cover and not embed_art:
-        return
+        return None
 
     saved_file = os.path.join(dirn, saved_name)
     embed_file = os.path.join(dirn, embed_name) if embed_name else None
+    chave_origem = os.path.abspath(embed_file or saved_file)
 
     precisa_salva = save_cover and not os.path.isfile(saved_file)
     precisa_embed = embed_art and embed_file and not os.path.isfile(embed_file)
@@ -2641,7 +2658,7 @@ async def _get_cover_and_embed(
         ui.skip(f"Ignorando arte da capa incorporada: {embed_name} (Já baixado)")
 
     if not precisa_salva and not precisa_embed:
-        return
+        return _COVER_SOURCES.get(chave_origem)
 
     async def _gravar(caminho, dados, rotulo, rotulo_origem):
         """Write cover image bytes to disk."""
@@ -2665,35 +2682,49 @@ async def _get_cover_and_embed(
             await _gravar(saved_file, apple_bytes, "Capa salva", "Apple (HQ)")
         if precisa_embed:
             await _gravar(embed_file, apple_bytes, "Capa de embed", "Apple (HQ)")
-        return
+        _COVER_SOURCES[chave_origem] = COVER_SOURCE_APPLE_LABEL
+        return COVER_SOURCE_APPLE_LABEL
 
     # 2) Fallback: Qobuz, respeitando saved_art_size/embedded_art_size separadamente (igual ao comportamento original), reaproveitando o arquivo salvo pro embed quando os dois tamanhos resolvem pra' mesma URL -- evita baixar a mesma imagem duas vezes no caso mais comum.
     saved_url = _resolve_art_url(item, saved_art_size) if precisa_salva else None
     embed_url = _resolve_art_url(item, embedded_art_size) if precisa_embed else None
 
+    gravou_qobuz = False
+
+    def _origem_qobuz():
+        # So' afirma "Qobuz" se alguma imagem da Qobuz foi de fato gravada.
+        if not gravou_qobuz:
+            return _COVER_SOURCES.get(chave_origem)
+        _COVER_SOURCES[chave_origem] = COVER_SOURCE_QOBUZ_LABEL
+        return COVER_SOURCE_QOBUZ_LABEL
+
     if precisa_salva:
         dados = await _fetch_qobuz_cover_bytes(item, saved_art_size, session)
         if dados:
             await _gravar(saved_file, dados, "Capa salva", "Qobuz")
+            gravou_qobuz = True
         else:
             ui.skip("Pulando capa: nenhuma fonte disponível")
 
     if not precisa_embed:
-        return
+        return _origem_qobuz()
 
     if precisa_salva and saved_url == embed_url and os.path.isfile(saved_file):
         try:
             shutil.copyfile(saved_file, embed_file)
             ui.detail("🌁 Reutilizando cover.jpg, para o embed..")
-            return
+            gravou_qobuz = True
+            return _origem_qobuz()
         except OSError as e:
             logger.debug(f"Falha ao copiar cover.jpg pra embed: {e}")
 
     dados = await _fetch_qobuz_cover_bytes(item, embedded_art_size, session)
     if dados:
         await _gravar(embed_file, dados, "Capa de embed", "Qobuz")
+        gravou_qobuz = True
     else:
         ui.skip("Pulando arte incorporada: nenhuma fonte disponível")
+    return _origem_qobuz()
 
 
 async def tqdm_download_segments(
