@@ -276,3 +276,31 @@ class TestNormalizeJsonStrings:
         assert resultado == "café"
         assert resultado == unicodedata.normalize("NFC", decomposto)
         assert len(resultado) == 4  # forma composta: c-a-f-é (não 5 chars)
+
+
+async def test_api_call_controles_internos_nao_vazam_para_a_api(monkeypatch):
+    """Timeout/retries de inicialização são locais, não parâmetros do Qobuz."""
+    client = Client()
+    client.id = "123"
+    client.base = "https://api.invalid/"
+    client.uat = "token"
+    response = httpx.Response(
+        200,
+        json={"ok": True},
+        request=httpx.Request("GET", "https://api.invalid/"),
+    )
+    session = type("Session", (), {"request": AsyncMock(return_value=response)})()
+    client.session = session
+    timeout = httpx.Timeout(8.0, connect=3.0)
+
+    assert await client.api_call(
+        "user/get", _request_timeout=timeout, _max_attempts=1
+    ) == {"ok": True}
+
+    session.request.assert_awaited_once()
+    kwargs = session.request.await_args.kwargs
+    assert kwargs["timeout"] is timeout
+    assert "_request_timeout" not in kwargs
+    assert "_max_attempts" not in kwargs
+    assert "_request_timeout" not in kwargs.get("params", {})
+    assert "_max_attempts" not in kwargs.get("params", {})

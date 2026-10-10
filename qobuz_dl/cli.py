@@ -54,6 +54,24 @@ from qobuz_dl.utils import checar_binarios_externos, get_config_paths
 
 logger = logging.getLogger(__name__)
 
+
+def _startup_timing(stage: str, started: float | None = None) -> None:
+    """Emite métricas de inicialização somente quando solicitado pelo usuário.
+
+    Ative com QOBUZ_DL_STARTUP_TIMING=1. Não registra credenciais nem dados
+    das requisições; serve para localizar gargalos sem poluir o uso normal.
+    """
+    if os.environ.get("QOBUZ_DL_STARTUP_TIMING", "").strip().lower() not in {
+        "1", "true", "yes", "on"
+    }:
+        return
+    elapsed = time.perf_counter() - started if started is not None else None
+    if elapsed is None:
+        logger.warning("[startup-timing] %s", stage)
+    else:
+        logger.warning("[startup-timing] %s: %.3fs", stage, elapsed)
+
+
 _config_paths = get_config_paths()
 CONFIG_DIR = _config_paths["config_dir"]
 CONFIG_PATH = _config_paths["config_path"]
@@ -1135,7 +1153,9 @@ def check_for_updates():
 
 
 async def async_main():
+    main_started = time.perf_counter()
     await _initial_checks()
+    _startup_timing("checagens iniciais concluídas", main_started)
 
     async def _async_check_updates():
         try:
@@ -1211,6 +1231,7 @@ async def async_main():
         sys.exit(await cmd_library(offline_args, directory=cfg_dir))
 
     config = configparser.ConfigParser(interpolation=None)
+    config_read_started = time.perf_counter()
     config.read(CONFIG_FILE, encoding="utf-8")
 
     try:
@@ -1243,6 +1264,7 @@ async def async_main():
             except OSError:
                 pass
 
+        _startup_timing("leitura de config/keyring/migração", config_read_started)
         fetch_lyrics = config.getboolean(section, "fetch_lyrics", fallback=False)
 
         directory_val = config.get(section, "directory", fallback=None)
@@ -1354,9 +1376,11 @@ async def async_main():
         )
         sys.exit(0)
 
+    binaries_started = time.perf_counter()
     checar_binarios_externos(
         precisa_fpcalc=bool(getattr(arguments, "find_duplicates", None))
     )
+    _startup_timing("verificação de binários externos", binaries_started)
 
     if getattr(arguments, "sync_db", None):
         from qobuz_dl.db import create_db

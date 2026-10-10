@@ -6,6 +6,7 @@ import asyncio
 import base64
 import hashlib
 import logging
+import os
 import time
 import unicodedata
 from datetime import date, datetime
@@ -52,6 +53,34 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+# App ID padrão do Qobuz-DL Ultra. Só consultamos o bundle se a API rejeitar
+# explicitamente este identificador (ou se o usuário solicitar atualização manual).
+DEFAULT_APP_ID = "798273057"
+
+
+def _is_app_id_rejection(exc: httpx.HTTPStatusError) -> bool:
+    """Identifica rejeição explícita do App ID sem confundir credenciais/rede.
+
+    Alguns endpoints devolvem 400/401/403 para motivos diferentes. O status,
+    isoladamente, não prova que o App ID está inválido; a resposta precisa
+    mencionar o identificador da aplicação.
+    """
+    if exc.response.status_code not in {400, 401, 403}:
+        return False
+    try:
+        body = exc.response.text.lower()
+    except Exception:
+        return False
+    markers = (
+        "app_id",
+        "app id",
+        "application id",
+        "application identifier",
+        "invalid application",
+        "unknown application",
+    )
+    return any(marker in body for marker in markers)
+
 
 def _resolve_user_auth_token(client, token=None):
     """Resolve token de múltiplas fontes para evitar AttributeError em testes."""
@@ -63,6 +92,19 @@ def _resolve_user_auth_token(client, token=None):
         if value:
             return str(value).strip()
     return ""
+
+
+def _startup_timing_enabled() -> bool:
+    """Ativa métricas de inicialização sem alterar o comportamento normal."""
+    return os.environ.get("QOBUZ_DL_STARTUP_TIMING", "").strip().lower() in {
+        "1", "true", "yes", "on"
+    }
+
+
+def _log_startup_timing(stage: str, elapsed: float) -> None:
+    """Registra somente duração; nunca inclui credenciais ou respostas da API."""
+    if _startup_timing_enabled():
+        logger.warning("[startup-timing] %s: %.3fs", stage, elapsed)
 
 
 class Client:
@@ -90,31 +132,68 @@ class Client:
         **kwargs,
     ):
         """Fabrica assincrona."""
+        total_started = time.perf_counter()
         self = cls()
         print(f"{YELLOW}Logando...{OFF}", end="", flush=True)
         self.secrets = secrets
-        self.id = str(app_id)
+        # Usa o App ID padrão quando a configuração não define outro.
+        # Não comparar o ID padrão com uma condição especial para baixar bundle:
+        # ele deve ser tentado primeiro como qualquer outro ID configurado.
+        self.id = str(app_id or DEFAULT_APP_ID).strip()
         self.force_english = force_english
 
-        if not self.id or self.id == "798273057":
-            if Bundle:
-                try:
-                    b = await Bundle.create()
-                    fresh_id = str(b.get_app_id())
-                    if fresh_id:
-                        self.id = fresh_id
-                        self.secrets = list(b.get_secrets().values())
-                        logger.info(
-                            f"\r{GREEN}[+] ID atualizado dinamicamente: {self.id}{OFF}\033[K"
-                        )
-                except Exception:
-                    ui.emit(
-                        f"\r{YELLOW} [!] ID nao atualizado (usando padrao).{OFF}\033[K"
-                    )
-            else:
-                logger.info(
-                    f"\r{GREEN}[+] Usando ID legado personalizado: {self.id}{OFF}\033[K"
+        bundle_started = time.perf_counter()
+        force_bundle_refresh = os.environ.get(
+            "QOBUZ_DL_FORCE_BUNDLE_REFRESH", ""
+        ).strip().lower() in {"1", "true", "yes", "on"}
+        bundle_refreshed = False
+
+        async def refresh_bundle(reason: str) -> bool:
+            """Atualiza App ID/segredos somente quando necessário.
+
+            Retorna True se encontrou uma configuração diferente e utilizável.
+            Nunca registra os segredos no log.
+            """
+            nonlocal bundle_refreshed
+            if not Bundle:
+                logger.warning("Bundle indisponível; não foi possível atualizar a configuração.")
+                return False
+            try:
+                b = await Bundle.create()
+                fresh_id = str(b.get_app_id() or "").strip()
+                fresh_secrets = list(dict.fromkeys(
+                    secret for secret in b.get_secrets().values() if secret
+                ))
+            except Exception as exc:
+                logger.warning(
+                    "Falha ao atualizar App ID/segredos pelo bundle (%s).",
+                    type(exc).__name__,
                 )
+                return False
+
+            if not fresh_id or not fresh_secrets:
+                logger.warning("Bundle não forneceu App ID e segredos utilizáveis.")
+                return False
+
+            changed = fresh_id != self.id or fresh_secrets != list(self.secrets or [])
+            if changed:
+                self.id = fresh_id
+                self.secrets = fresh_secrets
+                logger.info("Configuração de API atualizada pelo bundle (%s).", reason)
+            else:
+                logger.info("Bundle consultado; App ID/segredos continuam iguais.")
+            bundle_refreshed = True
+            return changed
+
+        # Caminho padrão: sempre tente primeiro o App ID local/padrão.
+        # O bundle NÃO é consultado só porque o ID é o padrão nem porque faltam
+        # segredos: a recuperação ocorre após uma rejeição explícita da API.
+        # A variável de ambiente permanece como opção de atualização manual.
+        if force_bundle_refresh:
+            await refresh_bundle("forçada")
+        else:
+            logger.debug("Usando App ID %s; bundle adiado até uma rejeição da API.", self.id)
+        _log_startup_timing("bundle/App ID inicial", time.perf_counter() - bundle_started)
 
         headers = {}
         if self.force_english:
@@ -142,6 +221,7 @@ class Client:
                 }
             )
 
+        http_client_started = time.perf_counter()
         client_timeout = httpx.Timeout(None, connect=15.0, read=90.0)
         self.session = make_client(
             headers=headers,
@@ -149,6 +229,7 @@ class Client:
             max_connections=50,
             max_keepalive_connections=10,
         )
+        _log_startup_timing("criação do cliente HTTP", time.perf_counter() - http_client_started)
         self.base = "https://www.qobuz.com/api.json/0.2/"
         self.sec = None
         self.session_id = None
@@ -159,11 +240,53 @@ class Client:
         self.user_auth_token = None
 
         try:
-            await self.auth(email, pwd, user_auth_token)
-            await self.cfg_setup()
+            auth_started = time.perf_counter()
+            try:
+                await self.auth(email, pwd, user_auth_token)
+            except AuthenticationError:
+                # Não confundir senha/token inválido com App ID desatualizado.
+                raise
+            except httpx.HTTPStatusError as exc:
+                # Só tenta recuperar com o bundle em erros HTTP de cliente que
+                # podem indicar App ID inválido. Erros de rede/servidor não
+                # disparam uma busca lenta e desnecessária pelo bundle.
+                if not _is_app_id_rejection(exc) or bundle_refreshed:
+                    raise
+                refreshed = await refresh_bundle("rejeição explícita do App ID durante autenticação")
+                if not refreshed:
+                    raise
+                self.session.headers.update({"X-App-Id": self.id})
+                self.uat = None
+                self.user_auth_token = None
+                await self.auth(email, pwd, user_auth_token)
+            _log_startup_timing("auth total (login + perfil)", time.perf_counter() - auth_started)
+
+            cfg_started = time.perf_counter()
+            try:
+                await self.cfg_setup()
+            except InvalidAppSecretError:
+                # Se não há segredos locais utilizáveis, só então recorre ao
+                # bundle para recuperá-los. Não atrasa o caminho normal.
+                if bundle_refreshed:
+                    raise
+                refreshed = await refresh_bundle("segredos ausentes ou inválidos")
+                if not refreshed:
+                    raise
+                self.session.headers.update({"X-App-Id": self.id})
+                await self.cfg_setup()
+            else:
+                if getattr(self, "_secret_validation_all_invalid", False) and not bundle_refreshed:
+                    # Só atualizar se todos os segredos foram rejeitados
+                    # explicitamente; falhas de rede não disparam scraping.
+                    refreshed = await refresh_bundle("segredos locais rejeitados")
+                    if refreshed:
+                        self.session.headers.update({"X-App-Id": self.id})
+                        await self.cfg_setup()
+            _log_startup_timing("cfg_setup/validação dos segredos", time.perf_counter() - cfg_started)
         except BaseException:
             await self.close()
             raise
+        _log_startup_timing("Client.create total", time.perf_counter() - total_started)
         return self
 
     async def close(self):
@@ -210,7 +333,9 @@ class Client:
             if self.session is not None:
                 self.session.headers.update({"X-User-Auth-Token": self.uat})
         else:
+            login_request_started = time.perf_counter()
             usr_info = await self.api_call("user/login", email=email, pwd=pwd)
+            _log_startup_timing("requisição user/login", time.perf_counter() - login_request_started)
             if not usr_info.get("user", {}).get("credential", {}).get("parameters"):
                 logger.info(
                     f"{YELLOW}[!] Conta gratuita detectada ou validacao ignorada.{OFF}"
@@ -221,7 +346,13 @@ class Client:
                 self.session.headers.update({"X-User-Auth-Token": self.uat})
 
         try:
-            raw_user_info = await self.api_call("user/get")
+            # A consulta de perfil é informativa: não deve deixar o login preso
+            # por até quatro tentativas longas quando o Qobuz está lento.
+            raw_user_info = await self.api_call(
+                "user/get",
+                _request_timeout=httpx.Timeout(8.0, connect=3.0),
+                _max_attempts=2,
+            )
             self.user_info = raw_user_info.get("user", raw_user_info) or {}
             cred = self.user_info.get("credential") or {}
             self.label = cred.get("parameters", {}).get("short_label") or cred.get(
@@ -383,7 +514,14 @@ class Client:
         return unpadder.update(padded) + unpadder.finalize()
 
     async def api_call(self, epoint, **kwargs):
-        """Build, sign, execute, and normalize one Qobuz API request."""
+        """Build, sign, execute, and normalize one Qobuz API request.
+
+        ``_request_timeout`` and ``_max_attempts`` are internal controls used by
+        best-effort startup checks. They are removed before API parameters are
+        built, so they can never leak into a Qobuz request.
+        """
+        request_timeout = kwargs.pop("_request_timeout", None)
+        max_attempts = kwargs.pop("_max_attempts", 4)
         if epoint == "user/login":
             # Prioriza token do objeto (self) sobre kwargs
             token = kwargs.get("user_auth_token") or getattr(
@@ -551,7 +689,7 @@ class Client:
             return False
 
         async for attempt in AsyncRetrying(
-            stop=stop_after_attempt(4),
+            stop=stop_after_attempt(max(1, int(max_attempts))),
             wait=wait_exponential(multiplier=1, min=1, max=6),
             retry=retry_if_exception(_retryable),
             reraise=True,
@@ -560,12 +698,24 @@ class Client:
                 n = attempt.retry_state.attempt_number
                 if n > 1:
                     logger.debug(f"Retentativa de rede em '{epoint}' ({n}/4)...")
+                if request_timeout is not None:
+                    req_kwargs["timeout"] = request_timeout
                 resp = await self.session.request(
                     method, self.base + epoint, **req_kwargs
                 )
                 if epoint == "user/login" and resp.status_code == 400:
-                    text = resp.text
-                    if "invalid" in text.lower():
+                    text = resp.text.lower()
+                    # Só classifica como credencial inválida quando a resposta
+                    # menciona explicitamente credenciais/login. Uma mensagem
+                    # como "invalid app_id" deve continuar como HTTPStatusError
+                    # para permitir a recuperação pontual via bundle.
+                    credential_markers = (
+                        "credential", "email", "password", "username",
+                        "user_auth_token", "invalid login",
+                    )
+                    if "invalid" in text and any(
+                        marker in text for marker in credential_markers
+                    ):
                         raise AuthenticationError("Invalid email or password.")
                 elif (
                     epoint
@@ -1022,15 +1172,32 @@ class Client:
         if not secrets:
             raise InvalidAppSecretError("Nenhum segredo encontrado.")
 
+        invalid_secret_errors = 0
+        other_validation_errors = 0
+        self._secret_validation_all_invalid = False
+
         async def validate(secret):
+            nonlocal invalid_secret_errors, other_validation_errors
             try:
+                # A validação serve apenas para escolher um segredo. Use um
+                # timeout curto e uma tentativa: o fallback abaixo preserva o
+                # comportamento anterior se a API estiver indisponível.
                 await self.api_call(
-                    "track/getFileUrl", id=5966783, fmt_id=5, sec=secret
+                    "track/getFileUrl",
+                    id=5966783,
+                    fmt_id=5,
+                    sec=secret,
+                    _request_timeout=httpx.Timeout(8.0, connect=3.0),
+                    _max_attempts=1,
                 )
                 return secret
             except asyncio.CancelledError:
                 raise
+            except InvalidAppSecretError:
+                invalid_secret_errors += 1
+                return None
             except Exception:
+                other_validation_errors += 1
                 return None
 
         # Pequeno limite de concorrência: reduz a latência sem lançar todas as
@@ -1057,7 +1224,16 @@ class Client:
                     task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
 
-        # Mantém o fallback anterior: algumas instalações podem usar segredos
-        # que não permitem esta chamada de teste, mas continuam configurados.
+        # Só buscar bundle automaticamente quando todos os segredos locais
+        # foram rejeitados explicitamente. Falhas de rede/timeout não contam
+        # como prova de configuração inválida.
+        self._secret_validation_all_invalid = (
+            not self.sec
+            and invalid_secret_errors == len(secrets)
+            and other_validation_errors == 0
+        )
+
+        # Mantém o fallback anterior para falhas transitórias ou endpoints que
+        # não aceitam a chamada de teste, sem forçar uma consulta ao bundle.
         if not self.sec:
             self.sec = secrets[0]
