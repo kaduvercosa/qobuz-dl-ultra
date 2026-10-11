@@ -21,9 +21,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
-async def check(
-    artist, album, track, upc=None, isrc=None, session=None, trace=None
-):
+async def check(artist, album, track, upc=None, isrc=None, session=None, trace=None):
     from qobuz_dl.utils import get_apple_hq_cover
 
     return await get_apple_hq_cover(

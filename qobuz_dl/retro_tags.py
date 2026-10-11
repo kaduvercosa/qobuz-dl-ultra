@@ -402,8 +402,10 @@ async def _decide_album_cover(
                 votes[found[0]] = votes.get(found[0], 0) + 1
 
         ranked = sorted(votes.items(), key=lambda pair: -pair[1])
-        if ranked and ranked[0][1] >= 2 and (
-            len(ranked) == 1 or ranked[0][1] > ranked[1][1]
+        if (
+            ranked
+            and ranked[0][1] >= 2
+            and (len(ranked) == 1 or ranked[0][1] > ranked[1][1])
         ):
             decision.update(
                 url=ranked[0][0],
@@ -836,7 +838,9 @@ async def retag_directory(directory_path, client, settings, covers_only=False):
                         )
                         if not embedded:
                             cover_source = None
-                            cover_status = "Apple: capa baixada, mas não foi possível embutir"
+                            cover_status = (
+                                "Apple: capa baixada, mas não foi possível embutir"
+                            )
                             stats["apple_failed"] += 1
                 else:
                     await loop.run_in_executor(
@@ -914,7 +918,9 @@ async def retag_directory(directory_path, client, settings, covers_only=False):
             # Linha principal neutra: somente o estado da operação recebe cor.
             ui.emit(f"{label} {name} [{action_color}{action}{OFF}]")
             if covers_only:
-                ui.emit(f"    {CYAN}↳ Tags:{OFF} {MUTED}não tocadas (modo só capas){OFF}")
+                ui.emit(
+                    f"    {CYAN}↳ Tags:{OFF} {MUTED}não tocadas (modo só capas){OFF}"
+                )
             else:
                 ui.emit(
                     f"    {CYAN}↳ Tags:{OFF} "

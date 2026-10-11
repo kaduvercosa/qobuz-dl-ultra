@@ -237,9 +237,7 @@ class TestFallbackEmfile:
         assert r == "ok"
         assert recebido == [(3, True), (3, contexto_falso.marcador)]
 
-    def test_assinatura_ilegivel_tambem_tem_fallback(
-        self, monkeypatch, contexto_falso
-    ):
+    def test_assinatura_ilegivel_tambem_tem_fallback(self, monkeypatch, contexto_falso):
         def sem_assinatura(obj):
             raise ValueError("builtin")
 

@@ -436,6 +436,7 @@ class TestFsyncDir:
         self, tmp_path, monkeypatch
     ):
         fechados = []
+
         def fsync_falha(fd):
             raise OSError("sem suporte")
 

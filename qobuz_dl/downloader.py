@@ -1440,8 +1440,8 @@ class Download:
                     return True
             else:
                 ui.skip(
-                        f"{_skip_pfx}Pulando: {os.path.basename(final_file)} (Ja existe)"
-                    )
+                    f"{_skip_pfx}Pulando: {os.path.basename(final_file)} (Ja existe)"
+                )
                 self.last_downloaded_file = final_file
                 return True
 

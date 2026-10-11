@@ -1016,9 +1016,7 @@ class TestModoSoCapas:
         assert "Capa existente preservada" in amb.texto
         assert _temporarios(amb.pasta) == []
 
-    def test_falha_ao_embutir_conta_como_falha_e_limpa_o_temporario(
-        self, amb, trocas
-    ):
+    def test_falha_ao_embutir_conta_como_falha_e_limpa_o_temporario(self, amb, trocas):
         trocas.resultado = False
         amb.arquivo("a.flac")
         stats = self._rodar_so_capas(amb)
@@ -1206,7 +1204,9 @@ def _album_qobuz(n_faixas=5, **extra):
         "upc": "0602",
         "artist": {"name": "Jão"},
         "tracks_count": n_faixas,
-        "tracks": {"items": [{"id": i, "title": f"Faixa {i}"} for i in range(n_faixas)]},
+        "tracks": {
+            "items": [{"id": i, "title": f"Faixa {i}"} for i in range(n_faixas)]
+        },
     }
     album.update(extra)
     return album

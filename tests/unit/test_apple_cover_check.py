@@ -102,7 +102,9 @@ def test_format_trace_lista_consultas_resultados_e_vereditos():
 def test_main_com_all_imprime_a_trace(monkeypatch, capsys):
     modulo = _carregar()
 
-    async def falso(artist, album, track, upc=None, isrc=None, session=None, trace=None):
+    async def falso(
+        artist, album, track, upc=None, isrc=None, session=None, trace=None
+    ):
         trace.append(
             {"type": "request", "tag": "t", "url": "u", "params": {}, "results": []}
         )

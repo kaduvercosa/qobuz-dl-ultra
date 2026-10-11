@@ -929,7 +929,9 @@ _MARCADORES_VERSAO = {
 # EPs ("- EP") e álbuns são tratados como "completos": a regra de contagem de
 # faixas da Qobuz e a da Apple divergem justamente entre EP e álbum, mas
 # concordam em quem é single (<= 3 faixas).
-_APPLE_SINGLE = re.compile(r"\s[-\u2013\u2014]\s*(?:single|sencillo|sencilla)\s*$", re.I)
+_APPLE_SINGLE = re.compile(
+    r"\s[-\u2013\u2014]\s*(?:single|sencillo|sencilla)\s*$", re.I
+)
 
 
 def apple_release_kind(collection_name: str) -> str:
@@ -1354,9 +1356,15 @@ async def get_apple_hq_cover(
 
         if not exact:
             fuzzy_candidates.sort(key=lambda item: (-item[0], item[1]))
-            for rank, _order, _score, label, closeness, artwork, perfect in (
-                fuzzy_candidates
-            ):
+            for (
+                rank,
+                _order,
+                _score,
+                label,
+                closeness,
+                artwork,
+                perfect,
+            ) in fuzzy_candidates:
                 valid_url, url_error = await artwork_url(client, artwork)
                 if not valid_url:
                     reject(
@@ -1385,7 +1393,7 @@ async def get_apple_hq_cover(
         if cache is None:
             cache = {}
             try:
-                setattr(client, "_apple_json_cache", cache)
+                client._apple_json_cache = cache
             except Exception:
                 pass
         key = (url, tuple(sorted(params.items())))
@@ -1486,8 +1494,9 @@ async def get_apple_hq_cover(
             candidate_album = str(result.get("collectionName") or "")
             if not candidate_album:
                 continue
-            if score_artista(artist or "", str(result.get("artistName") or "")) < (
-                thresholds["artist"]
+            if (
+                score_artista(artist or "", str(result.get("artistName") or ""))
+                < (thresholds["artist"])
             ):
                 continue
             if (

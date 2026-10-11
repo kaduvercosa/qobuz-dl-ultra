@@ -562,9 +562,7 @@ class TestTituloComparavel:
             ("Musica (Acoustic Version)", "musica"),
         ],
     )
-    def test_remove_sufixos_inofensivos_e_marcadores_de_versao(
-        self, entrada, esperado
-    ):
+    def test_remove_sufixos_inofensivos_e_marcadores_de_versao(self, entrada, esperado):
         assert utils.extrair_titulo_comparavel(entrada) == esperado
 
     @pytest.mark.parametrize(
@@ -849,9 +847,7 @@ class TestFaixaDentroDoAlbumCerto:
             album=corpo(album_apple(9, "Outro Artista", "Anti-Herói")),
             tracks={9: corpo(faixa("Outro Artista", "Anti-Herói", "VSF"))},
         )
-        url, _, _ = await buscar(
-            s, artist="Jão", album="Anti-Herói", track_title="VSF"
-        )
+        url, _, _ = await buscar(s, artist="Jão", album="Anti-Herói", track_title="VSF")
         assert url is None and s.lookups() == []
 
     async def test_lookup_do_album_e_reaproveitado_na_mesma_sessao(self):
@@ -944,7 +940,9 @@ class _SessaoPorTermo:
         if "/lookup" in url:
             tabela = self.catalogo if params.get("entity") == "album" else self.tracks
             return _Resp(tabela.get(params.get("id"), corpo()))
-        return _Resp(self.buscas.get((params.get("entity"), params.get("term")), corpo()))
+        return _Resp(
+            self.buscas.get((params.get("entity"), params.get("term")), corpo())
+        )
 
     async def head(self, url, **_kw):
         return _Resp({}, status=200)
@@ -1026,14 +1024,14 @@ class TestFontesAlternativasDeAlbum:
             catalogo={7: corpo(album_apple(1, "Outro Artista", "Anti-Herói"))},
             tracks={1: _faixas_antiheroi()},
         )
-        url, _, _ = await buscar(
-            s, artist="Jão", album="Anti-Herói", track_title="VSF"
-        )
+        url, _, _ = await buscar(s, artist="Jão", album="Anti-Herói", track_title="VSF")
         assert url is None
 
     async def test_mesmo_candidato_por_duas_etapas_conta_uma_rejeicao(self):
         buscas = dict(self._BASE)
-        buscas[("song", "Jão Anti-Herói")] = corpo(faixa("Jão", _AO_VIVO, "VSF (Ao Vivo)"))
+        buscas[("song", "Jão Anti-Herói")] = corpo(
+            faixa("Jão", _AO_VIVO, "VSF (Ao Vivo)")
+        )
         s = _SessaoPorTermo(buscas=buscas)
         _, _, motivo = await buscar(
             s, artist="Jão", album="Anti-Herói", track_title="VSF"
@@ -1096,9 +1094,15 @@ class TestTipoSingleXAlbum:
         assert utils.apple_release_kind(nome) == esperado
 
     async def test_single_aceita_o_single_da_apple(self):
-        s = _Sessao(search=corpo(faixa_arte("Jão", "Ressaca - Single", "Ressaca", "single")))
+        s = _Sessao(
+            search=corpo(faixa_arte("Jão", "Ressaca - Single", "Ressaca", "single"))
+        )
         url, _, motivo = await buscar(
-            s, artist="Jão", album="Ressaca", track_title="Ressaca", release_kind="single"
+            s,
+            artist="Jão",
+            album="Ressaca",
+            track_title="Ressaca",
+            release_kind="single",
         )
         assert url is not None, motivo
 
@@ -1106,24 +1110,38 @@ class TestTipoSingleXAlbum:
         # O mesmo nome de álbum e faixa, mas na Apple é o álbum completo.
         s = _Sessao(search=corpo(faixa_arte("Jão", "Ressaca", "Ressaca", "album")))
         url, _, motivo = await buscar(
-            s, artist="Jão", album="Ressaca", track_title="Ressaca", release_kind="single"
+            s,
+            artist="Jão",
+            album="Ressaca",
+            track_title="Ressaca",
+            release_kind="single",
         )
         assert url is None
-        assert "tipo de lançamento incompatível (pedido=single, Apple=álbum/EP" in motivo
+        assert (
+            "tipo de lançamento incompatível (pedido=single, Apple=álbum/EP" in motivo
+        )
 
     async def test_album_nao_recebe_a_capa_do_single(self):
-        s = _Sessao(search=corpo(faixa_arte("Jão", "Disco - Single", "Musica", "single")))
+        s = _Sessao(
+            search=corpo(faixa_arte("Jão", "Disco - Single", "Musica", "single"))
+        )
         url, _, motivo = await buscar(
             s, artist="Jão", album="Disco", track_title="Musica", release_kind="full"
         )
         assert url is None
-        assert "tipo de lançamento incompatível (pedido=álbum/EP, Apple=single" in motivo
+        assert (
+            "tipo de lançamento incompatível (pedido=álbum/EP, Apple=single" in motivo
+        )
 
     async def test_album_aceita_ep_e_album_da_apple(self):
         for nome in ("Disco", "Disco - EP"):
             s = _Sessao(search=corpo(faixa_arte("Jão", nome, "Musica", "ok")))
             url, _, motivo = await buscar(
-                s, artist="Jão", album="Disco", track_title="Musica", release_kind="full"
+                s,
+                artist="Jão",
+                album="Disco",
+                track_title="Musica",
+                release_kind="full",
             )
             assert url is not None, (nome, motivo)
 
@@ -1222,7 +1240,8 @@ class TestBuscaProfundaDeAlbum:
     async def test_deep_nao_aceita_o_album_ao_vivo_nem_o_single(self):
         buscas = dict(self._BASE)
         buscas[("album", "Jão")] = corpo(
-            album_apple(2, "Jão", _AO_VIVO), album_apple(3, "Jão", "Anti-Herói - Single")
+            album_apple(2, "Jão", _AO_VIVO),
+            album_apple(3, "Jão", "Anti-Herói - Single"),
         )
         s = _SessaoPorTermo(buscas=buscas)
         url, _, _ = await buscar(
@@ -1237,7 +1256,8 @@ class TestBuscaProfundaDeAlbum:
     async def test_deep_prefere_a_edicao_identica(self):
         buscas = dict(self._BASE)
         buscas[("album", "Jão")] = corpo(
-            album_apple(7, "Jão", "Anti-Herói (Deluxe)"), album_apple(1, "Jão", "Anti-Herói")
+            album_apple(7, "Jão", "Anti-Herói (Deluxe)"),
+            album_apple(1, "Jão", "Anti-Herói"),
         )
         s = _SessaoPorTermo(buscas=buscas)
         url, _, _ = await buscar(

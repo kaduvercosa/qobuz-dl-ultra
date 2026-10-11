@@ -276,9 +276,7 @@ class TestReplaceCoverOnlyFlac:
         assert fake["COVER_SOURCE"] == "Apple/iTunes"
         linhas = fake["COMMENT"].splitlines()
         assert "Fonte: Qobuz" in linhas and "Tipo: Album" in linhas
-        assert [ln for ln in linhas if ln.startswith("Capa:")] == [
-            "Capa: Apple/iTunes"
-        ]
+        assert [ln for ln in linhas if ln.startswith("Capa:")] == ["Capa: Apple/iTunes"]
         embutida = [ln for ln in linhas if ln.startswith("Capa embutida:")]
         assert len(embutida) == 1
         assert "Original" in embutida[0] and "Solicitada: org" in embutida[0]
@@ -365,17 +363,13 @@ class TestReplaceCoverOnlyMp3:
         assert id3_falso.saved[1]["v2_version"] == 3
 
     def test_sem_comentario_cria_um(self, monkeypatch, tmp_path):
-        id3_falso, audio, capa = self._preparar(
-            monkeypatch, tmp_path, comentario=False
-        )
+        id3_falso, audio, capa = self._preparar(monkeypatch, tmp_path, comentario=False)
         metadata.replace_cover_only(audio, capa, cover_source="Apple/iTunes")
         comentario = id3_falso.getall("COMM")[0].text[0]
         assert comentario.startswith("Cover:")
         assert comentario.endswith("Capa: Apple/iTunes")
 
-    def test_falha_ao_embutir_restaura_a_capa_e_nao_salva(
-        self, monkeypatch, tmp_path
-    ):
+    def test_falha_ao_embutir_restaura_a_capa_e_nao_salva(self, monkeypatch, tmp_path):
         id3_falso, audio, capa = self._preparar(monkeypatch, tmp_path)
 
         def embutir_falha(root_dir, audio_id3, cover_override=None):
