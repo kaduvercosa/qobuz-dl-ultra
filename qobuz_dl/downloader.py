@@ -49,6 +49,13 @@ from qobuz_dl.color import (
     MUTED,
 )
 from qobuz_dl.exceptions import NonStreamable
+from qobuz_dl.track_identity import (
+    STATE_IN_PROGRESS,
+    STATE_NEW,
+    build_name_stems,
+    release_claims,
+    resolve_output_path,
+)
 
 import aiofiles
 from tenacity import (
@@ -973,12 +980,18 @@ class Download:
             success = False
             track_attr = None
         else:
+            # Posição da faixa NA PLAYLIST. Serve só para exibição (barra de
+            # progresso, logs). NÃO sobrescreve track_meta["track_number"]:
+            # essa chave é o número da faixa no ÁLBUM e é o que vai para a
+            # tag TRACKNUMBER/TRCK. O QOBUZTRACKID (id da faixa) também
+            # continua vindo de track_meta["id"], intocado.
+            playlist_index = None
             if (
                 getattr(self, "is_playlist", False)
                 and not getattr(self, "playlist_as_albums", False)
                 and getattr(self, "playlist_track_number", None)
             ):
-                track_meta["track_number"] = self.playlist_track_number
+                playlist_index = int(self.playlist_track_number)
 
             track_album = track_meta.get("album", {})
             artist = _artist_label(
@@ -1141,6 +1154,7 @@ class Download:
                     embed_cover_path=embed_cover_path,
                     letras_out=letras_info,
                     cover_source=cover_source,
+                    display_index=playlist_index,
                 )
 
                 if embed_cover_path and os.path.isfile(embed_cover_path):
@@ -1251,7 +1265,22 @@ class Download:
 
         return bool(success)
 
-    async def _download_and_tag(
+    async def _download_and_tag(self, *args, **kwargs) -> bool:
+        """Download audio file and apply ID3/FLAC tags.
+
+        Fina camada sobre `_download_and_tag_impl`: garante que qualquer nome
+        de arquivo reservado para esta faixa (ver `track_identity`) seja
+        liberado ao terminar, seja por sucesso, falha ou cancelamento.
+        """
+        claimed_paths: list[str] = []
+        try:
+            return await self._download_and_tag_impl(
+                *args, _claimed=claimed_paths, **kwargs
+            )
+        finally:
+            release_claims(claimed_paths)
+
+    async def _download_and_tag_impl(
         self,
         root_dir,
         tmp_count,
@@ -1266,6 +1295,8 @@ class Download:
         embed_cover_path=None,
         letras_out: Optional[dict] = None,
         cover_source=None,
+        display_index: Optional[int] = None,
+        _claimed: Optional[list] = None,
     ) -> bool:
         """Download audio file and apply ID3/FLAC tags."""
         extension = ".mp3" if is_mp3 else ".flac"
@@ -1288,17 +1319,37 @@ class Download:
             else False
         )
 
+        # Nomes candidatos (do mais simples ao mais específico) para a pasta
+        # única de playlist. Preenchido só nesse modo. Veja `track_identity`.
+        candidate_stems = None
+        track_id_str = str(track_metadata.get("id") or "").strip()
+        # Prefixo "[NN] " (posição na playlist) nos avisos de pulo.
+        _skip_pfx = f"[{int(display_index):02d}] " if display_index else ""
+
         if getattr(self, "is_playlist", False) and not getattr(
             self, "playlist_as_albums", False
         ):
             clean_playlist_format = "{artist} - {track_title}"
-            formatted_path = sanitize_filename(
-                clean_filename(
-                    clean_playlist_format.format(**filename_attr),
-                    legacy_charmap=legacy_flag,
-                ),
-                replacement_text="_",
-            )
+
+            def _safe_name(text):
+                """Torna um trecho seguro para uso em nome de arquivo."""
+                return sanitize_filename(
+                    clean_filename(text, legacy_charmap=legacy_flag),
+                    replacement_text="_",
+                )
+
+            playlist_base_name = clean_playlist_format.format(**filename_attr)
+            formatted_path = _safe_name(playlist_base_name)
+            if track_id_str:
+                # O nome só pelo "artista - título" não identifica uma faixa:
+                # o mesmo par pode existir em álbuns diferentes. Os
+                # candidatos adicionam álbum e, por fim, o ID da faixa.
+                candidate_stems = build_name_stems(
+                    playlist_base_name,
+                    filename_attr.get("album_title"),
+                    track_id_str,
+                    sanitize=_safe_name,
+                )
         elif multiple and self.settings.multiple_disc_one_dir:
             formatted_path = sanitize_filename(
                 clean_filename(
@@ -1334,6 +1385,33 @@ class Download:
 
         final_file = os.path.join(root_dir, formatted_path) + extension
 
+        if candidate_stems:
+            # Escolha ATÔMICA do nome (vale também para o modo paralelo, em
+            # que o arquivo final só aparece em disco no fim do download):
+            #  - existente com o ID desta faixa  -> segue o fluxo "já existe";
+            #  - reservado por outra tarefa p/ ESTA mesma faixa -> duplicada
+            #    dentro da playlist, nada a baixar;
+            #  - senão, primeiro nome livre, reservado até o fim da tarefa.
+            candidate_files = [
+                os.path.join(root_dir, stem) + extension for stem in candidate_stems
+            ]
+            final_file, name_state = await loop.run_in_executor(
+                None,
+                lambda: resolve_output_path(candidate_files, track_id_str, _claimed),
+            )
+            if name_state == STATE_IN_PROGRESS:
+                ui.skip(
+                    f"{_skip_pfx}Pulando: {os.path.basename(final_file)} "
+                    "(mesma faixa repetida na playlist)"
+                )
+                self.last_downloaded_file = final_file
+                return True
+            if name_state == STATE_NEW and final_file != candidate_files[0]:
+                ui.step(
+                    "Outra faixa já usa esse nome; salvando como "
+                    f"{os.path.basename(final_file)}"
+                )
+
         if os.path.exists(final_file):
             if getattr(self.settings, "verify_after_download", False):
                 ok, message = await loop.run_in_executor(
@@ -1355,11 +1433,15 @@ class Download:
                         "baixando novamente."
                     )
                 else:
-                    ui.skip(f"Pulando: {os.path.basename(final_file)} (Ja existe)")
+                    ui.skip(
+                        f"{_skip_pfx}Pulando: {os.path.basename(final_file)} (Ja existe)"
+                    )
                     self.last_downloaded_file = final_file
                     return True
             else:
-                ui.skip(f"Pulando: {os.path.basename(final_file)} (Ja existe)")
+                ui.skip(
+                        f"{_skip_pfx}Pulando: {os.path.basename(final_file)} (Ja existe)"
+                    )
                 self.last_downloaded_file = final_file
                 return True
 
@@ -1387,7 +1469,12 @@ class Download:
 
         filename = os.path.join(root_dir, f"~tmp_{tmp_count:02}.tmp")
         track_title = _get_title(track_metadata)
-        track_no = format_track_label(track_metadata, total_discs)
+        # Em playlist, o índice exibido é a posição na playlist (display_index);
+        # as tags continuam usando o track_number do álbum em track_metadata.
+        if display_index:
+            track_no = f"{int(display_index):02d}"
+        else:
+            track_no = format_track_label(track_metadata, total_discs)
         desc = f"[{track_no}] {track_title}"
 
         FALLBACK_TIERS_LOCAL = [27, 7, 6, 5]

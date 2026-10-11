@@ -300,7 +300,8 @@ def tags_args(subparsers, default_folder=None):
             "arquivos de áudio que EXISTEM no dispositivo, a partir dos metadados "
             "atuais do Qobuz. Também tenta trocar a capa embutida por uma capa "
             "em alta resolução da Apple/iTunes, mas só quando a correspondência "
-            "é validada (sem certeza, a capa atual é mantida). Não mexe em letras."
+            "é validada (sem certeza, a capa atual é mantida). Não mexe em letras. "
+            "Use --covers-only para trocar apenas as capas, sem regravar tags."
         ),
         help="modo de correção retroativa de tags de metadados",
     )
@@ -323,6 +324,16 @@ def tags_args(subparsers, default_folder=None):
         "--no-multi-tags",
         action="store_true",
         help='grava artistas, compositores e gêneros como texto único "A, B" (sobrescreve config.ini)',
+    )
+    tags.add_argument(
+        "--covers-only",
+        dest="covers_only",
+        action="store_true",
+        default=False,
+        help=(
+            "só troca a capa embutida (quando a Apple/iTunes tem uma validada e "
+            "de resolução maior); NÃO regrava nenhuma tag de metadados"
+        ),
     )
     return tags
 

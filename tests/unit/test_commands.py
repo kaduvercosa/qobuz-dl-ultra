@@ -119,6 +119,12 @@ class TestParserPrincipal:
         with pytest.raises(SystemExit):  # as duas juntas se contradizem
             parser.parse_args(["tags", "--multi-tags", "--no-multi-tags"])
 
+    def test_tags_covers_only(self, parser):
+        assert parser.parse_args(["tags"]).covers_only is False
+        so_capas = parser.parse_args(["tags", "--covers-only", "/musicas"])
+        assert so_capas.covers_only is True
+        assert so_capas.DIR == "/musicas"
+
     def test_flags_de_nivel_superior_existem(self, parser):
         args = parser.parse_args(["--reset", "dl", "URL"])
         assert args.reset is True

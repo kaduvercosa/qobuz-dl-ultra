@@ -350,9 +350,16 @@ A Edição Ultra inclui poderosos gerenciadores de biblioteca local para acompan
 
   O `tags` também **troca a capa embutida** pela versão em alta resolução da Apple/iTunes, usando as mesmas regras de validação dos downloads (UPC/ISRC primeiro, depois busca por texto com artista, álbum e título compatíveis). Quando a capa é trocada, a origem fica registrada no comentário da faixa (`Capa: Apple/iTunes`). Quando a Apple não tem uma correspondência segura, a capa que já estava no arquivo é preservada e o motivo aparece no log (por exemplo, `artista incompatível` ou `título completo da faixa incompatível`). O resumo final conta `Capas Apple embutidas`, `Capas Apple não encontradas` e `Falhas na etapa Apple`; os arquivos temporários de capa (`.apple-cover-*.jpg`) são apagados logo após cada arquivo.
 
+  **Diff das tags alteradas e títulos com sufixo de edição.** Quando as tags de um arquivo mudam, o log lista logo abaixo de `↳ Tags: alteradas` exatamente o que mudou (`+` tag nova, `-` removida, `~ antes → depois`; no `COMMENT`, só as linhas que mudaram). Se a capa atual é mantida, as linhas de capa do comentário (`Capa embutida:`/`Capa:`) são preservadas em vez de apagadas. Na busca por texto da Apple, sufixos que só indicam a edição do álbum — `(Bonus Track)`, `(Deluxe)`, `(Explicit)` — não impedem mais a correspondência (ex.: `Fim Do Mundo` ↔ `Fim do Mundo (Bonus Track)` em `LOBOS (Deluxe)`). Marcadores de outra gravação — `(Ao Vivo)`/`(Live)`, `(Acoustic)`, `(Demo)`, `(Remix)`, `(Instrumental)` — continuam sendo rejeitados, a não ser que o álbum pedido seja do mesmo tipo (um álbum ao vivo na Qobuz aceita a faixa ao vivo da Apple).
+
+  **Busca da capa dentro do álbum certo.** A busca por faixa não decide pelo primeiro resultado: quando ela não traz um candidato idêntico, o `tags` localiza o álbum pedido na Apple (mesmo artista, mesmo nome, mesmo tipo de versão), lista as faixas dele e confere a faixa lá dentro. Todos os candidatos de todas as etapas e países são avaliados e a capa só é escolhida no fim, preferindo o álbum de título idêntico ao pedido (ex.: `Lobos` em vez de `LOBOS (Deluxe)`). Só um candidato perfeito (artista, álbum e título idênticos) encerra a busca mais cedo. As respostas de álbum são reaproveitadas durante a execução, então um álbum inteiro não é consultado uma vez por faixa.
+
+  **Somente capas (`-—covers-only`):** não regrava nenhuma tag de metadados. Só troca a imagem embutida (e a origem/tamanho da capa no comentário e em `COVER_SOURCE`) quando a Apple/iTunes tem uma capa validada e de resolução maior; o restante do arquivo fica intacto.
+
   ```bash
   python -m qobuz_dl tags “/caminho/para/sua/pasta/local/de/musica” --multi-tags
-  python -m qobuz_dl tags “/caminho/para/sua/pasta/local/de/musica” —-no-multi-tags
+  python -m qobuz_dl tags “/caminho/para/sua/pasta/local/de/musica” --no-multi-tags
+  python -m qobuz_dl tags “/caminho/para/sua/pasta/local/de/musica” --covers-only
   ```
 
 * **Limpar Banco de Dados (`-p`, `—purge`):**

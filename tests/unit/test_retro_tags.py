@@ -87,6 +87,19 @@ class TestRetagDirectory:
             }
 
         monkeypatch.setattr(retro_tags.metadata, "tag_flac", fake_flac)
+
+        async def sem_apple(item, album, sessao):
+            # Sem isto o laço tentaria buscar a capa na internet de verdade.
+            return (None, None, "Apple desativada no teste")
+
+        monkeypatch.setattr(retro_tags, "_fetch_apple_cover_for_track", sem_apple)
+
+        class _SessaoFalsa:
+            async def aclose(self):
+                pass
+
+        # Nenhum cliente HTTP real é criado num teste unitário.
+        monkeypatch.setattr(retro_tags, "make_client", lambda **kw: _SessaoFalsa())
         monkeypatch.setattr(
             retro_tags, "extract_track_id", lambda p: ids.get(os.path.basename(p))
         )

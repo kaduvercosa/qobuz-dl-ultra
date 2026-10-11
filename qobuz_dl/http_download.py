@@ -171,7 +171,9 @@ def _ssl_context_from_memory(ca_file: str | None, ca_dir: str | None) -> ssl.SSL
         )
         if not certificates:
             raise ValueError(f"Nenhum certificado PEM encontrado em {source!r}")
-        context.load_verify_locations(cadata=b"\\n".join(certificates).decode("ascii"))
+        # Quebra de linha REAL entre os blocos: com "\\n" (barra + n) o OpenSSL
+        # não reconhece nenhum certificado e o fallback nunca funcionava.
+        context.load_verify_locations(cadata=b"\n".join(certificates).decode("ascii"))
 
     if ca_dir:
         context.load_verify_locations(capath=ca_dir)

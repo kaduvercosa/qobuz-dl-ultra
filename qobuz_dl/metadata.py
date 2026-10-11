@@ -93,6 +93,10 @@ ID3_LEGEND = {
     "comment": id3.COMM,
     "year": id3.TYER,
     "performer": id3.TOPE,
+    # IDs usados por sync-playlist, .m3u e pela identificação de faixas na
+    # pasta única de playlist. Sem estas chaves o MP3 não gravava o ID.
+    "QOBUZTRACKID": id3.TXXX,
+    "QOBUZALBUMID": id3.TXXX,
     "QOBUZ TRACK ID": id3.TXXX,
     "QOBUZ ALBUM ID": id3.TXXX,
     "QOBUZ ALBUM URL": id3.TXXX,
@@ -341,6 +345,66 @@ def _cover_comment_line(source: Optional[str]):
     return f"Capa: {source or COVER_SOURCE_UNKNOWN}"
 
 
+# Linhas/trechos do COMMENT que descrevem a capa embutida. No FLAC cada item é
+# uma linha ("Capa embutida: ..." / "Capa: ..."); no MP3 o comentário é uma
+# linha única separada por " | " ("Cover: ..." / "Capa: ...").
+_FLAC_COVER_COMMENT_PREFIXES = ("Capa embutida:", "Capa:")
+_MP3_COVER_COMMENT_PREFIXES = ("Cover:", "Capa:")
+
+
+def _extract_flac_cover_comment_lines(values) -> list:
+    """Linhas de capa de um COMMENT Vorbis (str ou lista de str)."""
+    if not values:
+        return []
+    if isinstance(values, str):
+        values = [values]
+    lines = []
+    for value in values:
+        for line in str(value).splitlines():
+            line = line.strip()
+            if line.startswith(_FLAC_COVER_COMMENT_PREFIXES) and line not in lines:
+                lines.append(line)
+    return lines
+
+
+def _extract_mp3_cover_comment_segments(text) -> list:
+    """Trechos de capa de um COMM ID3 (linha única separada por ' | ')."""
+    if not text:
+        return []
+    if not isinstance(text, str):
+        text = " | ".join(str(part) for part in text)
+    segments = []
+    for segment in text.split(" | "):
+        segment = segment.strip()
+        if segment.startswith(_MP3_COVER_COMMENT_PREFIXES) and segment not in segments:
+            segments.append(segment)
+    return segments
+
+
+def _id3_comment_frame(audio):
+    """Primeiro frame COMM com texto (None se não houver)."""
+    try:
+        frames = audio.getall("COMM")
+    except Exception:
+        return None
+    for frame in frames:
+        for part in getattr(frame, "text", None) or []:
+            if str(part).strip():
+                return frame
+    return None
+
+
+def _id3_comment_text(audio) -> str:
+    """Texto do primeiro frame COMM não vazio ('' se não houver)."""
+    frame = _id3_comment_frame(audio)
+    if frame is None:
+        return ""
+    for part in frame.text:
+        if str(part).strip():
+            return str(part)
+    return ""
+
+
 # # Embute a capa no FLAC; se necessário, usa uma cópia recompactada sem alterar cover.jpg.
 def _image_dimensions(image_data):
     """Retorna (largura, altura) de bytes de imagem; None se inválidos."""
@@ -496,8 +560,14 @@ def tag_flac(
     embed_cover_path=None,
     musicbrainz_ids=None,
     cover_source: Optional[str] = None,
+    preserve_cover_info: bool = False,
 ):
-    """Apply tags to FLAC file."""
+    """Apply tags to FLAC file.
+
+    preserve_cover_info: quando a capa NÃO é regravada (em_image=False), mantém
+    no COMMENT as linhas "Capa embutida:"/"Capa:" já existentes. Sem isso, um
+    retag que preserva a capa apagava a origem registrada no comentário.
+    """
     audio = FLAC(filename)
     if settings is None:
         settings = QobuzDLSettings()
@@ -597,6 +667,10 @@ def tag_flac(
             )
         if cover_source:
             comment_lines.append(_cover_comment_line(cover_source))
+    elif preserve_cover_info:
+        for line in _extract_flac_cover_comment_lines(audio.get("COMMENT")):
+            if line not in comment_lines:
+                comment_lines.append(line)
     tags["COMMENT"] = "\n".join(comment_lines)
 
     # # Só grava valores preenchidos. Com multi_value_tags, ARTIST/COMPOSER/
@@ -648,8 +722,9 @@ def tag_mp3(
     embed_cover_path=None,
     musicbrainz_ids=None,
     cover_source: Optional[str] = None,
+    preserve_cover_info: bool = False,
 ):
-    """Apply tags to MP3 file."""
+    """Apply tags to MP3 file (preserve_cover_info: ver tag_flac)."""
     try:
         audio = id3.ID3(filename)
     except ID3NoHeaderError:
@@ -728,6 +803,9 @@ def tag_mp3(
             )
         if cover_source:
             base_comment += f" | Capa: {cover_source}"
+    elif preserve_cover_info:
+        for segment in _extract_mp3_cover_comment_segments(_id3_comment_text(audio)):
+            base_comment += f" | {segment}"
 
     tags["COMMENT"] = base_comment
 
@@ -805,6 +883,94 @@ def tag_mp3(
     # Origem == destino quando o arquivo e' retagueado no lugar (retro_tags).
     if os.path.abspath(filename) != os.path.abspath(final_name):
         os.rename(filename, final_name)
+
+
+def replace_cover_only(
+    filename,
+    cover_path,
+    cover_source: Optional[str] = None,
+    settings: Optional[QobuzDLSettings] = None,
+) -> bool:
+    """Troca SOMENTE a imagem embutida (modo `tags --covers-only`).
+
+    Não regrava nenhuma tag de metadados. Só acompanha a capa: a origem
+    ("Capa: ...", COVER_SOURCE) e o tamanho no COMMENT são atualizados; o
+    resto do comentário e das tags fica intacto. Devolve True se gravou.
+    """
+    if not cover_path or not os.path.isfile(cover_path):
+        return False
+
+    req_size = getattr(settings, "embedded_art_size", "unknown")
+    size_text = humanize.naturalsize(os.path.getsize(cover_path), binary=True)
+    root_dir = os.path.dirname(os.path.abspath(filename))
+    extension = os.path.splitext(filename)[1].lower()
+
+    if extension == ".mp3":
+        try:
+            audio = id3.ID3(filename)
+            had_header = True
+        except ID3NoHeaderError:
+            audio = id3.ID3()
+            had_header = False
+
+        previous_apic = [f for k, f in audio.items() if k.startswith("APIC")]
+        _embed_id3_img(root_dir, audio, cover_override=cover_path)
+        if not [k for k in audio.keys() if k.startswith("APIC")]:
+            # Falha ao ler a nova imagem: devolve a capa que já existia.
+            for frame in previous_apic:
+                audio.add(frame)
+            return False
+
+        is_org = "YES" if req_size == "org" else "NO"
+        segments = [
+            part
+            for part in _id3_comment_text(audio).split(" | ")
+            if part.strip() and not part.strip().startswith(_MP3_COVER_COMMENT_PREFIXES)
+        ]
+        segments.append(f"Cover: {size_text} (Req: {req_size}, Org: {is_org})")
+        if cover_source:
+            segments.append(_cover_comment_line(cover_source))
+        new_comment = " | ".join(segments)
+
+        comm_frame = _id3_comment_frame(audio)
+        if comm_frame is not None:
+            comm_frame.text = [new_comment]
+        else:
+            audio.add(id3.COMM(encoding=3, lang="eng", desc="", text=[new_comment]))
+
+        # Mantém a versão ID3 do arquivo: baixar de v2.4 para v2.3 mexeria nos
+        # frames multivalorados.
+        version = audio.version[1] if had_header else 3
+        audio.save(filename, v2_version=version if version in (3, 4) else 4)
+        return True
+
+    audio = FLAC(filename)
+    previous_pictures = list(audio.pictures)
+    _embed_flac_img(root_dir, audio, cover_override=cover_path)
+    if not audio.pictures:
+        # _embed_flac_img limpa as imagens antes de embutir; se falhou, restaura.
+        for picture in previous_pictures:
+            audio.add_picture(picture)
+        return False
+
+    cover_kind = "Original" if req_size == "org" else "Redimensionada"
+    lines = []
+    current_comment = audio.get("COMMENT") or []
+    if isinstance(current_comment, str):
+        current_comment = [current_comment]
+    for value in current_comment:
+        for line in str(value).splitlines():
+            if line.strip() and not line.strip().startswith(
+                _FLAC_COVER_COMMENT_PREFIXES
+            ):
+                lines.append(line)
+    lines.append(f"Capa embutida: {size_text} | {cover_kind} | Solicitada: {req_size}")
+    if cover_source:
+        lines.append(_cover_comment_line(cover_source))
+        audio[COVER_SOURCE_TAG] = cover_source
+    audio["COMMENT"] = "\n".join(lines)
+    audio.save(padding=lambda info: 8192)
+    return True
 
 
 # # Constrói o dicionário unificado de tags a partir dos metadados Qobuz.

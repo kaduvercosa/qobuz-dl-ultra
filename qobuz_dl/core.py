@@ -1312,6 +1312,7 @@ class QobuzDL:
         is_parallel=False,
         position_pool=None,
         suppress_header=False,
+        title=None,
     ):
         """Baixa UM item (álbum ou faixa) já sabendo o `item_id`. É o
         "menor" ponto de entrada de download -- handle_url(),
@@ -1323,9 +1324,14 @@ class QobuzDL:
         if await handle_download_id(
             self.downloads_db, item_id, add_id=False, quality=self.quality
         ):
-            logger.info(
-                f"    {YELLOW}ℹ️ Este ID de lançamento ({item_id}) já foi baixado de acordo com o banco de dados local.\n"
-                f"    Use the '--no-db' flag para ignorar isto.{OFF}"
+            # Avisa QUAL item foi pulado (com a posição na playlist, quando
+            # houver) e o MOTIVO. Antes era um logger.info genérico, que não
+            # aparecia no terminal e não dizia qual faixa tinha sido pulada.
+            _pos = f"[{int(playlist_index):02d}] " if playlist_index else ""
+            _nome = title or f"ID {item_id}"
+            ui.skip(
+                f"{_pos}{_nome} (já baixada: ID {item_id} consta no banco "
+                "local; use --no-db para baixar de novo)"
             )
             if is_playlist:
                 self.settings.pl_skipped = getattr(self.settings, "pl_skipped", 0) + 1
@@ -1654,14 +1660,23 @@ class QobuzDL:
                 if can_parallelize:
                     item_id_captured = item["id"]
                     idx_captured = idx
+                    title_captured = item.get("title")
 
                     async def _bounded_track_download(
-                        item_id=item_id_captured, idx=idx_captured
+                        item_id=item_id_captured,
+                        idx=idx_captured,
+                        title_captured=title_captured,
                     ):
                         stagger_index = idx - 1
-                        if stagger_index < batch_workers:
-                            await asyncio.sleep(stagger_index * HEADER_STAGGER_DELAY)
+                        # O semáforo é pego ANTES do stagger: assim as vagas
+                        # são ocupadas na ordem da playlist (01, 02, 03...).
+                        # Com o sleep antes do semáforo, as faixas depois da
+                        # 5ª não dormiam e tomavam as vagas das primeiras.
                         async with semaphore:
+                            if stagger_index < batch_workers:
+                                await asyncio.sleep(
+                                    stagger_index * HEADER_STAGGER_DELAY
+                                )
                             return await self.download_from_id(
                                 item_id,
                                 False,
@@ -1671,6 +1686,7 @@ class QobuzDL:
                                 is_parallel=True,
                                 position_pool=position_pool,
                                 suppress_header=is_playlist,
+                                title=title_captured,
                             )
 
                     pending_tasks.append(_bounded_track_download())
@@ -1683,6 +1699,7 @@ class QobuzDL:
                             is_playlist=is_playlist,
                             playlist_index=idx,
                             suppress_header=is_playlist,
+                            title=item.get("title"),
                         )
                     )
 
@@ -1819,9 +1836,10 @@ class QobuzDL:
             semaphore = asyncio.Semaphore(batch_workers)
 
             async def _bounded_track_url(original_url, item_id, stagger_index=0):
-                if stagger_index < batch_workers:
-                    await asyncio.sleep(stagger_index * HEADER_STAGGER_DELAY)
+                # Semáforo antes do stagger (ver nota no lote de playlist).
                 async with semaphore:
+                    if stagger_index < batch_workers:
+                        await asyncio.sleep(stagger_index * HEADER_STAGGER_DELAY)
                     success = await self.download_from_id(
                         item_id,
                         False,
@@ -2797,9 +2815,10 @@ class QobuzDL:
                     t_id=track_id_captured, t_idx=idx_captured
                 ):
                     stagger_index = t_idx - 1
-                    if stagger_index < batch_workers:
-                        await asyncio.sleep(stagger_index * HEADER_STAGGER_DELAY)
+                    # Semáforo antes do stagger (ver nota no lote de playlist).
                     async with semaphore:
+                        if stagger_index < batch_workers:
+                            await asyncio.sleep(stagger_index * HEADER_STAGGER_DELAY)
                         return await self.download_from_id(
                             t_id,
                             album=False,

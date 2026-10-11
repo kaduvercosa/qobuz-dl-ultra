@@ -5,10 +5,15 @@
 # Qobuz. Quando a Apple/iTunes encontrar uma capa validada, ela e baixada
 # temporariamente, embutida no arquivo e registrada no comentario como
 # "Capa: Apple/iTunes". Se a Apple nao retornar uma capa, a arte ja embutida
-# e preservada.
+# e preservada (junto com as linhas de capa do comentario).
+#
+# Modo "so capas" (covers_only=True / `tags --covers-only`): NAO regrava
+# nenhuma tag; apenas troca a imagem embutida quando a Apple valida uma capa
+# superior. Para cada arquivo, o log mostra o diff exato das tags alteradas.
 # ============================================================================
 
 import asyncio
+import difflib
 import logging
 import os
 import re
@@ -167,6 +172,73 @@ def snapshot_tags(file_path: str) -> dict:
     return snapshot
 
 
+def _tag_lines(value) -> list:
+    """Normaliza o valor de uma tag em linhas de texto (listas e quebras de linha)."""
+    items = value if isinstance(value, (list, tuple)) else [value]
+    lines: list = []
+    for item in items:
+        lines.extend(str(item).split("\n"))
+    return lines
+
+
+def _short(text: str, limit: int) -> str:
+    text = str(text)
+    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
+
+
+def format_tag_diff(
+    before_text,
+    after_text,
+    max_value: int = 100,
+    max_lines: int = 60,
+) -> list:
+    """Linhas legíveis com o diff EXATO entre dois mapas de tags.
+
+    "+ CHAVE: valor" (nova), "- CHAVE: valor" (removida) e, quando o valor
+    mudou, "~ CHAVE: 'antes' → 'depois'". Valores com várias linhas (como o
+    COMMENT) ou várias entradas mostram só as linhas removidas/adicionadas.
+    """
+    before_text = before_text if isinstance(before_text, dict) else {}
+    after_text = after_text if isinstance(after_text, dict) else {}
+    out: list = []
+
+    for key in sorted(set(before_text) | set(after_text), key=str):
+        in_before, in_after = key in before_text, key in after_text
+        old = _tag_lines(before_text[key]) if in_before else []
+        new = _tag_lines(after_text[key]) if in_after else []
+        if old == new:
+            continue
+
+        if not in_before:
+            out.append(f"{GREEN}+ {key}:{OFF} {_short(' | '.join(new), max_value)}")
+        elif not in_after:
+            out.append(f"{RED}- {key}:{OFF} {_short(' | '.join(old), max_value)}")
+        elif len(old) == 1 and len(new) == 1:
+            out.append(
+                f"{YELLOW}~ {key}:{OFF} {_short(old[0], max_value)!r}"
+                f" → {_short(new[0], max_value)!r}"
+            )
+        else:
+            out.append(f"{YELLOW}~ {key}:{OFF}")
+            matcher = difflib.SequenceMatcher(None, old, new, autojunk=False)
+            for op, a0, a1, b0, b1 in matcher.get_opcodes():
+                if op in ("replace", "delete"):
+                    out.extend(
+                        f"    {RED}- {_short(line, max_value)}{OFF}"
+                        for line in old[a0:a1]
+                    )
+                if op in ("replace", "insert"):
+                    out.extend(
+                        f"    {GREEN}+ {_short(line, max_value)}{OFF}"
+                        for line in new[b0:b1]
+                    )
+
+    if len(out) > max_lines:
+        extra = len(out) - max_lines
+        out = out[:max_lines] + [f"… (+{extra} linhas de diferença)"]
+    return out
+
+
 def multi_tags_label(settings) -> str:
     """Texto curto com o modo multi-tags em uso."""
     return "ATIVADO" if getattr(settings, "multi_value_tags", False) else "DESATIVADO"
@@ -210,6 +282,140 @@ async def _resolve_metadata(client, track_id, album_id, album_cache):
     return None
 
 
+# Rótulos para o log (classify_release_type devolve estes valores).
+_RELEASE_LABELS = {
+    "single": "single",
+    "ep": "EP",
+    "album": "álbum",
+    "live": "álbum ao vivo",
+    "compilation": "coletânea",
+}
+# Quantas faixas de um álbum entram na votação por consenso.
+_MAX_CONSENSUS_TRACKS = 40
+
+
+def _classify_album(album: dict) -> str:
+    """Tipo do lançamento pela regra do projeto (<=3 single, 4-7 EP, >7 álbum)."""
+    from qobuz_dl.utils import classify_release_type
+
+    tracks = (album.get("tracks") or {}).get("items") or []
+    return classify_release_type(
+        title=album.get("title"),
+        version=album.get("version"),
+        track_count=album.get("tracks_count") or len(tracks),
+        duration_seconds=album.get("duration"),
+        api_release_type=album.get("release_type") or album.get("product_type"),
+    )
+
+
+def _release_kind(album: dict) -> Optional[str]:
+    """'single' ou 'full' (EP/álbum/ao vivo/coletânea); None se desconhecido.
+
+    É o que separa a capa do single da capa do álbum onde a mesma faixa
+    também aparece: são lançamentos diferentes na Qobuz (IDs diferentes) e,
+    na Apple, "X - Single" é outro álbum.
+    """
+    if not isinstance(album, dict):
+        return None
+    kind = _classify_album(album)
+    if kind == "single":
+        return "single"
+    if kind in _RELEASE_LABELS:
+        return "full"
+    return None
+
+
+def _album_full_title(album: dict) -> str:
+    title = (album.get("title") or "").strip()
+    version = (album.get("version") or "").strip()
+    if version and version.casefold() not in title.casefold():
+        title = f"{title} ({version})"
+    return title
+
+
+async def _decide_album_cover(
+    album: dict,
+    http_session: httpx.AsyncClient,
+    track_results: dict,
+) -> dict:
+    """Escolhe UMA capa Apple para o álbum Qobuz inteiro.
+
+    1) Busca no nível do álbum (UPC e busca por álbum, com o tipo single/
+       álbum respeitado).
+    2) Sem resultado, consenso das faixas: cada faixa é pesquisada e a capa
+       que a maioria das faixas encontrou vale para todas (a faixa que a Apple
+       não localizou, ou localizou em outro lugar, herda a capa do álbum).
+       Só vale se pelo menos 2 faixas concordam e nenhuma outra capa empata.
+    3) Sem consenso (coletâneas, faixas espalhadas por vários álbuns): sem
+       decisão por álbum, e cada faixa é avaliada sozinha.
+
+    Devolve {"url", "source", "method", "note", "path", "used"}. Os resultados
+    por faixa obtidos na votação ficam em `track_results` (não se pesquisa
+    duas vezes).
+    """
+    from qobuz_dl.utils import get_apple_hq_cover
+
+    decision = {
+        "url": None,
+        "source": None,
+        "method": None,
+        "note": None,
+        "path": None,
+        "used": False,
+    }
+    artist = (album.get("artist") or {}).get("name", "")
+    reason = None
+
+    try:
+        result = await get_apple_hq_cover(
+            session=http_session,
+            upc=album.get("upc"),
+            artist=artist,
+            album=_album_full_title(album),
+            release_kind=_release_kind(album),
+            deep_album_search=True,
+        )
+        if isinstance(result, tuple) and result and isinstance(result[0], str):
+            if result[0].strip():
+                decision.update(
+                    url=result[0],
+                    source=(result[1] if len(result) > 1 else None) or "Apple/iTunes",
+                    method="busca do álbum",
+                )
+                return decision
+        if isinstance(result, tuple) and len(result) > 2:
+            reason = result[2]
+    except Exception as exc:
+        reason = f"erro ({type(exc).__name__}: {exc})"
+        logger.debug("Falha na busca de capa do álbum", exc_info=True)
+
+    items = (album.get("tracks") or {}).get("items") or []
+    if len(items) >= 2:
+        votes: dict = {}
+        for item in items[:_MAX_CONSENSUS_TRACKS]:
+            try:
+                found = await _fetch_apple_cover_for_track(item, album, http_session)
+            except Exception as exc:
+                found = (None, None, f"erro ({type(exc).__name__}: {exc})")
+            track_results[str(item.get("id"))] = found
+            if found and isinstance(found[0], str) and found[0].strip():
+                votes[found[0]] = votes.get(found[0], 0) + 1
+
+        ranked = sorted(votes.items(), key=lambda pair: -pair[1])
+        if ranked and ranked[0][1] >= 2 and (
+            len(ranked) == 1 or ranked[0][1] > ranked[1][1]
+        ):
+            decision.update(
+                url=ranked[0][0],
+                source="Apple/iTunes",
+                method=f"consenso de {ranked[0][1]}/{len(items)} faixas",
+            )
+            return decision
+
+    decision["note"] = reason
+    return decision
+
+
 async def _fetch_apple_cover_for_track(
     item: dict,
     album: dict,
@@ -238,6 +444,8 @@ async def _fetch_apple_cover_for_track(
         artist=artist_data.get("name", ""),
         album=album_data.get("title") or album.get("title", ""),
         track_title=track_title,
+        # Single so' casa com "X - Single"; album/EP nunca recebe capa de single.
+        release_kind=_release_kind(album) or _release_kind(album_data),
     )
 
     if isinstance(result, tuple):
@@ -305,6 +513,17 @@ async def _download_apple_cover(
         return None
 
 
+def _discard_shared_cover(decision: dict) -> None:
+    """Apaga o temporário da capa compartilhada de um álbum."""
+    path = decision.get("path")
+    decision["path"] = None
+    if path:
+        try:
+            os.remove(path)
+        except OSError as exc:
+            logger.debug("Falha ao remover capa temporária '%s': %s", path, exc)
+
+
 def _display_track_name(
     item: dict, album: dict, file_path: str, limit: int = 54
 ) -> str:
@@ -362,12 +581,16 @@ def _cover_result_message(
     return cover_status
 
 
-async def retag_directory(directory_path, client, settings):
+async def retag_directory(directory_path, client, settings, covers_only=False):
     """Reescreve tags e tenta substituir capas por versoes Apple/iTunes.
 
     A capa existente so e alterada quando uma imagem Apple valida e baixada.
     O terminal informa, para cada faixa, se a busca encontrou a capa, se o
-    download da imagem falhou ou se nenhuma correspondencia foi aceita.
+    download da imagem falhou ou se nenhuma correspondencia foi aceita, e
+    mostra o diff exato das tags que mudaram.
+
+    covers_only=True: nao regrava tags; so troca a imagem embutida (e a origem
+    da capa no comentario) quando a Apple tem uma capa validada e superior.
     """
     if not os.path.isdir(directory_path):
         ui.emit(f"{RED}[!] A pasta não existe no dispositivo: '{directory_path}'{OFF}")
@@ -375,7 +598,12 @@ async def retag_directory(directory_path, client, settings):
 
     ui.emit(f"\n{CYAN}[*] Iniciando correção retroativa de tags...{OFF}")
     ui.emit(f"{CYAN} • Pasta raiz  :{RESET} {directory_path}")
-    ui.emit(f"{CYAN} • Multi-tags  :{RESET} {multi_tags_label(settings)}")
+    if covers_only:
+        ui.emit(
+            f"{CYAN} • Modo        :{RESET} SOMENTE CAPAS (nenhuma tag será regravada)"
+        )
+    else:
+        ui.emit(f"{CYAN} • Multi-tags  :{RESET} {multi_tags_label(settings)}")
     ui.emit(
         f"{CYAN} • Capas Apple :{RESET} procurando e substituindo quando validada\n"
     )
@@ -399,6 +627,11 @@ async def retag_directory(directory_path, client, settings):
 
     loop = asyncio.get_running_loop()
     album_cache: dict = {}
+    # Capa decidida UMA vez por álbum Qobuz (chave = ID do álbum): single,
+    # álbum, edição Deluxe e coletânea têm IDs diferentes e nunca se misturam.
+    album_decisions: dict = {}
+    track_results: dict = {}  # faixa -> (url, fonte, motivo), da votação
+    shared_holder = {"decision": None}  # só a capa do álbum atual fica em disco
     width = len(str(len(files)))
 
     http_session = make_client(
@@ -463,17 +696,46 @@ async def retag_directory(directory_path, client, settings):
             cover_source: Optional[str] = None
             cover_status = "Apple: não pesquisada"
             apple_diagnostic = None
+            shared_cover = False  # True: o arquivo pertence ao álbum, não a esta faixa
 
             try:
-                (
-                    apple_cover_url,
-                    apple_cover_source,
-                    apple_diagnostic,
-                ) = await _fetch_apple_cover_for_track(
-                    item,
-                    album,
-                    http_session,
-                )
+                album_key = str(album.get("id") or "")
+                album_decision = None
+                if album_key:
+                    album_decision = album_decisions.get(album_key)
+                    if album_decision is None:
+                        album_decision = await _decide_album_cover(
+                            album, http_session, track_results
+                        )
+                        album_decisions[album_key] = album_decision
+                        if album_decision and album_decision.get("url"):
+                            kind_label = _RELEASE_LABELS.get(
+                                _classify_album(album), "álbum"
+                            )
+                            ui.emit(
+                                f"{CYAN}[Álbum]{OFF} {album.get('title') or album_key}"
+                                f" ({kind_label}): capa Apple única para todas as "
+                                f"faixas -- {album_decision.get('method')}"
+                            )
+
+                if album_decision and album_decision.get("url"):
+                    apple_cover_url = album_decision["url"]
+                    apple_cover_source = album_decision.get("source")
+                    apple_diagnostic = None
+                else:
+                    cached = track_results.get(str(item.get("id")))
+                    if cached is None:
+                        cached = await _fetch_apple_cover_for_track(
+                            item,
+                            album,
+                            http_session,
+                        )
+                    (
+                        apple_cover_url,
+                        apple_cover_source,
+                        apple_diagnostic,
+                    ) = cached
+                    album_decision = None
 
                 if not isinstance(apple_cover_url, str) or not apple_cover_url.strip():
                     cover_status = (
@@ -482,6 +744,34 @@ async def retag_directory(directory_path, client, settings):
                         else "Apple: nenhum candidato passou pelos filtros"
                     )
                     stats["apple_not_found"] += 1
+
+                elif album_decision:
+                    # Capa do álbum: baixada uma vez e reaproveitada pelas
+                    # demais faixas (só a do álbum atual fica em disco).
+                    path = album_decision.get("path")
+                    reused = bool(path and os.path.isfile(path))
+                    if not reused:
+                        previous = shared_holder["decision"]
+                        if previous is not None and previous is not album_decision:
+                            _discard_shared_cover(previous)
+                        path = await _download_apple_cover(
+                            http_session, apple_cover_url, root_dir
+                        )
+                        album_decision["path"] = path
+                        shared_holder["decision"] = album_decision if path else None
+                    if path:
+                        cover_path = path
+                        shared_cover = True
+                        cover_source = apple_cover_source or "Apple/iTunes"
+                        size_kib = max(1, os.path.getsize(path) // 1024)
+                        cover_status = (
+                            f"Apple: capa do álbum reaproveitada ({size_kib} KiB)"
+                            if reused
+                            else f"Apple: capa do álbum baixada ({size_kib} KiB)"
+                        )
+                    else:
+                        cover_status = "Apple: URL encontrada, download falhou"
+                        stats["apple_failed"] += 1
 
                 else:
                     cover_path = await _download_apple_cover(
@@ -518,10 +808,11 @@ async def retag_directory(directory_path, client, settings):
                     cover_path,
                 ),
             ):
-                try:
-                    os.remove(cover_path)
-                except OSError:
-                    pass
+                if not shared_cover:
+                    try:
+                        os.remove(cover_path)
+                    except OSError:
+                        pass
                 cover_path = None
                 cover_source = None
                 cover_status = "Capa existente preservada (candidata não é superior)"
@@ -529,22 +820,44 @@ async def retag_directory(directory_path, client, settings):
             before = await loop.run_in_executor(None, snapshot_tags, file_path)
 
             try:
-                await loop.run_in_executor(
-                    None,
-                    functools.partial(
-                        tag_function,
-                        file_path,
-                        root_dir,
-                        file_path,
-                        item,
-                        album,
-                        istrack,
-                        bool(cover_path),
-                        settings=settings,
-                        embed_cover_path=cover_path,
-                        cover_source=cover_source,
-                    ),
-                )
+                if covers_only:
+                    # Modo "so capas": nenhuma tag e regravada; so a imagem
+                    # (e a origem da capa no comentario) quando ha capa nova.
+                    if cover_path:
+                        embedded = await loop.run_in_executor(
+                            None,
+                            functools.partial(
+                                metadata.replace_cover_only,
+                                file_path,
+                                cover_path,
+                                cover_source=cover_source,
+                                settings=settings,
+                            ),
+                        )
+                        if not embedded:
+                            cover_source = None
+                            cover_status = "Apple: capa baixada, mas não foi possível embutir"
+                            stats["apple_failed"] += 1
+                else:
+                    await loop.run_in_executor(
+                        None,
+                        functools.partial(
+                            tag_function,
+                            file_path,
+                            root_dir,
+                            file_path,
+                            item,
+                            album,
+                            istrack,
+                            bool(cover_path),
+                            settings=settings,
+                            embed_cover_path=cover_path,
+                            cover_source=cover_source,
+                            # Sem capa nova, mantem no comentario as linhas de
+                            # capa que ja estavam la (senao o retag as apagava).
+                            preserve_cover_info=True,
+                        ),
+                    )
 
                 after = await loop.run_in_executor(None, snapshot_tags, file_path)
 
@@ -555,7 +868,7 @@ async def retag_directory(directory_path, client, settings):
                 continue
 
             finally:
-                if cover_path:
+                if cover_path and not shared_cover:
                     try:
                         os.remove(cover_path)
                     except OSError as exc:
@@ -575,7 +888,9 @@ async def retag_directory(directory_path, client, settings):
             # alterações reais.
             before_text = before.get("text", before)
             after_text = after.get("text", after)
-            tags_changed = before_text != after_text
+            # No modo "so capas" as tags nao sao tocadas: a unica diferenca
+            # possivel no COMMENT e a origem/tamanho da capa nova.
+            tags_changed = False if covers_only else before_text != after_text
             cover_changed = before.get("art", []) != after.get("art", [])
 
             if tags_changed and cover_changed:
@@ -598,14 +913,20 @@ async def retag_directory(directory_path, client, settings):
 
             # Linha principal neutra: somente o estado da operação recebe cor.
             ui.emit(f"{label} {name} [{action_color}{action}{OFF}]")
-            ui.emit(
-                f"    {CYAN}↳ Tags:{OFF} "
-                f"{GREEN if tags_changed else MUTED}{'alteradas' if tags_changed else 'sem alteração'}{OFF}"
-            )
+            if covers_only:
+                ui.emit(f"    {CYAN}↳ Tags:{OFF} {MUTED}não tocadas (modo só capas){OFF}")
+            else:
+                ui.emit(
+                    f"    {CYAN}↳ Tags:{OFF} "
+                    f"{GREEN if tags_changed else MUTED}{'alteradas' if tags_changed else 'sem alteração'}{OFF}"
+                )
+                if tags_changed:
+                    for diff_line in format_tag_diff(before_text, after_text):
+                        ui.emit(f"        {diff_line}")
             ui.emit(
                 f"    {CYAN}↳ Capa:{OFF} "
                 f"{YELLOW if cover_changed else MUTED}{'substituída' if cover_changed else 'preservada/inalterada'}{OFF}"
-                f" — {result_message}"
+                f" -- {result_message}"
             )
 
         ui.emit("")
@@ -633,4 +954,6 @@ async def retag_directory(directory_path, client, settings):
         return stats
 
     finally:
+        if shared_holder["decision"] is not None:
+            _discard_shared_cover(shared_holder["decision"])
         await http_session.aclose()

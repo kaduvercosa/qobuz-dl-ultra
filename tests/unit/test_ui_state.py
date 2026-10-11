@@ -41,8 +41,23 @@ def estado_limpo(monkeypatch):
         monkeypatch.setattr(ui, nome, valor)
 
 
+def _sem_terminal(fd=None):
+    raise OSError("sem terminal")
+
+
 @pytest.fixture
-def colunas(monkeypatch):
+def sem_tty(monkeypatch):
+    """Garante que `raw_width()` não leia o terminal real de quem roda a suíte.
+
+    `raw_width()` prefere o tamanho do TTY ao `COLUMNS`. Com a saída capturada
+    (pytest padrão) isso não importa, mas com `pytest -s` num terminal os testes
+    de largura passariam a depender da janela de quem os executa.
+    """
+    monkeypatch.setattr(ui.os, "get_terminal_size", _sem_terminal)
+
+
+@pytest.fixture
+def colunas(monkeypatch, sem_tty):
     def _define(n):
         monkeypatch.setenv("COLUMNS", str(n))
 
@@ -58,7 +73,7 @@ class TestRawWidth:
         assert ui.raw_width() == 123
 
     @pytest.mark.parametrize("valor", ["0", "-5", "abc", ""])
-    def test_columns_invalida_cai_para_o_terminal(self, monkeypatch, valor):
+    def test_columns_invalida_cai_para_o_terminal(self, monkeypatch, sem_tty, valor):
         monkeypatch.setenv("COLUMNS", valor)
         monkeypatch.setattr(
             ui.shutil,
@@ -67,7 +82,7 @@ class TestRawWidth:
         )
         assert ui.raw_width() == 77
 
-    def test_erro_ao_consultar_o_terminal_usa_o_fallback(self, monkeypatch):
+    def test_erro_ao_consultar_o_terminal_usa_o_fallback(self, monkeypatch, sem_tty):
         monkeypatch.delenv("COLUMNS", raising=False)
 
         def explode(fallback):
@@ -75,6 +90,78 @@ class TestRawWidth:
 
         monkeypatch.setattr(ui.shutil, "get_terminal_size", explode)
         assert ui.raw_width() == ui.FALLBACK[0]
+
+
+class _SaidaFalsa:
+    """`sys.stdout` falso para simular saída em terminal ou redirecionada."""
+
+    def __init__(self, tty=True, fileno=7):
+        self._tty, self._fileno = tty, fileno
+
+    def isatty(self):
+        return self._tty
+
+    def fileno(self):
+        if isinstance(self._fileno, Exception):
+            raise self._fileno
+        return self._fileno
+
+
+class TestRawWidthComTerminalVivo:
+    """O tamanho real do TTY vence `COLUMNS` (redimensionar reflete na hora)."""
+
+    def test_tty_vence_columns(self, monkeypatch):
+        monkeypatch.setenv("COLUMNS", "50")
+        monkeypatch.setattr(ui.sys, "stdout", _SaidaFalsa(tty=True))
+        pedidos = []
+
+        def tamanho(fd):
+            pedidos.append(fd)
+            return types.SimpleNamespace(columns=133)
+
+        monkeypatch.setattr(ui.os, "get_terminal_size", tamanho)
+        assert ui.raw_width() == 133
+        assert pedidos == [7]
+
+    def test_saida_redirecionada_respeita_columns(self, monkeypatch):
+        monkeypatch.setenv("COLUMNS", "64")
+        monkeypatch.setattr(ui.sys, "stdout", _SaidaFalsa(tty=False))
+        monkeypatch.setattr(
+            ui.os, "get_terminal_size", lambda fd: types.SimpleNamespace(columns=999)
+        )
+        assert ui.raw_width() == 64
+
+    @pytest.mark.parametrize(
+        "erro", [OSError("sem tty"), ValueError("fd fechado"), AttributeError("x")]
+    )
+    def test_falha_ao_ler_o_tty_cai_para_columns(self, monkeypatch, erro):
+        monkeypatch.setenv("COLUMNS", "88")
+        monkeypatch.setattr(ui.sys, "stdout", _SaidaFalsa(tty=True))
+
+        def explode(fd):
+            raise erro
+
+        monkeypatch.setattr(ui.os, "get_terminal_size", explode)
+        assert ui.raw_width() == 88
+
+    def test_stdout_sem_fileno_utilizavel_cai_para_columns(self, monkeypatch):
+        monkeypatch.setenv("COLUMNS", "70")
+        monkeypatch.setattr(
+            ui.sys, "stdout", _SaidaFalsa(tty=True, fileno=ValueError("sem fileno"))
+        )
+        assert ui.raw_width() == 70
+
+    def test_stdout_sem_isatty_nao_quebra(self, monkeypatch, sem_tty):
+        monkeypatch.setenv("COLUMNS", "55")
+        monkeypatch.setattr(ui.sys, "stdout", object())
+        assert ui.raw_width() == 55
+
+    def test_largura_do_tty_e_limitada_por_width_como_qualquer_outra(self, monkeypatch):
+        monkeypatch.setattr(ui.sys, "stdout", _SaidaFalsa(tty=True))
+        monkeypatch.setattr(
+            ui.os, "get_terminal_size", lambda fd: types.SimpleNamespace(columns=500)
+        )
+        assert ui.width() == ui.MAX_WIDTH
 
 
 class TestWidth:

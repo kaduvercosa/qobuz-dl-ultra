@@ -361,13 +361,13 @@ class TestTagMp3:
     def test_tags_sem_mapeamento_no_id3_legend_nao_aparecem(
         self, monkeypatch, tmp_path
     ):
-        """[Comportamento real, não bug] MP3/ID3 só tem vocabulário fixo
-        de frames -- tags que `_get_tags_to_add` gera mas não estão em
-        ID3_LEGEND (COMPILATION, QOBUZTRACKID, QOBUZALBUMID, QOBUZ ALBUM
-        URL, ALBUMARTISTSORT, ARTISTSORT, EXPLICIT, RATING,
-        REPLAYGAIN_ALBUM_*) são silenciosamente descartadas no MP3 --
-        só existem no FLAC (que grava qualquer chave via Vorbis Comment
-        sem essa limitação). Documentando aqui pra não virar surpresa."""
+        """Tags sem mapeamento ID3 são descartadas no MP3.
+
+        COMPILATION e outras tags sem entrada em ID3_LEGEND não devem
+        virar frames TXXX. Os identificadores Qobuz, por outro lado,
+        têm mapeamento explícito porque são usados para identificar
+        faixas e sincronizar playlists.
+        """
         monkeypatch.setattr(metadata.id3, "ID3", FakeID3)
         audios_criados = []
         original_init = FakeID3.__init__
@@ -397,7 +397,7 @@ class TestTagMp3:
         chaves_desc_em_txxx = {
             frame.desc for frame in audio.added if isinstance(frame, id3.TXXX)
         }
-        assert "QOBUZTRACKID" not in chaves_desc_em_txxx
+        assert "QOBUZTRACKID" in chaves_desc_em_txxx
         assert "COMPILATION" not in chaves_desc_em_txxx
 
     def test_txxx_e_comm_vao_via_add_nao_setitem(self, monkeypatch, tmp_path):

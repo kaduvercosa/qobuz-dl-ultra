@@ -351,6 +351,28 @@ def _pick_accent_color() -> str:
     return rgb
 
 
+def _purge_databases(config_path: str, downloads_db: str) -> list[str]:
+    """Apaga TODOS os bancos SQLite do programa (``--purge``).
+
+    Bancos: ``qobuz_dl.db`` (IDs já baixados) e ``library.db`` (catálogo de
+    favoritos/estado de download), mais os arquivos auxiliares do SQLite
+    (``-journal``, ``-wal``, ``-shm``) que podem ficar ao lado deles.
+    Devolve os caminhos realmente removidos.
+    """
+    from qobuz_dl.library_cmd import library_db_path
+
+    removed: list[str] = []
+    for db_path in (downloads_db, library_db_path(config_path)):
+        for suffix in ("", "-journal", "-wal", "-shm"):
+            path = db_path + suffix
+            try:
+                os.remove(path)
+            except FileNotFoundError:
+                continue
+            removed.append(path)
+    return removed
+
+
 async def _reset_config(config_file: str):
     """Run the interactive configuration wizard and save the result to config_file."""
     if ui.width() >= 41:
@@ -1051,7 +1073,7 @@ _COMMAND_DESCRIPTIONS_PT = {
     "interactive": "Busca interativa: procura faixas/álbuns e escolhe o que baixar na hora.",
     "lucky": "Baixa os N primeiros resultados de uma busca no Qobuz, sem passar URL.",
     "lyrics": "Varre uma pasta já baixada e injeta letras/traduções que estejam faltando.",
-    "tags": "Varre uma pasta já baixada, regrava/corrige as tags de metadados (com ou sem multi-tags) e troca a capa pela da Apple/iTunes quando validada.",
+    "tags": "Varre uma pasta já baixada, regrava/corrige as tags de metadados (com ou sem multi-tags) e troca a capa pela da Apple/iTunes quando validada. Com --covers-only, troca só as capas.",
     "sync-playlist": "Sincroniza uma pasta local com uma playlist do Qobuz (baixa o que falta, remove o que saiu).",
     "sync-favorites": "Sincroniza os favoritos da conta com o catálogo local (novos/removidos) e baixa o que falta.",
     "scan": "Casa sua pasta de música com o catálogo (tag de ID, UPC, nome, fuzzy) e grava sentinelas.",
@@ -1353,11 +1375,14 @@ async def async_main():
         sys.exit(0)
 
     if arguments.purge:
-        try:
-            os.remove(QOBUZ_DB)
-        except FileNotFoundError:
-            pass
-        ui.ok("O banco de dados foi deletado com sucesso.")
+        removed = _purge_databases(CONFIG_PATH, QOBUZ_DB)
+        if removed:
+            ui.ok(
+                "Bancos de dados deletados: "
+                + ", ".join(os.path.basename(path) for path in removed)
+            )
+        else:
+            ui.ok("Nenhum banco de dados encontrado para deletar.")
         sys.exit(0)
 
     if arguments.command in (
@@ -1558,7 +1583,12 @@ async def async_main():
             ui.error(f"Não foi possível autenticar no Qobuz para corrigir as tags: {e}")
             sys.exit(1)
         try:
-            await retag_directory(target_dir, tags_client, tags_settings)
+            await retag_directory(
+                target_dir,
+                tags_client,
+                tags_settings,
+                covers_only=bool(getattr(arguments, "covers_only", False)),
+            )
         except KeyboardInterrupt:
             ui.error("Operação interrompida manualmente pelo usuário (CTRL+C).")
             ui.warn("Os arquivos já processados estão seguros. Saindo...")
