@@ -650,9 +650,7 @@ class TestRotuloDeAcao:
         )
         assert stats["updated"] == 1
 
-    def test_somente_tags_com_capa_preservada_nao_tem_pendencia(
-        self, amb
-    ):
+    def test_somente_tags_com_capa_preservada_nao_tem_pendencia(self, amb):
         amb.substituir = False
         amb.arquivo("a.flac")
         _rodar(amb)
@@ -1049,9 +1047,7 @@ class TestModoSoCapas:
         assert "mantida -- a capa atual já tem resolução igual ou maior" in amb.texto
         assert _temporarios(amb.pasta) == []
 
-    def test_falha_ao_embutir_conta_como_falha_e_limpa_o_temporario(
-        self, amb, trocas
-    ):
+    def test_falha_ao_embutir_conta_como_falha_e_limpa_o_temporario(self, amb, trocas):
         trocas.resultado = False
         amb.arquivo("a.flac")
         stats = self._rodar_so_capas(amb)
@@ -1117,9 +1113,8 @@ class TestCapaPorAlbum:
         assert len(cabecalhos) == 1  # uma vez por álbum, não por faixa
         assert cabecalhos[0].startswith("== Disco -- Banda  |  álbum | 12 faixas ")
         assert cabecalhos[0].endswith("=")
-        assert (
-            "   Capa Apple única para todas as faixas (busca do álbum)"
-            in amb.de("emit")
+        assert "   Capa Apple única para todas as faixas (busca do álbum)" in amb.de(
+            "emit"
         )
         assert _temporarios(amb.pasta) == []
 
@@ -1252,7 +1247,9 @@ def _album_qobuz(n_faixas=5, **extra):
         "upc": "0602",
         "artist": {"name": "Jão"},
         "tracks_count": n_faixas,
-        "tracks": {"items": [{"id": i, "title": f"Faixa {i}"} for i in range(n_faixas)]},
+        "tracks": {
+            "items": [{"id": i, "title": f"Faixa {i}"} for i in range(n_faixas)]
+        },
     }
     album.update(extra)
     return album
@@ -1500,7 +1497,9 @@ class TestLegendaEEspacamento:
     def test_mensagens_de_pulo_tambem_ficam_separadas(self, amb):
         amb.arquivo("a.flac", track_id=None)
         _rodar(amb)
-        i = next(i for i, (_, t) in enumerate(amb.linhas) if "sem ID Qobuz nas tags" in t)
+        i = next(
+            i for i, (_, t) in enumerate(amb.linhas) if "sem ID Qobuz nas tags" in t
+        )
         assert amb.linhas[i - 1] == ("emit", "")
 
     def test_sem_travessao_nem_simbolos_exoticos_no_bloco(self, amb):
@@ -1557,9 +1556,7 @@ class TestCoresDoLog:
         bloco = self._bloco_cor(amb, "<Y>")
         assert bloco[1].startswith("   <Y>• Alterado (somente as tags)")
         assert bloco[2].startswith("<G>   Tags")  # a tag alterada segue verde
-        assert any(
-            t.startswith("<Y>   Capa   não encontrada na Apple") for t in bloco
-        )
+        assert any(t.startswith("<Y>   Capa   não encontrada na Apple") for t in bloco)
         assert "<M>          Motivo: motivo-xyz</>" in bloco
 
     def test_sem_alteracao_mas_capa_nao_achada_destaca_so_a_capa(self, amb, cores):
@@ -1576,8 +1573,7 @@ class TestCoresDoLog:
         amb.arquivo("a.flac")
         _rodar(amb)
         assert any(
-            t.startswith("<Y>   Capa   erro na etapa da Apple")
-            for t in amb.de("emit")
+            t.startswith("<Y>   Capa   erro na etapa da Apple") for t in amb.de("emit")
         )
 
     def test_diff_verde_para_novo_e_alterado_amarelo_para_removido(self, cores):
@@ -1659,7 +1655,9 @@ class TestDecideAlbumCoverVersaoCerta:
         self, decisao_env
     ):
         album = _album_qobuz(2)
-        album["tracks"]["items"][0].update(title="Take My Breath", version="Single Version")
+        album["tracks"]["items"][0].update(
+            title="Take My Breath", version="Single Version"
+        )
         album["tracks"]["items"][1].update(title="Outra", version="")
         await retro_tags._decide_album_cover(album, object(), {})
         a = decisao_env.args_album
@@ -1683,10 +1681,18 @@ class TestTituloDaFaixaQobuz:
     @pytest.mark.parametrize(
         "item, esperado",
         [
-            ({"title": "Take My Breath", "version": "Single Version"},
-             "Take My Breath (Single Version)"),
-            ({"title": "Fat Juicy &…", "version": "Radio Edit"}, "Fat Juicy &… (Radio Edit)"),
-            ({"title": "Musica (Radio Edit)", "version": "Radio Edit"}, "Musica (Radio Edit)"),
+            (
+                {"title": "Take My Breath", "version": "Single Version"},
+                "Take My Breath (Single Version)",
+            ),
+            (
+                {"title": "Fat Juicy &…", "version": "Radio Edit"},
+                "Fat Juicy &… (Radio Edit)",
+            ),
+            (
+                {"title": "Musica (Radio Edit)", "version": "Radio Edit"},
+                "Musica (Radio Edit)",
+            ),
             ({"title": "Simples"}, "Simples"),
             ({"title": " Espaço ", "version": " "}, "Espaço"),
             ({}, ""),

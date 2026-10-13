@@ -935,7 +935,9 @@ _MARCADORES_VERSAO = {
 # EPs ("- EP") e álbuns são tratados como "completos": a regra de contagem de
 # faixas da Qobuz e a da Apple divergem justamente entre EP e álbum, mas
 # concordam em quem é single (<= 3 faixas).
-_APPLE_SINGLE = re.compile(r"\s[-\u2013\u2014]\s*(?:single|sencillo|sencilla)\s*$", re.I)
+_APPLE_SINGLE = re.compile(
+    r"\s[-\u2013\u2014]\s*(?:single|sencillo|sencilla)\s*$", re.I
+)
 
 
 def apple_release_kind(collection_name: str) -> str:
@@ -999,7 +1001,9 @@ def faixas_equivalentes(
     return difflib.SequenceMatcher(None, a, b).ratio() >= minimo
 
 
-def contar_faixas_em_comum(titulos_pedidos, titulos_candidatos, album_pedido="", album_candidata="") -> int:
+def contar_faixas_em_comum(
+    titulos_pedidos, titulos_candidatos, album_pedido="", album_candidata=""
+) -> int:
     """Quantas faixas pedidas existem na lista candidata (uma a uma, sem repetir)."""
     livres = list(titulos_candidatos)
     achadas = 0
@@ -1099,9 +1103,11 @@ async def get_apple_hq_cover(
         )
     }
     countries = tuple(countries) if countries else ("br", "us")
-    fallback = tuple(
-        code for code in _APPLE_FALLBACK_COUNTRIES if code not in countries
-    ) if fallback_countries else ()
+    fallback = (
+        tuple(code for code in _APPLE_FALLBACK_COUNTRIES if code not in countries)
+        if fallback_countries
+        else ()
+    )
     resolutions = ("10000x10000bb", "3000x3000bb", "1400x1400bb")
     thresholds = {
         "artist": 0.85,
@@ -1307,9 +1313,12 @@ async def get_apple_hq_cover(
                 if exact == "isrc" and q_album_full:
                     # Entre os álbuns com a mesma gravação, vence o de título
                     # idêntico ao pedido (edição certa).
-                    score += 0.05 * difflib.SequenceMatcher(
-                        None, q_album_full, extrair_titulo_completo(candidate_album)
-                    ).ratio()
+                    score += (
+                        0.05
+                        * difflib.SequenceMatcher(
+                            None, q_album_full, extrair_titulo_completo(candidate_album)
+                        ).ratio()
+                    )
                 if score > best_score or best_url is None:
                     best_score = score
                     best_url = valid_url
@@ -1451,9 +1460,15 @@ async def get_apple_hq_cover(
 
         if not exact:
             fuzzy_candidates.sort(key=lambda item: (-item[0], item[1]))
-            for rank, _order, _score, label, closeness, artwork, perfect in (
-                fuzzy_candidates
-            ):
+            for (
+                rank,
+                _order,
+                _score,
+                label,
+                closeness,
+                artwork,
+                perfect,
+            ) in fuzzy_candidates:
                 valid_url, url_error = await artwork_url(client, artwork)
                 if not valid_url:
                     reject(
@@ -1482,7 +1497,7 @@ async def get_apple_hq_cover(
         if cache is None:
             cache = {}
             try:
-                setattr(client, "_apple_json_cache", cache)
+                client._apple_json_cache = cache
             except Exception:
                 pass
         key = (url, tuple(sorted(params.items())))
@@ -1609,8 +1624,9 @@ async def get_apple_hq_cover(
             name = str(result.get("collectionName") or "")
             if not name:
                 continue
-            if score_artista(artist or "", str(result.get("artistName") or "")) < (
-                thresholds["artist"]
+            if (
+                score_artista(artist or "", str(result.get("artistName") or ""))
+                < (thresholds["artist"])
             ):
                 continue
             if (
@@ -1718,8 +1734,9 @@ async def get_apple_hq_cover(
             candidate_album = str(result.get("collectionName") or "")
             if not candidate_album:
                 continue
-            if score_artista(artist or "", str(result.get("artistName") or "")) < (
-                thresholds["artist"]
+            if (
+                score_artista(artist or "", str(result.get("artistName") or ""))
+                < (thresholds["artist"])
             ):
                 continue
             if (

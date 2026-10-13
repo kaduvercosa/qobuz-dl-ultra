@@ -144,7 +144,12 @@ def test_decide_monta_o_album_da_qobuz(monkeypatch):
 
     async def falsa(album, sessao, resultados, trace=None):
         recebido.update(album=album, trace=trace)
-        return {"url": "U", "source": "Apple/iTunes", "method": "busca do álbum", "note": None}
+        return {
+            "url": "U",
+            "source": "Apple/iTunes",
+            "method": "busca do álbum",
+            "note": None,
+        }
 
     class _Sessao:
         async def aclose(self):
@@ -174,9 +179,16 @@ def test_main_decide_usa_a_faixa_quando_nao_ha_album_track(monkeypatch):
     modulo = _carregar()
     chamado = {}
 
-    async def falsa(artist, album, album_tracks, upc=None, kind=None, session=None, trace=None):
+    async def falsa(
+        artist, album, album_tracks, upc=None, kind=None, session=None, trace=None
+    ):
         chamado.update(album_tracks=album_tracks, kind=kind)
-        return {"url": "U", "source": "Apple/iTunes", "method": "busca do álbum", "note": None}
+        return {
+            "url": "U",
+            "source": "Apple/iTunes",
+            "method": "busca do álbum",
+            "note": None,
+        }
 
     monkeypatch.setattr(modulo, "decide", falsa)
     assert modulo.main(["A", "B", "Faixa X", "--decide", "--kind", "single"]) == 0
@@ -184,6 +196,15 @@ def test_main_decide_usa_a_faixa_quando_nao_ha_album_track(monkeypatch):
 
     chamado.clear()
     modulo.main(
-        ["A", "B", "Faixa X", "--decide", "--album-track", "Um", "--album-track", "Dois"]
+        [
+            "A",
+            "B",
+            "Faixa X",
+            "--decide",
+            "--album-track",
+            "Um",
+            "--album-track",
+            "Dois",
+        ]
     )
     assert chamado["album_tracks"] == ["Um", "Dois"]

@@ -82,7 +82,10 @@ class _Apple:
                 cid = params["id"]
                 faixas = self.albuns[cid][2]
                 return _Resp(
-                    {"results": [self._album(cid)] + [self._faixa(cid, t) for t in faixas]}
+                    {
+                        "results": [self._album(cid)]
+                        + [self._faixa(cid, t) for t in faixas]
+                    }
                 )
             return _Resp({"results": []})
         entidade = params.get("entity")
@@ -181,7 +184,9 @@ def test_troca_por_isrc_nao_depende_do_texto():
         "trackName": "Faixa",
         "artworkUrl100": "https://img.test/100x100bb.jpg",
     }
-    d = _diag(cat, "Banda", "Disco", "Faixa", isrc="US123", loja={"isrc_linhas": [linha]})
+    d = _diag(
+        cat, "Banda", "Disco", "Faixa", isrc="US123", loja={"isrc_linhas": [linha]}
+    )
     assert d["veredito"] == "troca"
     assert "UPC/ISRC" in d["por_que"][0]
 
@@ -198,7 +203,9 @@ def test_troca_por_isrc_nao_depende_do_texto():
     ],
 )
 def test_versao_aninhada_vira_o_mesmo_titulo(qobuz, apple):
-    assert utils.extrair_titulo_comparavel(qobuz) == utils.extrair_titulo_comparavel(apple)
+    assert utils.extrair_titulo_comparavel(qobuz) == utils.extrair_titulo_comparavel(
+        apple
+    )
 
 
 def test_termo_de_busca_com_parenteses_aninhados_nao_deixa_sobra():
@@ -208,7 +215,11 @@ def test_termo_de_busca_com_parenteses_aninhados_nao_deixa_sobra():
 def test_musica_com_versao_aninhada_agora_e_trocada():
     cat = {1: ("The Weeknd", "Trilogy", ["Wicked Games", "The Morning"])}
     d = _diag(
-        cat, "The Weeknd", "Trilogy", "Wicked Games (Album Version (Explicit))", tipo="full"
+        cat,
+        "The Weeknd",
+        "Trilogy",
+        "Wicked Games (Album Version (Explicit))",
+        tipo="full",
     )
     assert d["veredito"] == "troca"
 
@@ -218,8 +229,14 @@ def test_musica_com_versao_aninhada_agora_e_trocada():
 # ---------------------------------------------------------------------------
 @pytest.mark.parametrize(
     "album, total, esperado",
-    [("X", 1, "single"), ("X", 3, "single"), ("X", 4, "full"), ("X", 12, "full"),
-     ("X", "", None), ("X", "abc", None)],
+    [
+        ("X", 1, "single"),
+        ("X", 3, "single"),
+        ("X", 4, "full"),
+        ("X", 12, "full"),
+        ("X", "", None),
+        ("X", "abc", None),
+    ],
 )
 def test_tipo_do_lancamento(album, total, esperado):
     assert _carregar().tipo_do_lancamento(album, total) == esperado
@@ -256,8 +273,12 @@ def test_cliente_com_pausa_repete_em_429_e_guarda_a_resposta():
 
         modulo.asyncio.sleep = rapido
         try:
-            a = await cliente.get("https://itunes.apple.com/search", params={"term": "x"})
-            b = await cliente.get("https://itunes.apple.com/search", params={"term": "x"})
+            a = await cliente.get(
+                "https://itunes.apple.com/search", params={"term": "x"}
+            )
+            b = await cliente.get(
+                "https://itunes.apple.com/search", params={"term": "x"}
+            )
         finally:
             modulo.asyncio.sleep = original
         return real.n, a.status_code, b is a

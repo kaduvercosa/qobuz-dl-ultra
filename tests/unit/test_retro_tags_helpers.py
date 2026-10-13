@@ -83,8 +83,20 @@ class TestFileState:
             (True, True, False, "G", "Alterado -- tags e capa"),
             (True, False, False, "G", "Alterado -- somente as tags"),
             (False, True, False, "G", "Alterado -- somente a capa"),
-            (True, False, True, "Y", "Alterado (somente as tags), mas ficou uma pendência na capa"),
-            (True, True, True, "Y", "Alterado (tags e capa), mas ficou uma pendência na capa"),
+            (
+                True,
+                False,
+                True,
+                "Y",
+                "Alterado (somente as tags), mas ficou uma pendência na capa",
+            ),
+            (
+                True,
+                True,
+                True,
+                "Y",
+                "Alterado (tags e capa), mas ficou uma pendência na capa",
+            ),
             (False, False, False, "M", "Sem alterações"),
             (False, False, True, "M", "Sem alterações"),  # a capa é que ganha o amarelo
         ],
@@ -244,9 +256,7 @@ class TestCabecalhoDoAlbum:
         assert retro_tags._album_header_lines({"id": "X"}, None, 80) == []
 
     def test_titulo_longo_e_truncado_sem_estourar_a_largura(self):
-        linhas = retro_tags._album_header_lines(
-            self._album(title="T" * 200), None, 60
-        )
+        linhas = retro_tags._album_header_lines(self._album(title="T" * 200), None, 60)
         assert len(linhas[0]) <= 60
 
     def test_singular_para_uma_faixa(self):

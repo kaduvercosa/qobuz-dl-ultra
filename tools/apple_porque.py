@@ -67,9 +67,15 @@ LIM_TITULO_PARECIDO = 0.60
 VEREDITOS = {
     "troca": ("TROCARIA", "a capa Apple foi aceita"),
     "nao_tem": ("NAO TEM", "a Apple não devolveu esta música"),
-    "outro_album": ("OUTRO ALBUM", "a Apple tem a música, mas só em outro álbum/lançamento"),
+    "outro_album": (
+        "OUTRO ALBUM",
+        "a Apple tem a música, mas só em outro álbum/lançamento",
+    ),
     "versao": ("OUTRA VERSAO", "a Apple tem a música, mas só em outra versão"),
-    "titulo": ("TITULO", "a Apple tem faixa parecida no mesmo álbum, mas o título não bate"),
+    "titulo": (
+        "TITULO",
+        "a Apple tem faixa parecida no mesmo álbum, mas o título não bate",
+    ),
     "filtro": ("FILTRO", "a Apple tem a música no álbum certo, mas um filtro recusou"),
     "rede": ("INCONCLUSIVO", "a Apple não respondeu direito (rede/limite)"),
 }
@@ -151,13 +157,20 @@ def _motivos_de_rejeicao(trace, linha: dict) -> list:
 
 def _medir(linha: dict, artista: str, album: str, faixa: str) -> dict:
     """Notas de UMA linha da Apple contra o que o Qobuz pediu."""
-    art = score_artista(artista, str(linha.get("artista") or "")) if (
-        extrair_essencia(artista)
-    ) else 1.0
-    q_alb, a_alb = extrair_essencia(album), extrair_essencia(str(linha.get("album") or ""))
+    art = (
+        score_artista(artista, str(linha.get("artista") or ""))
+        if (extrair_essencia(artista))
+        else 1.0
+    )
+    q_alb, a_alb = (
+        extrair_essencia(album),
+        extrair_essencia(str(linha.get("album") or "")),
+    )
     alb = _ratio(q_alb, a_alb) if q_alb else 1.0
     a_faixa = str(linha.get("faixa") or "")
-    solto = _ratio(extrair_essencia(faixa), extrair_essencia(a_faixa)) if a_faixa else 0.0
+    solto = (
+        _ratio(extrair_essencia(faixa), extrair_essencia(a_faixa)) if a_faixa else 0.0
+    )
     nq, na = extrair_titulo_comparavel(faixa), extrair_titulo_comparavel(a_faixa)
     estrito = _ratio(nq, na) if a_faixa else 0.0
     return {
@@ -168,7 +181,8 @@ def _medir(linha: dict, artista: str, album: str, faixa: str) -> dict:
         "estrito": estrito,
         "norm": (nq, na),
         "mesma_versao": marcadores_versao(faixa) | marcadores_versao(album)
-        == marcadores_versao(a_faixa) | marcadores_versao(str(linha.get("album") or "")),
+        == marcadores_versao(a_faixa)
+        | marcadores_versao(str(linha.get("album") or "")),
         "art_ok": art >= LIM_ARTISTA,
         "alb_ok": alb >= LIM_ALBUM,
     }
@@ -215,7 +229,11 @@ def analisar(trace, url, motivo, artista, album, faixa, tipo=None) -> dict:
             f"{melhor_art['linha'].get('artista')!r}"
             if melhor_art and melhor_art["art_ok"]
             else "nenhum resultado com artista parecido"
-            + (f" (mais perto: {melhor_art['linha'].get('artista')!r} {melhor_art['art']:.2f})" if melhor_art else ""),
+            + (
+                f" (mais perto: {melhor_art['linha'].get('artista')!r} {melhor_art['art']:.2f})"
+                if melhor_art
+                else ""
+            ),
         ),
         (
             bool(melhor_alb and melhor_alb["alb_ok"]),
@@ -223,7 +241,11 @@ def analisar(trace, url, motivo, artista, album, faixa, tipo=None) -> dict:
             f"{melhor_alb['linha'].get('album')!r}"
             if melhor_alb and melhor_alb["alb_ok"]
             else "nenhum álbum parecido com o do artista"
-            + (f" (mais perto: {melhor_alb['linha'].get('album')!r} {melhor_alb['alb']:.2f})" if melhor_alb else ""),
+            + (
+                f" (mais perto: {melhor_alb['linha'].get('album')!r} {melhor_alb['alb']:.2f})"
+                if melhor_alb
+                else ""
+            ),
         ),
         (
             bool(parecidas),
@@ -231,20 +253,32 @@ def analisar(trace, url, motivo, artista, album, faixa, tipo=None) -> dict:
             f"{parecidas[0]['linha'].get('faixa')!r}"
             if parecidas
             else "nenhuma faixa do artista com esse título"
-            + (f" (mais perto: {melhor_mus['linha'].get('faixa')!r} {melhor_mus['solto']:.2f})" if melhor_mus else ""),
+            + (
+                f" (mais perto: {melhor_mus['linha'].get('faixa')!r} {melhor_mus['solto']:.2f})"
+                if melhor_mus
+                else ""
+            ),
         ),
         (
             (bool(na_versao) if no_album else None),
             "Versão",
-            "mesma versão" if na_versao else (
-                "só em outra versão" if no_album else "(só vale se a música estiver no álbum certo)"
+            "mesma versão"
+            if na_versao
+            else (
+                "só em outra versão"
+                if no_album
+                else "(só vale se a música estiver no álbum certo)"
             ),
         ),
         (
             (bool(no_tipo) if na_versao else None),
             "Tipo",
-            "single x álbum compatível" if no_tipo else (
-                "tipo diferente do Qobuz" if na_versao else "(só vale se a versão bater)"
+            "single x álbum compatível"
+            if no_tipo
+            else (
+                "tipo diferente do Qobuz"
+                if na_versao
+                else "(só vale se a versão bater)"
             ),
         ),
     ]
@@ -260,28 +294,42 @@ def analisar(trace, url, motivo, artista, album, faixa, tipo=None) -> dict:
     # ---- veredito ----
     if url:
         tem_aceito = any(e.get("type") == "accept" for e in trace or [])
-        via = (
-            "busca por texto" if tem_aceito else "identificador exato (UPC/ISRC)"
-        )
+        via = "busca por texto" if tem_aceito else "identificador exato (UPC/ISRC)"
         cand = next(
             (e["label"] for e in reversed(trace or []) if e.get("type") == "accept"), ""
         )
-        return {**base, "veredito": "troca", "por_que": [f"Aceita por {via}." + (f" Candidato: {cand}" if cand else "")]}
+        return {
+            **base,
+            "veredito": "troca",
+            "por_que": [f"Aceita por {via}." + (f" Candidato: {cand}" if cand else "")],
+        }
 
-    erros_de_rede = "erros de rede" in (motivo or "") or "sem resposta" in (motivo or "")
+    erros_de_rede = "erros de rede" in (motivo or "") or "sem resposta" in (
+        motivo or ""
+    )
     if not linhas:
         return {
             **base,
             "veredito": "rede" if erros_de_rede else "nao_tem",
             "por_que": [
                 "A Apple não devolveu NENHUM resultado "
-                + ("(houve erro de rede/limite)." if erros_de_rede else "para as consultas feitas.")
+                + (
+                    "(houve erro de rede/limite)."
+                    if erros_de_rede
+                    else "para as consultas feitas."
+                )
             ],
         }
 
     if parecidas:
         melhor = max(
-            parecidas, key=lambda n: (n["alb_ok"], n["mesma_versao"], n["estrito"] >= LIM_TITULO, n["solto"])
+            parecidas,
+            key=lambda n: (
+                n["alb_ok"],
+                n["mesma_versao"],
+                n["estrito"] >= LIM_TITULO,
+                n["solto"],
+            ),
         )
         l = melhor["linha"]
         if not melhor["alb_ok"]:
@@ -309,14 +357,18 @@ def analisar(trace, url, motivo, artista, album, faixa, tipo=None) -> dict:
                 "Recusada sem motivo registrado: " + (motivo or "?")
             ]
             nq, na = melhor["norm"]
-            por_que.append(f"norm do título: Qobuz {nq!r} ↔ Apple {na!r}  ({melhor['estrito']:.2f})")
+            por_que.append(
+                f"norm do título: Qobuz {nq!r} ↔ Apple {na!r}  ({melhor['estrito']:.2f})"
+            )
             base["norm"] = (nq, na)
             base["motivos"] = motivos
     else:
         quase = [
             n
             for n in notas_musica
-            if n["art_ok"] and n["alb_ok"] and LIM_TITULO_PARECIDO <= n["solto"] < LIM_TITULO
+            if n["art_ok"]
+            and n["alb_ok"]
+            and LIM_TITULO_PARECIDO <= n["solto"] < LIM_TITULO
         ]
         if quase:
             n = max(quase, key=lambda n: n["solto"])
@@ -328,7 +380,9 @@ def analisar(trace, url, motivo, artista, album, faixa, tipo=None) -> dict:
         else:
             veredito = "nao_tem"
             parecida = max(
-                (n for n in notas_musica), key=lambda n: (n["solto"], n["art"]), default=None
+                (n for n in notas_musica),
+                key=lambda n: (n["solto"], n["art"]),
+                default=None,
             )
             por_que = [
                 f"Nenhum dos {len(linhas)} resultados tem o artista {artista!r} "
@@ -341,7 +395,9 @@ def analisar(trace, url, motivo, artista, album, faixa, tipo=None) -> dict:
                 )
 
     if erros_de_rede and veredito in ("nao_tem", "titulo"):
-        por_que.append("ATENÇÃO: houve erro de rede; a lista da Apple pode estar incompleta.")
+        por_que.append(
+            "ATENÇÃO: houve erro de rede; a lista da Apple pode estar incompleta."
+        )
         veredito = "rede"
     return {**base, "veredito": veredito, "por_que": por_que}
 
@@ -350,9 +406,16 @@ def evidencias(trace, artista, album, faixa, maximo=8) -> list:
     """Os resultados da Apple mais próximos do pedido (para ver o que ela devolveu)."""
     # Só músicas: as linhas de "álbum" não dizem nada sobre a faixa.
     notas = [
-        _medir(r, artista, album, faixa) for r in linhas_da_apple(trace) if r.get("faixa")
+        _medir(r, artista, album, faixa)
+        for r in linhas_da_apple(trace)
+        if r.get("faixa")
     ]
-    notas.sort(key=lambda n: (-(n["art"] + n["solto"] + n["alb"]), n["linha"].get("faixa") or ""))
+    notas.sort(
+        key=lambda n: (
+            -(n["art"] + n["solto"] + n["alb"]),
+            n["linha"].get("faixa") or "",
+        )
+    )
     saida = []
     for n in notas[:maximo]:
         saida.append(
@@ -404,8 +467,17 @@ class ClienteComPausa:
         await self._real.aclose()
 
 
-async def diagnosticar(sessao, artista, album, faixa, upc=None, isrc=None, tipo=None,
-                       paises=None, lojas_extras=False) -> dict:
+async def diagnosticar(
+    sessao,
+    artista,
+    album,
+    faixa,
+    upc=None,
+    isrc=None,
+    tipo=None,
+    paises=None,
+    lojas_extras=False,
+) -> dict:
     sessao._apple_json_cache = {}  # cache interno POR FAIXA (ver ClienteComPausa)
     trace = []
     try:
@@ -588,12 +660,17 @@ def blocos(item: dict, diag: dict, ordem: str, tipo) -> list:
     ev = evidencias(diag["trace"], item["artista"], item["album"], item["faixa"], 8)
     if ev and diag["veredito"] != "troca":
         sai.append(
-            (f"        A Apple devolveu {diag['n_resultados']} resultado(s); os mais próximos:", False)
+            (
+                f"        A Apple devolveu {diag['n_resultados']} resultado(s); os mais próximos:",
+                False,
+            )
         )
         # 3 na tela; o relatório (.txt) guarda 8.
         sai += [(f"          - {e}", i >= 3) for i, e in enumerate(ev)]
     if diag.get("motivo") and diag["veredito"] != "troca":
-        sai.append((f"        Motivo bruto do get_apple_hq_cover: {diag['motivo']}", True))
+        sai.append(
+            (f"        Motivo bruto do get_apple_hq_cover: {diag['motivo']}", True)
+        )
     sai.append(("", False))
     return sai
 
@@ -614,8 +691,12 @@ async def executar(args) -> int:
             (
                 None,
                 {
-                    "artista": artista, "album": album, "faixa": faixa,
-                    "isrc": args.isrc or "", "upc": args.upc or "", "total": total or "",
+                    "artista": artista,
+                    "album": album,
+                    "faixa": faixa,
+                    "isrc": args.isrc or "",
+                    "upc": args.upc or "",
+                    "total": total or "",
                 },
             )
         )
@@ -628,7 +709,9 @@ async def executar(args) -> int:
             try:
                 pasta = pasta_padrao()
             except Exception as exc:
-                print(f"Não consegui descobrir a pasta de downloads ({exc}). Informe a PASTA.")
+                print(
+                    f"Não consegui descobrir a pasta de downloads ({exc}). Informe a PASTA."
+                )
                 return 1
             print(f"Usando a pasta de downloads do config.ini: {pasta}")
         if not os.path.isdir(pasta):
@@ -649,10 +732,15 @@ async def executar(args) -> int:
             vistos.add(chave)
             itens.append((os.path.relpath(caminho, pasta), tags))
         if not itens:
-            print("Nenhuma faixa com tags encontrada" + (" para esse --filtro." if args.filtro else "."))
+            print(
+                "Nenhuma faixa com tags encontrada"
+                + (" para esse --filtro." if args.filtro else ".")
+            )
             return 1
     else:
-        print('Use: apple_porque.py  |  apple_porque.py PASTA  |  apple_porque.py "Artista" "Álbum" "Faixa"')
+        print(
+            'Use: apple_porque.py  |  apple_porque.py PASTA  |  apple_porque.py "Artista" "Álbum" "Faixa"'
+        )
         return 2
 
     if args.limite:
@@ -667,26 +755,50 @@ async def executar(args) -> int:
             "faixas com UPC/ISRC reconhecido terminam rápido."
         )
         saida.linha("")
-        cliente = ClienteComPausa(make_client(follow_redirects=True), args.pausa,
-                                  aviso=lambda m: saida.linha(m))
+        cliente = ClienteComPausa(
+            make_client(follow_redirects=True),
+            args.pausa,
+            aviso=lambda m: saida.linha(m),
+        )
         try:
             for n, (caminho, tags) in enumerate(itens, 1):
-                tipo = tipo_fixo if len(alvo) == 3 else tipo_do_lancamento(tags["album"], tags["total"])
+                tipo = (
+                    tipo_fixo
+                    if len(alvo) == 3
+                    else tipo_do_lancamento(tags["album"], tags["total"])
+                )
                 try:
                     diag = await diagnosticar(
-                        cliente, tags["artista"], tags["album"], tags["faixa"],
-                        upc=tags["upc"] or None, isrc=tags["isrc"] or None,
-                        tipo=tipo, paises=paises, lojas_extras=args.lojas_extras,
+                        cliente,
+                        tags["artista"],
+                        tags["album"],
+                        tags["faixa"],
+                        upc=tags["upc"] or None,
+                        isrc=tags["isrc"] or None,
+                        tipo=tipo,
+                        paises=paises,
+                        lojas_extras=args.lojas_extras,
                     )
                 except KeyboardInterrupt:
                     raise
                 contagem[diag["veredito"]] = contagem.get(diag["veredito"], 0) + 1
                 linhas_csv.append(
-                    [caminho or "", tags["artista"], tags["album"], tags["faixa"],
-                     tags["isrc"], tags["upc"], diag["veredito"], " | ".join(diag["por_que"])]
+                    [
+                        caminho or "",
+                        tags["artista"],
+                        tags["album"],
+                        tags["faixa"],
+                        tags["isrc"],
+                        tags["upc"],
+                        diag["veredito"],
+                        " | ".join(diag["por_que"]),
+                    ]
                 )
                 if args.so_problemas and diag["veredito"] == "troca":
-                    saida.linha(f"[{n}/{len(itens)}] TROCARIA  {tags['artista']} - {tags['faixa']}", detalhe=True)
+                    saida.linha(
+                        f"[{n}/{len(itens)}] TROCARIA  {tags['artista']} - {tags['faixa']}",
+                        detalhe=True,
+                    )
                     continue
                 for texto, detalhe in blocos(tags, diag, f"[{n}/{len(itens)}]", tipo):
                     saida.linha(texto, detalhe=detalhe)
@@ -699,11 +811,24 @@ async def executar(args) -> int:
         for chave, (nome, descricao) in VEREDITOS.items():
             if contagem.get(chave):
                 saida.linha(f"  {contagem[chave]:>4}  {nome:<13} {descricao}")
-        saida.linha(f"\nRelatório completo (com o 'O que fazer' e os resultados da Apple): {destino}")
+        saida.linha(
+            f"\nRelatório completo (com o 'O que fazer' e os resultados da Apple): {destino}"
+        )
         if args.csv and linhas_csv:
             with open(args.csv, "w", newline="", encoding="utf-8") as fh:
                 w = csv.writer(fh)
-                w.writerow(["arquivo", "artista", "album", "faixa", "isrc", "upc", "veredito", "por_que"])
+                w.writerow(
+                    [
+                        "arquivo",
+                        "artista",
+                        "album",
+                        "faixa",
+                        "isrc",
+                        "upc",
+                        "veredito",
+                        "por_que",
+                    ]
+                )
                 w.writerows(linhas_csv)
             saida.linha(f"CSV salvo em {args.csv}")
     return 0
@@ -712,21 +837,40 @@ async def executar(args) -> int:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(
         description="Explica por que a capa Apple não seria trocada.",
-        epilog='Exemplos:  apple_porque.py   |   apple_porque.py PASTA   |   '
+        epilog="Exemplos:  apple_porque.py   |   apple_porque.py PASTA   |   "
         'apple_porque.py "Artista" "Álbum" "Faixa"',
     )
-    ap.add_argument("alvo", nargs="*", help='(nada) = pasta do config.ini | PASTA | "Artista" "Álbum" "Faixa"')
-    ap.add_argument("--filtro", help="só faixas cujo caminho/artista/título contém este texto")
-    ap.add_argument("--so-problemas", action="store_true", help="não detalha as que trocariam")
+    ap.add_argument(
+        "alvo",
+        nargs="*",
+        help='(nada) = pasta do config.ini | PASTA | "Artista" "Álbum" "Faixa"',
+    )
+    ap.add_argument(
+        "--filtro", help="só faixas cujo caminho/artista/título contém este texto"
+    )
+    ap.add_argument(
+        "--so-problemas", action="store_true", help="não detalha as que trocariam"
+    )
     ap.add_argument("--limite", type=int, default=0, help="máx. de faixas (0 = todas)")
-    ap.add_argument("--lojas-extras", action="store_true",
-                    help="se br/us não resolverem, tenta gb, ca, au, de, fr, es, mx, jp")
-    ap.add_argument("--paises", default="br,us", help="lojas principais (padrão: br,us)")
-    ap.add_argument("--pausa", type=float, default=3.5, help="segundos entre consultas à Apple")
+    ap.add_argument(
+        "--lojas-extras",
+        action="store_true",
+        help="se br/us não resolverem, tenta gb, ca, au, de, fr, es, mx, jp",
+    )
+    ap.add_argument(
+        "--paises", default="br,us", help="lojas principais (padrão: br,us)"
+    )
+    ap.add_argument(
+        "--pausa", type=float, default=3.5, help="segundos entre consultas à Apple"
+    )
     ap.add_argument("--saida", metavar="ARQ.txt", help="onde gravar o relatório")
     ap.add_argument("--csv", metavar="ARQ.csv", help="também salva uma tabela")
     # só no modo "uma faixa":
-    ap.add_argument("--tipo", choices=("single", "album"), help="(uma faixa) tipo do lançamento no Qobuz")
+    ap.add_argument(
+        "--tipo",
+        choices=("single", "album"),
+        help="(uma faixa) tipo do lançamento no Qobuz",
+    )
     ap.add_argument("--isrc", help="(uma faixa) ISRC do Qobuz")
     ap.add_argument("--upc", help="(uma faixa) UPC do Qobuz")
     args = ap.parse_args(argv)

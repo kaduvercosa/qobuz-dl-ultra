@@ -183,7 +183,9 @@ def comparar_campo(campo: str, qobuz: str, apple: str) -> dict:
         score = score_artista(qobuz, apple)
         limite = THRESH["artist"]
         if not nq:
-            avisos.append("Qobuz normaliza para VAZIO: artista aprovado automaticamente")
+            avisos.append(
+                "Qobuz normaliza para VAZIO: artista aprovado automaticamente"
+            )
     elif campo == "album":
         nq, na = extrair_essencia(qobuz), extrair_essencia(apple)
         score = _ratio(nq, na) if nq else 1.0
@@ -267,7 +269,7 @@ CASOS = [
     ("aspas", "track", "Don\u2019t Stop", "Don't Stop"),
     ("aspas", "track", "I\u2019m", "I'm"),
     ("aspas", "track", "I\u2019m Yours", "I'm Yours"),
-    ("aspas", "track", "\u201cAspas\u201d", "\"Aspas\""),
+    ("aspas", "track", "\u201cAspas\u201d", '"Aspas"'),
     ("travess\u00f5es", "track", "Anti\u2013Her\u00f3i", "Anti-Her\u00f3i"),
     ("travess\u00f5es", "track", "Faixa \u2014 Remix", "Faixa - Remix"),
     ("& e and", "artist", "Simon & Garfunkel", "Simon and Garfunkel"),
@@ -291,12 +293,34 @@ CASOS = [
     ("s\u00edmbolos", "artist", "Panic! at the Disco", "Panic at the Disco"),
     ("s\u00edmbolos", "track", "\u00bfQu\u00e9 Pasa?", "Que Pasa"),
     ("s\u00edmbolos", "artist", "t.A.T.u.", "tATu"),
-    ("n\u00e3o latino", "artist", "\u5b87\u591a\u7530\u30d2\u30ab\u30eb", "Utada Hikaru"),
-    ("n\u00e3o latino", "artist", "\u5b87\u591a\u7530\u30d2\u30ab\u30eb", "\u690e\u540d\u6797\u6a8e", False),  # artistas DIFERENTES
-    ("n\u00e3o latino", "track", "\u591c\u306b\u99c6\u3051\u308b", "\u7fa4\u9752", False),  # faixas DIFERENTES
+    (
+        "n\u00e3o latino",
+        "artist",
+        "\u5b87\u591a\u7530\u30d2\u30ab\u30eb",
+        "Utada Hikaru",
+    ),
+    (
+        "n\u00e3o latino",
+        "artist",
+        "\u5b87\u591a\u7530\u30d2\u30ab\u30eb",
+        "\u690e\u540d\u6797\u6a8e",
+        False,
+    ),  # artistas DIFERENTES
+    (
+        "n\u00e3o latino",
+        "track",
+        "\u591c\u306b\u99c6\u3051\u308b",
+        "\u7fa4\u9752",
+        False,
+    ),  # faixas DIFERENTES
     ("n\u00e3o latino", "artist", "\u041a\u0438\u043d\u043e", "Kino"),
     ("n\u00e3o latino", "artist", "\ubc29\ud0c4\uc18c\ub144\ub2e8", "BTS"),
-    ("n\u00e3o latino", "artist", "Utada Hikaru", "\u5b87\u591a\u7530\u30d2\u30ab\u30eb"),
+    (
+        "n\u00e3o latino",
+        "artist",
+        "Utada Hikaru",
+        "\u5b87\u591a\u7530\u30d2\u30ab\u30eb",
+    ),
     ("n\u00e3o latino", "album", "First Love", "\u521d\u604b"),
     ("vers\u00f5es", "track", "Ressaca (Ao Vivo)", "Ressaca - Ao Vivo"),
     ("vers\u00f5es", "track", "Ressaca (Ao Vivo)", "Ressaca", False),
@@ -308,7 +332,12 @@ CASOS = [
     ("vers\u00f5es", "album_full", "After Hours (Explicit)", "After Hours"),
     ("vers\u00f5es", "album_full", "Planet Her (Explicit)", "Planet Her"),
     ("vers\u00f5es", "album_full", "Dawn FM (Explicit)", "Dawn FM"),
-    ("vers\u00f5es", "album_full", "Beauty Behind The Madness (Explicit Version)", "Beauty Behind the Madness"),
+    (
+        "vers\u00f5es",
+        "album_full",
+        "Beauty Behind The Madness (Explicit Version)",
+        "Beauty Behind the Madness",
+    ),
     ("vers\u00f5es", "album_full", "Lobos", "Lobos - Single"),
     ("vers\u00f5es", "album_full", "Lobos (Deluxe)", "Lobos", False),
 ]
@@ -336,7 +365,9 @@ def cmd_selftest(args) -> int:
             grupo_atual = grupo
         imprimir_comparacao(res, q, a, esperado=esperado)
     ambos(f"\nTotal: {total} casos")
-    ambos(f"  BUG rejeita o par certo : {bugs_rejeita}  (capa certa deixaria de ser trocada)")
+    ambos(
+        f"  BUG rejeita o par certo : {bugs_rejeita}  (capa certa deixaria de ser trocada)"
+    )
     ambos(f"  BUG aprova o par errado : {bugs_aprova}  (risco de capa errada)")
     ambos(f"  texto virou VAZIO       : {vazios}  (comparação anulada)")
     return 0
@@ -442,10 +473,15 @@ def chave_ordem(info: dict, faixa: str):
 # --------------------------------------------------------------------------
 def cmd_live(args) -> int:
     paises = [p.strip() for p in args.paises.split(",") if p.strip()]
-    print(f"Qobuz (digitado): artista={args.artista!r} álbum={args.album!r} faixa={args.faixa!r}")
+    print(
+        f"Qobuz (digitado): artista={args.artista!r} álbum={args.album!r} faixa={args.faixa!r}"
+    )
     cands, erros = candidatos_apple(
-        limpar_tag(args.artista), limpar_tag(args.album), limpar_tag(args.faixa),
-        paises, args.limite,
+        limpar_tag(args.artista),
+        limpar_tag(args.album),
+        limpar_tag(args.faixa),
+        paises,
+        args.limite,
     )
     if not cands:
         ambos("Apple não devolveu resultados (ou a rede falhou).")
@@ -523,7 +559,11 @@ def pastas_com_audio(raizes, maximo=8) -> list:
             if pasta in achadas:
                 continue
             n = (
-                sum(1 for x in os.listdir(pasta) if x.lower().endswith((".flac", ".mp3")))
+                sum(
+                    1
+                    for x in os.listdir(pasta)
+                    if x.lower().endswith((".flac", ".mp3"))
+                )
                 if pasta == raiz
                 else _contar_audios(pasta)
             )
@@ -542,7 +582,9 @@ def cmd_onde(args) -> int:
     try:
         pasta, cfg = pasta_padrao()
         print(f"config.ini        : {cfg}")
-        print(f"pasta de downloads: {pasta}  ({'existe' if os.path.isdir(pasta) else 'NÃO existe'})")
+        print(
+            f"pasta de downloads: {pasta}  ({'existe' if os.path.isdir(pasta) else 'NÃO existe'})"
+        )
     except Exception as exc:
         print(f"Não consegui ler o config.ini: {exc}")
         pasta = None
@@ -551,18 +593,22 @@ def cmd_onde(args) -> int:
     print("\nPastas com .flac/.mp3 encontradas (HOME, Documents e pasta atual):")
     achadas = pastas_com_audio(raizes)
     if not achadas:
-        print("  nenhuma. Confira com `pwd` e `ls`, ou use o caminho que o app mostra ao baixar.")
+        print(
+            "  nenhuma. Confira com `pwd` e `ls`, ou use o caminho que o app mostra ao baixar."
+        )
         return 1
     for caminho, n in achadas:
         print(f"  {n:>5} arquivos  {caminho}")
-    print("\nUse: python tools/apple_text_compare.py scan \"CAMINHO\"")
+    print('\nUse: python tools/apple_text_compare.py scan "CAMINHO"')
     return 0
 
 
 # --------------------------------------------------------------------------
 # scan
 # --------------------------------------------------------------------------
-_ESPECIAIS = set("&\u2019\u2018\u201c\u201d\u2013\u2014\u2026/!$@#*:+\u00bf\u00a1\u00b7")
+_ESPECIAIS = set(
+    "&\u2019\u2018\u201c\u201d\u2013\u2014\u2026/!$@#*:+\u00bf\u00a1\u00b7"
+)
 
 
 def tem_texto_dificil(*textos) -> bool:
@@ -616,7 +662,9 @@ def cmd_scan(args) -> int:
     arquivos = achar_audios(pasta)
     if not arquivos:
         ambos(f"Nenhum .flac/.mp3 em {pasta}")
-        ambos("Rode `python tools/apple_text_compare.py onde` para procurar a pasta certa.")
+        ambos(
+            "Rode `python tools/apple_text_compare.py onde` para procurar a pasta certa."
+        )
         return 1
     paises = [p.strip() for p in args.paises.split(",") if p.strip()]
     linhas_csv, analisados, rejeitados, inconclusivos = [], 0, 0, 0
@@ -634,7 +682,9 @@ def cmd_scan(args) -> int:
             continue
         vistos.add((artista, album, titulo))
         if analisados >= args.limite:
-            ambos(f"\n(limite de {args.limite} faixas atingido; use --limite para mais)")
+            ambos(
+                f"\n(limite de {args.limite} faixas atingido; use --limite para mais)"
+            )
             break
         analisados += 1
         print(f"\n### {os.path.relpath(caminho, pasta)}")
@@ -648,7 +698,10 @@ def cmd_scan(args) -> int:
             todos_cands += cands
             if cands:
                 atual = min(
-                    (comparar_candidato(artista, album, titulo, r) for r in todos_cands),
+                    (
+                        comparar_candidato(artista, album, titulo, r)
+                        for r in todos_cands
+                    ),
                     key=lambda i: chave_ordem(i, titulo),
                 )
                 melhor = atual
@@ -658,12 +711,16 @@ def cmd_scan(args) -> int:
         if melhor is None:
             if erros:
                 inconclusivos += 1
-                print(f"  => INCONCLUSIVO: {erros} consulta(s) falharam (rede/limite da Apple)")
+                print(
+                    f"  => INCONCLUSIVO: {erros} consulta(s) falharam (rede/limite da Apple)"
+                )
                 veredito = "inconclusivo"
             else:
                 print("  Apple: sem resultados")
                 veredito = "sem resultados"
-            linhas_csv.append([caminho, artista, album, titulo, "", "", "", veredito, ""])
+            linhas_csv.append(
+                [caminho, artista, album, titulo, "", "", "", veredito, ""]
+            )
             resumo(f"[{analisados}] {veredito.upper():<14} {artista} - {titulo}")
             continue
         a_art, a_alb, a_trk = melhor["apple"]
@@ -689,7 +746,17 @@ def cmd_scan(args) -> int:
             veredito = "rejeitaria"
             print("  => REJEITARIA: " + ", ".join(problemas))
         linhas_csv.append(
-            [caminho, artista, album, titulo, a_art, a_alb, a_trk, veredito, "; ".join(problemas)]
+            [
+                caminho,
+                artista,
+                album,
+                titulo,
+                a_art,
+                a_alb,
+                a_trk,
+                veredito,
+                "; ".join(problemas),
+            ]
         )
         resumo(
             f"[{analisados}] {veredito.upper():<14} {artista} - {titulo}"
@@ -702,8 +769,19 @@ def cmd_scan(args) -> int:
     if args.csv and linhas_csv:
         with open(args.csv, "w", newline="", encoding="utf-8") as fh:
             w = csv.writer(fh)
-            w.writerow(["arquivo", "q_artista", "q_album", "q_titulo",
-                        "a_artista", "a_album", "a_faixa", "veredito", "problemas"])
+            w.writerow(
+                [
+                    "arquivo",
+                    "q_artista",
+                    "q_album",
+                    "q_titulo",
+                    "a_artista",
+                    "a_album",
+                    "a_faixa",
+                    "veredito",
+                    "problemas",
+                ]
+            )
             w.writerows(linhas_csv)
         ambos(f"CSV salvo em {args.csv}")
     return 0
@@ -727,8 +805,11 @@ def main(argv=None) -> int:
     )
 
     st = sub.add_parser("selftest", help="casos típicos, offline", parents=[comum])
-    st.add_argument("--so-falhas", action="store_true",
-                    help="mostra só falhas e avisos de texto vazio")
+    st.add_argument(
+        "--so-falhas",
+        action="store_true",
+        help="mostra só falhas e avisos de texto vazio",
+    )
     st.set_defaults(fn=cmd_selftest)
 
     lv = sub.add_parser("live", help="compara com a Apple de verdade", parents=[comum])
@@ -742,12 +823,17 @@ def main(argv=None) -> int:
 
     sc = sub.add_parser("scan", help="varre uma pasta já baixada", parents=[comum])
     sc.add_argument("pasta", nargs="?", help="padrão: pasta de downloads do config.ini")
-    sc.add_argument("--todos", action="store_true",
-                    help="inclui faixas sem acento/símbolo (padrão: só as 'difíceis')")
+    sc.add_argument(
+        "--todos",
+        action="store_true",
+        help="inclui faixas sem acento/símbolo (padrão: só as 'difíceis')",
+    )
     sc.add_argument("--limite", type=int, default=20, help="máx. de faixas analisadas")
     sc.add_argument("--consulta", type=int, default=10, help="resultados por consulta")
     sc.add_argument("--paises", default="br,us")
-    sc.add_argument("--pausa", type=float, default=3.5, help="segundos entre CONSULTAS à Apple")
+    sc.add_argument(
+        "--pausa", type=float, default=3.5, help="segundos entre CONSULTAS à Apple"
+    )
     sc.add_argument("--csv", help="salva o resultado em CSV")
     sc.set_defaults(fn=cmd_scan)
 

@@ -427,8 +427,10 @@ async def _decide_album_cover(
                 votes[found[0]] = votes.get(found[0], 0) + 1
 
         ranked = sorted(votes.items(), key=lambda pair: -pair[1])
-        if ranked and ranked[0][1] >= 2 and (
-            len(ranked) == 1 or ranked[0][1] > ranked[1][1]
+        if (
+            ranked
+            and ranked[0][1] >= 2
+            and (len(ranked) == 1 or ranked[0][1] > ranked[1][1])
         ):
             decision.update(
                 url=ranked[0][0],
@@ -975,7 +977,9 @@ async def retag_directory(directory_path, client, settings, covers_only=False):
                         )
                     else:
                         cover_outcome = "download_failed"
-                        cover_status = "a imagem encontrada na Apple não pôde ser baixada"
+                        cover_status = (
+                            "a imagem encontrada na Apple não pôde ser baixada"
+                        )
                         stats["apple_failed"] += 1
 
                 else:
@@ -991,7 +995,9 @@ async def retag_directory(directory_path, client, settings, covers_only=False):
                         cover_status = f"capa baixada ({size_kib} KiB)"
                     else:
                         cover_outcome = "download_failed"
-                        cover_status = "a imagem encontrada na Apple não pôde ser baixada"
+                        cover_status = (
+                            "a imagem encontrada na Apple não pôde ser baixada"
+                        )
                         stats["apple_failed"] += 1
 
             except Exception as exc:
@@ -1162,14 +1168,39 @@ async def retag_directory(directory_path, client, settings, covers_only=False):
         ui.emit("")
         ui.emit(f"{CYAN} Resumo:{RESET}")
         for text_label, key, color_on, explanation in (
-            ("Arquivos analisados", "total", None, "faixas .flac/.mp3 encontradas na pasta"),
+            (
+                "Arquivos analisados",
+                "total",
+                None,
+                "faixas .flac/.mp3 encontradas na pasta",
+            ),
             ("Atualizados", "updated", GREEN, "faixas com tags e/ou capa alteradas"),
             ("Já corretos", "unchanged", None, "faixas que já estavam como deveriam"),
-            ("Sem ID Qobuz", "no_id", YELLOW, "sem ID nas tags: não dá para corrigir sozinho"),
+            (
+                "Sem ID Qobuz",
+                "no_id",
+                YELLOW,
+                "sem ID nas tags: não dá para corrigir sozinho",
+            ),
             ("Não encontrados", "not_found", YELLOW, "ID não encontrado na Qobuz"),
-            ("Capas Apple embutidas", "apple_embedded", GREEN, "faixas que receberam a capa da Apple"),
-            ("Capas Apple não encontradas", "apple_not_found", YELLOW, "sem capa válida na Apple (capa atual mantida)"),
-            ("Falhas na etapa Apple", "apple_failed", YELLOW, "capa achada, mas o download/gravação falhou"),
+            (
+                "Capas Apple embutidas",
+                "apple_embedded",
+                GREEN,
+                "faixas que receberam a capa da Apple",
+            ),
+            (
+                "Capas Apple não encontradas",
+                "apple_not_found",
+                YELLOW,
+                "sem capa válida na Apple (capa atual mantida)",
+            ),
+            (
+                "Falhas na etapa Apple",
+                "apple_failed",
+                YELLOW,
+                "capa achada, mas o download/gravação falhou",
+            ),
             ("Erros", "errors", RED, "falhas ao consultar o Qobuz ou gravar tags"),
         ):
             value = stats[key]
