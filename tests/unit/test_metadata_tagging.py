@@ -531,8 +531,7 @@ def _item_tyler(**overrides):
     base = dict(
         performer={"name": "Tyler, The Creator"},
         performers=(
-            "Tyler, The Creator, MainArtist, Composer - "
-            "Kali Uchis, FeaturedArtist"
+            "Tyler, The Creator, MainArtist, Composer - Kali Uchis, FeaturedArtist"
         ),
         composer={"name": "Tyler, The Creator"},
     )
@@ -605,7 +604,7 @@ class TestNomesComVirgula:
         assert saida["COMPOSER"] == ["Tyler, The Creator"]
 
     def test_artistsort_nao_quebra_artigo_nem_nome(self):
-        """"The Weeknd" vira "Weeknd, The" (um valor só), não dois valores."""
+        """ "The Weeknd" vira "Weeknd, The" (um valor só), não dois valores."""
         saida = {}
         item = _item(
             performer={"name": "The Weeknd"},

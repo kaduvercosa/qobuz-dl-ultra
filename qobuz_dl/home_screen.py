@@ -215,7 +215,9 @@ def _painel_comandos_largo(cmds: list, largura: int, st: _Estilo) -> list:
         dir_ = [st.mudo(x) for x in _quebrar(f"{PROG} {c['uso']}", w_dir)]
         if c["exemplo"]:
             ex = _quebrar(f"{PROG} {c['exemplo']}", w_dir - 4)
-            dir_ += [(st.neg("ex: ") if i == 0 else "    ") + x for i, x in enumerate(ex)]
+            dir_ += [
+                (st.neg("ex: ") if i == 0 else "    ") + x for i, x in enumerate(ex)
+            ]
         bloco = []
         for i in range(max(len(esq), len(dir_))):
             col1 = st.dest(c["nome"].ljust(w_cmd)) if i == 0 else " " * w_cmd
@@ -296,9 +298,16 @@ def _painel_dicas(largura: int, st: _Estilo) -> list:
     return _painel("Dicas", _com_separadores(blocos), largura, st)
 
 
-def render_home(comandos, flags=(), largura: int = None, cor: bool = True,
-                destaque: str = "\033[36m", mudo: str = "\033[2m",
-                reset: str = "\033[0m", negrito: str = "\033[1m") -> str:
+def render_home(
+    comandos,
+    flags=(),
+    largura: int = None,
+    cor: bool = True,
+    destaque: str = "\033[36m",
+    mudo: str = "\033[2m",
+    reset: str = "\033[0m",
+    negrito: str = "\033[1m",
+) -> str:
     """Devolve os painéis da tela inicial (sem logo) como string.
 
     comandos: lista de dicts/tuplas (nome, aliases, descrição[, uso[, exemplo]])

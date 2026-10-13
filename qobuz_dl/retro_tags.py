@@ -760,7 +760,9 @@ def _cover_detail_lines(outcome: str, cover_source, detail: str, width: int) -> 
                     lines.extend(wrapped)
             else:
                 lines.extend(_wrap_lines(f"{label}: {body}", indent, width))
-    elif outcome in ("download_failed", "embed_failed", "error", "no_compare") and detail:
+    elif (
+        outcome in ("download_failed", "embed_failed", "error", "no_compare") and detail
+    ):
         lines.extend(_wrap_lines(detail, indent, width))
     return [f"{MUTED}{line}{OFF}" for line in lines]
 
@@ -996,7 +998,9 @@ async def retag_directory(
                     # Modo só tags: a Apple não é consultada e a capa fica como está.
                     cover_status = "não pesquisada (modo só tags)"
 
-                elif not isinstance(apple_cover_url, str) or not apple_cover_url.strip():
+                elif (
+                    not isinstance(apple_cover_url, str) or not apple_cover_url.strip()
+                ):
                     cover_outcome = "not_found"
                     cover_status = (
                         apple_diagnostic or "nenhum candidato passou pelos filtros"
@@ -1068,9 +1072,7 @@ async def retag_directory(
             if cover_path:
                 should_replace, compare_reason = await loop.run_in_executor(
                     None,
-                    functools.partial(
-                        _compare_covers, file_path, cover_path
-                    ),
+                    functools.partial(_compare_covers, file_path, cover_path),
                 )
             else:
                 should_replace, compare_reason = True, None

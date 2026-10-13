@@ -52,7 +52,7 @@ def test_paineis_alinhados(largura):
 @pytest.mark.parametrize("largura", [30, 46, 80, 100])
 def test_linha_horizontal_entre_comandos(largura):
     texto = _render(largura)
-    painel = texto[texto.index("Comandos"):]
+    painel = texto[texto.index("Comandos") :]
     painel = painel[: painel.index("╰")]
     separadores = [l for l in painel.splitlines() if l.strip().startswith("├")]
     assert len(separadores) >= len(_cmds()) - 1

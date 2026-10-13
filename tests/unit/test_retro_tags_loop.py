@@ -562,9 +562,7 @@ class TestPreservacaoDaCapaAtual:
         assert (em_image, caminho, origem) == (False, None, None)
         assert "mantida -- a capa atual já tem resolução igual ou maior" in amb.texto
 
-    def test_comparacao_impossivel_nao_diz_que_a_atual_e_melhor(
-        self, amb, monkeypatch
-    ):
+    def test_comparacao_impossivel_nao_diz_que_a_atual_e_melhor(self, amb, monkeypatch):
         amb.substituir = False
         monkeypatch.setattr(
             retro_tags.metadata, "last_cover_compare_reason", lambda: "unreadable"
