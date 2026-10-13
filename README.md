@@ -149,11 +149,13 @@ cd qobuz-dl-ultra
 pip3 install -r requirements.txt
 ```
 
+> **Recursos opcionais:** o `requirements.txt` e o `pip install qobuz-dl-ultra` trazem só o núcleo. Instale o que precisar: `pip install "qobuz-dl-ultra[covers]"` (Pillow), `[speed]`, `[watch]`, `[genius]`, `[duplicates]`, `[analyze]` ou `[all]` para tudo. O comando `tags` **não depende do Pillow** para comparar capas (lê as dimensões do próprio JPEG/PNG); o Pillow só é usado para recompactar uma capa acima do limite de 16 MB do FLAC. No **a-Shell**, não instale extras: use o que já vem instalado. Rode `qobuz-dl doctor` para ver o que está disponível.
+
 *Execute o programa usando:* `python -m qobuz_dl`
 
 <a name="opcao-c-docker"></a>
 ### Opção C: 🐳 Uso com Docker (NAS e Servidores Caseiros)
-A Edição Ultimate é totalmente conteinerizada e inclui todas as dependências (Python, FFmpeg). Este é o método de instalação recomendado para Synology, QNAP, Unraid e servidores headless.
+A Edição Ultra é totalmente conteinerizada e inclui as dependências (Python, FFmpeg e os extras de capas, velocidade, letras e análise). Este é o método de instalação recomendado para Synology, QNAP, Unraid e servidores headless.
 
 ```bash
 # Baixar a imagem oficial mais recente
@@ -285,6 +287,13 @@ Use a flag `-—multi-tags` para garantir que faixas complexas com múltiplos ar
 python -m qobuz_dl dl “URL” -—multi-tags
 ```
 
+**Artistas com vírgula no nome:**  
+Nomes como `Tyler, The Creator` ou `Earth, Wind & Fire` são reconhecidos e **não** são divididos em dois artistas (nem com `--multi-tags`). Há uma lista embutida e, além dela, qualquer artista que a API do Qobuz entregue como entrada estruturada com vírgula no nome é protegido automaticamente. Para incluir outros, adicione na seção `[qobuz]` do `config.ini` (separados por `;`):
+
+```ini
+artists_with_comma = Tyler, The Creator; Earth, Wind & Fire
+```
+
 **Modo Apenas Metadados e Encarte:**
 Quer completar os metadados da sua biblioteca sem baixar gigabytes de áudio? Este comando busca apenas a arte da capa, gera o encarte com lista de faixas/créditos, baixa os Goodies em PDF oficiais e ignora com segurança todas as faixas de áudio.
 
@@ -345,21 +354,40 @@ A Edição Ultra inclui poderosos gerenciadores de biblioteca local para acompan
   python -m qobuz_dl lyrics “/caminho/para/sua/pasta/local/de/musica”
   ```
 
-* **Correção Retroativa de Tags (`tags`):**
-  Arquivos já baixados com tags erradas, incompletas ou no formato antigo? O comando `tags` varre a pasta **no dispositivo** (o banco de dados não é consultado), lê o ID Qobuz gravado em cada arquivo FLAC/MP3 e regrava as tags de metadados (artista, álbum, compositor, gênero, data, faixa/disco, ISRC, IDs, comentário técnico) exatamente como um download novo faria, respeitando as opções `no_*_tag` do `config.ini`. Letras (`.lrc`) não são alteradas. Você escolhe o formato dos campos multivalorados em cada execução; sem flag, vale o `multi_value_tags` do `config.ini`. Se nenhuma pasta for informada, o comando usa a pasta padrão do `config.ini` (a mesma dos downloads).
+* **Correção Retroativa de Tags (`tags`):**  
+ Arquivos já baixados com tags erradas, incompletas ou no formato antigo? O comando `tags` varre a pasta **no dispositivo** (o banco de dados não é consultado), lê o ID Qobuz gravado em cada arquivo FLAC/MP3 e regrava as tags de metadados (artista, álbum, compositor, gênero, data, faixa/disco, ISRC, IDs, comentário técnico) exatamente como um download novo faria, respeitando as opções `no_*_tag` do `config.ini`. Letras (`.lrc`) não são alteradas.  
+ Você escolhe o formato dos campos multivalorados em cada execução; sem flag, vale o `multi_value_tags` do `config.ini`. Se nenhuma pasta for informada, o comando usa a pasta padrão do `config.ini` (a mesma dos downloads).
 
-  O `tags` também **troca a capa embutida** pela versão em alta resolução da Apple/iTunes, usando as mesmas regras de validação dos downloads (UPC/ISRC primeiro, depois busca por texto com artista, álbum e título compatíveis). Quando a capa é trocada, a origem fica registrada no comentário da faixa (`Capa: Apple/iTunes`). Quando a Apple não tem uma correspondência segura, a capa que já estava no arquivo é preservada e o motivo aparece no log (por exemplo, `artista incompatível` ou `título completo da faixa incompatível`). O resumo final conta `Capas Apple embutidas`, `Capas Apple não encontradas` e `Falhas na etapa Apple`; os arquivos temporários de capa (`.apple-cover-*.jpg`) são apagados logo após cada arquivo.
+  O `tags` também **troca a capa embutida** pela versão em alta resolução da Apple/iTunes, usando as mesmas regras de validação dos downloads (UPC/ISRC primeiro, depois busca por texto com artista, álbum e título compatíveis).  
+  Quando a capa é trocada, a origem fica registrada no comentário da faixa (`Capa: Apple/iTunes`). Quando a Apple não tem uma correspondência segura, a capa que já estava no arquivo é preservada e o motivo aparece no log (por exemplo, `artista incompatível` ou `título completo da faixa incompatível`).  
+  O resumo final conta `Capas Apple embutidas`, `Capas Apple não encontradas` e `Falhas na etapa Apple`; os arquivos temporários de capa (`.apple-cover-*.jpg`) são apagados logo após cada arquivo.
 
-  **Diff das tags alteradas e títulos com sufixo de edição.** Quando as tags de um arquivo mudam, o log lista logo abaixo de `↳ Tags: alteradas` exatamente o que mudou (`+` tag nova, `-` removida, `~ antes → depois`; no `COMMENT`, só as linhas que mudaram). Se a capa atual é mantida, as linhas de capa do comentário (`Capa embutida:`/`Capa:`) são preservadas em vez de apagadas. Na busca por texto da Apple, sufixos que só indicam a edição do álbum — `(Bonus Track)`, `(Deluxe)`, `(Explicit)` — não impedem mais a correspondência (ex.: `Fim Do Mundo` ↔ `Fim do Mundo (Bonus Track)` em `LOBOS (Deluxe)`). Marcadores de outra gravação — `(Ao Vivo)`/`(Live)`, `(Acoustic)`, `(Demo)`, `(Remix)`, `(Instrumental)` — continuam sendo rejeitados, a não ser que o álbum pedido seja do mesmo tipo (um álbum ao vivo na Qobuz aceita a faixa ao vivo da Apple).
+  **Diff das tags alteradas e títulos com sufixo de edição.**  
+  Quando as tags de um arquivo mudam, o log lista logo abaixo de `↳ Tags: alteradas` exatamente o que mudou (`+` tag nova, `-` removida, `~ antes → depois`; no `COMMENT`, só as linhas que mudaram).  
+  Se a capa atual é mantida, as linhas de capa do comentário (`Capa embutida:`/`Capa:`) são preservadas em vez de apagadas. Na busca por texto da Apple, sufixos que só indicam a edição do álbum — `(Bonus Track)`, `(Deluxe)`, `(Explicit)` — não impedem mais a correspondência (ex.: `Fim Do Mundo` ↔ `Fim do Mundo (Bonus Track)` em `LOBOS (Deluxe)`).  
+  Marcadores de outra gravação — `(Ao Vivo)`/`(Live)`, `(Acoustic)`, `(Demo)`, `(Remix)`, `(Instrumental)` — continuam sendo rejeitados, a não ser que o álbum pedido seja do mesmo tipo (um álbum ao vivo na Qobuz aceita a faixa ao vivo da Apple).
 
-  **Busca da capa dentro do álbum certo.** A busca por faixa não decide pelo primeiro resultado: quando ela não traz um candidato idêntico, o `tags` localiza o álbum pedido na Apple (mesmo artista, mesmo nome, mesmo tipo de versão), lista as faixas dele e confere a faixa lá dentro. Todos os candidatos de todas as etapas e países são avaliados e a capa só é escolhida no fim, preferindo o álbum de título idêntico ao pedido (ex.: `Lobos` em vez de `LOBOS (Deluxe)`). Só um candidato perfeito (artista, álbum e título idênticos) encerra a busca mais cedo. As respostas de álbum são reaproveitadas durante a execução, então um álbum inteiro não é consultado uma vez por faixa.
+  **Busca da capa dentro do álbum certo.**  
+  A busca por faixa não decide pelo primeiro resultado: quando ela não traz um candidato idêntico, o `tags` localiza o álbum pedido na Apple (mesmo artista, mesmo nome, mesmo tipo de versão), lista as faixas dele e confere a faixa lá dentro.  
+  Todos os candidatos de todas as etapas e países são avaliados e a capa só é escolhida no fim, preferindo o álbum de título idêntico ao pedido (ex.: `Lobos` em vez de `LOBOS (Deluxe)`).  
+  Só um candidato perfeito (artista, álbum e título idênticos) encerra a busca mais cedo. As respostas de álbum são reaproveitadas durante a execução, então um álbum inteiro não é consultado uma vez por faixa.
 
-  **Somente capas (`-—covers-only`):** não regrava nenhuma tag de metadados. Só troca a imagem embutida (e a origem/tamanho da capa no comentário e em `COVER_SOURCE`) quando a Apple/iTunes tem uma capa validada e de resolução maior; o restante do arquivo fica intacto.
+  **O que alterar: só tags, só capas ou os dois.** Por padrão o `tags` faz as duas coisas. Para escolher:
+
+| Opção | Tags | Capa | Consulta a Apple? |
+| :--- | :--- | :--- | :--- |
+| *(nenhuma)* ou `--both` | regrava | troca quando validada | sim |
+| `--tags-only` | regrava | **não é tocada** (a embutida e as linhas de capa do comentário ficam como estão) | **não** |
+| `--covers-only` | **não é tocada** | troca quando validada e de resolução maior (a origem/tamanho vai para o comentário e para `COVER_SOURCE`) | sim |
+
+  As três opções são excludentes entre si. Em `--tags-only` o log mostra `Modo: SOMENTE TAGS`, a linha `Capa` aparece como `não tocada` e o resumo omite as contagens da Apple.
 
   ```bash
   python -m qobuz_dl tags “/caminho/para/sua/pasta/local/de/musica” --multi-tags
   python -m qobuz_dl tags “/caminho/para/sua/pasta/local/de/musica” --no-multi-tags
+  python -m qobuz_dl tags “/caminho/para/sua/pasta/local/de/musica” --tags-only
   python -m qobuz_dl tags “/caminho/para/sua/pasta/local/de/musica” --covers-only
+  python -m qobuz_dl tags “/caminho/para/sua/pasta/local/de/musica” --both
   ```
 
 * **Limpar Banco de Dados (`-p`, `—purge`):**
@@ -413,7 +441,7 @@ Você pode personalizar profundamente seu `config.ini` ou usar as flags CLI `-ff
 #### 📝 Tabela de Referência de Variáveis Completas
 
 | Categoria / Variável | Descrição | Exemplo de Saída |
-| :---| :--- | :--- |
+| :--- | :--- | :--- |
 | **Artistas & Compositores** | | |
 | `{album_artist}` | O principal artista do álbum (lida com compilações graciosamente). | `Daft Punk` |
 | `{artist}` / `{track_artist}` | O artista performático da faixa específica. | `Pharrell Williams` |

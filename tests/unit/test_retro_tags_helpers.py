@@ -118,6 +118,7 @@ class TestCoverLine:
             ("download_failed", False, "Y"),
             ("embed_failed", False, "Y"),
             ("error", False, "Y"),
+            ("no_compare", False, "Y"),
             ("not_searched", False, "M"),
         ],
     )
@@ -134,6 +135,8 @@ class TestCoverLine:
         assert linha("replaced", True, None)[1].endswith("Apple/iTunes")
         assert "igual ou maior" in linha("kept", False, None)[1]
         assert "capa atual foi mantida" in linha("not_found", False, None)[1]
+        assert "não deu para comparar" in linha("no_compare", False, None)[1]
+        assert "igual ou maior" not in linha("no_compare", False, None)[1]
 
     def test_desfechos_de_atencao(self):
         assert retro_tags._COVER_ATTENTION == {
@@ -141,6 +144,7 @@ class TestCoverLine:
             "download_failed",
             "embed_failed",
             "error",
+            "no_compare",
         }
 
 

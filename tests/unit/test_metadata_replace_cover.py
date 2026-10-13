@@ -239,3 +239,126 @@ class TestImageDimensions:
         Image.new("RGB", (64, 48), "blue").save(caminho, format="JPEG")
         assert metadata._image_dimensions(caminho.read_bytes()) == (64, 48)
         assert os.path.getsize(caminho) > 0
+
+
+# --------------------------------------------------------------------
+# Leitura de dimensões SEM Pillow (a-Shell: Pillow é opcional)
+# --------------------------------------------------------------------
+def _png(w, h):
+    import struct
+
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + struct.pack(">I", 13)
+        + b"IHDR"
+        + struct.pack(">II", w, h)
+        + b"\x08\x02\x00\x00\x00"
+    )
+
+
+def _jpeg(w, h, com_exif=True):
+    import struct
+
+    partes = [b"\xff\xd8"]
+    if com_exif:  # segmento APP1 antes do SOF, como nas capas reais
+        partes.append(b"\xff\xe1" + struct.pack(">H", 8) + b"Exif\x00\x00")
+    partes.append(b"\xff\xc4" + struct.pack(">H", 4) + b"\x00\x00")  # DHT: não é SOF
+    partes.append(
+        b"\xff\xc2"  # SOF2 (progressivo)
+        + struct.pack(">HBHHB", 11, 8, h, w, 1)
+        + b"\x01\x11\x00"
+    )
+    return b"".join(partes) + b"\xff\xd9"
+
+
+class TestDimensoesPeloCabecalho:
+    def test_png(self):
+        assert metadata._dimensions_from_header(_png(3000, 2000)) == (3000, 2000)
+
+    def test_jpeg_pula_exif_e_dht_e_le_o_sof(self):
+        assert metadata._dimensions_from_header(_jpeg(1400, 1400)) == (1400, 1400)
+
+    def test_jpeg_sem_exif(self):
+        dados = _jpeg(600, 400, com_exif=False)
+        assert metadata._dimensions_from_header(dados) == (600, 400)
+
+    def test_gif(self):
+        import struct
+
+        dados = b"GIF89a" + struct.pack("<HH", 40, 30) + b"\x00" * 6
+        assert metadata._dimensions_from_header(dados) == (40, 30)
+
+    def test_webp_vp8x(self):
+        dados = (
+            b"RIFF\x00\x00\x00\x00WEBPVP8X"
+            + b"\x0a\x00\x00\x00"
+            + b"\x00\x00\x00\x00"
+            + (99).to_bytes(3, "little")
+            + (49).to_bytes(3, "little")
+        )
+        assert metadata._dimensions_from_header(dados) == (100, 50)
+
+    @pytest.mark.parametrize(
+        "dados",
+        [
+            b"",
+            None,
+            b"nao-e-imagem-nenhuma",
+            b"\x89PNG\r\n\x1a\ncorrompido",
+            b"\xff\xd8\xff\xd9",  # JPEG sem SOF
+            b"\xff\xd8\xff\xc0\x00\x0b\x08\x00",  # SOF truncado
+            _png(0, 10),  # dimensão inválida
+        ],
+    )
+    def test_invalidos_devolvem_none(self, dados):
+        assert metadata._dimensions_from_header(dados) is None
+
+    def test_image_dimensions_cai_no_cabecalho_sem_pillow(self, monkeypatch):
+        import builtins
+
+        real = builtins.__import__
+
+        def sem_pillow(nome, *a, **kw):
+            if nome == "PIL" or nome.startswith("PIL."):
+                raise ImportError("sem Pillow")
+            return real(nome, *a, **kw)
+
+        monkeypatch.setattr(builtins, "__import__", sem_pillow)
+        assert metadata._image_dimensions(_jpeg(1200, 1200)) == (1200, 1200)
+        assert metadata._image_dimensions(b"lixo") is None
+
+    def test_cabecalho_concorda_com_pillow_quando_ele_existe(self, tmp_path):
+        try:
+            from PIL import Image
+
+            Image.new("RGB", (1, 1))
+        except Exception:
+            pytest.skip("Pillow indisponível neste ambiente")
+        for formato, tamanho in (("JPEG", (321, 123)), ("PNG", (50, 70))):
+            buffer = io.BytesIO()
+            Image.new("RGB", tamanho, "green").save(buffer, format=formato)
+            dados = buffer.getvalue()
+            assert metadata._dimensions_from_header(dados) == tamanho
+
+
+class TestMotivoDaComparacao:
+    def test_candidata_ilegivel_marca_unreadable(self, mundo):
+        assert _decidir("a.flac", mundo.candidata(None)) is False
+        assert metadata.last_cover_compare_reason() == "unreadable"
+
+    def test_capa_atual_ilegivel_marca_unreadable(self, mundo):
+        mundo.flac_pics = [b"atual"]  # sem dims registradas -> None
+        assert _decidir("a.flac", mundo.candidata((100, 100))) is False
+        assert metadata.last_cover_compare_reason() == "unreadable"
+
+    def test_atual_melhor_nao_e_unreadable(self, mundo):
+        mundo.flac_pics = [b"atual"]
+        mundo.dims[b"atual"] = (3000, 3000)
+        assert _decidir("a.flac", mundo.candidata((100, 100))) is False
+        assert metadata.last_cover_compare_reason() is None
+
+    def test_troca_limpa_o_motivo_anterior(self, mundo):
+        _decidir("a.flac", mundo.candidata(None))
+        assert metadata.last_cover_compare_reason() == "unreadable"
+        assert _decidir("a.flac", mundo.candidata((100, 100))) is True
+        assert metadata.last_cover_compare_reason() is None

@@ -7,6 +7,8 @@ import io
 import logging
 import os
 import re
+import struct
+import threading
 import unicodedata
 from typing import Any, Optional
 
@@ -63,6 +65,100 @@ def _split_multi_value(value: str) -> list:
     campo, sem nenhuma separação real).
     """
     return [part.strip() for part in value.split(", ") if part.strip()]
+
+
+# # Nomes que TÊM vírgula no próprio nome. Sem proteção, "Tyler, The Creator"
+# # virava dois artistas ("Tyler" e "The Creator"), porque a API do Qobuz
+# # entrega créditos como texto separado por vírgula ("Nome, Papel, Papel").
+# # Nomes extras podem ser informados em config.ini (artists_with_comma, separados
+# # por ";"); nomes estruturados vindos da própria API (lista "artists") também
+# # são protegidos automaticamente.
+NOMES_COM_VIRGULA = frozenset(
+    {
+        "Tyler, The Creator",
+        "Earth, Wind & Fire",
+        "Crosby, Stills, Nash & Young",
+        "Crosby, Stills & Nash",
+        "Emerson, Lake & Palmer",
+        "Blood, Sweat & Tears",
+        "Peter, Paul and Mary",
+        "Peter, Paul & Mary",
+    }
+)
+
+_PH_ABRE, _PH_FECHA = "", ""
+
+
+def _nomes_protegidos(qobuz_album=None, qobuz_item=None, settings=None) -> list:
+    """Nomes com vírgula que não devem ser quebrados, do mais longo ao mais curto.
+
+    União de: lista embutida, config (settings.artists_with_comma) e nomes de
+    artistas ESTRUTURADOS da API (lista "artists": cada entrada é UMA pessoa/grupo
+    com seus papéis, então uma vírgula ali faz parte do nome). Os campos de texto
+    "artist"/"performer" não entram: neles o Qobuz às vezes junta "A, B" de verdade.
+    """
+    nomes = set(NOMES_COM_VIRGULA)
+    for extra in getattr(settings, "artists_with_comma", None) or ():
+        if isinstance(extra, str) and "," in extra:
+            nomes.add(extra.strip())
+    for fonte in (qobuz_album, qobuz_item):
+        if not isinstance(fonte, dict):
+            continue
+        lista = fonte.get("artists")
+        if not isinstance(lista, list):
+            continue
+        for artista in lista:
+            nome = artista.get("name") if isinstance(artista, dict) else None
+            if isinstance(nome, str) and "," in nome:
+                nomes.add(nome.strip())
+    return sorted(nomes, key=len, reverse=True)
+
+
+def _split_protegido(texto, sep: str, protegidos) -> list:
+    """Como ``texto.split(sep)``, mas sem quebrar nomes protegidos.
+
+    Cada nome protegido (sem diferenciar maiúsculas, só como palavra inteira) é
+    trocado por um marcador antes de quebrar e restaurado depois. Devolve as
+    partes sem espaços nas pontas e sem vazios.
+    """
+    if not texto or not isinstance(texto, str):
+        return []
+    restaurar = {}
+    trabalho = texto
+    for nome in protegidos or ():
+        padrao = re.compile(r"(?<!\w)" + re.escape(nome) + r"(?!\w)", re.IGNORECASE)
+
+        def _troca(m):
+            marcador = f"{_PH_ABRE}{len(restaurar)}{_PH_FECHA}"
+            restaurar[marcador] = m.group(0)
+            return marcador
+
+        trabalho = padrao.sub(_troca, trabalho)
+    partes = []
+    for parte in trabalho.split(sep):
+        parte = parte.strip()
+        for marcador, original in restaurar.items():
+            parte = parte.replace(marcador, original)
+        if parte:
+            partes.append(parte)
+    return partes
+
+
+def _valores_multi(chave: str, valor, multi_out=None):
+    """Lista a gravar numa tag multivalorada (ou None se não é multivalorada).
+
+    Prefere a lista EXATA montada em ``_get_tags_to_add`` (que sabe que
+    "Tyler, The Creator" é um artista só); cai no split por ", " só se não houver
+    lista ou se o texto da tag já não corresponde a ela.
+    """
+    if chave not in MULTI_VALUE_FIELDS or not isinstance(valor, str):
+        return None
+    lista = (multi_out or {}).get(chave)
+    if lista and ", ".join(lista) == valor:
+        return list(lista)
+    if ", " in valor:
+        return _split_multi_value(valor)
+    return None
 
 
 COPYRIGHT, PHON_COPYRIGHT = "\u00a9", "\u2117"
@@ -406,15 +502,97 @@ def _id3_comment_text(audio) -> str:
 
 
 # # Embute a capa no FLAC; se necessário, usa uma cópia recompactada sem alterar cover.jpg.
+def _dimensions_from_header(data):
+    """(largura, altura) lidas só do cabeçalho de JPEG, PNG, GIF ou WebP.
+
+    Python puro, sem Pillow: no a-Shell o Pillow é opcional (usa-se o que já vem
+    instalado) e o comando `tags` não pode deixar de comparar capas por causa
+    dele. Devolve None para dados truncados, corrompidos ou de outro formato.
+    """
+    try:
+        if not data or len(data) < 12:
+            return None
+        if data[:8] == b"\x89PNG\r\n\x1a\n":
+            if len(data) < 24 or data[12:16] != b"IHDR":
+                return None
+            largura, altura = struct.unpack(">II", data[16:24])
+        elif data[:6] in (b"GIF87a", b"GIF89a"):
+            largura, altura = struct.unpack("<HH", data[6:10])
+        elif data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+            tipo = data[12:16]
+            if tipo == b"VP8 " and len(data) >= 30:
+                largura, altura = struct.unpack("<HH", data[26:30])
+                largura, altura = largura & 0x3FFF, altura & 0x3FFF
+            elif tipo == b"VP8L" and len(data) >= 25:
+                b0, b1, b2, b3 = data[21:25]
+                largura = 1 + (((b1 & 0x3F) << 8) | b0)
+                altura = 1 + (((b3 & 0x0F) << 10) | (b2 << 2) | ((b1 & 0xC0) >> 6))
+            elif tipo == b"VP8X" and len(data) >= 30:
+                largura = 1 + int.from_bytes(data[24:27], "little")
+                altura = 1 + int.from_bytes(data[27:30], "little")
+            else:
+                return None
+        elif data[:2] == b"\xff\xd8":
+            i, n = 2, len(data)
+            while i + 4 <= n:
+                if data[i] != 0xFF:
+                    i += 1
+                    continue
+                marcador = data[i + 1]
+                if marcador == 0xFF:
+                    i += 1
+                    continue
+                if marcador in (0x01, 0xD8) or 0xD0 <= marcador <= 0xD7:
+                    i += 2
+                    continue
+                if marcador == 0xD9:
+                    return None
+                tamanho = struct.unpack(">H", data[i + 2 : i + 4])[0]
+                # SOF0..SOF15, exceto DHT (C4), JPG (C8) e DAC (CC).
+                if 0xC0 <= marcador <= 0xCF and marcador not in (0xC4, 0xC8, 0xCC):
+                    if i + 9 > n:
+                        return None
+                    altura, largura = struct.unpack(">HH", data[i + 5 : i + 9])
+                    break
+                i += 2 + tamanho
+            else:
+                return None
+        else:
+            return None
+        if largura > 0 and altura > 0:
+            return (largura, altura)
+    except Exception:
+        return None
+    return None
+
+
 def _image_dimensions(image_data):
-    """Retorna (largura, altura) de bytes de imagem; None se inválidos."""
+    """Retorna (largura, altura) de bytes de imagem; None se inválidos.
+
+    Usa o Pillow quando ele funciona e, sem ele, lê o cabeçalho direto
+    (`_dimensions_from_header`): Pillow é opcional e a comparação de capas do
+    `tags` não depende dele.
+    """
     try:
         from PIL import Image
 
         with Image.open(io.BytesIO(image_data)) as image:
             return image.size
     except Exception:
-        return None
+        return _dimensions_from_header(image_data)
+
+
+_COVER_COMPARE = threading.local()
+
+
+def last_cover_compare_reason() -> Optional[str]:
+    """Motivo da última comparação de capas NESTA thread, quando não decisiva.
+
+    "unreadable": não deu para ler as dimensões (da candidata ou da capa atual),
+    então a comparação não pôde ser feita e a capa atual foi preservada. None:
+    a comparação foi feita normalmente (trocou ou a atual já era melhor).
+    """
+    return getattr(_COVER_COMPARE, "reason", None)
 
 
 def should_replace_embedded_cover(filename, candidate_path):
@@ -423,7 +601,10 @@ def should_replace_embedded_cover(filename, candidate_path):
     A política é conservadora: se já existe uma capa e não for possível
     comparar as dimensões com segurança, preserva a existente. Uma candidata
     só substitui a capa atual quando tem mais pixels (área total).
+    Quando a comparação não é possível, ``last_cover_compare_reason()`` devolve
+    "unreadable" (para o log não dizer que a atual "já é melhor").
     """
+    _COVER_COMPARE.reason = None
     if not candidate_path or not os.path.isfile(candidate_path):
         return False
 
@@ -431,6 +612,7 @@ def should_replace_embedded_cover(filename, candidate_path):
         with open(candidate_path, "rb") as cover_file:
             candidate_dimensions = _image_dimensions(cover_file.read())
         if not candidate_dimensions:
+            _COVER_COMPARE.reason = "unreadable"
             return False
 
         extension = os.path.splitext(filename)[1].lower()
@@ -464,6 +646,7 @@ def should_replace_embedded_cover(filename, candidate_path):
             dimensions = _image_dimensions(image_data)
             if not dimensions:
                 # Não destrói uma capa existente cuja qualidade não pôde ser lida.
+                _COVER_COMPARE.reason = "unreadable"
                 return False
             existing_areas.append(dimensions[0] * dimensions[1])
 
@@ -471,6 +654,7 @@ def should_replace_embedded_cover(filename, candidate_path):
         return candidate_area > max(existing_areas)
     except Exception as exc:
         logger.debug("Não foi possível comparar capas de '%s': %s", filename, exc)
+        _COVER_COMPARE.reason = "unreadable"
         return False
 
 
@@ -580,8 +764,13 @@ def tag_flac(
         qobuz_album = album
 
     # # Centraliza a montagem para manter FLAC e MP3 com o mesmo conteúdo lógico.
+    multi_out: dict = {}
     tags = _get_tags_to_add(
-        qobuz_album, qobuz_item, settings=settings, musicbrainz_ids=musicbrainz_ids
+        qobuz_album,
+        qobuz_item,
+        settings=settings,
+        musicbrainz_ids=musicbrainz_ids,
+        multi_out=multi_out,
     )
     if em_image:
         _set_cover_source(tags, cover_source)
@@ -682,14 +871,14 @@ def tag_flac(
         if not v:
             continue
 
-        is_multi = (
-            getattr(settings, "multi_value_tags", False)
-            and k in MULTI_VALUE_FIELDS
-            and isinstance(v, str)
-            and ", " in v
+        # # Lista exata (respeita nomes com vírgula, ex.: "Tyler, The Creator").
+        multi_values = (
+            _valores_multi(k, v, multi_out)
+            if getattr(settings, "multi_value_tags", False)
+            else None
         )
-        if is_multi:
-            audio[k] = _split_multi_value(v)
+        if multi_values and len(multi_values) > 1:
+            audio[k] = multi_values
         else:
             audio[k] = v
 
@@ -738,8 +927,13 @@ def tag_mp3(
         qobuz_album = album
 
     # # Centraliza a montagem para manter FLAC e MP3 com o mesmo conteúdo lógico.
+    multi_out: dict = {}
     tags = _get_tags_to_add(
-        qobuz_album, qobuz_item, settings=settings, musicbrainz_ids=musicbrainz_ids
+        qobuz_album,
+        qobuz_item,
+        settings=settings,
+        musicbrainz_ids=musicbrainz_ids,
+        multi_out=multi_out,
     )
     if em_image:
         _set_cover_source(tags, cover_source)
@@ -822,14 +1016,15 @@ def tag_mp3(
         if not v:
             continue
 
-        is_multi = (
-            getattr(settings, "multi_value_tags", False)
-            and k in MULTI_VALUE_FIELDS
-            and isinstance(v, str)
-            and ", " in v
+        # # Lista exata (respeita nomes com vírgula, ex.: "Tyler, The Creator").
+        multi_values = (
+            _valores_multi(k, v, multi_out)
+            if getattr(settings, "multi_value_tags", False)
+            else None
         )
+        is_multi = bool(multi_values and len(multi_values) > 1)
 
-        write_values = _split_multi_value(v) if is_multi else [v]
+        write_values = multi_values if is_multi else [v]
         id3tag = ID3_LEGEND.get(k.lower()) or ID3_LEGEND.get(k)
 
         if not id3tag:
@@ -979,13 +1174,24 @@ def _get_tags_to_add(
     qobuz_item: dict,
     settings: Optional[QobuzDLSettings] = None,
     musicbrainz_ids=None,
+    multi_out: Optional[dict] = None,
 ):
-    """Build dictionary of tags to add based on settings."""
+    """Build dictionary of tags to add based on settings.
+
+    multi_out: se informado (dict), recebe as LISTAS exatas dos campos
+    multivalorados (ARTIST, ALBUMARTIST, COMPOSER, GENRE e *SORT). As tags de
+    texto continuam "A, B" (compatível); a lista evita que um nome com vírgula,
+    como "Tyler, The Creator", seja quebrado ao gravar multi-tags.
+    """
     tags: dict[str, Any] = {}
+    if multi_out is None:
+        multi_out = {}
     if settings is None:
         settings = QobuzDLSettings()
     if not qobuz_album or not qobuz_item:
         return tags
+
+    protegidos = _nomes_protegidos(qobuz_album, qobuz_item, settings)
 
     if not settings.no_album_title_tag:
         tags["ALBUM"] = _get_title_with_version(
@@ -1014,6 +1220,14 @@ def _get_tags_to_add(
             for value in _albumartist_values
             if str(value).strip()
         )
+        multi_out["ALBUMARTIST"] = [
+            str(value).strip() for value in _albumartist_values if str(value).strip()
+        ]
+        multi_out["ALBUMARTISTSORT"] = [
+            _make_sort_name(str(value).strip())
+            for value in _albumartist_values
+            if str(value).strip()
+        ]
 
     if not settings.no_track_artist_tag:
         artists = []
@@ -1064,13 +1278,13 @@ def _get_tags_to_add(
         ) or qobuz_album.get("artist", {}).get("name", "")
 
         if main_artist_raw:
-            for part in main_artist_raw.split(","):
+            for part in _split_protegido(main_artist_raw, ",", protegidos):
                 add_unique_artist(part)
 
         performers_str = qobuz_item.get("performers", "")
         if performers_str:
             for performer_block in performers_str.split(" - "):
-                parts = [part.strip() for part in performer_block.split(",")]
+                parts = _split_protegido(performer_block, ",", protegidos)
                 if len(parts) <= 1:
                     continue
 
@@ -1089,6 +1303,8 @@ def _get_tags_to_add(
             tags["ARTISTSORT"] = ", ".join(
                 _make_sort_name(artist) for artist in artists
             )
+            multi_out["ARTIST"] = list(artists)
+            multi_out["ARTISTSORT"] = [_make_sort_name(a) for a in artists]
         else:
             tags["ARTIST"] = ""
 
@@ -1098,7 +1314,7 @@ def _get_tags_to_add(
 
         if performers_str:
             for performer_block in performers_str.split(" - "):
-                parts = [p.strip() for p in performer_block.split(", ")]
+                parts = _split_protegido(performer_block, ",", protegidos)
                 if len(parts) > 1:
                     name = parts[0]
                     roles = parts[1:]
@@ -1114,6 +1330,7 @@ def _get_tags_to_add(
 
         if len(composers) > 0:
             tags["COMPOSER"] = ", ".join(composers)
+            multi_out["COMPOSER"] = list(composers)
         else:
             tags["COMPOSER"] = ""
 
@@ -1146,6 +1363,7 @@ def _get_tags_to_add(
                 final_genres.append(translated)
 
         tags["GENRE"] = ", ".join(final_genres)
+        multi_out["GENRE"] = list(final_genres)
     if not settings.no_label_tag:
         tags["COPYRIGHT"] = _format_copyright(qobuz_album.get("copyright", "n/a"))
     if not settings.no_label_tag:
@@ -1210,7 +1428,7 @@ def _get_tags_to_add(
 
     if performers_str:
         for performer_block in performers_str.split(" - "):
-            parts = [p.strip() for p in performer_block.split(", ")]
+            parts = _split_protegido(performer_block, ",", protegidos)
             if len(parts) > 1:
                 name = parts[0]
                 roles = parts[1:]
@@ -1243,6 +1461,7 @@ def _get_tags_to_add(
     for _k in MULTI_VALUE_FIELDS:
         _v = tags.get(_k)
         if isinstance(_v, (list, tuple)):
-            tags[_k] = ", ".join(str(p).strip() for p in _v if str(p).strip())
+            multi_out[_k] = [str(p).strip() for p in _v if str(p).strip()]
+            tags[_k] = ", ".join(multi_out[_k])
 
     return tags
