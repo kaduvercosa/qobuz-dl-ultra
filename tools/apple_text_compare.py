@@ -463,7 +463,7 @@ def cmd_live(args) -> int:
             f"\n--- {status} | {info['tipo']} | {r['_pais']} | média {info['proximidade']:.2f} | "
             f"Apple: {a_art!r} / {a_alb!r} / {a_trk!r}"
         )
-        for campo, q, a, res in info["res"]:
+        for _campo, q, a, res in info["res"]:
             imprimir_comparacao(res, q, a, prefixo="  ")
     resumo(
         f"{len(avaliados)} candidato(s) da Apple; "
