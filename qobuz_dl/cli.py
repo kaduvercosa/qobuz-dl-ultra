@@ -1073,7 +1073,7 @@ _COMMAND_DESCRIPTIONS_PT = {
     "interactive": "Busca interativa: procura faixas/álbuns e escolhe o que baixar na hora.",
     "lucky": "Baixa os N primeiros resultados de uma busca no Qobuz, sem passar URL.",
     "lyrics": "Varre uma pasta já baixada e injeta letras/traduções que estejam faltando.",
-    "tags": "Varre uma pasta já baixada, regrava/corrige as tags de metadados (com ou sem multi-tags) e troca a capa pela da Apple/iTunes quando validada. Com --covers-only, troca só as capas.",
+    "tags": "Varre uma pasta já baixada, regrava/corrige as tags de metadados (com ou sem multi-tags) e troca a capa pela da Apple/iTunes quando validada. Escolha: --tags-only (só tags), --covers-only (só capas) ou o padrão (os dois).",
     "sync-playlist": "Sincroniza uma pasta local com uma playlist do Qobuz (baixa o que falta, remove o que saiu).",
     "sync-favorites": "Sincroniza os favoritos da conta com o catálogo local (novos/removidos) e baixa o que falta.",
     "scan": "Casa sua pasta de música com o catálogo (tag de ID, UPC, nome, fuzzy) e grava sentinelas.",
@@ -1098,6 +1098,7 @@ _FLAG_DESCRIPTIONS_PT = {
 
 def _print_welcome_screen():
     from qobuz_dl import __version__
+    from qobuz_dl.home_screen import render_home
 
     cols = ui.width()
     ui.blank()
@@ -1105,33 +1106,45 @@ def _print_welcome_screen():
     version_line = f"v{__version__}"
     pad_version = " " * max((cols - len(version_line)) // 2, 0)
     ui.emit(f"{RESET}{pad_version}{version_line}\n")
-    ui.rule("=")
-    ui.emit(f"{ACCENT}{BG}Uso: qobuz-dl ou qdl + {OFF}")
-    ui.wrapped(
-        f"{ACCENT}Help:{RESET} qobuz-dl --help {MUTED}(lista todas as opções do comando){OFF} ",
-        indent=2,
+    parser = qobuz_dl_args()
+
+    comandos = []
+    sub_action = next(
+        (a for a in parser._actions if isinstance(a, argparse._SubParsersAction)),
+        None,
+    )
+    for name, aliases, help_text in _extract_subcommands(parser):
+        usage = None
+        if sub_action is not None:
+            raw = getattr(sub_action.choices.get(name), "usage", None) or ""
+            usage = raw.replace("qobuz-dl ", "", 1) or None
+        comandos.append(
+            {
+                "nome": name,
+                "aliases": aliases,
+                "desc": _COMMAND_DESCRIPTIONS_PT.get(name, help_text or ""),
+                "uso": usage,
+            }
+        )
+
+    flags = []
+    for flag_str, dest, help_text in _extract_global_flags(parser):
+        flags.append((flag_str, _FLAG_DESCRIPTIONS_PT.get(dest, help_text or "")))
+
+    negrito = ui.c("\033[1m")
+    ui.emit(
+        render_home(
+            comandos,
+            flags,
+            largura=cols,
+            cor=bool(negrito),
+            destaque=ACCENT,
+            mudo=MUTED,
+            reset=RESET,
+            negrito=negrito,
+        )
     )
     ui.blank()
-    parser = qobuz_dl_args()
-    ui.emit(f"{ACCENT}{BG}COMANDOS:{OFF}\n")
-    for name, aliases, help_text in _extract_subcommands(parser):
-        label = name if not aliases else f"{name} ({aliases})"
-        desc = _COMMAND_DESCRIPTIONS_PT.get(name, help_text or "")
-        ui.wrapped(f"{ACCENT}{label}{OFF}", indent=2)
-        ui.wrapped(desc, indent=4)
-        ui.blank()
-    if cols >= 62:
-        ui.emit(
-            f"{ACCENT}{BG}FLAGS GLOBAIS:{RESET} {MUTED}(não pertencem a nenhum comando específico){OFF}\n"
-        )
-    else:
-        ui.emit(f"{BG}FLAGS GLOBAIS:{RESET}\n")
-    for flag_str, dest, help_text in _extract_global_flags(parser):
-        desc = _FLAG_DESCRIPTIONS_PT.get(dest, help_text or "")
-        ui.emit(f" {ACCENT}{flag_str}{OFF}")
-        ui.wrapped(desc, indent=4)
-        ui.blank()
-    ui.rule("=")
 
 
 async def _initial_checks():
@@ -1588,6 +1601,7 @@ async def async_main():
                 tags_client,
                 tags_settings,
                 covers_only=bool(getattr(arguments, "covers_only", False)),
+                tags_only=bool(getattr(arguments, "tags_only", False)),
             )
         except KeyboardInterrupt:
             ui.error("Operação interrompida manualmente pelo usuário (CTRL+C).")

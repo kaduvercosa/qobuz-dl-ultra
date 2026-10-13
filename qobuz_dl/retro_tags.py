@@ -7,9 +7,13 @@
 # "Capa: Apple/iTunes". Se a Apple nao retornar uma capa, a arte ja embutida
 # e preservada (junto com as linhas de capa do comentario).
 #
-# Modo "so capas" (covers_only=True / `tags --covers-only`): NAO regrava
-# nenhuma tag; apenas troca a imagem embutida quando a Apple valida uma capa
-# superior. Para cada arquivo, o log mostra o diff exato das tags alteradas.
+# Tres modos (`tags`, `tags --tags-only`, `tags --covers-only`):
+#   - padrao / ambos : regrava as tags E troca a capa quando a Apple valida.
+#   - so tags        : (tags_only=True) regrava as tags; NAO consulta a Apple e
+#                      mantem a capa embutida como esta.
+#   - so capas       : (covers_only=True) NAO regrava nenhuma tag; apenas troca
+#                      a imagem embutida quando a Apple valida uma capa superior.
+# Para cada arquivo, o log mostra o diff exato das tags alteradas.
 # ============================================================================
 
 import asyncio
@@ -611,7 +615,20 @@ def _display_track_name(
 # Formatação da saída (cores com significado fixo, blocos espaçados)
 # ---------------------------------------------------------------------------
 # Desfechos da capa que pedem atenção do usuário (ficam em amarelo).
-_COVER_ATTENTION = {"not_found", "download_failed", "embed_failed", "error"}
+_COVER_ATTENTION = {
+    "not_found",
+    "download_failed",
+    "embed_failed",
+    "error",
+    "no_compare",
+}
+
+
+def _compare_covers(file_path, cover_path):
+    """(deve_trocar, motivo) -- o motivo vem da MESMA thread da comparação."""
+    decision = metadata.should_replace_embedded_cover(file_path, cover_path)
+    reason_getter = getattr(metadata, "last_cover_compare_reason", None)
+    return decision, (reason_getter() if reason_getter else None)
 
 
 def _term_width() -> int:
@@ -704,6 +721,11 @@ def _cover_line(outcome: str, cover_changed: bool, cover_source: Optional[str]):
             MUTED,
             "mantida -- a capa atual já tem resolução igual ou maior que a da Apple",
         )
+    if outcome == "no_compare":
+        return (
+            YELLOW,
+            "mantida -- não deu para comparar as resoluções (imagem ilegível)",
+        )
     if outcome == "not_found":
         return YELLOW, "não encontrada na Apple -- a capa atual foi mantida"
     if outcome == "download_failed":
@@ -738,7 +760,7 @@ def _cover_detail_lines(outcome: str, cover_source, detail: str, width: int) -> 
                     lines.extend(wrapped)
             else:
                 lines.extend(_wrap_lines(f"{label}: {body}", indent, width))
-    elif outcome in ("download_failed", "embed_failed", "error") and detail:
+    elif outcome in ("download_failed", "embed_failed", "error", "no_compare") and detail:
         lines.extend(_wrap_lines(detail, indent, width))
     return [f"{MUTED}{line}{OFF}" for line in lines]
 
@@ -788,7 +810,16 @@ def _legend_lines() -> list:
     ]
 
 
-async def retag_directory(directory_path, client, settings, covers_only=False):
+def resolve_mode(covers_only: bool = False, tags_only: bool = False) -> str:
+    """'both' (padrão), 'tags' (só tags) ou 'covers' (só capas)."""
+    if covers_only and tags_only:
+        raise ValueError("covers_only e tags_only são excludentes")
+    return "covers" if covers_only else "tags" if tags_only else "both"
+
+
+async def retag_directory(
+    directory_path, client, settings, covers_only=False, tags_only=False
+):
     """Reescreve tags e tenta substituir capas por versoes Apple/iTunes.
 
     A capa existente so e alterada quando uma imagem Apple valida e baixada.
@@ -798,7 +829,13 @@ async def retag_directory(directory_path, client, settings, covers_only=False):
 
     covers_only=True: nao regrava tags; so troca a imagem embutida (e a origem
     da capa no comentario) quando a Apple tem uma capa validada e superior.
+    tags_only=True: regrava as tags e NAO consulta a Apple; a capa embutida e
+    as linhas de capa do comentario ficam como estao.
+    Os dois juntos nao fazem sentido (ValueError); nenhum dos dois = ambos.
     """
+    mode = resolve_mode(covers_only, tags_only)
+    covers_only, tags_only = mode == "covers", mode == "tags"
+
     if not os.path.isdir(directory_path):
         ui.emit(f"{RED}[!] A pasta não existe no dispositivo: '{directory_path}'{OFF}")
         return None
@@ -810,8 +847,18 @@ async def retag_directory(directory_path, client, settings, covers_only=False):
             f"{CYAN} • Modo        :{RESET} SOMENTE CAPAS (nenhuma tag será regravada)"
         )
     else:
+        if tags_only:
+            ui.emit(
+                f"{CYAN} • Modo        :{RESET} SOMENTE TAGS "
+                "(a capa não é pesquisada nem alterada)"
+            )
         ui.emit(f"{CYAN} • Multi-tags  :{RESET} {multi_tags_label(settings)}")
-    ui.emit(f"{CYAN} • Capas Apple :{RESET} procurando e substituindo quando validada")
+    if tags_only:
+        ui.emit(f"{CYAN} • Capas Apple :{RESET} desligadas (modo só tags)")
+    else:
+        ui.emit(
+            f"{CYAN} • Capas Apple :{RESET} procurando e substituindo quando validada"
+        )
     ui.emit("")
     for legend_line in _legend_lines():
         ui.emit(legend_line)
@@ -906,7 +953,7 @@ async def retag_directory(directory_path, client, settings, covers_only=False):
 
             cover_path: Optional[str] = None
             cover_source: Optional[str] = None
-            # cover_outcome: replaced | kept | not_found | download_failed |
+            # cover_outcome: replaced | kept | no_compare | not_found | download_failed |
             # embed_failed | error | not_searched (define cor e texto no log);
             # cover_status: detalhe em texto, mostrado abaixo da linha de capa.
             cover_outcome = "not_searched"
@@ -915,9 +962,10 @@ async def retag_directory(directory_path, client, settings, covers_only=False):
             shared_cover = False  # True: o arquivo pertence ao álbum, não a esta faixa
             album_key = str(album.get("id") or "")
 
+            apple_cover_url = apple_cover_source = apple_diagnostic = None
             try:
                 album_decision = None
-                if album_key:
+                if album_key and not tags_only:
                     album_decision = album_decisions.get(album_key)
                     if album_decision is None:
                         album_decision = await _decide_album_cover(
@@ -929,7 +977,7 @@ async def retag_directory(directory_path, client, settings, covers_only=False):
                     apple_cover_url = album_decision["url"]
                     apple_cover_source = album_decision.get("source")
                     apple_diagnostic = None
-                else:
+                elif not tags_only:
                     cached = track_results.get(str(item.get("id")))
                     if cached is None:
                         cached = await _fetch_apple_cover_for_track(
@@ -944,7 +992,11 @@ async def retag_directory(directory_path, client, settings, covers_only=False):
                     ) = cached
                     album_decision = None
 
-                if not isinstance(apple_cover_url, str) or not apple_cover_url.strip():
+                if tags_only:
+                    # Modo só tags: a Apple não é consultada e a capa fica como está.
+                    cover_status = "não pesquisada (modo só tags)"
+
+                elif not isinstance(apple_cover_url, str) or not apple_cover_url.strip():
                     cover_outcome = "not_found"
                     cover_status = (
                         apple_diagnostic or "nenhum candidato passou pelos filtros"
@@ -1013,14 +1065,16 @@ async def retag_directory(directory_path, client, settings, covers_only=False):
 
             # Preserva a capa atual quando a candidata Apple não tem resolução
             # superior. A comparação é conservadora: em caso de dúvida, não troca.
-            if cover_path and not await loop.run_in_executor(
-                None,
-                functools.partial(
-                    metadata.should_replace_embedded_cover,
-                    file_path,
-                    cover_path,
-                ),
-            ):
+            if cover_path:
+                should_replace, compare_reason = await loop.run_in_executor(
+                    None,
+                    functools.partial(
+                        _compare_covers, file_path, cover_path
+                    ),
+                )
+            else:
+                should_replace, compare_reason = True, None
+            if cover_path and not should_replace:
                 if not shared_cover:
                     try:
                         os.remove(cover_path)
@@ -1028,8 +1082,17 @@ async def retag_directory(directory_path, client, settings, covers_only=False):
                         pass
                 cover_path = None
                 cover_source = None
-                cover_outcome = "kept"
-                cover_status = "Capa existente preservada (candidata não é superior)"
+                if compare_reason == "unreadable":
+                    cover_outcome = "no_compare"
+                    cover_status = (
+                        "Não foi possível ler as dimensões da capa (da Apple ou da "
+                        "atual) -- por segurança a capa atual foi preservada"
+                    )
+                else:
+                    cover_outcome = "kept"
+                    cover_status = (
+                        "Capa existente preservada (candidata não é superior)"
+                    )
 
             before = await loop.run_in_executor(None, snapshot_tags, file_path)
 
@@ -1153,9 +1216,12 @@ async def retag_directory(directory_path, client, settings, covers_only=False):
                 for diff_line in format_tag_diff(before_text, after_text):
                     ui.emit(f"          {diff_line}")
 
-            cover_color, cover_text = _cover_line(
-                cover_outcome, cover_changed, cover_source
-            )
+            if tags_only:
+                cover_color, cover_text = MUTED, "não tocada (modo só tags)"
+            else:
+                cover_color, cover_text = _cover_line(
+                    cover_outcome, cover_changed, cover_source
+                )
             for line in _labeled_lines("Capa", cover_text, columns):
                 ui.emit(f"{cover_color}{line}{OFF}")
             for line in _cover_detail_lines(
@@ -1203,6 +1269,8 @@ async def retag_directory(directory_path, client, settings, covers_only=False):
             ),
             ("Erros", "errors", RED, "falhas ao consultar o Qobuz ou gravar tags"),
         ):
+            if tags_only and key.startswith("apple_"):
+                continue  # sem etapa Apple neste modo
             value = stats[key]
             value_color = color_on if (color_on and value) else MUTED
             ui.emit(

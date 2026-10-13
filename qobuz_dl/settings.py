@@ -28,6 +28,16 @@ def _bounded_workers(value, default, maximum):
 
 
 # # Resolve uma opção em que o valor da CLI, quando fornecido, substitui o config.ini.
+def _parse_names_with_comma(value) -> tuple:
+    """Normaliza a lista de nomes com vírgula (config.ini usa ";" como separador)."""
+    if not value:
+        return ()
+    itens = value.split(";") if isinstance(value, str) else list(value)
+    return tuple(
+        item.strip() for item in itens if isinstance(item, str) and "," in item
+    )
+
+
 def _merge_bool_opt_out(arguments, dest, config_value):
     """Merge boolean option where CLI true overrides config true (opt-out pattern)."""
     cli_value = getattr(arguments, dest, _MISSING)
@@ -122,6 +132,11 @@ class QobuzDLSettings:
         self.lyrics_word_sync = kwargs.get("lyrics_word_sync", False)
 
         self.multi_value_tags = kwargs.get("multi_value_tags", False)
+        # # Nomes de artista que contêm vírgula (ex.: "Tyler, The Creator") e que
+        # # não podem ser quebrados em dois. Aceita lista/tupla ou texto com ";".
+        self.artists_with_comma = _parse_names_with_comma(
+            kwargs.get("artists_with_comma")
+        )
 
         self.embed_art = kwargs.get("embed_art", False)
         self.cover_og_quality = kwargs.get("og_cover", False)
@@ -311,6 +326,11 @@ class QobuzDLSettings:
                 arguments,
                 "lyrics_word_sync",
                 config.getboolean(section, "lyrics_word_sync", fallback=False),
+            ),
+            # # Opcional: nomes com vírgula extras, separados por ";" (ex.:
+            # # artists_with_comma = Tyler, The Creator; Earth, Wind & Fire).
+            "artists_with_comma": config.get(
+                section, "artists_with_comma", fallback=""
             ),
             # # --no-multi-tags força False; caso contrário, CLI tem precedência sobre config.ini.
             "multi_value_tags": (

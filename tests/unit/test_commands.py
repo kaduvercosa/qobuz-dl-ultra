@@ -125,6 +125,27 @@ class TestParserPrincipal:
         assert so_capas.covers_only is True
         assert so_capas.DIR == "/musicas"
 
+    def test_tags_so_tags_e_ambos(self, parser):
+        padrao = parser.parse_args(["tags"])
+        assert (padrao.tags_only, padrao.covers_only, padrao.both) == (
+            False,
+            False,
+            False,
+        )
+        so_tags = parser.parse_args(["tags", "--tags-only", "/musicas"])
+        assert so_tags.tags_only is True and so_tags.covers_only is False
+        assert so_tags.DIR == "/musicas"
+        assert parser.parse_args(["tags", "--both"]).both is True
+
+    def test_tags_modos_de_alteracao_sao_excludentes(self, parser):
+        for combinacao in (
+            ["--tags-only", "--covers-only"],
+            ["--tags-only", "--both"],
+            ["--covers-only", "--both"],
+        ):
+            with pytest.raises(SystemExit):
+                parser.parse_args(["tags", *combinacao])
+
     def test_flags_de_nivel_superior_existem(self, parser):
         args = parser.parse_args(["--reset", "dl", "URL"])
         assert args.reset is True

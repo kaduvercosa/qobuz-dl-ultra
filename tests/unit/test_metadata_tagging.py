@@ -522,3 +522,216 @@ class TestTagMp3:
         apics = [frame for frame in audio.added if isinstance(frame, id3.APIC)]
         assert len(apics) == 1
         assert apics[0].data == b"fake-jpeg-bytes"
+
+
+# --------------------------------------------------------------------
+# Nomes de artista que contêm vírgula ("Tyler, The Creator")
+# --------------------------------------------------------------------
+def _item_tyler(**overrides):
+    base = dict(
+        performer={"name": "Tyler, The Creator"},
+        performers=(
+            "Tyler, The Creator, MainArtist, Composer - "
+            "Kali Uchis, FeaturedArtist"
+        ),
+        composer={"name": "Tyler, The Creator"},
+    )
+    base.update(overrides)
+    return _item(**base)
+
+
+def _album_tyler(**overrides):
+    base = dict(artist={"name": "Tyler, The Creator"})
+    base.update(overrides)
+    return _album(**base)
+
+
+class TestNomesComVirgula:
+    def test_split_protegido_nao_quebra_nome_conhecido(self):
+        protegidos = metadata._nomes_protegidos()
+        partes = metadata._split_protegido(
+            "Tyler, The Creator, Kali Uchis", ",", protegidos
+        )
+        assert partes == ["Tyler, The Creator", "Kali Uchis"]
+
+    def test_split_protegido_ignora_maiusculas_e_preserva_grafia(self):
+        protegidos = metadata._nomes_protegidos()
+        partes = metadata._split_protegido("tyler, the creator, X", ",", protegidos)
+        assert partes == ["tyler, the creator", "X"]
+
+    def test_split_protegido_so_palavra_inteira(self):
+        protegidos = ["Tyler, The Creator"]
+        partes = metadata._split_protegido(
+            "Not Tyler, The Creatorx, Y", ",", protegidos
+        )
+        assert partes == ["Not Tyler", "The Creatorx", "Y"]
+
+    def test_split_protegido_sem_protegidos_equivale_ao_split(self):
+        assert metadata._split_protegido("A, B ,C", ",", []) == ["A", "B", "C"]
+        assert metadata._split_protegido("", ",", []) == []
+
+    def test_nome_estruturado_da_api_e_protegido_automaticamente(self):
+        album = _album(
+            artists=[
+                {"name": "Fulano, O Grande", "roles": ["main-artist"]},
+                {"name": "Sem Virgula", "roles": ["main-artist"]},
+            ]
+        )
+        protegidos = metadata._nomes_protegidos(album, _item())
+        assert "Fulano, O Grande" in protegidos
+        assert "Sem Virgula" not in protegidos
+
+    def test_nome_do_config_e_protegido(self):
+        settings = QobuzDLSettings(artists_with_comma="Banda, Do Fulano; Outro, Nome")
+        assert settings.artists_with_comma == ("Banda, Do Fulano", "Outro, Nome")
+        protegidos = metadata._nomes_protegidos(settings=settings)
+        assert "Banda, Do Fulano" in protegidos
+
+    def test_get_tags_mantem_texto_com_virgula(self):
+        tags = metadata._get_tags_to_add(
+            _album_tyler(), _item_tyler(), QobuzDLSettings()
+        )
+        assert tags["ARTIST"] == "Tyler, The Creator, Kali Uchis"
+        assert tags["COMPOSER"] == "Tyler, The Creator"
+        assert tags["ALBUMARTIST"] == "Tyler, The Creator"
+
+    def test_get_tags_devolve_listas_exatas(self):
+        saida = {}
+        metadata._get_tags_to_add(
+            _album_tyler(), _item_tyler(), QobuzDLSettings(), multi_out=saida
+        )
+        assert saida["ARTIST"] == ["Tyler, The Creator", "Kali Uchis"]
+        assert saida["ALBUMARTIST"] == ["Tyler, The Creator"]
+        assert saida["COMPOSER"] == ["Tyler, The Creator"]
+
+    def test_artistsort_nao_quebra_artigo_nem_nome(self):
+        """"The Weeknd" vira "Weeknd, The" (um valor só), não dois valores."""
+        saida = {}
+        item = _item(
+            performer={"name": "The Weeknd"},
+            performers="The Weeknd, MainArtist",
+        )
+        metadata._get_tags_to_add(
+            _album(artist={"name": "The Weeknd"}),
+            item,
+            QobuzDLSettings(),
+            multi_out=saida,
+        )
+        assert saida["ARTISTSORT"] == ["Weeknd, The"]
+
+    def test_flac_multi_ligado_mantem_tyler_inteiro(self, monkeypatch, tmp_path):
+        fake = FakeFLAC()
+        monkeypatch.setattr(metadata, "FLAC", lambda path: fake)
+        origem = tmp_path / "tmp.flac"
+        origem.write_bytes(b"dummy")
+
+        metadata.tag_flac(
+            str(origem),
+            str(tmp_path),
+            str(tmp_path / "final.flac"),
+            _item_tyler(),
+            _album_tyler(),
+            istrack=False,
+            settings=QobuzDLSettings(multi_value_tags=True),
+        )
+
+        assert fake["ARTIST"] == ["Tyler, The Creator", "Kali Uchis"]
+        # Um artista só: grava texto simples, sem quebrar nada.
+        assert fake["ALBUMARTIST"] == "Tyler, The Creator"
+        assert fake["COMPOSER"] == "Tyler, The Creator"
+
+    def test_flac_multi_desligado_grava_texto_unico(self, monkeypatch, tmp_path):
+        fake = FakeFLAC()
+        monkeypatch.setattr(metadata, "FLAC", lambda path: fake)
+        origem = tmp_path / "tmp.flac"
+        origem.write_bytes(b"dummy")
+
+        metadata.tag_flac(
+            str(origem),
+            str(tmp_path),
+            str(tmp_path / "final.flac"),
+            _item_tyler(),
+            _album_tyler(),
+            istrack=False,
+            settings=QobuzDLSettings(),
+        )
+
+        assert fake["ARTIST"] == "Tyler, The Creator, Kali Uchis"
+        assert fake["ALBUMARTIST"] == "Tyler, The Creator"
+
+    def test_flac_solo_tyler_com_multi_ligado_nao_vira_dois(
+        self, monkeypatch, tmp_path
+    ):
+        fake = FakeFLAC()
+        monkeypatch.setattr(metadata, "FLAC", lambda path: fake)
+        origem = tmp_path / "tmp.flac"
+        origem.write_bytes(b"dummy")
+        item = _item_tyler(performers="Tyler, The Creator, MainArtist")
+
+        metadata.tag_flac(
+            str(origem),
+            str(tmp_path),
+            str(tmp_path / "final.flac"),
+            item,
+            _album_tyler(),
+            istrack=False,
+            settings=QobuzDLSettings(multi_value_tags=True),
+        )
+
+        assert fake["ARTIST"] == "Tyler, The Creator"
+
+    def test_mp3_multi_ligado_mantem_tyler_inteiro(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(metadata.id3, "ID3", FakeID3)
+        audios_criados = []
+        original_init = FakeID3.__init__
+
+        def _init_e_registra(self, filename=None):
+            original_init(self, filename)
+            audios_criados.append(self)
+
+        monkeypatch.setattr(FakeID3, "__init__", _init_e_registra)
+        origem = tmp_path / "tmp.mp3"
+        origem.write_bytes(b"dummy")
+
+        metadata.tag_mp3(
+            str(origem),
+            str(tmp_path),
+            str(tmp_path / "final.mp3"),
+            _item_tyler(),
+            _album_tyler(),
+            istrack=False,
+            settings=QobuzDLSettings(multi_value_tags=True),
+        )
+
+        audio = audios_criados[0]
+        assert audio["TPE1"].text == ["Tyler, The Creator", "Kali Uchis"]
+
+    def test_mp3_multi_desligado_grava_texto_unico(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(metadata.id3, "ID3", FakeID3)
+        audios_criados = []
+        original_init = FakeID3.__init__
+
+        def _init_e_registra(self, filename=None):
+            original_init(self, filename)
+            audios_criados.append(self)
+
+        monkeypatch.setattr(FakeID3, "__init__", _init_e_registra)
+        origem = tmp_path / "tmp.mp3"
+        origem.write_bytes(b"dummy")
+
+        metadata.tag_mp3(
+            str(origem),
+            str(tmp_path),
+            str(tmp_path / "final.mp3"),
+            _item_tyler(),
+            _album_tyler(),
+            istrack=False,
+            settings=QobuzDLSettings(),
+        )
+
+        assert audios_criados[0]["TPE1"].text == ["Tyler, The Creator, Kali Uchis"]
+
+    def test_valores_multi_cai_no_split_legado_sem_lista(self):
+        assert metadata._valores_multi("ARTIST", "A, B", {}) == ["A", "B"]
+        assert metadata._valores_multi("TITLE", "A, B", {}) is None
+        assert metadata._valores_multi("ARTIST", "Solo", {}) is None

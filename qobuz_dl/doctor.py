@@ -50,7 +50,7 @@ REQUIRED_MODULES = [
 OPTIONAL_MODULES = {
     "rapidfuzz": "match fuzzy mais rápido",
     "brotli": "respostas HTTP comprimidas",
-    "PIL": "redimensionar capas (extra 'covers')",
+    "PIL": "recompactar capas acima de 16MB (extra 'covers'; no a-Shell usa o já instalado)",
     "watchdog": "--watch",
     "acoustid": "--find-duplicates",
     "lyricsgenius": "letras via Genius",

@@ -52,6 +52,7 @@ dependencies = [
     "colorama>=0.4.6",
     "cryptography",
     "keyring",
+    "certifi",
 ]
 
 [project.optional-dependencies]
@@ -60,7 +61,9 @@ speed = [
     "brotli",
 ]
 covers = [
-    "Pillow==11.3.0",
+    # Sem piso de versao DE PROPOSITO (como o cryptography): no a-Shell o Pillow
+    # ja vem instalado e deve ser usado como esta, sem upgrade forcado.
+    "Pillow",
 ]
 watch = [
     "watchdog",
@@ -76,13 +79,14 @@ analyze = [
     "numpy",
 ]
 all = [
-    "qobuz-dl-ultra[speed,covers,watch,duplicates,genius,analyze, dev-full]",
+    "qobuz-dl-ultra[speed,covers,watch,duplicates,genius,analyze,dev-full]",
 ]
 dev = [
     "pytest>=8",
     "pytest-asyncio>=0.24",
     "pytest-httpx>=0.30",
     "pytest-cov>=5",
+    "tomli; python_version < '3.11'",
 ]
 
 dev-full = [

@@ -562,6 +562,22 @@ class TestPreservacaoDaCapaAtual:
         assert (em_image, caminho, origem) == (False, None, None)
         assert "mantida -- a capa atual já tem resolução igual ou maior" in amb.texto
 
+    def test_comparacao_impossivel_nao_diz_que_a_atual_e_melhor(
+        self, amb, monkeypatch
+    ):
+        amb.substituir = False
+        monkeypatch.setattr(
+            retro_tags.metadata, "last_cover_compare_reason", lambda: "unreadable"
+        )
+        amb.arquivo("a.flac")
+        stats = _rodar(amb)
+        assert stats["apple_embedded"] == 0
+        _, _, em_image, caminho, origem = amb.tags("flac")[0]
+        assert (em_image, caminho, origem) == (False, None, None)
+        assert "não deu para comparar as resoluções" in amb.texto
+        assert "igual ou maior" not in amb.texto
+        assert _temporarios(amb.pasta) == []
+
     def test_temporario_da_candidata_descartada_e_removido(self, amb):
         amb.substituir = False
         amb.arquivo("a.flac")
@@ -1700,3 +1716,106 @@ class TestTituloDaFaixaQobuz:
     )
     def test_titulo_com_versao(self, item, esperado):
         assert retro_tags._qobuz_track_title(item) == esperado
+
+
+# ---------------------------------------------------------------------------
+# Modo --tags-only: a Apple não é consultada e a capa fica como está
+# ---------------------------------------------------------------------------
+class TestModoSoTags:
+    @pytest.fixture
+    def sem_apple(self, amb, monkeypatch):
+        consultas = []
+
+        async def proibido(*args, **kwargs):
+            consultas.append(args)
+            raise AssertionError("a Apple não pode ser consultada no modo só tags")
+
+        monkeypatch.setattr(retro_tags, "_fetch_apple_cover_for_track", proibido)
+        monkeypatch.setattr(retro_tags, "_decide_album_cover", proibido)
+        return consultas
+
+    def _rodar_so_tags(self, amb):
+        return asyncio.run(
+            retro_tags.retag_directory(
+                str(amb.pasta),
+                SimpleNamespace(),
+                SimpleNamespace(multi_value_tags=True),
+                tags_only=True,
+            )
+        )
+
+    def test_grava_as_tags_sem_consultar_nem_baixar_capa(self, amb, sem_apple):
+        amb.arquivo("a.flac")
+        stats = self._rodar_so_tags(amb)
+        assert sem_apple == []
+        assert ("download", "u") not in amb.chamadas
+        assert [c for c in amb.chamadas if c[0] == "download"] == []
+        # tag_flac chamado SEM capa nova (a embutida é preservada)
+        assert amb.tags("flac") == [("flac", "a.flac", False, None, None)]
+        assert stats["updated"] == 1
+        assert stats["apple_embedded"] == 0
+        assert stats["apple_not_found"] == 0 and stats["apple_failed"] == 0
+        assert _temporarios(amb.pasta) == []
+
+    def test_mp3_tambem(self, amb, sem_apple):
+        amb.arquivo("a.mp3")
+        self._rodar_so_tags(amb)
+        assert amb.tags("mp3") == [("mp3", "a.mp3", False, None, None)]
+
+    def test_log_explica_o_modo_e_nao_fala_de_apple_no_resumo(self, amb, sem_apple):
+        amb.arquivo("a.flac")
+        self._rodar_so_tags(amb)
+        assert "SOMENTE TAGS" in amb.texto
+        assert "SOMENTE CAPAS" not in amb.texto
+        assert "Multi-tags" in amb.texto
+        assert "Capa   não tocada (modo só tags)" in amb.texto
+        assert "Capas Apple embutidas" not in amb.texto
+        assert "Capas Apple não encontradas" not in amb.texto
+
+    def test_nao_diz_que_a_capa_nao_foi_achada(self, amb, sem_apple):
+        amb.apple = (None, None, "sem candidato")
+        amb.arquivo("a.flac")
+        self._rodar_so_tags(amb)
+        assert "não encontrada na Apple" not in amb.texto
+        assert "sem candidato" not in amb.texto
+
+    def test_tags_ja_corretas_contam_como_sem_alteracao(self, amb, sem_apple):
+        amb.muda_texto = False
+        amb.arquivo("a.flac")
+        stats = self._rodar_so_tags(amb)
+        assert stats["unchanged"] == 1 and stats["updated"] == 0
+
+    def test_varios_arquivos_nao_consultam_a_apple(self, amb, sem_apple):
+        amb.arquivo("a.flac", track_id="1")
+        amb.arquivo("b.flac", track_id="2")
+        stats = self._rodar_so_tags(amb)
+        assert sem_apple == [] and stats["updated"] == 2
+
+    def test_modo_normal_continua_consultando_a_apple(self, amb):
+        amb.arquivo("a.flac")
+        stats = _rodar(amb)
+        assert stats["apple_embedded"] == 1
+        assert "SOMENTE TAGS" not in amb.texto
+
+    def test_modos_excludentes(self, amb):
+        with pytest.raises(ValueError):
+            asyncio.run(
+                retro_tags.retag_directory(
+                    str(amb.pasta),
+                    SimpleNamespace(),
+                    SimpleNamespace(multi_value_tags=True),
+                    covers_only=True,
+                    tags_only=True,
+                )
+            )
+
+    @pytest.mark.parametrize(
+        "covers, tags, esperado",
+        [
+            (False, False, "both"),
+            (True, False, "covers"),
+            (False, True, "tags"),
+        ],
+    )
+    def test_resolve_mode(self, covers, tags, esperado):
+        assert retro_tags.resolve_mode(covers, tags) == esperado

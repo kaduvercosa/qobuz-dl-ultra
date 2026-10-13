@@ -28,7 +28,9 @@ COPY qobuz_dl ./qobuz_dl
 # (tools/gerar_requirements.py), instalar direto do pyproject elimina o
 # fallback e a possibilidade de build "com sucesso" a partir de
 # dependências erradas/desatualizadas.
-RUN pip install --no-cache-dir .
+# Extras de runtime: Pillow (recompactar capas acima do limite de 16MB do FLAC),
+# rapidfuzz, Genius, --watch e analise espectral. `dev`/`dev-full` ficam de fora.
+RUN pip install --no-cache-dir ".[speed,covers,watch,genius,analyze]"
 
 USER qobuz
 WORKDIR /home/qobuz

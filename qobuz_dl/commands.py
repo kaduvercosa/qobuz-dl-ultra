@@ -301,7 +301,8 @@ def tags_args(subparsers, default_folder=None):
             "atuais do Qobuz. Também tenta trocar a capa embutida por uma capa "
             "em alta resolução da Apple/iTunes, mas só quando a correspondência "
             "é validada (sem certeza, a capa atual é mantida). Não mexe em letras. "
-            "Use --covers-only para trocar apenas as capas, sem regravar tags."
+            "Escolha o que alterar: --tags-only (só tags), --covers-only (só capas) "
+            "ou nenhuma das duas / --both (tags e capas, o padrão)."
         ),
         help="modo de correção retroativa de tags de metadados",
     )
@@ -325,7 +326,19 @@ def tags_args(subparsers, default_folder=None):
         action="store_true",
         help='grava artistas, compositores e gêneros como texto único "A, B" (sobrescreve config.ini)',
     )
-    tags.add_argument(
+    # O que alterar: só tags, só capas ou os dois (padrão).
+    what = tags.add_mutually_exclusive_group()
+    what.add_argument(
+        "--tags-only",
+        dest="tags_only",
+        action="store_true",
+        default=False,
+        help=(
+            "só regrava as tags de metadados; NÃO consulta a Apple/iTunes e a "
+            "capa embutida fica como está"
+        ),
+    )
+    what.add_argument(
         "--covers-only",
         dest="covers_only",
         action="store_true",
@@ -334,6 +347,13 @@ def tags_args(subparsers, default_folder=None):
             "só troca a capa embutida (quando a Apple/iTunes tem uma validada e "
             "de resolução maior); NÃO regrava nenhuma tag de metadados"
         ),
+    )
+    what.add_argument(
+        "--both",
+        dest="both",
+        action="store_true",
+        default=False,
+        help="regrava as tags E troca a capa quando validada (é o padrão)",
     )
     return tags
 
