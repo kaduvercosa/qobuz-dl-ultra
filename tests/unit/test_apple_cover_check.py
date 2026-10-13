@@ -102,9 +102,7 @@ def test_format_trace_lista_consultas_resultados_e_vereditos():
 def test_main_com_all_imprime_a_trace(monkeypatch, capsys):
     modulo = _carregar()
 
-    async def falso(
-        artist, album, track, upc=None, isrc=None, session=None, trace=None
-    ):
+    async def falso(artist, album, track, upc=None, isrc=None, trace=None, **_kw):
         trace.append(
             {"type": "request", "tag": "t", "url": "u", "params": {}, "results": []}
         )
@@ -114,3 +112,78 @@ def test_main_com_all_imprime_a_trace(monkeypatch, capsys):
     assert modulo.main(["A", "B", "C", "--all"]) == 1
     saida = capsys.readouterr().out
     assert "CONSULTAS À APPLE (1)" in saida and "NÃO ENCONTRADA: motivo-x" in saida
+
+
+def test_check_envia_tipo_paises_e_fallback(monkeypatch):
+    modulo = _carregar()
+    vistos = {}
+
+    async def falsa(sessao, **kw):
+        vistos.update(kw)
+        return ("U", "Apple/iTunes", None)
+
+    monkeypatch.setattr("qobuz_dl.utils.get_apple_hq_cover", falsa)
+    asyncio.run(
+        modulo.check("A", "B", "C", kind="single", countries=["jp"], fallback=True)
+    )
+    assert vistos["release_kind"] == "single"
+    assert vistos["countries"] == ("jp",)
+    assert vistos["fallback_countries"] is True
+
+    asyncio.run(modulo.check("A", "B", "C", kind="album"))
+    assert vistos["release_kind"] == "full"
+    asyncio.run(modulo.check("A", "B", "C"))
+    assert vistos["release_kind"] is None and vistos["countries"] is None
+
+
+def test_decide_monta_o_album_da_qobuz(monkeypatch):
+    modulo = _carregar()
+    from qobuz_dl import retro_tags
+
+    recebido = {}
+
+    async def falsa(album, sessao, resultados, trace=None):
+        recebido.update(album=album, trace=trace)
+        return {"url": "U", "source": "Apple/iTunes", "method": "busca do álbum", "note": None}
+
+    class _Sessao:
+        async def aclose(self):
+            pass
+
+    monkeypatch.setattr(retro_tags, "_decide_album_cover", falsa)
+    decisao = asyncio.run(
+        modulo.decide(
+            "The Weeknd",
+            "Take My Breath",
+            ["Take My Breath (Single Version)"],
+            upc="123",
+            kind="single",
+            session=_Sessao(),
+            trace=[],
+        )
+    )
+    album = recebido["album"]
+    assert decisao["url"] == "U"
+    assert album["title"] == "Take My Breath" and album["upc"] == "123"
+    assert album["artist"] == {"name": "The Weeknd"}
+    assert album["release_type"] == "single" and album["tracks_count"] == 1
+    assert album["tracks"]["items"][0]["title"] == "Take My Breath (Single Version)"
+
+
+def test_main_decide_usa_a_faixa_quando_nao_ha_album_track(monkeypatch):
+    modulo = _carregar()
+    chamado = {}
+
+    async def falsa(artist, album, album_tracks, upc=None, kind=None, session=None, trace=None):
+        chamado.update(album_tracks=album_tracks, kind=kind)
+        return {"url": "U", "source": "Apple/iTunes", "method": "busca do álbum", "note": None}
+
+    monkeypatch.setattr(modulo, "decide", falsa)
+    assert modulo.main(["A", "B", "Faixa X", "--decide", "--kind", "single"]) == 0
+    assert chamado == {"album_tracks": ["Faixa X"], "kind": "single"}
+
+    chamado.clear()
+    modulo.main(
+        ["A", "B", "Faixa X", "--decide", "--album-track", "Um", "--album-track", "Dois"]
+    )
+    assert chamado["album_tracks"] == ["Um", "Dois"]

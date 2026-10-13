@@ -408,6 +408,7 @@ def amb(monkeypatch, tmp_path):
 
     monkeypatch.setattr(retro_tags, "_fetch_apple_cover_for_track", buscar)
     monkeypatch.setattr(retro_tags, "_decide_album_cover", decidir)
+    monkeypatch.setenv("COLUMNS", "120")  # o log quebra linhas pela largura
     monkeypatch.setattr(retro_tags, "_download_apple_cover", baixar)
     monkeypatch.setattr(retro_tags, "make_client", lambda **kw: _Sessao())
     monkeypatch.setattr(
@@ -483,7 +484,7 @@ class TestCapaAppleNoLaco:
         assert em_image is True
         assert caminho.endswith(".apple-cover-teste.jpg")
         assert origem == "Apple/iTunes"
-        assert "Capa: Apple/iTunes; Apple: capa baixada (3 KiB)" in amb.texto
+        assert "Fonte: Apple/iTunes | capa baixada (3 KiB)" in amb.texto
 
     def test_temporario_e_removido_depois_de_gravar(self, amb):
         amb.arquivo("a.flac")
@@ -514,7 +515,7 @@ class TestCapaAppleNoLaco:
         amb.arquivo("a.flac")
         stats = _rodar(amb)
         assert stats["apple_not_found"] == 1 and stats["apple_embedded"] == 0
-        assert "Apple: artista incompatível (0.56 < 0.85)" in amb.texto
+        assert "Motivo: artista incompatível (0.56 < 0.85)" in amb.texto
         _, _, em_image, caminho, origem = amb.tags("flac")[0]
         assert (em_image, caminho, origem) == (False, None, None)
         # As tags são regravadas mesmo sem capa nova.
@@ -524,7 +525,7 @@ class TestCapaAppleNoLaco:
         amb.apple = (None, None, None)
         amb.arquivo("a.flac")
         _rodar(amb)
-        assert "Apple: nenhum candidato passou pelos filtros" in amb.texto
+        assert "Motivo: nenhum candidato passou pelos filtros" in amb.texto
 
     @pytest.mark.parametrize("url", ["", "   ", None, 123])
     def test_url_invalida_conta_como_nao_encontrada(self, amb, url):
@@ -537,7 +538,7 @@ class TestCapaAppleNoLaco:
         amb.arquivo("a.flac")
         stats = _rodar(amb)
         assert stats["apple_failed"] == 1 and stats["apple_embedded"] == 0
-        assert "Apple: URL encontrada, download falhou" in amb.texto
+        assert "a imagem encontrada na Apple não pôde ser baixada" in amb.texto
         assert amb.tags("flac")[0][2] is False
 
     def test_excecao_na_busca_nao_impede_o_retag(self, amb):
@@ -547,7 +548,8 @@ class TestCapaAppleNoLaco:
         stats = _rodar(amb)
         assert stats["apple_failed"] == 1 and stats["errors"] == 0
         assert stats["updated"] == 1
-        assert "Apple: erro (RuntimeError: quebrou)" in amb.texto
+        assert "erro na etapa da Apple" in amb.texto
+        assert "RuntimeError: quebrou" in amb.texto
 
 
 class TestPreservacaoDaCapaAtual:
@@ -558,7 +560,7 @@ class TestPreservacaoDaCapaAtual:
         assert stats["apple_embedded"] == 0
         _, _, em_image, caminho, origem = amb.tags("flac")[0]
         assert (em_image, caminho, origem) == (False, None, None)
-        assert "Capa existente preservada (candidata não é superior)" in amb.texto
+        assert "mantida -- a capa atual já tem resolução igual ou maior" in amb.texto
 
     def test_temporario_da_candidata_descartada_e_removido(self, amb):
         amb.substituir = False
@@ -619,28 +621,48 @@ class TestPreservacaoDaCapaAtual:
 # ---------------------------------------------------------------------------
 # Rótulo de ação por arquivo
 # ---------------------------------------------------------------------------
-class TestRotuloDeAcao:
-    def _linha(self, amb):
-        return next(t for t in amb.de("emit") if t.startswith("[1/1]"))
+def _bloco(amb, prefixo="[1/1]"):
+    """Linhas emitidas do bloco do arquivo (do cabeçalho até a linha em branco)."""
+    emit = amb.de("emit")
+    inicio = next(i for i, t in enumerate(emit) if t.startswith(prefixo))
+    bloco = []
+    for texto in emit[inicio:]:
+        if texto == "" and bloco:
+            break
+        bloco.append(texto)
+    return bloco
 
+
+class TestRotuloDeAcao:
     def test_tags_e_capa(self, amb):
         amb.arquivo("a.flac")
         stats = _rodar(amb)
-        assert "[TAGS + CAPA ALTERADAS]" in self._linha(amb)
+        assert _bloco(amb)[1] == "   • Alterado -- tags e capa"
         assert stats["updated"] == 1 and stats["unchanged"] == 0
 
     def test_somente_tags(self, amb):
         amb.apple = (None, None, "sem candidato")
         amb.arquivo("a.flac")
         stats = _rodar(amb)
-        assert "[SOMENTE TAGS ALTERADAS]" in self._linha(amb)
+        # A capa não foi achada: a alteração das tags ficou com pendência.
+        assert _bloco(amb)[1] == (
+            "   • Alterado (somente as tags), mas ficou uma pendência na capa"
+        )
         assert stats["updated"] == 1
+
+    def test_somente_tags_com_capa_preservada_nao_tem_pendencia(
+        self, amb
+    ):
+        amb.substituir = False
+        amb.arquivo("a.flac")
+        _rodar(amb)
+        assert _bloco(amb)[1] == "   • Alterado -- somente as tags"
 
     def test_somente_capa(self, amb):
         amb.muda_texto = False
         amb.arquivo("a.flac")
         stats = _rodar(amb)
-        assert "[SOMENTE CAPA ALTERADA]" in self._linha(amb)
+        assert _bloco(amb)[1] == "   • Alterado -- somente a capa"
         assert stats["updated"] == 1
 
     def test_nenhuma_alteracao(self, amb):
@@ -648,25 +670,36 @@ class TestRotuloDeAcao:
         amb.apple = (None, None, "sem candidato")
         amb.arquivo("a.flac")
         stats = _rodar(amb)
-        assert "[NENHUMA ALTERAÇÃO]" in self._linha(amb)
+        assert _bloco(amb)[1] == "   • Sem alterações"
         assert stats["unchanged"] == 1 and stats["updated"] == 0
 
     def test_linhas_de_detalhe_de_tags_e_capa(self, amb):
         amb.arquivo("a.flac")
         _rodar(amb)
-        assert "    ↳ Tags: alteradas" in amb.de("emit")
-        capa = next(t for t in amb.de("emit") if "↳ Capa:" in t)
-        assert "substituída" in capa
-        assert "Capa: Apple/iTunes; Apple: capa baixada" in capa
+        bloco = _bloco(amb)
+        assert "   Tags   alteradas (1 campo)" in bloco
+        assert "   Capa   substituída pela capa da Apple/iTunes" in bloco
+        assert any("Fonte: Apple/iTunes | capa baixada" in t for t in bloco)
 
     def test_detalhe_sem_alteracao(self, amb):
         amb.muda_texto = amb.muda_capa = False
         amb.apple = (None, None, "motivo-xyz")
         amb.arquivo("a.flac")
         _rodar(amb)
-        assert "    ↳ Tags: sem alteração" in amb.de("emit")
-        capa = next(t for t in amb.de("emit") if "↳ Capa:" in t)
-        assert "preservada/inalterada" in capa and "Apple: motivo-xyz" in capa
+        bloco = _bloco(amb)
+        assert "   Tags   já estavam corretas" in bloco
+        assert "   Capa   não encontrada na Apple -- a capa atual foi mantida" in bloco
+        assert any("Motivo: motivo-xyz" in t for t in bloco)
+
+    def test_capa_mantida_porque_a_atual_ja_e_igual_ou_maior(self, amb):
+        amb.muda_texto = amb.muda_capa = False
+        amb.substituir = False
+        amb.arquivo("a.flac")
+        _rodar(amb)
+        assert (
+            "   Capa   mantida -- a capa atual já tem resolução igual ou maior "
+            "que a da Apple"
+        ) in _bloco(amb)
 
     def test_snapshot_em_formato_de_mapa_simples_tambem_funciona(
         self, amb, monkeypatch
@@ -684,7 +717,7 @@ class TestRotuloDeAcao:
     def test_so_a_linha_principal_leva_o_nome_exibido(self, amb):
         amb.arquivo("a.flac")
         _rodar(amb)
-        assert "[1/1] Banda - Musica [" in self._linha(amb)
+        assert _bloco(amb)[0] == "[1/1] Banda - Musica"
 
 
 # ---------------------------------------------------------------------------
@@ -924,7 +957,7 @@ class TestDiffNoLaco:
         amb.arquivo("a.flac")
         _rodar(amb)
         emit = amb.de("emit")
-        i = emit.index("    ↳ Tags: alteradas")
+        i = emit.index("   Tags   alteradas (1 campo)")
         assert "'0' → '1'" in emit[i + 1]  # o snapshot falso muda v: 0 -> 1
 
     def test_sem_alteracao_nao_mostra_diff(self, amb):
@@ -979,7 +1012,7 @@ class TestModoSoCapas:
         )
 
     def _linha(self, amb):
-        return next(t for t in amb.de("emit") if t.startswith("[1/1]"))
+        return _bloco(amb)[1]
 
     def test_troca_a_capa_sem_regravar_tags(self, amb, trocas):
         amb.arquivo("a.flac")
@@ -987,8 +1020,8 @@ class TestModoSoCapas:
         assert trocas.chamadas == [("a.flac", "Apple/iTunes")]
         assert amb.tags("flac") == [] and amb.tags("mp3") == []
         assert stats["apple_embedded"] == 1 and stats["updated"] == 1
-        assert "[SOMENTE CAPA ALTERADA]" in self._linha(amb)
-        assert "Tags:" in amb.texto and "não tocadas (modo só capas)" in amb.texto
+        assert self._linha(amb) == "   • Alterado -- somente a capa"
+        assert "Tags   não tocadas (modo só capas)" in amb.texto
         assert "SOMENTE CAPAS" in amb.texto
         assert _temporarios(amb.pasta) == []
 
@@ -1003,7 +1036,7 @@ class TestModoSoCapas:
         amb.arquivo("a.flac")
         stats = self._rodar_so_capas(amb)
         assert trocas.chamadas == [] and amb.chamadas == []
-        assert "[NENHUMA ALTERAÇÃO]" in self._linha(amb)
+        assert self._linha(amb) == "   • Sem alterações"
         assert stats["unchanged"] == 1 and stats["updated"] == 0
         assert stats["apple_not_found"] == 1
 
@@ -1013,15 +1046,17 @@ class TestModoSoCapas:
         stats = self._rodar_so_capas(amb)
         assert trocas.chamadas == []
         assert stats["unchanged"] == 1
-        assert "Capa existente preservada" in amb.texto
+        assert "mantida -- a capa atual já tem resolução igual ou maior" in amb.texto
         assert _temporarios(amb.pasta) == []
 
-    def test_falha_ao_embutir_conta_como_falha_e_limpa_o_temporario(self, amb, trocas):
+    def test_falha_ao_embutir_conta_como_falha_e_limpa_o_temporario(
+        self, amb, trocas
+    ):
         trocas.resultado = False
         amb.arquivo("a.flac")
         stats = self._rodar_so_capas(amb)
         assert stats["apple_failed"] == 1 and stats["apple_embedded"] == 0
-        assert "não foi possível embutir" in amb.texto
+        assert "a gravação da imagem no arquivo falhou" in amb.texto
         assert _temporarios(amb.pasta) == []
 
     def test_erro_ao_trocar_conta_erro_e_segue(self, amb, monkeypatch):
@@ -1059,6 +1094,12 @@ class TestCapaPorAlbum:
         return [c[3] for c in amb.tags("flac")]
 
     def test_todas_as_faixas_recebem_a_mesma_capa_baixada_uma_vez(self, amb):
+        amb.album = {
+            "id": "ALB",
+            "title": "Disco",
+            "artist": {"name": "Banda"},
+            "tracks_count": 12,
+        }
         amb.decisao_de["ALB"] = _decisao("https://img/album.jpg")
         amb.apple = (None, None, "a busca por faixa não achou nada")
         for nome, tid in (("a.flac", "1"), ("b.flac", "2"), ("c.flac", "3")):
@@ -1072,7 +1113,14 @@ class TestCapaPorAlbum:
         assert amb.decisoes == ["ALB"]  # decidido uma vez
         assert "capa do álbum baixada" in amb.texto
         assert amb.texto.count("capa do álbum reaproveitada") == 2
-        assert "[Álbum] " in amb.texto and "capa Apple única" in amb.texto
+        cabecalhos = [t for t in amb.de("emit") if t.startswith("== Disco")]
+        assert len(cabecalhos) == 1  # uma vez por álbum, não por faixa
+        assert cabecalhos[0].startswith("== Disco -- Banda  |  álbum | 12 faixas ")
+        assert cabecalhos[0].endswith("=")
+        assert (
+            "   Capa Apple única para todas as faixas (busca do álbum)"
+            in amb.de("emit")
+        )
         assert _temporarios(amb.pasta) == []
 
     def test_faixa_que_a_apple_nao_achou_herda_a_capa_do_album(self, amb):
@@ -1124,7 +1172,7 @@ class TestCapaPorAlbum:
         stats = _rodar(amb)
         assert self._downloads(amb) == ["https://img/a.jpg", "https://img/a.jpg"]
         assert stats["apple_embedded"] == 2
-        assert "[Álbum]" not in amb.texto
+        assert "Capa Apple única" not in amb.texto
 
     def test_capa_nao_superior_em_uma_faixa_nao_apaga_a_do_album(
         self, amb, monkeypatch
@@ -1204,9 +1252,7 @@ def _album_qobuz(n_faixas=5, **extra):
         "upc": "0602",
         "artist": {"name": "Jão"},
         "tracks_count": n_faixas,
-        "tracks": {
-            "items": [{"id": i, "title": f"Faixa {i}"} for i in range(n_faixas)]
-        },
+        "tracks": {"items": [{"id": i, "title": f"Faixa {i}"} for i in range(n_faixas)]},
     }
     album.update(extra)
     return album
@@ -1363,3 +1409,288 @@ class TestTipoDeLancamento:
             )
         )
         assert vistos["release_kind"] == "single"
+
+
+# ---------------------------------------------------------------------------
+# Cabeçalho do álbum, legenda, espaçamento e resumo
+# ---------------------------------------------------------------------------
+def _album_com_titulo(id_, titulo, faixas=12):
+    return {
+        "id": id_,
+        "title": titulo,
+        "artist": {"name": "Banda"},
+        "tracks_count": faixas,
+    }
+
+
+class TestCabecalhoDeAlbum:
+    def _cabecalhos(self, amb):
+        return [t for t in amb.de("emit") if t.startswith("== ")]
+
+    def test_uma_vez_por_album_e_de_novo_ao_voltar(self, amb):
+        amb.album_de = {
+            "1": _album_com_titulo("A1", "Primeiro"),
+            "2": _album_com_titulo("A2", "Segundo"),
+            "3": _album_com_titulo("A1", "Primeiro"),
+        }
+        for nome, tid in (("a.flac", "1"), ("b.flac", "2"), ("c.flac", "3")):
+            amb.arquivo(nome, track_id=tid)
+        _rodar(amb)
+        titulos = [c.split(" -- ")[0] for c in self._cabecalhos(amb)]
+        assert titulos == ["== Primeiro", "== Segundo", "== Primeiro"]
+
+    def test_faixas_do_mesmo_album_nao_repetem_o_cabecalho(self, amb):
+        amb.album = _album_com_titulo("ALB", "Disco")
+        amb.arquivo("a.flac", track_id="1")
+        amb.arquivo("b.flac", track_id="2")
+        _rodar(amb)
+        assert len(self._cabecalhos(amb)) == 1
+
+    def test_tipo_do_lancamento_aparece_no_cabecalho(self, amb):
+        amb.album = _album_com_titulo("ALB", "Ressaca", faixas=1)
+        amb.arquivo("a.flac")
+        _rodar(amb)
+        assert "|  single | 1 faixa " in self._cabecalhos(amb)[0]
+
+    def test_sem_decisao_por_album_o_cabecalho_explica(self, amb):
+        amb.album = _album_com_titulo("ALB", "Disco")
+        amb.arquivo("a.flac")
+        _rodar(amb)
+        assert (
+            "   Sem capa única para o álbum: cada faixa é avaliada separadamente"
+            in amb.de("emit")
+        )
+
+    def test_album_sem_titulo_nao_imprime_cabecalho(self, amb):
+        amb.arquivo("a.flac")  # o álbum do ambiente é só {"id": "ALB"}
+        _rodar(amb)
+        assert self._cabecalhos(amb) == []
+
+    def test_cabecalho_vem_antes_do_bloco_da_faixa_com_linha_em_branco(self, amb):
+        amb.album = _album_com_titulo("ALB", "Disco")
+        amb.arquivo("a.flac")
+        _rodar(amb)
+        emit = amb.de("emit")
+        i = next(i for i, t in enumerate(emit) if t.startswith("== Disco"))
+        assert emit[i - 1] == ""
+        j = next(j for j, t in enumerate(emit) if t.startswith("[1/1]"))
+        assert j > i and emit[j - 1] == ""
+
+
+class TestLegendaEEspacamento:
+    def test_legenda_das_cores_no_inicio(self, amb):
+        amb.arquivo("a.flac")
+        _rodar(amb)
+        emit = amb.de("emit")
+        i = next(i for i, t in enumerate(emit) if "Legenda das cores" in t)
+        legenda = "\n".join(emit[i : i + 5])
+        for palavra in ("verde", "amarelo", "cinza", "vermelho"):
+            assert palavra in legenda
+        assert i < next(j for j, t in enumerate(emit) if t.startswith("[1/1]"))
+
+    def test_linha_em_branco_antes_de_cada_faixa(self, amb):
+        for nome, tid in (("a.flac", "1"), ("b.flac", "2"), ("c.flac", "3")):
+            amb.arquivo(nome, track_id=tid)
+        _rodar(amb)
+        emit = amb.de("emit")
+        for numero in (1, 2, 3):
+            i = next(i for i, t in enumerate(emit) if t.startswith(f"[{numero}/3]"))
+            assert emit[i - 1] == ""
+
+    def test_mensagens_de_pulo_tambem_ficam_separadas(self, amb):
+        amb.arquivo("a.flac", track_id=None)
+        _rodar(amb)
+        i = next(i for i, (_, t) in enumerate(amb.linhas) if "sem ID Qobuz nas tags" in t)
+        assert amb.linhas[i - 1] == ("emit", "")
+
+    def test_sem_travessao_nem_simbolos_exoticos_no_bloco(self, amb):
+        # a-Shell: só ASCII + os símbolos que o terminal já exibia.
+        amb.album = _album_com_titulo("ALB", "Disco")
+        amb.arquivo("a.flac")
+        _rodar(amb)
+        # Escapes unicode: travessão, ponto médio, traço de caixa e círculo.
+        for caractere in ("\u2014", "\u00b7", "\u2501", "\u25cf"):
+            assert caractere not in amb.texto
+
+
+class TestCoresDoLog:
+    """Verde = alterou; amarelo = atenção; cinza = nada a alterar."""
+
+    @pytest.fixture
+    def cores(self, monkeypatch):
+        for nome, marca in (
+            ("GREEN", "<G>"),
+            ("YELLOW", "<Y>"),
+            ("MUTED", "<M>"),
+            ("RED", "<R>"),
+            ("CYAN", "<C>"),
+            ("OFF", "</>"),
+            ("RESET", "</>"),
+        ):
+            monkeypatch.setattr(retro_tags, nome, marca)
+
+    def _bloco_cor(self, amb, cor):
+        return _bloco(amb, prefixo=f"{cor}[1/1]")
+
+    def test_alterado_fica_verde(self, amb, cores):
+        amb.arquivo("a.flac")
+        _rodar(amb)
+        bloco = self._bloco_cor(amb, "<G>")
+        assert bloco[1] == "   <G>• Alterado -- tags e capa</>"
+        assert bloco[2] == "<G>   Tags   alteradas (1 campo)</>"
+        assert "<G>   Capa   substituída pela capa da Apple/iTunes</>" in bloco
+
+    def test_nada_a_alterar_fica_cinza(self, amb, cores):
+        amb.muda_texto = amb.muda_capa = False
+        amb.substituir = False
+        amb.arquivo("a.flac")
+        _rodar(amb)
+        bloco = self._bloco_cor(amb, "<M>")
+        assert bloco[1] == "   <M>• Sem alterações</>"
+        assert bloco[2] == "<M>   Tags   já estavam corretas</>"
+        assert bloco[3].startswith("<M>   Capa   mantida -- ")
+
+    def test_pendencia_na_capa_fica_amarela(self, amb, cores):
+        amb.apple = (None, None, "motivo-xyz")
+        amb.arquivo("a.flac")
+        _rodar(amb)
+        bloco = self._bloco_cor(amb, "<Y>")
+        assert bloco[1].startswith("   <Y>• Alterado (somente as tags)")
+        assert bloco[2].startswith("<G>   Tags")  # a tag alterada segue verde
+        assert any(
+            t.startswith("<Y>   Capa   não encontrada na Apple") for t in bloco
+        )
+        assert "<M>          Motivo: motivo-xyz</>" in bloco
+
+    def test_sem_alteracao_mas_capa_nao_achada_destaca_so_a_capa(self, amb, cores):
+        amb.muda_texto = amb.muda_capa = False
+        amb.apple = (None, None, "motivo-xyz")
+        amb.arquivo("a.flac")
+        _rodar(amb)
+        bloco = self._bloco_cor(amb, "<M>")  # o arquivo em si: nada alterado
+        assert bloco[1] == "   <M>• Sem alterações</>"
+        assert any(t.startswith("<Y>   Capa   não encontrada") for t in bloco)
+
+    def test_erro_na_etapa_da_apple_fica_amarelo(self, amb, cores):
+        amb.apple = RuntimeError("quebrou")
+        amb.arquivo("a.flac")
+        _rodar(amb)
+        assert any(
+            t.startswith("<Y>   Capa   erro na etapa da Apple")
+            for t in amb.de("emit")
+        )
+
+    def test_diff_verde_para_novo_e_alterado_amarelo_para_removido(self, cores):
+        linhas = retro_tags.format_tag_diff(
+            {"VELHA": ["a"], "MUDA": ["x"]}, {"NOVA": ["b"], "MUDA": ["y"]}
+        )
+        texto = "\n".join(linhas)
+        assert "<G>+ NOVA:</>" in texto
+        assert "<G>~ MUDA:</>" in texto
+        assert "<Y>- VELHA:</>" in texto
+
+    def test_modo_so_capas_tags_ficam_cinza(self, amb, cores, monkeypatch):
+        monkeypatch.setattr(
+            retro_tags.metadata,
+            "replace_cover_only",
+            lambda *a, **k: True,
+            raising=False,
+        )
+        amb.arquivo("a.flac")
+        asyncio.run(
+            retro_tags.retag_directory(
+                str(amb.pasta),
+                SimpleNamespace(),
+                SimpleNamespace(multi_value_tags=True),
+                covers_only=True,
+            )
+        )
+        assert "<M>   Tags   não tocadas (modo só capas)</>" in amb.de("emit")
+
+
+class TestResumoFinal:
+    def _linhas(self, amb):
+        emit = amb.de("emit")
+        i = next(i for i, t in enumerate(emit) if "Correção de tags concluída" in t)
+        return emit[i:]
+
+    def test_cada_numero_vem_com_uma_explicacao(self, amb):
+        amb.arquivo("a.flac")
+        _rodar(amb)
+        resumo = "\n".join(self._linhas(amb))
+        assert "Resumo:" in resumo
+        assert "Arquivos analisados       : 1  faixas .flac/.mp3 encontradas" in resumo
+        assert "Atualizados               : 1  faixas com tags e/ou capa" in resumo
+        assert "Capas Apple embutidas     : 1  faixas que receberam a capa" in resumo
+        assert "Erros                     : 0  falhas ao consultar" in resumo
+
+    def test_linha_em_branco_antes_do_resumo(self, amb):
+        amb.arquivo("a.flac")
+        _rodar(amb)
+        emit = amb.de("emit")
+        i = next(i for i, t in enumerate(emit) if "Correção de tags concluída" in t)
+        assert emit[i - 1] == "" and emit[i + 1] == ""
+
+    def test_cores_dos_numeros(self, amb, monkeypatch):
+        for nome, marca in (
+            ("GREEN", "<G>"),
+            ("YELLOW", "<Y>"),
+            ("MUTED", "<M>"),
+            ("RED", "<R>"),
+            ("CYAN", "<C>"),
+            ("OFF", "</>"),
+            ("RESET", "</>"),
+        ):
+            monkeypatch.setattr(retro_tags, nome, marca)
+        amb.apple = (None, None, "x")
+        amb.arquivo("a.flac")
+        amb.arquivo("b.flac", track_id=None)
+        _rodar(amb)
+        resumo = "\n".join(self._linhas(amb))
+        assert "<G>1</>" in resumo  # Atualizados > 0
+        assert "<Y>1</>" in resumo  # sem ID Qobuz / capa não encontrada > 0
+        assert "Erros                     :</> <M>0</>" in resumo  # zero = cinza
+
+
+class TestDecideAlbumCoverVersaoCerta:
+    """A versão certa do álbum é confirmada pela lista de faixas da Qobuz."""
+
+    async def test_envia_a_lista_de_faixas_com_a_versao_e_as_lojas_extras(
+        self, decisao_env
+    ):
+        album = _album_qobuz(2)
+        album["tracks"]["items"][0].update(title="Take My Breath", version="Single Version")
+        album["tracks"]["items"][1].update(title="Outra", version="")
+        await retro_tags._decide_album_cover(album, object(), {})
+        a = decisao_env.args_album
+        assert a["album_tracks"] == ["Take My Breath (Single Version)", "Outra"]
+        assert a["fallback_countries"] is True
+
+    async def test_album_sem_lista_de_faixas_nao_envia_album_tracks(self, decisao_env):
+        album = _album_qobuz(0)
+        await retro_tags._decide_album_cover(album, object(), {})
+        assert decisao_env.args_album["album_tracks"] is None
+
+    async def test_trace_so_e_repassado_quando_pedido(self, decisao_env):
+        await retro_tags._decide_album_cover(_album_qobuz(2), object(), {})
+        assert "trace" not in decisao_env.args_album
+        trace = []
+        await retro_tags._decide_album_cover(_album_qobuz(2), object(), {}, trace=trace)
+        assert decisao_env.args_album["trace"] is trace
+
+
+class TestTituloDaFaixaQobuz:
+    @pytest.mark.parametrize(
+        "item, esperado",
+        [
+            ({"title": "Take My Breath", "version": "Single Version"},
+             "Take My Breath (Single Version)"),
+            ({"title": "Fat Juicy &…", "version": "Radio Edit"}, "Fat Juicy &… (Radio Edit)"),
+            ({"title": "Musica (Radio Edit)", "version": "Radio Edit"}, "Musica (Radio Edit)"),
+            ({"title": "Simples"}, "Simples"),
+            ({"title": " Espaço ", "version": " "}, "Espaço"),
+            ({}, ""),
+        ],
+    )
+    def test_titulo_com_versao(self, item, esperado):
+        assert retro_tags._qobuz_track_title(item) == esperado

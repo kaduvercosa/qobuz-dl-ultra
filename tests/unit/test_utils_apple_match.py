@@ -562,7 +562,9 @@ class TestTituloComparavel:
             ("Musica (Acoustic Version)", "musica"),
         ],
     )
-    def test_remove_sufixos_inofensivos_e_marcadores_de_versao(self, entrada, esperado):
+    def test_remove_sufixos_inofensivos_e_marcadores_de_versao(
+        self, entrada, esperado
+    ):
         assert utils.extrair_titulo_comparavel(entrada) == esperado
 
     @pytest.mark.parametrize(
@@ -847,7 +849,9 @@ class TestFaixaDentroDoAlbumCerto:
             album=corpo(album_apple(9, "Outro Artista", "Anti-Herói")),
             tracks={9: corpo(faixa("Outro Artista", "Anti-Herói", "VSF"))},
         )
-        url, _, _ = await buscar(s, artist="Jão", album="Anti-Herói", track_title="VSF")
+        url, _, _ = await buscar(
+            s, artist="Jão", album="Anti-Herói", track_title="VSF"
+        )
         assert url is None and s.lookups() == []
 
     async def test_lookup_do_album_e_reaproveitado_na_mesma_sessao(self):
@@ -940,9 +944,7 @@ class _SessaoPorTermo:
         if "/lookup" in url:
             tabela = self.catalogo if params.get("entity") == "album" else self.tracks
             return _Resp(tabela.get(params.get("id"), corpo()))
-        return _Resp(
-            self.buscas.get((params.get("entity"), params.get("term")), corpo())
-        )
+        return _Resp(self.buscas.get((params.get("entity"), params.get("term")), corpo()))
 
     async def head(self, url, **_kw):
         return _Resp({}, status=200)
@@ -1024,14 +1026,14 @@ class TestFontesAlternativasDeAlbum:
             catalogo={7: corpo(album_apple(1, "Outro Artista", "Anti-Herói"))},
             tracks={1: _faixas_antiheroi()},
         )
-        url, _, _ = await buscar(s, artist="Jão", album="Anti-Herói", track_title="VSF")
+        url, _, _ = await buscar(
+            s, artist="Jão", album="Anti-Herói", track_title="VSF"
+        )
         assert url is None
 
     async def test_mesmo_candidato_por_duas_etapas_conta_uma_rejeicao(self):
         buscas = dict(self._BASE)
-        buscas[("song", "Jão Anti-Herói")] = corpo(
-            faixa("Jão", _AO_VIVO, "VSF (Ao Vivo)")
-        )
+        buscas[("song", "Jão Anti-Herói")] = corpo(faixa("Jão", _AO_VIVO, "VSF (Ao Vivo)"))
         s = _SessaoPorTermo(buscas=buscas)
         _, _, motivo = await buscar(
             s, artist="Jão", album="Anti-Herói", track_title="VSF"
@@ -1094,15 +1096,9 @@ class TestTipoSingleXAlbum:
         assert utils.apple_release_kind(nome) == esperado
 
     async def test_single_aceita_o_single_da_apple(self):
-        s = _Sessao(
-            search=corpo(faixa_arte("Jão", "Ressaca - Single", "Ressaca", "single"))
-        )
+        s = _Sessao(search=corpo(faixa_arte("Jão", "Ressaca - Single", "Ressaca", "single")))
         url, _, motivo = await buscar(
-            s,
-            artist="Jão",
-            album="Ressaca",
-            track_title="Ressaca",
-            release_kind="single",
+            s, artist="Jão", album="Ressaca", track_title="Ressaca", release_kind="single"
         )
         assert url is not None, motivo
 
@@ -1110,38 +1106,24 @@ class TestTipoSingleXAlbum:
         # O mesmo nome de álbum e faixa, mas na Apple é o álbum completo.
         s = _Sessao(search=corpo(faixa_arte("Jão", "Ressaca", "Ressaca", "album")))
         url, _, motivo = await buscar(
-            s,
-            artist="Jão",
-            album="Ressaca",
-            track_title="Ressaca",
-            release_kind="single",
+            s, artist="Jão", album="Ressaca", track_title="Ressaca", release_kind="single"
         )
         assert url is None
-        assert (
-            "tipo de lançamento incompatível (pedido=single, Apple=álbum/EP" in motivo
-        )
+        assert "tipo de lançamento incompatível (pedido=single, Apple=álbum/EP" in motivo
 
     async def test_album_nao_recebe_a_capa_do_single(self):
-        s = _Sessao(
-            search=corpo(faixa_arte("Jão", "Disco - Single", "Musica", "single"))
-        )
+        s = _Sessao(search=corpo(faixa_arte("Jão", "Disco - Single", "Musica", "single")))
         url, _, motivo = await buscar(
             s, artist="Jão", album="Disco", track_title="Musica", release_kind="full"
         )
         assert url is None
-        assert (
-            "tipo de lançamento incompatível (pedido=álbum/EP, Apple=single" in motivo
-        )
+        assert "tipo de lançamento incompatível (pedido=álbum/EP, Apple=single" in motivo
 
     async def test_album_aceita_ep_e_album_da_apple(self):
         for nome in ("Disco", "Disco - EP"):
             s = _Sessao(search=corpo(faixa_arte("Jão", nome, "Musica", "ok")))
             url, _, motivo = await buscar(
-                s,
-                artist="Jão",
-                album="Disco",
-                track_title="Musica",
-                release_kind="full",
+                s, artist="Jão", album="Disco", track_title="Musica", release_kind="full"
             )
             assert url is not None, (nome, motivo)
 
@@ -1240,8 +1222,7 @@ class TestBuscaProfundaDeAlbum:
     async def test_deep_nao_aceita_o_album_ao_vivo_nem_o_single(self):
         buscas = dict(self._BASE)
         buscas[("album", "Jão")] = corpo(
-            album_apple(2, "Jão", _AO_VIVO),
-            album_apple(3, "Jão", "Anti-Herói - Single"),
+            album_apple(2, "Jão", _AO_VIVO), album_apple(3, "Jão", "Anti-Herói - Single")
         )
         s = _SessaoPorTermo(buscas=buscas)
         url, _, _ = await buscar(
@@ -1256,11 +1237,511 @@ class TestBuscaProfundaDeAlbum:
     async def test_deep_prefere_a_edicao_identica(self):
         buscas = dict(self._BASE)
         buscas[("album", "Jão")] = corpo(
-            album_apple(7, "Jão", "Anti-Herói (Deluxe)"),
-            album_apple(1, "Jão", "Anti-Herói"),
+            album_apple(7, "Jão", "Anti-Herói (Deluxe)"), album_apple(1, "Jão", "Anti-Herói")
         )
         s = _SessaoPorTermo(buscas=buscas)
         url, _, _ = await buscar(
             s, artist="Jão", album="Anti-Herói", deep_album_search=True
         )
         assert url.startswith("https://album1.test/")
+
+
+# ---------------------------------------------------------------------------
+# Versões da mesma música em vários lançamentos (single, álbum, Deluxe,
+# coletânea). Casos reais do `tags` com The Weeknd:
+#  - "Earned It (...) (From The "Fifty Shades Of Grey" Soundtrack)": a
+#    procedência entre parênteses não muda a gravação;
+#  - "Take My Breath (Single Version)": a Apple chama de "Take My Breath", e a
+#    "(Extended Version)" é OUTRA gravação (quase passava: 0,84 < 0,85);
+#  - "Pray For Me" de "The Weeknd" no single "The Weeknd & Kendrick Lamar".
+# ---------------------------------------------------------------------------
+class TestTituloComJanelaDeProcedenciaEVersao:
+    @pytest.mark.parametrize(
+        "entrada, esperado",
+        [
+            (
+                'Earned It (Fifty Shades Of Grey) (From The "Fifty Shades Of Grey" Soundtrack)',
+                "earned it (fifty shades of grey)",
+            ),
+            ("Musica (From Dust)", "musica"),
+            ("Take My Breath (Single Version)", "take my breath"),
+            ("Musica (Album Version)", "musica"),
+            ("Musica (Original Version)", "musica"),
+            ("Take My Breath (Extended Version)", "take my breath"),
+            ("Musica (Extended Mix)", "musica"),
+        ],
+    )
+    def test_comparavel(self, entrada, esperado):
+        assert utils.extrair_titulo_comparavel(entrada) == esperado
+
+    @pytest.mark.parametrize(
+        "entrada",
+        ["Musica (Radio Edit)", "Musica (Remastered 2011)", "Musica (Live From Paris)"],
+    )
+    def test_outras_versoes_continuam(self, entrada):
+        assert utils.extrair_titulo_comparavel(entrada) == (
+            utils.extrair_titulo_completo(entrada)
+        )
+
+    def test_extended_e_marcador_de_versao(self):
+        assert utils.marcadores_versao("Take My Breath (Extended Version)") == (
+            frozenset({"extended"})
+        )
+        assert utils.marcadores_versao("Take My Breath") == frozenset()
+
+
+class TestTermoDeBusca:
+    @pytest.mark.parametrize(
+        "entrada, esperado",
+        [
+            (
+                'Earned It (Fifty Shades Of Grey) (From The "Fifty Shades" Soundtrack)',
+                "Earned It",
+            ),
+            ("Take My Breath (Single Version)", "Take My Breath"),
+            ("Musica [Deluxe]", "Musica"),
+            ('Titulo "com aspas"', "Titulo com aspas"),
+            ("Simples", "Simples"),
+            ("", ""),
+            (None, ""),
+        ],
+    )
+    def test_termo(self, entrada, esperado):
+        assert utils.termo_de_busca(entrada) == esperado
+
+
+class TestFaixasEquivalentes:
+    def test_mesma_gravacao_com_procedencia_e_versao_de_single(self):
+        assert utils.faixas_equivalentes(
+            'Earned It (Fifty Shades Of Grey) (From The "Fifty Shades Of Grey" Soundtrack)',
+            "Earned It (Fifty Shades of Grey)",
+        )
+        assert utils.faixas_equivalentes(
+            "Take My Breath (Single Version)", "Take My Breath"
+        )
+
+    def test_versao_estendida_nao_e_a_mesma_gravacao(self):
+        assert not utils.faixas_equivalentes(
+            "Take My Breath (Single Version)", "Take My Breath (Extended Version)"
+        )
+        assert not utils.faixas_equivalentes("Take My Breath", "Take My Breath (Instrumental)")
+
+    def test_ao_vivo_so_vale_com_album_ao_vivo(self):
+        assert not utils.faixas_equivalentes("VSF", "VSF (Ao Vivo)")
+        assert utils.faixas_equivalentes(
+            "VSF", "VSF (Ao Vivo)", "Turnê (Ao Vivo)", "Turnê (Ao Vivo)"
+        )
+
+    def test_radio_edit_continua_sendo_outra_edicao(self):
+        assert not utils.faixas_equivalentes("Musica", "Musica (Radio Edit)")
+
+    def test_titulos_so_de_pontuacao(self):
+        assert utils.faixas_equivalentes(":(", ":(")
+        assert not utils.faixas_equivalentes(":(", ":)")
+
+    def test_conta_sem_repetir(self):
+        pedidas = ["A", "A", "B", "C"]
+        achadas = ["A", "B", "Z"]
+        assert utils.contar_faixas_em_comum(pedidas, achadas) == 2  # A e B
+        assert utils.contar_faixas_em_comum([], achadas) == 0
+        assert utils.contar_faixas_em_comum(pedidas, []) == 0
+
+
+# ---------------------------------------------------------------------------
+# Loja Apple de mentira: álbuns (com faixas e lojas onde existem), busca de
+# álbum/música/artista e lookup por id, tudo sensível ao país.
+# ---------------------------------------------------------------------------
+class _LojaApple:
+    def __init__(self, albuns):
+        # id -> dict(name, artist, tracks, art, stores(opcional), isrc(opcional))
+        self.albuns = albuns
+        self.chamadas = []
+
+    def _visivel(self, cid, pais):
+        lojas = self.albuns[cid].get("stores")
+        return lojas is None or pais in lojas
+
+    def _linha_album(self, cid):
+        a = self.albuns[cid]
+        return {
+            "wrapperType": "collection",
+            "collectionId": cid,
+            "artistName": a["artist"],
+            "collectionName": a["name"],
+            "artworkUrl100": _arte(a["art"]),
+        }
+
+    def _linha_faixa(self, cid, titulo):
+        a = self.albuns[cid]
+        return {
+            "wrapperType": "track",
+            "kind": "song",
+            "artistName": a["artist"],
+            "collectionName": a["name"],
+            "trackName": titulo,
+            "artworkUrl100": _arte(a["art"]),
+        }
+
+    async def get(self, url, **kw):
+        params = kw.get("params") or {}
+        self.chamadas.append((url, params))
+        pais = params.get("country", "br")
+        if "/lookup" in url:
+            if "isrc=" in url:
+                linhas = [
+                    self._linha_faixa(cid, t)
+                    for cid, a in self.albuns.items()
+                    if self._visivel(cid, pais)
+                    for t in a["tracks"]
+                    if t in a.get("isrc_titles", ())
+                ]
+                return _Resp({"results": linhas})
+            if params.get("entity") == "song" and params.get("id") in self.albuns:
+                cid = params["id"]
+                if not self._visivel(cid, pais):
+                    return _Resp({"results": []})
+                return _Resp(
+                    {
+                        "results": [self._linha_album(cid)]
+                        + [self._linha_faixa(cid, t) for t in self.albuns[cid]["tracks"]]
+                    }
+                )
+            return _Resp({"results": []})
+        entidade = params.get("entity")
+        if entidade == "album":
+            return _Resp(
+                {
+                    "results": [
+                        self._linha_album(cid)
+                        for cid in self.albuns
+                        if self._visivel(cid, pais)
+                    ]
+                }
+            )
+        if entidade == "song":
+            linhas = [
+                self._linha_faixa(cid, t)
+                for cid, a in self.albuns.items()
+                if self._visivel(cid, pais)
+                for t in a["tracks"]
+            ]
+            return _Resp({"results": linhas[:50]})
+        return _Resp({"results": []})
+
+    async def head(self, url, **_kw):
+        return _Resp({}, status=200)
+
+    def paises(self):
+        return {str(p.get("country")) for _, p in self.chamadas if p.get("country")}
+
+
+def _album_apple_loja(nome, artista, faixas, arte, **extra):
+    return {"name": nome, "artist": artista, "tracks": faixas, "art": arte, **extra}
+
+
+async def _album_certo(loja, qobuz_album, faixas, **kw):
+    return await buscar(
+        loja,
+        artist="The Weeknd",
+        album=qobuz_album,
+        album_tracks=faixas,
+        deep_album_search=True,
+        **kw,
+    )
+
+
+class TestVerificacaoPorListaDeFaixas:
+    async def test_earned_it_single_com_procedencia_no_titulo(self):
+        loja = _LojaApple(
+            {
+                11: _album_apple_loja(
+                    "Earned It (Fifty Shades of Grey) - Single",
+                    "The Weeknd",
+                    ["Earned It (Fifty Shades of Grey)"],
+                    "single",
+                ),
+                12: _album_apple_loja(
+                    "The Highlights",
+                    "The Weeknd",
+                    ["Earned It (Fifty Shades Of Grey)"] + [f"Outra {i}" for i in range(17)],
+                    "highlights",
+                ),
+                14: _album_apple_loja(
+                    "Earned It (Fifty Shades of Grey) [The Voice Performance] - Single",
+                    "Brooke Simpson & Davon Fleming",
+                    ["Earned It (Fifty Shades of Grey) [The Voice Performance]"],
+                    "voice",
+                ),
+            }
+        )
+        url, _, motivo = await _album_certo(
+            loja,
+            "Earned It (Fifty Shades Of Grey)",
+            [
+                'Earned It (Fifty Shades Of Grey) (From The "Fifty Shades Of Grey" Soundtrack)'
+            ],
+            release_kind="single",
+        )
+        assert url is not None, motivo
+        assert url.startswith("https://single.test/")
+
+    async def test_take_my_breath_single_version_nao_pega_a_estendida(self):
+        loja = _LojaApple(
+            {
+                32: _album_apple_loja(
+                    "Take My Breath (Extended Version) - Single",
+                    "The Weeknd",
+                    ["Take My Breath (Extended Version)"],
+                    "estendida",
+                ),
+                31: _album_apple_loja(
+                    "Take My Breath - Single", "The Weeknd", ["Take My Breath"], "single"
+                ),
+                34: _album_apple_loja(
+                    "Take My Breath (Instrumental) - Single",
+                    "The Weeknd",
+                    ["Take My Breath (Instrumental)"],
+                    "instrumental",
+                ),
+            }
+        )
+        url, _, motivo = await _album_certo(
+            loja,
+            "Take My Breath",
+            ["Take My Breath (Single Version)"],
+            release_kind="single",
+        )
+        assert url is not None, motivo
+        assert url.startswith("https://single.test/")
+
+    async def test_pray_for_me_artista_com_participacao(self):
+        loja = _LojaApple(
+            {
+                22: _album_apple_loja("Pray For Me - Single", "Lekan", ["Pray For Me"], "lekan"),
+                21: _album_apple_loja(
+                    "Pray for Me - Single",
+                    "The Weeknd & Kendrick Lamar",
+                    ["Pray For Me"],
+                    "single",
+                ),
+                23: _album_apple_loja(
+                    "Pray for Me", "The Bellamy Brothers", ["Pray for Me"], "bellamy"
+                ),
+            }
+        )
+        url, _, motivo = await _album_certo(
+            loja, "Pray For Me", ["Pray For Me"], release_kind="single"
+        )
+        assert url is not None, motivo
+        assert url.startswith("https://single.test/")
+
+    async def test_album_padrao_nao_pega_deluxe_nem_single(self):
+        faixas = [f"Musica {i}" for i in range(10)]
+        loja = _LojaApple(
+            {
+                42: _album_apple_loja(
+                    "After Hours (Deluxe)",
+                    "The Weeknd",
+                    faixas + [f"Bonus {i}" for i in range(4)],
+                    "deluxe",
+                ),
+                43: _album_apple_loja(
+                    "Musica 3 - Single", "The Weeknd", ["Musica 3"], "single3"
+                ),
+                41: _album_apple_loja("After Hours", "The Weeknd", faixas, "padrao"),
+            }
+        )
+        url, _, _ = await _album_certo(loja, "After Hours", faixas, release_kind="full")
+        assert url.startswith("https://padrao.test/")
+
+    async def test_deluxe_pede_o_deluxe(self):
+        faixas = [f"Musica {i}" for i in range(10)]
+        extras = faixas + [f"Bonus {i}" for i in range(4)]
+        loja = _LojaApple(
+            {
+                41: _album_apple_loja("After Hours", "The Weeknd", faixas, "padrao"),
+                42: _album_apple_loja("After Hours (Deluxe)", "The Weeknd", extras, "deluxe"),
+            }
+        )
+        url, _, _ = await _album_certo(
+            loja, "After Hours (Deluxe)", extras, release_kind="full"
+        )
+        assert url.startswith("https://deluxe.test/")
+
+    async def test_lista_que_nao_confere_e_rejeitada(self):
+        loja = _LojaApple(
+            {
+                1: _album_apple_loja(
+                    "Disco", "The Weeknd", ["Outra A", "Outra B", "Outra C"], "errado"
+                )
+            }
+        )
+        url, _, motivo = await _album_certo(
+            loja, "Disco", ["Musica 1", "Musica 2", "Musica 3"], release_kind="full"
+        )
+        assert url is None
+        assert "faixas do álbum não conferem (0/3" in motivo
+
+    async def test_tolera_uma_faixa_com_titulo_diferente(self):
+        # 3 de 4 conferem (Jaccard 3/5 = 0,6): mesma edição, uma faixa
+        # escrita de outro jeito.
+        loja = _LojaApple(
+            {1: _album_apple_loja("Disco", "The Weeknd", ["A", "B", "C", "Zzz"], "ok")}
+        )
+        url, _, motivo = await _album_certo(
+            loja, "Disco", ["A", "B", "C", "D"], release_kind="full"
+        )
+        assert url is not None, motivo
+
+    async def test_metade_conferindo_nao_basta(self):
+        # 2 de 4 (Jaccard 2/6): é outra edição/lançamento.
+        loja = _LojaApple(
+            {1: _album_apple_loja("Disco", "The Weeknd", ["A", "B", "X", "Y"], "ok")}
+        )
+        url, _, _ = await _album_certo(
+            loja, "Disco", ["A", "B", "C", "D"], release_kind="full"
+        )
+        assert url is None
+
+
+class TestLojasExtras:
+    def _single_so_na_loja(self, pais):
+        return _LojaApple(
+            {
+                1: _album_apple_loja(
+                    "Earned It - Single",
+                    "The Weeknd",
+                    ["Earned It"],
+                    "single",
+                    stores={pais},
+                ),
+                2: _album_apple_loja(
+                    "The Highlights",
+                    "The Weeknd",
+                    ["Earned It"] + [f"Outra {i}" for i in range(9)],
+                    "highlights",
+                ),
+            }
+        )
+
+    async def test_sem_fallback_so_consulta_br_e_us(self):
+        loja = self._single_so_na_loja("gb")
+        url, _, _ = await _album_certo(
+            loja, "Earned It", ["Earned It"], release_kind="single"
+        )
+        assert url is None
+        assert loja.paises() == {"br", "us"}
+
+    async def test_com_fallback_acha_o_single_em_outra_loja(self):
+        loja = self._single_so_na_loja("gb")
+        url, _, motivo = await _album_certo(
+            loja,
+            "Earned It",
+            ["Earned It"],
+            release_kind="single",
+            fallback_countries=True,
+        )
+        assert url is not None, motivo
+        assert url.startswith("https://single.test/")
+        assert {"br", "us", "gb"} <= loja.paises()
+
+    async def test_fallback_so_entra_se_as_principais_nao_resolverem(self):
+        loja = self._single_so_na_loja("br")
+        url, _, _ = await _album_certo(
+            loja,
+            "Earned It",
+            ["Earned It"],
+            release_kind="single",
+            fallback_countries=True,
+        )
+        assert url is not None
+        assert loja.paises() == {"br"}  # nem chegou a consultar us nem as extras
+
+    async def test_paises_personalizados(self):
+        loja = self._single_so_na_loja("jp")
+        url, _, _ = await _album_certo(
+            loja, "Earned It", ["Earned It"], release_kind="single", countries=("jp",)
+        )
+        assert url is not None and loja.paises() == {"jp"}
+
+    async def test_fallback_tambem_na_busca_por_faixa(self):
+        loja = self._single_so_na_loja("ca")
+        url, _, _ = await buscar(
+            loja,
+            artist="The Weeknd",
+            album="Earned It",
+            track_title="Earned It",
+            release_kind="single",
+            fallback_countries=True,
+        )
+        assert url is not None and url.startswith("https://single.test/")
+
+
+class TestIsrcRespeitaTipoEEdicao:
+    # O mesmo ISRC aparece no single, no álbum e na coletânea.
+    def _loja(self):
+        titulos = ("Starboy",)
+        return _LojaApple(
+            {
+                1: _album_apple_loja(
+                    "Starboy - Single", "The Weeknd", ["Starboy"], "single",
+                    isrc_titles=titulos,
+                ),
+                2: _album_apple_loja(
+                    "Starboy (Deluxe)", "The Weeknd", ["Starboy"], "deluxe",
+                    isrc_titles=titulos,
+                ),
+                3: _album_apple_loja(
+                    "Starboy", "The Weeknd", ["Starboy"], "album", isrc_titles=titulos
+                ),
+            }
+        )
+
+    async def test_album_nao_recebe_a_capa_do_single_pelo_isrc(self):
+        url, _, _ = await buscar(
+            self._loja(),
+            isrc="USUG11601",
+            artist="The Weeknd",
+            album="Starboy",
+            track_title="Starboy",
+            release_kind="full",
+        )
+        assert url.startswith("https://album.test/")  # edição idêntica ao pedido
+
+    async def test_single_recebe_o_single_pelo_isrc(self):
+        url, _, _ = await buscar(
+            self._loja(),
+            isrc="USUG11601",
+            artist="The Weeknd",
+            album="Starboy",
+            track_title="Starboy",
+            release_kind="single",
+        )
+        assert url.startswith("https://single.test/")
+
+    async def test_isrc_prefere_a_edicao_de_titulo_identico(self):
+        url, _, _ = await buscar(
+            self._loja(),
+            isrc="USUG11601",
+            artist="The Weeknd",
+            album="Starboy (Deluxe)",
+            track_title="Starboy",
+        )
+        assert url.startswith("https://deluxe.test/")
+
+
+class TestTermoLimpoNaBuscaDeMusica:
+    async def test_busca_com_o_titulo_sem_parenteses_e_aspas(self):
+        loja = _LojaApple(
+            {1: _album_apple_loja("Earned It - Single", "The Weeknd", ["Earned It"], "s")}
+        )
+        await buscar(
+            loja,
+            artist="The Weeknd",
+            album="Earned It",
+            track_title='Earned It (Fifty Shades Of Grey) (From The "Fifty Shades" Soundtrack)',
+            release_kind="single",
+        )
+        termos = [p.get("term") for _, p in loja.chamadas if p.get("entity") == "song"]
+        assert "The Weeknd Earned It" in termos
+        assert all('"' not in t for t in termos if t and "From" not in t)

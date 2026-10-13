@@ -902,7 +902,11 @@ _SUFIXO_EDICAO_INOFENSIVO = re.compile(
     r"\s*\(\s*(?:"
     r"bonus\s+tracks?|faixa\s+bonus|"
     r"(?:deluxe|expanded)(?:\s+(?:edition|version|edicao|versao))?|"
-    r"edicao\s+deluxe|explicit"
+    r"edicao\s+deluxe|explicit|"
+    # Procedencia da faixa, nao outra gravacao: "(From The "X" Soundtrack)".
+    r"from\s+[^()]*|"
+    # "Single Version"/"Album Version": a Qobuz escreve, a Apple costuma omitir.
+    r"(?:single|album|original)\s+version"
     r")\s*\)"
 )
 
@@ -911,7 +915,8 @@ _SUFIXO_EDICAO_INOFENSIVO = re.compile(
 # parte, por conjunto de marcadores, e nao pela similaridade de texto.
 _PAREN_MARCADOR_VERSAO = re.compile(
     r"\s*\(\s*(?:live|ao vivo|en vivo|en directo|acoustic|acustico|acustica|"
-    r"unplugged|demo|remix|instrumental)(?:\s+(?:version|versao|session|sessao))?\s*\)"
+    r"unplugged|demo|remix|instrumental|extended)"
+    r"(?:\s+(?:version|versao|session|sessao|mix))?\s*\)"
 )
 
 # Marcadores que mudam a gravacao (ao vivo, acustica, demo...). Se o pedido
@@ -922,6 +927,7 @@ _MARCADORES_VERSAO = {
     "demo": re.compile(r"\bdemo\b"),
     "remix": re.compile(r"\b(?:remix|rmx)\b"),
     "instrumental": re.compile(r"\binstrumental\b"),
+    "extended": re.compile(r"\bextended\b"),
 }
 
 
@@ -929,14 +935,31 @@ _MARCADORES_VERSAO = {
 # EPs ("- EP") e álbuns são tratados como "completos": a regra de contagem de
 # faixas da Qobuz e a da Apple divergem justamente entre EP e álbum, mas
 # concordam em quem é single (<= 3 faixas).
-_APPLE_SINGLE = re.compile(
-    r"\s[-\u2013\u2014]\s*(?:single|sencillo|sencilla)\s*$", re.I
-)
+_APPLE_SINGLE = re.compile(r"\s[-\u2013\u2014]\s*(?:single|sencillo|sencilla)\s*$", re.I)
 
 
 def apple_release_kind(collection_name: str) -> str:
     """'single' para "X - Single" da Apple; 'full' para o resto (álbum/EP)."""
     return "single" if _APPLE_SINGLE.search(collection_name or "") else "full"
+
+
+# Lojas extras, consultadas só quando as principais não resolvem: o catálogo
+# varia por país, mas a capa do mesmo lançamento é a mesma.
+_APPLE_FALLBACK_COUNTRIES = ("gb", "ca", "au", "de", "fr", "es", "mx", "jp")
+
+
+def termo_de_busca(texto: str) -> str:
+    """Texto sem parênteses/colchetes e sem aspas, para usar como termo.
+    ...
+    """
+    limpo = texto or ""
+    while True:
+        novo = re.sub(r"\s*[\(\[][^\(\)\[\]]*[\)\]]", " ", limpo)
+        if novo == limpo:
+            break
+        limpo = novo
+    limpo = limpo.replace('"', " ").replace("\u201c", " ").replace("\u201d", " ")
+    return " ".join(limpo.split())
 
 
 def extrair_titulo_comparavel(texto: str) -> str:
@@ -945,11 +968,48 @@ def extrair_titulo_comparavel(texto: str) -> str:
     # Live...). Os marcadores sao comparados em marcadores_versao().
     """Full title minus harmless edition suffixes and pure version markers."""
     base = extrair_titulo_completo(texto)
-    limpo = _SUFIXO_EDICAO_INOFENSIVO.sub(" ", base)
-    limpo = _PAREN_MARCADOR_VERSAO.sub(" ", limpo)
+    limpo = base
+    for _ in range(4):
+        novo = _SUFIXO_EDICAO_INOFENSIVO.sub(" ", limpo)
+        novo = _PAREN_MARCADOR_VERSAO.sub(" ", novo)
+        novo = re.sub(r"\s+", " ", novo).strip()
+        if novo == limpo:
+            break
+        limpo = novo
     limpo = re.sub(r"\s+bonus\s+tracks?\s*$", "", limpo)
     limpo = re.sub(r"\s+", " ", limpo).strip()
     return limpo or base
+
+
+def faixas_equivalentes(
+    pedido: str,
+    candidata: str,
+    album_pedido: str = "",
+    album_candidata: str = "",
+    minimo: float = 0.85,
+) -> bool:
+    """Duas faixas são a mesma gravação? (título comparável + mesma versão)."""
+    pedida = marcadores_versao(pedido) | marcadores_versao(album_pedido)
+    achada = marcadores_versao(candidata) | marcadores_versao(album_candidata)
+    if pedida != achada:
+        return False
+    a, b = extrair_titulo_comparavel(pedido), extrair_titulo_comparavel(candidata)
+    if not a and not b:  # títulos só de pontuação, como ":("
+        return (pedido or "").strip().casefold() == (candidata or "").strip().casefold()
+    return difflib.SequenceMatcher(None, a, b).ratio() >= minimo
+
+
+def contar_faixas_em_comum(titulos_pedidos, titulos_candidatos, album_pedido="", album_candidata="") -> int:
+    """Quantas faixas pedidas existem na lista candidata (uma a uma, sem repetir)."""
+    livres = list(titulos_candidatos)
+    achadas = 0
+    for pedido in titulos_pedidos:
+        for i, candidata in enumerate(livres):
+            if faixas_equivalentes(pedido, candidata, album_pedido, album_candidata):
+                achadas += 1
+                del livres[i]
+                break
+    return achadas
 
 
 def marcadores_versao(texto: str) -> frozenset:
@@ -1001,6 +1061,9 @@ async def get_apple_hq_cover(
     trace: Optional[list] = None,
     release_kind: Optional[str] = None,
     deep_album_search: bool = False,
+    album_tracks: Optional[list] = None,
+    countries: Optional[tuple] = None,
+    fallback_countries: bool = False,
 ) -> tuple[Optional[str], Optional[str], Optional[str]]:
     """Busca uma capa Apple e devolve URL, fonte e motivo se não encontrar.
 
@@ -1013,6 +1076,13 @@ async def get_apple_hq_cover(
     nunca recebe a capa de um single (as artes costumam ser diferentes).
     deep_album_search: na busca por ÁLBUM (sem faixa), também procura nas
     demais fontes de álbuns (só o álbum, só o artista, catálogo do artista).
+    album_tracks: títulos das faixas do álbum na Qobuz. Na busca por ÁLBUM, a
+    versão certa é confirmada pela LISTA DE FAIXAS (cada álbum candidato da
+    Apple tem as faixas listadas e comparadas): é assim que se distingue o
+    single do álbum, o Deluxe do padrão e a versão estendida da normal.
+    countries: lojas consultadas (padrão: br e us).
+    fallback_countries: se as lojas principais não resolverem, tenta também
+    gb, ca, au, de, fr, es, mx e jp.
 
     Resultado: (url, fonte, motivo). Em sucesso, motivo é None. Em falha,
     url/fonte são None e motivo explica a principal causa da rejeição.
@@ -1028,7 +1098,10 @@ async def get_apple_hq_cover(
             "(KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36"
         )
     }
-    countries = ("br", "us")
+    countries = tuple(countries) if countries else ("br", "us")
+    fallback = tuple(
+        code for code in _APPLE_FALLBACK_COUNTRIES if code not in countries
+    ) if fallback_countries else ()
     resolutions = ("10000x10000bb", "3000x3000bb", "1400x1400bb")
     thresholds = {
         "artist": 0.85,
@@ -1206,6 +1279,22 @@ async def get_apple_hq_cover(
                         closeness,
                     )
                     continue
+                if (
+                    exact == "isrc"
+                    and q_album
+                    and release_kind in ("single", "full")
+                    and apple_release_kind(candidate_album) != release_kind
+                ):
+                    # A mesma gravação (mesmo ISRC) aparece no single, no álbum
+                    # e em coletâneas: só vale o lançamento do mesmo tipo.
+                    reject(
+                        f"ISRC encontrado em lançamento de outro tipo "
+                        f"(pedido={'single' if release_kind == 'single' else 'álbum/EP'}"
+                        f"; álbum Apple={candidate_album!r})",
+                        label,
+                        closeness,
+                    )
+                    continue
                 valid_url, url_error = await artwork_url(
                     client, str(result.get("artworkUrl100") or "")
                 )
@@ -1215,6 +1304,12 @@ async def get_apple_hq_cover(
                     )
                     continue
                 score = (artist_score + album_score) / 2.0
+                if exact == "isrc" and q_album_full:
+                    # Entre os álbuns com a mesma gravação, vence o de título
+                    # idêntico ao pedido (edição certa).
+                    score += 0.05 * difflib.SequenceMatcher(
+                        None, q_album_full, extrair_titulo_completo(candidate_album)
+                    ).ratio()
                 if score > best_score or best_url is None:
                     best_score = score
                     best_url = valid_url
@@ -1356,15 +1451,9 @@ async def get_apple_hq_cover(
 
         if not exact:
             fuzzy_candidates.sort(key=lambda item: (-item[0], item[1]))
-            for (
-                rank,
-                _order,
-                _score,
-                label,
-                closeness,
-                artwork,
-                perfect,
-            ) in fuzzy_candidates:
+            for rank, _order, _score, label, closeness, artwork, perfect in (
+                fuzzy_candidates
+            ):
                 valid_url, url_error = await artwork_url(client, artwork)
                 if not valid_url:
                     reject(
@@ -1393,7 +1482,7 @@ async def get_apple_hq_cover(
         if cache is None:
             cache = {}
             try:
-                client._apple_json_cache = cache
+                setattr(client, "_apple_json_cache", cache)
             except Exception:
                 pass
         key = (url, tuple(sorted(params.items())))
@@ -1431,6 +1520,15 @@ async def get_apple_hq_cover(
                 f"álbuns: só o álbum {country}",
             ),
             (
+                {
+                    "term": f"{artist} {termo_de_busca(album)}".strip(),
+                    "entity": "album",
+                    "country": country,
+                    "limit": 25,
+                },
+                f"álbuns: artista+álbum sem parênteses {country}",
+            ),
+            (
                 {"term": artist, "entity": "album", "country": country, "limit": 200},
                 f"álbuns: só o artista {country}",
             ),
@@ -1466,6 +1564,132 @@ async def get_apple_hq_cover(
             results.extend((data or {}).get("results", []))
         return results
 
+    async def accept_best(client, candidates: list) -> Optional[str]:
+        # candidates: (rank, ordem, rótulo, proximidade, artwork, perfeito).
+        # Valida a imagem só do melhor colocado e registra o aceito.
+        best_url = None
+        for rank, _order, label, closeness, artwork, perfect in sorted(
+            candidates, key=lambda item: (-item[0], item[1])
+        ):
+            valid_url, url_error = await artwork_url(client, artwork)
+            if not valid_url:
+                reject(f"URL da imagem não validada ({url_error})", label, closeness)
+                continue
+            accepted.append((rank, len(accepted), valid_url, perfect))
+            trace_add(
+                {"type": "accept", "rank": rank, "perfect": perfect, "label": label}
+            )
+            best_url = valid_url
+            break
+        return best_url
+
+    async def verify_albums_by_tracklist(client, country: str) -> None:
+        # Álbum: cada álbum candidato da Apple (mesmo artista, nome, tipo e
+        # versão) tem as faixas listadas e comparadas com as da Qobuz. Só vale
+        # o álbum cuja lista bate (single x álbum, Deluxe x padrão, versão
+        # estendida x normal), e vence o que mais se parece.
+        nonlocal search_had_results
+        results = await collect_album_results(client, country)
+        unique_albums = {}
+        for result in results:
+            collection_id = result.get("collectionId")
+            if collection_id and collection_id not in unique_albums:
+                unique_albums[collection_id] = result
+        if unique_albums:
+            search_had_results = True
+        else:
+            note_album(f"{country}: a busca de álbum não retornou resultados")
+            return
+
+        junk = ("karaoke", "tribute", "cover", "instrumental", "mixed", "remix")
+        requested_text = (album or "").casefold()
+        requested_markers = marcadores_versao(album or "")
+        picks = []
+        for order, (collection_id, result) in enumerate(unique_albums.items()):
+            name = str(result.get("collectionName") or "")
+            if not name:
+                continue
+            if score_artista(artist or "", str(result.get("artistName") or "")) < (
+                thresholds["artist"]
+            ):
+                continue
+            if (
+                difflib.SequenceMatcher(None, q_album, extrair_essencia(name)).ratio()
+                < thresholds["album"]
+            ):
+                continue
+            if marcadores_versao(name) != requested_markers:
+                continue
+            if release_kind in ("single", "full") and (
+                apple_release_kind(name) != release_kind
+            ):
+                continue
+            if any(w in name.casefold() and w not in requested_text for w in junk):
+                continue
+            similarity = difflib.SequenceMatcher(
+                None, q_album_full, extrair_titulo_completo(name)
+            ).ratio()
+            picks.append((-similarity, order, collection_id, name, result))
+
+        if not picks:
+            note_album(
+                f"{country}: nenhum álbum compatível com {album!r} "
+                f"({len(unique_albums)} vistos)"
+            )
+            return
+
+        picks.sort(key=lambda item: (item[0], item[1]))
+        wanted = len(album_tracks)
+        candidates = []
+        for neg_similarity, order, collection_id, name, result in picks[:8]:
+            data = await cached_get(
+                client,
+                "https://itunes.apple.com/lookup",
+                {
+                    "id": collection_id,
+                    "entity": "song",
+                    "country": country,
+                    "limit": 200,
+                },
+                f"lookup álbum {country}",
+            )
+            titles = [
+                str(item.get("trackName"))
+                for item in (data or {}).get("results", [])
+                if item.get("trackName")
+            ]
+            matched = contar_faixas_em_comum(album_tracks, titles, album or "", name)
+            union = wanted + len(titles) - matched
+            jaccard = matched / union if union else 0.0
+            note_album(
+                f"{country}: {name!r} ({len(titles)} faixas, "
+                f"{matched}/{wanted} conferem)"
+            )
+            label = (
+                f"artist={result.get('artistName')!r}, album={name!r}, "
+                f"faixas Apple={len(titles)}"
+            )
+            if matched < max(1, -(-wanted // 2)) or jaccard < 0.5:
+                reject(
+                    f"faixas do álbum não conferem ({matched}/{wanted} da Qobuz "
+                    f"estão no álbum Apple, que tem {len(titles)})",
+                    label,
+                    jaccard,
+                )
+                continue
+            similarity = -neg_similarity
+            candidates.append(
+                (
+                    jaccard + 0.05 * similarity,
+                    order,
+                    label,
+                    jaccard,
+                    str(result.get("artworkUrl100") or ""),
+                    jaccard >= 0.999 and similarity >= 0.999,
+                )
+            )
+        await accept_best(client, candidates)
+
     async def search_inside_album(client, country: str) -> None:
         # Acha os álbuns Apple que são o álbum pedido (mesmo artista, mesmo
         # nome, mesmo tipo de versão), lista as faixas de cada um e avalia
@@ -1494,9 +1718,8 @@ async def get_apple_hq_cover(
             candidate_album = str(result.get("collectionName") or "")
             if not candidate_album:
                 continue
-            if (
-                score_artista(artist or "", str(result.get("artistName") or ""))
-                < (thresholds["artist"])
+            if score_artista(artist or "", str(result.get("artistName") or "")) < (
+                thresholds["artist"]
             ):
                 continue
             if (
@@ -1547,12 +1770,14 @@ async def get_apple_hq_cover(
             if tracks:
                 await evaluate({"results": tracks}, client)
 
-    async def search(client) -> tuple[Optional[str], Optional[str], Optional[str]]:
+    async def run_group(
+        client, group_countries
+    ) -> Optional[tuple[Optional[str], Optional[str], Optional[str]]]:
         # Primeiro lookup exato por UPC/ISRC.
         for code, kind in ((upc, "upc"), (isrc, "isrc")):
             if not code or str(code).strip().lower() in ("n/a", "none"):
                 continue
-            for country in countries:
+            for country in group_countries:
                 try:
                     response = await client.get(
                         f"https://itunes.apple.com/lookup?{kind}="
@@ -1585,9 +1810,23 @@ async def get_apple_hq_cover(
         # acontece no fim. Só um candidato PERFEITO (artista, álbum e título
         # idênticos, sem o que melhorar) encerra a busca antes.
         query = f"{artist or ''} {track_title if track_title else album or ''}".strip()
+        verify_mode = bool(album_tracks) and not track_title and q_artist and q_album
         if query:
             entity = "song" if track_title else "album"
-            for country in countries:
+            for country in group_countries:
+                # Álbum com a lista de faixas da Qobuz: a versão certa é
+                # confirmada pela lista (a busca por nome sozinha não basta).
+                if verify_mode:
+                    try:
+                        await verify_albums_by_tracklist(client, country)
+                    except Exception as exc:
+                        network_errors.append(
+                            f"álbuns {country}: {type(exc).__name__}: {exc}"
+                        )
+                    if any(item[3] for item in accepted):
+                        return pick_best()
+                    continue
+
                 try:
                     response = await client.get(
                         "https://itunes.apple.com/search",
@@ -1649,6 +1888,32 @@ async def get_apple_hq_cover(
                     if any(item[3] for item in accepted):
                         return pick_best()
 
+                # Faixa: termo limpo. Títulos com "(From The "X" Soundtrack)" e
+                # aspas pioram a busca; o que está entre parênteses é conferido
+                # depois, na avaliação.
+                clean_title = termo_de_busca(track_title) if track_title else ""
+                if clean_title and clean_title != (track_title or "").strip():
+                    try:
+                        clean_songs = await cached_get(
+                            client,
+                            "https://itunes.apple.com/search",
+                            {
+                                "term": f"{artist or ''} {clean_title}".strip(),
+                                "entity": "song",
+                                "country": country,
+                                "limit": 50,
+                            },
+                            f"search faixa sem parênteses {country}",
+                        )
+                        if clean_songs:
+                            await evaluate(clean_songs, client)
+                    except Exception as exc:
+                        network_errors.append(
+                            f"faixa limpa {country}: {type(exc).__name__}: {exc}"
+                        )
+                    if any(item[3] for item in accepted):
+                        return pick_best()
+
                 # Álbum (usado pelo retag, que decide a capa por álbum): as
                 # demais fontes de álbuns, avaliadas com as mesmas travas.
                 if deep_album_search and not track_title and q_artist and q_album:
@@ -1684,6 +1949,14 @@ async def get_apple_hq_cover(
 
         if accepted:
             return pick_best()
+        return None
+
+    async def search(client) -> tuple[Optional[str], Optional[str], Optional[str]]:
+        # Lojas principais primeiro; as extras só se nada foi aceito.
+        for group in [countries] + ([fallback] if fallback else []):
+            found = await run_group(client, group)
+            if found:
+                return found
         return None, None, final_reason()
 
     if session is not None:

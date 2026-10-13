@@ -74,18 +74,199 @@ def test_multi_tags_label():
 
 
 # ---------------------------------------------------------------------------
-# _cover_result_message
+# Formatação da saída (cores com significado fixo, blocos espaçados)
 # ---------------------------------------------------------------------------
-class TestCoverResultMessage:
-    def test_com_fonte(self):
-        assert (
-            retro_tags._cover_result_message("Apple/iTunes", "capa baixada (10 KiB)")
-            == "Capa: Apple/iTunes; capa baixada (10 KiB)"
+class TestFileState:
+    @pytest.mark.parametrize(
+        "tags, capa, atencao, cor, texto",
+        [
+            (True, True, False, "G", "Alterado -- tags e capa"),
+            (True, False, False, "G", "Alterado -- somente as tags"),
+            (False, True, False, "G", "Alterado -- somente a capa"),
+            (True, False, True, "Y", "Alterado (somente as tags), mas ficou uma pendência na capa"),
+            (True, True, True, "Y", "Alterado (tags e capa), mas ficou uma pendência na capa"),
+            (False, False, False, "M", "Sem alterações"),
+            (False, False, True, "M", "Sem alterações"),  # a capa é que ganha o amarelo
+        ],
+    )
+    def test_cor_e_texto(self, monkeypatch, tags, capa, atencao, cor, texto):
+        for nome, marca in (("GREEN", "G"), ("YELLOW", "Y"), ("MUTED", "M")):
+            monkeypatch.setattr(retro_tags, nome, marca)
+        assert retro_tags._file_state(tags, capa, atencao) == (cor, texto)
+
+
+class TestCoverLine:
+    @pytest.mark.parametrize(
+        "desfecho, mudou, cor",
+        [
+            ("replaced", True, "G"),
+            ("replaced", False, "M"),
+            ("kept", False, "M"),
+            ("not_found", False, "Y"),
+            ("download_failed", False, "Y"),
+            ("embed_failed", False, "Y"),
+            ("error", False, "Y"),
+            ("not_searched", False, "M"),
+        ],
+    )
+    def test_cor_por_desfecho(self, monkeypatch, desfecho, mudou, cor):
+        for nome, marca in (("GREEN", "G"), ("YELLOW", "Y"), ("MUTED", "M")):
+            monkeypatch.setattr(retro_tags, nome, marca)
+        assert retro_tags._cover_line(desfecho, mudou, "Apple/iTunes")[0] == cor
+
+    def test_textos(self):
+        linha = retro_tags._cover_line
+        assert linha("replaced", True, "Apple/iTunes")[1] == (
+            "substituída pela capa da Apple/iTunes"
+        )
+        assert linha("replaced", True, None)[1].endswith("Apple/iTunes")
+        assert "igual ou maior" in linha("kept", False, None)[1]
+        assert "capa atual foi mantida" in linha("not_found", False, None)[1]
+
+    def test_desfechos_de_atencao(self):
+        assert retro_tags._COVER_ATTENTION == {
+            "not_found",
+            "download_failed",
+            "embed_failed",
+            "error",
+        }
+
+
+class TestSplitAppleDiagnostic:
+    def test_separa_motivo_etapa_do_album_e_exemplos(self):
+        texto = (
+            "versão incompatível (candidato mais próximo; 1 rejeitado(s) no total)"
+            "; etapa do álbum: br: nenhum álbum compatível (1 vistos)"
+            "; erros de rede: HTTP 503"
+            "; exemplos: motivo A: x | motivo B: y"
+        )
+        assert retro_tags.split_apple_diagnostic(texto) == [
+            (
+                "Motivo",
+                "versão incompatível (candidato mais próximo; 1 rejeitado(s) no total)",
+            ),
+            ("Etapa do álbum", "br: nenhum álbum compatível (1 vistos)"),
+            ("Erros de rede", "HTTP 503"),
+            ("Exemplos", "motivo A: x | motivo B: y"),
+        ]
+
+    def test_so_motivo(self):
+        assert retro_tags.split_apple_diagnostic("artista incompatível") == [
+            ("Motivo", "artista incompatível")
+        ]
+
+    @pytest.mark.parametrize("vazio", ["", None])
+    def test_vazio(self, vazio):
+        assert retro_tags.split_apple_diagnostic(vazio) == []
+
+    def test_nao_corta_ponto_e_virgula_dentro_de_uma_nota(self):
+        texto = "m; etapa do álbum: br: a; us: b; exemplos: e"
+        secoes = dict(retro_tags.split_apple_diagnostic(texto))
+        assert secoes["Etapa do álbum"] == "br: a; us: b"
+
+
+class TestWrapEDetalhes:
+    def test_wrap_respeita_largura_e_recuo(self):
+        linhas = retro_tags._wrap_lines("palavra " * 30, 10, width=40)
+        assert len(linhas) > 1
+        assert all(len(ln) <= 39 and ln.startswith(" " * 10) for ln in linhas)
+
+    def test_palavra_gigante_nao_estoura(self):
+        linhas = retro_tags._wrap_lines("x" * 200, 4, width=40)
+        assert all(len(ln) <= 39 for ln in linhas)
+
+    def test_labeled_alinha_a_continuacao_sob_o_texto(self):
+        linhas = retro_tags._labeled_lines("Capa", "palavra " * 20, 40)
+        assert linhas[0].startswith("   Capa   palavra")
+        assert all(ln.startswith(" " * 10) for ln in linhas[1:])
+
+    def test_detalhe_do_nao_encontrado_separa_secoes_e_exemplos(self):
+        texto = "motivo; etapa do álbum: br: ok; exemplos: ex1 | ex2"
+        linhas = retro_tags._cover_detail_lines("not_found", None, texto, 100)
+        planas = [ln.strip() for ln in linhas]
+        assert "Motivo: motivo" in planas
+        assert "Etapa do álbum: br: ok" in planas
+        assert "Exemplos:" in planas
+        assert "• ex1" in planas and "• ex2" in planas
+
+    def test_detalhe_da_capa_substituida(self):
+        linhas = retro_tags._cover_detail_lines(
+            "replaced", "Apple/iTunes", "capa baixada (3 KiB)", 100
+        )
+        assert [ln.strip() for ln in linhas] == [
+            "Fonte: Apple/iTunes | capa baixada (3 KiB)"
+        ]
+
+    def test_kept_nao_tem_detalhe(self):
+        assert retro_tags._cover_detail_lines("kept", None, "x", 100) == []
+
+    def test_term_width_fica_entre_60_e_120(self, monkeypatch):
+        for colunas, esperado in (("20", 60), ("90", 90), ("300", 120)):
+            monkeypatch.setenv("COLUMNS", colunas)
+            assert retro_tags._term_width() == esperado
+
+
+class TestContagemDeTags:
+    def test_conta_chaves_diferentes(self):
+        antes = {"A": ["1"], "B": ["2"], "C": ["3"]}
+        depois = {"A": ["1"], "B": ["9"], "D": ["4"]}
+        assert retro_tags.count_changed_tags(antes, depois) == 3  # B, C, D
+
+    def test_iguais_e_entradas_invalidas(self):
+        assert retro_tags.count_changed_tags({"A": ["1"]}, {"A": ["1"]}) == 0
+        assert retro_tags.count_changed_tags(None, "x") == 0
+
+
+class TestCabecalhoDoAlbum:
+    def _album(self, **extra):
+        album = {"title": "Anti-Herói", "artist": {"name": "Jão"}, "tracks_count": 10}
+        album.update(extra)
+        return album
+
+    def test_titulo_artista_tipo_e_faixas(self):
+        linhas = retro_tags._album_header_lines(self._album(), None, 80)
+        assert linhas[0].startswith("== Anti-Herói -- Jão  |  álbum | 10 faixas ")
+        assert linhas[0].endswith("=") and len(linhas[0]) <= 80
+        assert len(linhas) == 1  # sem decisão informada: só o cabeçalho
+
+    def test_com_decisao_mostra_o_metodo(self):
+        decisao = {"url": "u", "method": "consenso de 8/9 faixas"}
+        linhas = retro_tags._album_header_lines(self._album(), decisao, 80)
+        assert linhas[1] == (
+            "   Capa Apple única para todas as faixas (consenso de 8/9 faixas)"
         )
 
-    @pytest.mark.parametrize("fonte", [None, ""])
-    def test_sem_fonte_mostra_so_o_status(self, fonte):
-        assert retro_tags._cover_result_message(fonte, "sem capa") == "sem capa"
+    def test_sem_url_explica_que_cada_faixa_e_avaliada_sozinha(self):
+        linhas = retro_tags._album_header_lines(self._album(), {"url": None}, 80)
+        assert "cada faixa é avaliada separadamente" in linhas[1]
+
+    def test_sem_titulo_nao_tem_cabecalho(self):
+        assert retro_tags._album_header_lines({"id": "X"}, None, 80) == []
+
+    def test_titulo_longo_e_truncado_sem_estourar_a_largura(self):
+        linhas = retro_tags._album_header_lines(
+            self._album(title="T" * 200), None, 60
+        )
+        assert len(linhas[0]) <= 60
+
+    def test_singular_para_uma_faixa(self):
+        linhas = retro_tags._album_header_lines(self._album(tracks_count=1), None, 80)
+        assert "single | 1 faixa " in linhas[0]
+
+
+def test_legenda_explica_as_quatro_cores():
+    texto = "\n".join(retro_tags._legend_lines())
+    for palavra in ("verde", "amarelo", "cinza", "vermelho"):
+        assert palavra in texto
+
+
+def test_muted_nao_e_mais_o_mesmo_que_amarelo():
+    # MUTED era um apelido de WARNING (amarelo): "sem alteração" e "capa
+    # substituída" saíam da mesma cor. Agora vem do GRAY do color.py.
+    from qobuz_dl import color
+
+    assert retro_tags.MUTED is color.GRAY
+    assert color.GRAY == "" or color.GRAY != color.WARNING
 
 
 # ---------------------------------------------------------------------------

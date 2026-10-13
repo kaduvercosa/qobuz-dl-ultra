@@ -232,6 +232,52 @@ def block_char():
 # --------------------------------------------------------------------------
 # Saída: um único caminho para o terminal
 # --------------------------------------------------------------------------
+# Linha de status "em andamento" (ex.: "[*] Logando...") deixada SEM quebra de
+# linha. A proxima escrita pelo emit()/emit_always() apaga essa linha e escreve
+# por cima, fazendo "Logando..." virar "Logado: OK" na mesma linha.
+_pending_status = False
+
+
+def _status_inline_supported():
+    # So' sobrescreve em terminal interativo; em pipe/CI/arquivo cada mensagem
+    # continua em sua propria linha (sem \r nem codigos ANSI no log).
+    try:
+        return bool(sys.stdout.isatty())
+    except Exception:
+        return False
+
+
+def _clear_pending_locked():
+    # Chamado dentro do print_lock: apaga a linha de status pendente.
+    global _pending_status
+    if _pending_status:
+        _pending_status = False
+        try:
+            sys.stdout.write("\r\033[2K")
+            sys.stdout.flush()
+        except Exception:
+            pass
+
+
+def step_inline(message):
+    """Print a progress step WITHOUT newline; the next message replaces it."""
+    if _quiet:
+        return
+    if not _status_inline_supported():
+        step(message)
+        return
+    global _pending_status
+    with print_lock:
+        _clear_pending_locked()
+        linha = _tagged(HIGHLIGHT, "*", message)[0]
+        _write_locked(linha, "")
+        try:
+            sys.stdout.flush()
+        except Exception:
+            pass
+        _pending_status = True
+
+
 def emit(text="", end="\n"):
     # ÚNICO ponto de escrita no terminal usado pelo restante do módulo (e,
     # por extensão, por todo o programa via as funções ok/warn/error/etc.).
@@ -242,6 +288,7 @@ def emit(text="", end="\n"):
     if _quiet:
         return
     with print_lock:
+        _clear_pending_locked()
         _write_locked(text, end)
 
 
@@ -274,6 +321,7 @@ def emit_always(text="", end="\n"):
     # de confirmação.
     """Print a message regardless of quiet mode (for critical output)."""
     with print_lock:
+        _clear_pending_locked()
         _write_locked(text, end)
 
 
@@ -690,6 +738,7 @@ __all__ = [
     "section",
     "skip",
     "step",
+    "step_inline",
     "truncate",
     "unicode_enabled",
     "warn",

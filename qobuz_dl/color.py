@@ -121,6 +121,9 @@ SUCCESS = _e(Fore.GREEN)
 WARNING = _e(Fore.YELLOW)
 WARNING_SAFE = _e(Fore.LIGHTRED_EX)
 MUTED = _e(Style.DIM)
+# Cinza neutro (256 cores). `MUTED` (DIM) so' esmaece a cor corrente e muda de
+# aparencia conforme o terminal; GRAY e' um cinza fixo, para "nada a fazer".
+GRAY = _e("\033[38;5;245m")
 
 # --------------------------------------------------------------------------
 # Cor de destaque (accent) -- personalizável pelo usuário via wizard

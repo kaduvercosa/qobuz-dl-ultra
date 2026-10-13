@@ -17,7 +17,9 @@ import difflib
 import logging
 import os
 import re
+import shutil
 import tempfile
+import textwrap
 from typing import Optional
 import functools
 
@@ -27,10 +29,18 @@ from mutagen.flac import FLAC
 
 from qobuz_dl import metadata, ui
 from qobuz_dl.http_download import make_client
-from qobuz_dl.color import GREEN, OFF, RED, RESET
+from qobuz_dl.color import GRAY, GREEN, OFF, RED, RESET
 from qobuz_dl.color import INFO as CYAN
 from qobuz_dl.color import WARNING as YELLOW
-from qobuz_dl.color import WARNING as MUTED
+
+# Significado fixo das cores no log do `tags`:
+#   verde    = alteração aplicada
+#   amarelo  = atenção (algo ficou pendente ou foi removido)
+#   cinza    = nada a alterar
+#   vermelho = erro
+# (MUTED aqui era um apelido de WARNING, ou seja, AMARELO: "sem alteração" e
+# "capa substituída" saíam da mesma cor. Agora o cinza é um cinza de verdade.)
+MUTED = GRAY
 from qobuz_dl.retro_tagger import extract_track_id
 
 logger = logging.getLogger(__name__)
@@ -194,6 +204,8 @@ def format_tag_diff(
 ) -> list:
     """Linhas legíveis com o diff EXATO entre dois mapas de tags.
 
+    Cores: verde = tag nova/alterada; amarelo = tag removida (merece atenção).
+
     "+ CHAVE: valor" (nova), "- CHAVE: valor" (removida) e, quando o valor
     mudou, "~ CHAVE: 'antes' → 'depois'". Valores com várias linhas (como o
     COMMENT) ou várias entradas mostram só as linhas removidas/adicionadas.
@@ -212,19 +224,19 @@ def format_tag_diff(
         if not in_before:
             out.append(f"{GREEN}+ {key}:{OFF} {_short(' | '.join(new), max_value)}")
         elif not in_after:
-            out.append(f"{RED}- {key}:{OFF} {_short(' | '.join(old), max_value)}")
+            out.append(f"{YELLOW}- {key}:{OFF} {_short(' | '.join(old), max_value)}")
         elif len(old) == 1 and len(new) == 1:
             out.append(
-                f"{YELLOW}~ {key}:{OFF} {_short(old[0], max_value)!r}"
+                f"{GREEN}~ {key}:{OFF} {_short(old[0], max_value)!r}"
                 f" → {_short(new[0], max_value)!r}"
             )
         else:
-            out.append(f"{YELLOW}~ {key}:{OFF}")
+            out.append(f"{GREEN}~ {key}:{OFF}")
             matcher = difflib.SequenceMatcher(None, old, new, autojunk=False)
             for op, a0, a1, b0, b1 in matcher.get_opcodes():
                 if op in ("replace", "delete"):
                     out.extend(
-                        f"    {RED}- {_short(line, max_value)}{OFF}"
+                        f"    {YELLOW}- {_short(line, max_value)}{OFF}"
                         for line in old[a0:a1]
                     )
                 if op in ("replace", "insert"):
@@ -337,6 +349,7 @@ async def _decide_album_cover(
     album: dict,
     http_session: httpx.AsyncClient,
     track_results: dict,
+    trace: Optional[list] = None,
 ) -> dict:
     """Escolhe UMA capa Apple para o álbum Qobuz inteiro.
 
@@ -367,6 +380,7 @@ async def _decide_album_cover(
     reason = None
 
     try:
+        items_for_check = (album.get("tracks") or {}).get("items") or []
         result = await get_apple_hq_cover(
             session=http_session,
             upc=album.get("upc"),
@@ -374,6 +388,12 @@ async def _decide_album_cover(
             album=_album_full_title(album),
             release_kind=_release_kind(album),
             deep_album_search=True,
+            # A versão certa do álbum é confirmada pela lista de faixas (single
+            # x álbum, Deluxe x padrão, versão estendida x normal) e a busca
+            # segue por outras lojas se as principais não tiverem o lançamento.
+            album_tracks=[_qobuz_track_title(i) for i in items_for_check] or None,
+            fallback_countries=True,
+            **({"trace": trace} if trace is not None else {}),
         )
         if isinstance(result, tuple) and result and isinstance(result[0], str):
             if result[0].strip():
@@ -394,7 +414,12 @@ async def _decide_album_cover(
         votes: dict = {}
         for item in items[:_MAX_CONSENSUS_TRACKS]:
             try:
-                found = await _fetch_apple_cover_for_track(item, album, http_session)
+                found = await _fetch_apple_cover_for_track(
+                    item,
+                    album,
+                    http_session,
+                    **({"trace": trace} if trace is not None else {}),
+                )
             except Exception as exc:
                 found = (None, None, f"erro ({type(exc).__name__}: {exc})")
             track_results[str(item.get("id"))] = found
@@ -402,10 +427,8 @@ async def _decide_album_cover(
                 votes[found[0]] = votes.get(found[0], 0) + 1
 
         ranked = sorted(votes.items(), key=lambda pair: -pair[1])
-        if (
-            ranked
-            and ranked[0][1] >= 2
-            and (len(ranked) == 1 or ranked[0][1] > ranked[1][1])
+        if ranked and ranked[0][1] >= 2 and (
+            len(ranked) == 1 or ranked[0][1] > ranked[1][1]
         ):
             decision.update(
                 url=ranked[0][0],
@@ -418,10 +441,24 @@ async def _decide_album_cover(
     return decision
 
 
+def _qobuz_track_title(item: dict) -> str:
+    """Título da faixa na Qobuz juntando "title" e "version".
+
+    A Qobuz separa os dois (ex.: "Fat Juicy &…" + "Radio Edit"), mas a Apple
+    junta tudo no nome da faixa. Sem a versão o título pedido nunca bate.
+    """
+    title = (item.get("title") or "").strip()
+    version = (item.get("version") or "").strip()
+    if version and version.casefold() not in title.casefold():
+        title = f"{title} ({version})"
+    return title
+
+
 async def _fetch_apple_cover_for_track(
     item: dict,
     album: dict,
     http_session: httpx.AsyncClient,
+    trace: Optional[list] = None,
 ) -> tuple[Optional[str], Optional[str], Optional[str]]:
     """Busca URL, fonte e diagnóstico da busca Apple."""
     from qobuz_dl.utils import get_apple_hq_cover
@@ -431,13 +468,7 @@ async def _fetch_apple_cover_for_track(
         item.get("performer") or album_data.get("artist") or album.get("artist") or {}
     )
 
-    # A Qobuz separa "title" e "version" (ex.: "Fat Juicy &…" + "Radio Edit"),
-    # mas a Apple junta tudo no nome da faixa. Sem a versao, o titulo pedido
-    # ("Fat Juicy &…") nunca bate com o da Apple ("Fat Juicy &... (Radio Edit)").
-    track_title = (item.get("title") or "").strip()
-    track_version = (item.get("version") or "").strip()
-    if track_version and track_version.casefold() not in track_title.casefold():
-        track_title = f"{track_title} ({track_version})"
+    track_title = _qobuz_track_title(item)
 
     result = await get_apple_hq_cover(
         session=http_session,
@@ -448,6 +479,7 @@ async def _fetch_apple_cover_for_track(
         track_title=track_title,
         # Single so' casa com "X - Single"; album/EP nunca recebe capa de single.
         release_kind=_release_kind(album) or _release_kind(album_data),
+        **({"trace": trace} if trace is not None else {}),
     )
 
     if isinstance(result, tuple):
@@ -573,14 +605,185 @@ def _display_track_name(
     return display or os.path.splitext(os.path.basename(file_path))[0][:limit]
 
 
-def _cover_result_message(
-    cover_source: Optional[str],
-    cover_status: str,
-) -> str:
-    """Monta o detalhe de capa impresso em linha separada."""
-    if cover_source:
-        return f"Capa: {cover_source}; {cover_status}"
-    return cover_status
+# ---------------------------------------------------------------------------
+# Formatação da saída (cores com significado fixo, blocos espaçados)
+# ---------------------------------------------------------------------------
+# Desfechos da capa que pedem atenção do usuário (ficam em amarelo).
+_COVER_ATTENTION = {"not_found", "download_failed", "embed_failed", "error"}
+
+
+def _term_width() -> int:
+    try:
+        columns = shutil.get_terminal_size((100, 24)).columns
+    except Exception:
+        columns = 100
+    return max(60, min(columns, 120))
+
+
+def _wrap_lines(text: str, indent: int, width: Optional[int] = None) -> list:
+    """Quebra o texto em linhas que cabem no terminal, com recuo fixo."""
+    width = width or _term_width()
+    prefix = " " * indent
+    return textwrap.wrap(
+        text,
+        width=width - 1,
+        initial_indent=prefix,
+        subsequent_indent=prefix,
+        break_long_words=True,
+        break_on_hyphens=False,
+    ) or [prefix]
+
+
+def _labeled_lines(label: str, text: str, width: int) -> list:
+    """Linha "   Rótulo  texto" com continuação alinhada sob o texto."""
+    return textwrap.wrap(
+        text,
+        width=width - 1,
+        initial_indent=f"   {label:<6} ",
+        subsequent_indent=" " * 10,
+        break_long_words=True,
+        break_on_hyphens=False,
+    ) or [f"   {label}"]
+
+
+def split_apple_diagnostic(text: str) -> list:
+    """Separa o diagnóstico da Apple em [(rótulo, texto)].
+
+    O motivo vem como uma frase só ("...; etapa do álbum: ...; exemplos: ...");
+    em linhas separadas fica legível, em vez de uma parede de texto.
+    """
+    parts = re.split(
+        r";\s+(?=(?:etapa do álbum|erros de rede|exemplos):\s)", text or ""
+    )
+    sections = [("Motivo", parts[0].strip())]
+    for part in parts[1:]:
+        label, _, rest = part.partition(": ")
+        sections.append((label.strip().capitalize(), rest.strip()))
+    return [(label, body) for label, body in sections if body]
+
+
+def count_changed_tags(before_text, after_text) -> int:
+    """Quantas tags (chaves) têm valor diferente entre os dois mapas."""
+    before_text = before_text if isinstance(before_text, dict) else {}
+    after_text = after_text if isinstance(after_text, dict) else {}
+    return sum(
+        1
+        for key in set(before_text) | set(after_text)
+        if _tag_lines(before_text.get(key, [])) != _tag_lines(after_text.get(key, []))
+    )
+
+
+def _file_state(tags_changed: bool, cover_changed: bool, attention: bool):
+    """(cor, texto) do resultado do arquivo: verde / amarelo / cinza."""
+    if tags_changed and cover_changed:
+        what = "tags e capa"
+    elif tags_changed:
+        what = "somente as tags"
+    elif cover_changed:
+        what = "somente a capa"
+    else:
+        what = None
+
+    if what and attention:
+        return YELLOW, f"Alterado ({what}), mas ficou uma pendência na capa"
+    if what:
+        return GREEN, f"Alterado -- {what}"
+    return MUTED, "Sem alterações"
+
+
+def _cover_line(outcome: str, cover_changed: bool, cover_source: Optional[str]):
+    """(cor, texto) da linha de capa."""
+    if outcome == "replaced":
+        if cover_changed:
+            return GREEN, f"substituída pela capa da {cover_source or 'Apple/iTunes'}"
+        return MUTED, "regravada, mas a imagem final é igual à anterior"
+    if outcome == "kept":
+        return (
+            MUTED,
+            "mantida -- a capa atual já tem resolução igual ou maior que a da Apple",
+        )
+    if outcome == "not_found":
+        return YELLOW, "não encontrada na Apple -- a capa atual foi mantida"
+    if outcome == "download_failed":
+        return (
+            YELLOW,
+            "encontrada na Apple, mas o download falhou -- a capa atual foi mantida",
+        )
+    if outcome == "embed_failed":
+        return (
+            YELLOW,
+            "baixada da Apple, mas não deu para embutir -- a capa atual foi mantida",
+        )
+    if outcome == "error":
+        return YELLOW, "erro na etapa da Apple -- a capa atual foi mantida"
+    return MUTED, "não pesquisada"
+
+
+def _cover_detail_lines(outcome: str, cover_source, detail: str, width: int) -> list:
+    """Linhas de explicação (cinza) abaixo da linha de capa."""
+    indent = 10
+    lines = []
+    if outcome == "replaced":
+        text = f"Fonte: {cover_source or 'Apple/iTunes'} | {detail}"
+        lines.extend(_wrap_lines(text, indent, width))
+    elif outcome == "not_found":
+        for label, body in split_apple_diagnostic(detail):
+            if label == "Exemplos":
+                lines.extend(_wrap_lines("Exemplos:", indent, width))
+                for example in body.split(" | "):
+                    wrapped = _wrap_lines(example, indent + 4, width)
+                    wrapped[0] = " " * (indent + 2) + "• " + wrapped[0].lstrip()
+                    lines.extend(wrapped)
+            else:
+                lines.extend(_wrap_lines(f"{label}: {body}", indent, width))
+    elif outcome in ("download_failed", "embed_failed", "error") and detail:
+        lines.extend(_wrap_lines(detail, indent, width))
+    return [f"{MUTED}{line}{OFF}" for line in lines]
+
+
+def _album_header_lines(album: dict, decision, width: int) -> list:
+    """Cabeçalho do álbum (uma vez por álbum) e como a capa dele foi decidida."""
+    title = (album.get("title") or "").strip()
+    if not title:
+        return []
+    artist = ((album.get("artist") or {}).get("name") or "").strip()
+    items = (album.get("tracks") or {}).get("items") or []
+    count = album.get("tracks_count") or len(items)
+    meta = " | ".join(
+        part
+        for part in (
+            _RELEASE_LABELS.get(_classify_album(album)),
+            f"{count} faixa{'s' if count != 1 else ''}" if count else None,
+        )
+        if part
+    )
+    head = f"== {title}" + (f" -- {artist}" if artist else "")
+    if meta:
+        head += f"  |  {meta}"
+    head = _short(head, width - 6) + " "
+    lines = [f"{CYAN}{head}{'=' * max(3, width - len(head) - 1)}{OFF}"]
+    if decision and decision.get("url"):
+        lines.append(
+            f"{CYAN}   Capa Apple única para todas as faixas "
+            f"({decision.get('method')}){OFF}"
+        )
+    elif decision is not None:
+        lines.append(
+            f"{MUTED}   Sem capa única para o álbum: cada faixa é avaliada "
+            f"separadamente{OFF}"
+        )
+    return lines
+
+
+def _legend_lines() -> list:
+    return [
+        f"{CYAN} Legenda das cores:{RESET}",
+        f"   {GREEN}•{OFF} verde     alteração aplicada (tags e/ou capa)",
+        f"   {YELLOW}•{OFF} amarelo   atenção: algo ficou pendente (ex.: capa não "
+        f"achada) ou tag removida",
+        f"   {MUTED}•{OFF} cinza     nada a alterar",
+        f"   {RED}•{OFF} vermelho  erro",
+    ]
 
 
 async def retag_directory(directory_path, client, settings, covers_only=False):
@@ -606,9 +809,10 @@ async def retag_directory(directory_path, client, settings, covers_only=False):
         )
     else:
         ui.emit(f"{CYAN} • Multi-tags  :{RESET} {multi_tags_label(settings)}")
-    ui.emit(
-        f"{CYAN} • Capas Apple :{RESET} procurando e substituindo quando validada\n"
-    )
+    ui.emit(f"{CYAN} • Capas Apple :{RESET} procurando e substituindo quando validada")
+    ui.emit("")
+    for legend_line in _legend_lines():
+        ui.emit(legend_line)
 
     files = find_audio_files(directory_path)
     stats = {
@@ -634,6 +838,7 @@ async def retag_directory(directory_path, client, settings, covers_only=False):
     album_decisions: dict = {}
     track_results: dict = {}  # faixa -> (url, fonte, motivo), da votação
     shared_holder = {"decision": None}  # só a capa do álbum atual fica em disco
+    last_album_key = None  # para imprimir o cabeçalho do álbum uma vez por álbum
     width = len(str(len(files)))
 
     http_session = make_client(
@@ -660,6 +865,7 @@ async def retag_directory(directory_path, client, settings, covers_only=False):
 
             if not track_id:
                 stats["no_id"] += 1
+                ui.emit("")
                 ui.skip(f"{label} {name} (sem ID Qobuz nas tags)")
                 continue
 
@@ -678,11 +884,13 @@ async def retag_directory(directory_path, client, settings, covers_only=False):
                 )
             except Exception as exc:
                 stats["errors"] += 1
+                ui.emit("")
                 ui.error(f"{label} {name} (erro ao consultar o Qobuz: {exc})")
                 continue
 
             if not resolved:
                 stats["not_found"] += 1
+                ui.emit("")
                 ui.skip(f"{label} {name} (faixa {track_id} não encontrada no Qobuz)")
                 continue
 
@@ -696,12 +904,16 @@ async def retag_directory(directory_path, client, settings, covers_only=False):
 
             cover_path: Optional[str] = None
             cover_source: Optional[str] = None
-            cover_status = "Apple: não pesquisada"
+            # cover_outcome: replaced | kept | not_found | download_failed |
+            # embed_failed | error | not_searched (define cor e texto no log);
+            # cover_status: detalhe em texto, mostrado abaixo da linha de capa.
+            cover_outcome = "not_searched"
+            cover_status = "não pesquisada"
             apple_diagnostic = None
             shared_cover = False  # True: o arquivo pertence ao álbum, não a esta faixa
+            album_key = str(album.get("id") or "")
 
             try:
-                album_key = str(album.get("id") or "")
                 album_decision = None
                 if album_key:
                     album_decision = album_decisions.get(album_key)
@@ -710,15 +922,6 @@ async def retag_directory(directory_path, client, settings, covers_only=False):
                             album, http_session, track_results
                         )
                         album_decisions[album_key] = album_decision
-                        if album_decision and album_decision.get("url"):
-                            kind_label = _RELEASE_LABELS.get(
-                                _classify_album(album), "álbum"
-                            )
-                            ui.emit(
-                                f"{CYAN}[Álbum]{OFF} {album.get('title') or album_key}"
-                                f" ({kind_label}): capa Apple única para todas as "
-                                f"faixas -- {album_decision.get('method')}"
-                            )
 
                 if album_decision and album_decision.get("url"):
                     apple_cover_url = album_decision["url"]
@@ -740,10 +943,9 @@ async def retag_directory(directory_path, client, settings, covers_only=False):
                     album_decision = None
 
                 if not isinstance(apple_cover_url, str) or not apple_cover_url.strip():
+                    cover_outcome = "not_found"
                     cover_status = (
-                        f"Apple: {apple_diagnostic}"
-                        if apple_diagnostic
-                        else "Apple: nenhum candidato passou pelos filtros"
+                        apple_diagnostic or "nenhum candidato passou pelos filtros"
                     )
                     stats["apple_not_found"] += 1
 
@@ -767,12 +969,13 @@ async def retag_directory(directory_path, client, settings, covers_only=False):
                         cover_source = apple_cover_source or "Apple/iTunes"
                         size_kib = max(1, os.path.getsize(path) // 1024)
                         cover_status = (
-                            f"Apple: capa do álbum reaproveitada ({size_kib} KiB)"
+                            f"capa do álbum reaproveitada ({size_kib} KiB)"
                             if reused
-                            else f"Apple: capa do álbum baixada ({size_kib} KiB)"
+                            else f"capa do álbum baixada ({size_kib} KiB)"
                         )
                     else:
-                        cover_status = "Apple: URL encontrada, download falhou"
+                        cover_outcome = "download_failed"
+                        cover_status = "a imagem encontrada na Apple não pôde ser baixada"
                         stats["apple_failed"] += 1
 
                 else:
@@ -785,13 +988,15 @@ async def retag_directory(directory_path, client, settings, covers_only=False):
                     if cover_path:
                         cover_source = apple_cover_source or "Apple/iTunes"
                         size_kib = max(1, os.path.getsize(cover_path) // 1024)
-                        cover_status = f"Apple: capa baixada ({size_kib} KiB)"
+                        cover_status = f"capa baixada ({size_kib} KiB)"
                     else:
-                        cover_status = "Apple: URL encontrada, download falhou"
+                        cover_outcome = "download_failed"
+                        cover_status = "a imagem encontrada na Apple não pôde ser baixada"
                         stats["apple_failed"] += 1
 
             except Exception as exc:
-                cover_status = f"Apple: erro ({type(exc).__name__}: {exc})"
+                cover_outcome = "error"
+                cover_status = f"{type(exc).__name__}: {exc}"
                 stats["apple_failed"] += 1
                 logger.warning(
                     "Falha ao obter capa Apple para '%s': %s",
@@ -817,6 +1022,7 @@ async def retag_directory(directory_path, client, settings, covers_only=False):
                         pass
                 cover_path = None
                 cover_source = None
+                cover_outcome = "kept"
                 cover_status = "Capa existente preservada (candidata não é superior)"
 
             before = await loop.run_in_executor(None, snapshot_tags, file_path)
@@ -838,9 +1044,8 @@ async def retag_directory(directory_path, client, settings, covers_only=False):
                         )
                         if not embedded:
                             cover_source = None
-                            cover_status = (
-                                "Apple: capa baixada, mas não foi possível embutir"
-                            )
+                            cover_outcome = "embed_failed"
+                            cover_status = "a gravação da imagem no arquivo falhou"
                             stats["apple_failed"] += 1
                 else:
                     await loop.run_in_executor(
@@ -884,8 +1089,8 @@ async def retag_directory(directory_path, client, settings, covers_only=False):
 
             if cover_source:
                 stats["apple_embedded"] += 1
+                cover_outcome = "replaced"
 
-            result_message = _cover_result_message(cover_source, cover_status)
             # Os snapshots reais usam as chaves "text" e "art". Alguns
             # chamadores/testes podem fornecer diretamente o mapa de tags;
             # nesse caso, comparar .get("text") compara None com None e perde
@@ -897,59 +1102,82 @@ async def retag_directory(directory_path, client, settings, covers_only=False):
             tags_changed = False if covers_only else before_text != after_text
             cover_changed = before.get("art", []) != after.get("art", [])
 
-            if tags_changed and cover_changed:
-                action = "TAGS + CAPA ALTERADAS"
-                action_color = GREEN
-            elif tags_changed:
-                action = "SOMENTE TAGS ALTERADAS"
-                action_color = CYAN
-            elif cover_changed:
-                action = "SOMENTE CAPA ALTERADA"
-                action_color = YELLOW
-            else:
-                action = "NENHUMA ALTERAÇÃO"
-                action_color = MUTED
-
             if tags_changed or cover_changed:
                 stats["updated"] += 1
             else:
                 stats["unchanged"] += 1
 
-            # Linha principal neutra: somente o estado da operação recebe cor.
-            ui.emit(f"{label} {name} [{action_color}{action}{OFF}]")
+            columns = _term_width()
+            state_color, state_text = _file_state(
+                tags_changed, cover_changed, cover_outcome in _COVER_ATTENTION
+            )
+
+            # Cabeçalho do álbum: uma vez, quando o álbum muda.
+            if album_key and album_key != last_album_key:
+                header = _album_header_lines(
+                    album, album_decisions.get(album_key), columns
+                )
+                if header:
+                    ui.emit("")
+                    for header_line in header:
+                        ui.emit(header_line)
+                last_album_key = album_key
+
+            # Um bloco por faixa, separado por linha em branco. Cor: verde =
+            # alterou, amarelo = atenção, cinza = nada a alterar.
+            ui.emit("")
+            ui.emit(f"{state_color}{label} {name}{OFF}")
+            ui.emit(f"   {state_color}• {state_text}{OFF}")
+
             if covers_only:
-                ui.emit(
-                    f"    {CYAN}↳ Tags:{OFF} {MUTED}não tocadas (modo só capas){OFF}"
+                tags_color, tags_text = MUTED, "não tocadas (modo só capas)"
+            elif tags_changed:
+                changed = count_changed_tags(before_text, after_text)
+                tags_color = GREEN
+                tags_text = (
+                    f"alteradas ({changed} campo{'s' if changed != 1 else ''})"
+                    if changed
+                    else "alteradas"
                 )
             else:
-                ui.emit(
-                    f"    {CYAN}↳ Tags:{OFF} "
-                    f"{GREEN if tags_changed else MUTED}{'alteradas' if tags_changed else 'sem alteração'}{OFF}"
-                )
-                if tags_changed:
-                    for diff_line in format_tag_diff(before_text, after_text):
-                        ui.emit(f"        {diff_line}")
-            ui.emit(
-                f"    {CYAN}↳ Capa:{OFF} "
-                f"{YELLOW if cover_changed else MUTED}{'substituída' if cover_changed else 'preservada/inalterada'}{OFF}"
-                f" -- {result_message}"
+                tags_color, tags_text = MUTED, "já estavam corretas"
+            for line in _labeled_lines("Tags", tags_text, columns):
+                ui.emit(f"{tags_color}{line}{OFF}")
+            if tags_changed and not covers_only:
+                for diff_line in format_tag_diff(before_text, after_text):
+                    ui.emit(f"          {diff_line}")
+
+            cover_color, cover_text = _cover_line(
+                cover_outcome, cover_changed, cover_source
             )
+            for line in _labeled_lines("Capa", cover_text, columns):
+                ui.emit(f"{cover_color}{line}{OFF}")
+            for line in _cover_detail_lines(
+                cover_outcome, cover_source, cover_status, columns
+            ):
+                ui.emit(line)
 
         ui.emit("")
         ui.emit(f"{GREEN}[+] Correção de tags concluída.{OFF}")
-        ui.emit(f"{CYAN} • Arquivos analisados       :{RESET} {stats['total']}")
-        ui.emit(f"{CYAN} • Atualizados               :{RESET} {stats['updated']}")
-        ui.emit(f"{CYAN} • Já corretos               :{RESET} {stats['unchanged']}")
-        ui.emit(f"{CYAN} • Sem ID Qobuz              :{RESET} {stats['no_id']}")
-        ui.emit(f"{CYAN} • Não encontrados           :{RESET} {stats['not_found']}")
-        ui.emit(
-            f"{CYAN} • Capas Apple embutidas     :{RESET} {stats['apple_embedded']}"
-        )
-        ui.emit(
-            f"{CYAN} • Capas Apple não encontradas:{RESET} {stats['apple_not_found']}"
-        )
-        ui.emit(f"{CYAN} • Falhas na etapa Apple     :{RESET} {stats['apple_failed']}")
-        ui.emit(f"{CYAN} • Erros                     :{RESET} {stats['errors']}")
+        ui.emit("")
+        ui.emit(f"{CYAN} Resumo:{RESET}")
+        for text_label, key, color_on, explanation in (
+            ("Arquivos analisados", "total", None, "faixas .flac/.mp3 encontradas na pasta"),
+            ("Atualizados", "updated", GREEN, "faixas com tags e/ou capa alteradas"),
+            ("Já corretos", "unchanged", None, "faixas que já estavam como deveriam"),
+            ("Sem ID Qobuz", "no_id", YELLOW, "sem ID nas tags: não dá para corrigir sozinho"),
+            ("Não encontrados", "not_found", YELLOW, "ID não encontrado na Qobuz"),
+            ("Capas Apple embutidas", "apple_embedded", GREEN, "faixas que receberam a capa da Apple"),
+            ("Capas Apple não encontradas", "apple_not_found", YELLOW, "sem capa válida na Apple (capa atual mantida)"),
+            ("Falhas na etapa Apple", "apple_failed", YELLOW, "capa achada, mas o download/gravação falhou"),
+            ("Erros", "errors", RED, "falhas ao consultar o Qobuz ou gravar tags"),
+        ):
+            value = stats[key]
+            value_color = color_on if (color_on and value) else MUTED
+            ui.emit(
+                f"{CYAN} • {text_label.ljust(26)}:{RESET} "
+                f"{value_color}{value}{OFF}  {MUTED}{explanation}{OFF}"
+            )
 
         if stats["no_id"]:
             ui.emit(

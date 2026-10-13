@@ -139,7 +139,7 @@ class Client:
         self = cls()
         # Use the shared UI writer so login output does not collide with logs
         # or progress bars, and always terminates the status line cleanly.
-        ui.step("Logando...")
+        ui.step_inline("Logando...")
         self.secrets = secrets
         # Usa o App ID padrão quando a configuração não define outro.
         # Não comparar o ID padrão com uma condição especial para baixar bundle:
