@@ -396,3 +396,99 @@ class TestBootstrapUi:
         monkeypatch.setattr(cli.ui, "install_logging", lambda: None)
         cli._bootstrap_ui()
         assert recebido == esperado
+
+
+# ---------------------------------------------------------------------------
+# tags --undo / --undo-list
+# ---------------------------------------------------------------------------
+class TestHandleTagsUndo:
+    @pytest.fixture
+    def tela(self, monkeypatch):
+        linhas = []
+
+        def _grava(*args, **_kwargs):
+            linhas.append(str(args[0]) if args else "")
+
+        for nome in ("emit", "warn", "error", "step"):
+            monkeypatch.setattr(cli.ui, nome, _grava)
+        return linhas
+
+    @staticmethod
+    def _args(**kw):
+        from types import SimpleNamespace
+
+        base = dict(undo=None, undo_list=False, undo_force=False, dry_run=False)
+        base.update(kw)
+        return SimpleNamespace(**base)
+
+    @staticmethod
+    def _execucao(base, pasta, antes=b"fLaC", depois=None):
+        """Cria uma execução real com um FLAC sintético alterado."""
+        from qobuz_dl import tags_journal as tj
+
+        def flac(comentario):
+            blocos = [(0, bytes(34)), (4, comentario)]
+            return tj._join_flac_blocks(blocos) + b"AUDIO" * 50
+
+        caminho = pasta / "a.flac"
+        caminho.write_bytes(flac(b"ARTIST=Antes"))
+        diario = tj.Journal.create(str(base), "both", str(pasta))
+        diario.begin(str(caminho))
+        caminho.write_bytes(flac(b"ARTIST=Depois"))
+        diario.finish(str(caminho))
+        return caminho, flac(b"ARTIST=Antes"), diario
+
+    def test_sem_execucoes_na_lista_so_avisa(self, tela, tmp_path):
+        assert cli._handle_tags_undo(self._args(undo_list=True), str(tmp_path)) == 0
+        assert any("Nenhuma execução" in t for t in tela)
+
+    def test_sem_execucoes_no_desfazer_e_erro(self, tela, tmp_path):
+        assert cli._handle_tags_undo(self._args(undo="last"), str(tmp_path)) == 1
+
+    def test_lista_mostra_id_modo_e_pasta(self, tela, tmp_path):
+        base = tmp_path / "cfg"
+        pasta = tmp_path / "musica"
+        pasta.mkdir()
+        _, _, diario = self._execucao(base, pasta)
+        assert cli._handle_tags_undo(self._args(undo_list=True), str(base)) == 0
+        texto = "\n".join(tela)
+        assert diario.run_id in texto and "modo=both" in texto and str(pasta) in texto
+
+    def test_desfaz_a_mais_recente_e_devolve_o_arquivo_original(self, tela, tmp_path):
+        base = tmp_path / "cfg"
+        pasta = tmp_path / "musica"
+        pasta.mkdir()
+        caminho, original, _ = self._execucao(base, pasta)
+        assert cli._handle_tags_undo(self._args(undo="last"), str(base)) == 0
+        assert caminho.read_bytes() == original
+        assert any("restaurados        : 1" in t for t in tela)
+
+    def test_simulacao_do_desfazer_nao_altera_o_arquivo(self, tela, tmp_path):
+        base = tmp_path / "cfg"
+        pasta = tmp_path / "musica"
+        pasta.mkdir()
+        caminho, original, _ = self._execucao(base, pasta)
+        depois = caminho.read_bytes()
+        assert (
+            cli._handle_tags_undo(self._args(undo="last", dry_run=True), str(base)) == 0
+        )
+        assert caminho.read_bytes() == depois != original
+        assert any("seriam restaurados : 1" in t for t in tela)
+
+    def test_id_desconhecido_e_erro_com_dica(self, tela, tmp_path):
+        base = tmp_path / "cfg"
+        pasta = tmp_path / "musica"
+        pasta.mkdir()
+        self._execucao(base, pasta)
+        assert cli._handle_tags_undo(self._args(undo="19990101_000000"), str(base)) == 1
+        assert any("--undo-list" in t for t in tela)
+
+    def test_arquivo_alterado_depois_e_avisado_e_force_resolve(self, tela, tmp_path):
+        base = tmp_path / "cfg"
+        pasta = tmp_path / "musica"
+        pasta.mkdir()
+        caminho, original, _ = self._execucao(base, pasta)
+        caminho.write_bytes(caminho.read_bytes() + b"x")  # mexeram depois
+        # Só o áudio mudou: os metadados ainda são os do tags, então restaura.
+        assert cli._handle_tags_undo(self._args(undo="last"), str(base)) == 0
+        assert caminho.read_bytes().startswith(original[: len(original) - 250])

@@ -20,6 +20,7 @@ from mutagen.id3 import ID3NoHeaderError
 from qobuz_dl.settings import QobuzDLSettings
 from qobuz_dl.utils import (
     classify_release_type,
+    encontrar_binario,
     get_album_artist,
 )
 
@@ -359,6 +360,72 @@ def _normalize_name(name) -> str:
     )
 
 
+# # Sem Pillow (a-Shell): recompacta com o ffmpeg, que o projeto já usa.
+# -q:v do encoder MJPEG: 2 = melhor qualidade, 31 = pior. Espelha 95 -> 50 do Pillow.
+_FFMPEG_QUALITIES = (2, 3, 4, 5, 7, 9, 12, 16)
+_FFMPEG_SCALES = (0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2)
+
+
+def _run_ffmpeg_jpeg(ffmpeg, image_path, out_path, quality, scale=None):
+    """Roda o ffmpeg uma vez e devolve os bytes do JPEG gerado (ou None)."""
+    import subprocess
+
+    filters = ["-vf", f"scale=trunc(iw*{scale}):trunc(ih*{scale})"] if scale else []
+    try:
+        subprocess.run(
+            [
+                ffmpeg,
+                "-y",
+                "-loglevel",
+                "error",
+                "-i",
+                image_path,
+                "-frames:v",
+                "1",
+                *filters,
+                "-q:v",
+                str(quality),
+                out_path,
+            ],
+            check=True,
+            capture_output=True,
+            timeout=120,
+        )
+        with open(out_path, "rb") as handle:
+            return handle.read()
+    except (OSError, subprocess.SubprocessError) as exc:
+        logger.debug("ffmpeg não conseguiu recompactar a capa: %s", exc)
+        return None
+
+
+def _shrink_with_ffmpeg(image_path, max_bytes):
+    """Mesma estratégia do Pillow (qualidade primeiro, depois dimensões), via ffmpeg.
+
+    Devolve os bytes do JPEG ou None se não houver ffmpeg, se ele falhar ou se
+    nem na menor escala a imagem couber.
+    """
+    ffmpeg = encontrar_binario("ffmpeg")
+    if not ffmpeg:
+        return None
+    import tempfile
+
+    with tempfile.TemporaryDirectory(prefix="qdl_cover_") as workdir:
+        out_path = os.path.join(workdir, "capa.jpg")
+        for quality in _FFMPEG_QUALITIES:
+            data = _run_ffmpeg_jpeg(ffmpeg, image_path, out_path, quality)
+            if data is None:
+                return None  # o ffmpeg em si falhou: não adianta insistir
+            if len(data) <= max_bytes:
+                return data
+        for scale in _FFMPEG_SCALES:
+            data = _run_ffmpeg_jpeg(ffmpeg, image_path, out_path, 4, scale)
+            if data is None:
+                return None
+            if len(data) <= max_bytes:
+                return data
+    return None
+
+
 # # Recompacta a capa em memória para respeitar o limite do bloco FLAC.
 def _shrink_image_to_fit(image_path, max_bytes):
     """
@@ -380,10 +447,17 @@ def _shrink_image_to_fit(image_path, max_bytes):
     """
     try:
         from PIL import Image
-    except ImportError:
+
+        Image.new("RGB", (1, 1))  # no a-Shell o import passa e o núcleo C falha aqui
+    except Exception:  # noqa: BLE001 -- ImportError, OSError do dlopen etc.
+        data = _shrink_with_ffmpeg(image_path, max_bytes)
+        if data is not None:
+            logger.info("Capa recompactada com o ffmpeg (Pillow indisponível).")
+            return data
         logger.warning(
-            "Pillow nao esta instalado -- nao e' possivel recompactar a capa "
-            "que excede o limite de 16MB do FLAC. Instale com: pip install Pillow"
+            "Nao e' possivel recompactar a capa que excede o limite de 16MB do "
+            "FLAC: o Pillow nao esta disponivel e o ffmpeg nao conseguiu. "
+            "Instale o ffmpeg ou o Pillow (pip install Pillow)."
         )
         return None
 
@@ -583,14 +657,22 @@ def _image_dimensions(image_data):
 
 
 _COVER_COMPARE = threading.local()
+_SQUARE_TOLERANCE = 0.03  # 3% de diferença entre largura e altura ainda é "quadrada"
+
+
+def _is_square(dimensions) -> bool:
+    """True se (largura, altura) é praticamente quadrada."""
+    largura, altura = dimensions
+    return abs(largura - altura) <= _SQUARE_TOLERANCE * max(largura, altura)
 
 
 def last_cover_compare_reason() -> Optional[str]:
     """Motivo da última comparação de capas NESTA thread, quando não decisiva.
 
     "unreadable": não deu para ler as dimensões (da candidata ou da capa atual),
-    então a comparação não pôde ser feita e a capa atual foi preservada. None:
-    a comparação foi feita normalmente (trocou ou a atual já era melhor).
+    então a comparação não pôde ser feita e a capa atual foi preservada.
+    "not_square": a candidata não é quadrada e a capa atual é. None: a
+    comparação foi feita normalmente (trocou ou a atual já era melhor).
     """
     return getattr(_COVER_COMPARE, "reason", None)
 
@@ -642,6 +724,7 @@ def should_replace_embedded_cover(filename, candidate_path):
 
         candidate_area = candidate_dimensions[0] * candidate_dimensions[1]
         existing_areas = []
+        existing_square = False
         for image_data in existing_images:
             dimensions = _image_dimensions(image_data)
             if not dimensions:
@@ -649,6 +732,13 @@ def should_replace_embedded_cover(filename, candidate_path):
                 _COVER_COMPARE.reason = "unreadable"
                 return False
             existing_areas.append(dimensions[0] * dimensions[1])
+            existing_square = existing_square or _is_square(dimensions)
+
+        # Capa de álbum é quadrada: uma candidata cortada/esticada não troca uma
+        # capa atual quadrada, mesmo tendo mais pixels.
+        if existing_square and not _is_square(candidate_dimensions):
+            _COVER_COMPARE.reason = "not_square"
+            return False
 
         # Só substitui se superar todas as capas já embutidas.
         return candidate_area > max(existing_areas)

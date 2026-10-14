@@ -146,6 +146,28 @@ class TestParserPrincipal:
             with pytest.raises(SystemExit):
                 parser.parse_args(["tags", *combinacao])
 
+    def test_tags_dry_run_e_desfazer(self, parser):
+        padrao = parser.parse_args(["tags"])
+        assert padrao.dry_run is False and padrao.no_undo is False
+        assert padrao.undo is None and padrao.undo_list is False
+        assert padrao.undo_force is False
+
+        simulado = parser.parse_args(["tags", "--dry-run", "/musicas"])
+        assert simulado.dry_run is True and simulado.DIR == "/musicas"
+        assert parser.parse_args(["tags", "--no-undo"]).no_undo is True
+
+    def test_tags_undo_com_e_sem_id(self, parser):
+        assert parser.parse_args(["tags", "--undo"]).undo == "last"
+        com_id = parser.parse_args(["tags", "--undo", "20261013_190000"])
+        assert com_id.undo == "20261013_190000"
+        assert parser.parse_args(["tags", "--undo-list"]).undo_list is True
+        forcado = parser.parse_args(["tags", "--undo", "--undo-force", "--dry-run"])
+        assert forcado.undo == "last" and forcado.undo_force and forcado.dry_run
+
+    def test_tags_undo_e_undo_list_sao_excludentes(self, parser):
+        with pytest.raises(SystemExit):
+            parser.parse_args(["tags", "--undo", "--undo-list"])
+
     def test_flags_de_nivel_superior_existem(self, parser):
         args = parser.parse_args(["--reset", "dl", "URL"])
         assert args.reset is True

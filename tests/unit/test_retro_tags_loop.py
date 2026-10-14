@@ -576,6 +576,20 @@ class TestPreservacaoDaCapaAtual:
         assert "igual ou maior" not in amb.texto
         assert _temporarios(amb.pasta) == []
 
+    def test_candidata_nao_quadrada_nao_diz_que_a_atual_e_melhor(
+        self, amb, monkeypatch
+    ):
+        amb.substituir = False
+        monkeypatch.setattr(
+            retro_tags.metadata, "last_cover_compare_reason", lambda: "not_square"
+        )
+        amb.arquivo("a.flac")
+        stats = _rodar(amb)
+        assert stats["apple_embedded"] == 0
+        assert "a capa da Apple não é quadrada" in amb.texto
+        assert "igual ou maior" not in amb.texto
+        assert _temporarios(amb.pasta) == []
+
     def test_temporario_da_candidata_descartada_e_removido(self, amb):
         amb.substituir = False
         amb.arquivo("a.flac")
@@ -1817,3 +1831,214 @@ class TestModoSoTags:
     )
     def test_resolve_mode(self, covers, tags, esperado):
         assert retro_tags.resolve_mode(covers, tags) == esperado
+
+
+# ---------------------------------------------------------------------------
+# Simulação (--dry-run), registro para desfazer e resumo final
+# ---------------------------------------------------------------------------
+def _rodar_com(amb, **kwargs):
+    return asyncio.run(
+        retro_tags.retag_directory(
+            str(amb.pasta),
+            SimpleNamespace(),
+            SimpleNamespace(multi_value_tags=True),
+            **kwargs,
+        )
+    )
+
+
+class _DiarioFalso:
+    """Imita `tags_journal.Journal` registrando a ordem das chamadas."""
+
+    def __init__(self, amb, run_id="20260101_120000", recorded=1, unbacked=0):
+        self.amb = amb
+        self.run_id = run_id
+        self.recorded = recorded
+        self.unbacked = unbacked
+        self.erro_no_begin = None
+
+    def begin(self, caminho):
+        if self.erro_no_begin:
+            raise self.erro_no_begin
+        self.amb.chamadas.append(("begin", os.path.basename(caminho)))
+        return True
+
+    def finish(self, caminho):
+        self.amb.chamadas.append(("finish", os.path.basename(caminho)))
+        return True
+
+
+def _ordem(amb):
+    return [c[0] for c in amb.chamadas if c[0] in ("begin", "flac", "mp3", "finish")]
+
+
+class TestSimulacao:
+    def test_grava_numa_copia_e_nao_na_pasta_do_usuario(self, amb, monkeypatch):
+        gravados = []
+        original = retro_tags.metadata.tag_flac
+
+        def espiao(filename, *a, **kw):
+            gravados.append(filename)
+            return original(filename, *a, **kw)
+
+        monkeypatch.setattr(retro_tags.metadata, "tag_flac", espiao)
+        amb.arquivo("a.flac")
+        _rodar_com(amb, dry_run=True)
+        assert len(gravados) == 1
+        assert os.path.dirname(gravados[0]) != str(amb.pasta)
+
+    def test_mostra_o_que_seria_feito(self, amb):
+        amb.arquivo("a.flac")
+        stats = _rodar_com(amb, dry_run=True)
+        assert stats["updated"] == 1
+        assert "SIMULAÇÃO" in amb.texto
+        assert "Alterado -- tags e capa [simulação]" in amb.texto
+        assert "Simulação concluída -- nenhum arquivo foi alterado." in amb.texto
+        assert "Seriam atualizados" in amb.texto
+        assert "sem --dry-run" in amb.texto
+        assert "Correção de tags concluída" not in amb.texto
+
+    def test_pasta_de_trabalho_temporaria_e_removida(self, amb, monkeypatch):
+        criadas = []
+        real = retro_tags.tempfile.mkdtemp
+
+        def mkdtemp(*a, **kw):
+            pasta = real(*a, **kw)
+            criadas.append(pasta)
+            return pasta
+
+        monkeypatch.setattr(retro_tags.tempfile, "mkdtemp", mkdtemp)
+        amb.arquivo("a.flac")
+        _rodar_com(amb, dry_run=True)
+        assert len(criadas) == 1 and not os.path.exists(criadas[0])
+
+    def test_capa_da_apple_nao_e_baixada_para_dentro_da_biblioteca(
+        self, amb, monkeypatch
+    ):
+        destinos = []
+        original = retro_tags._download_apple_cover
+
+        async def espiao(sessao, url, pasta):
+            destinos.append(pasta)
+            return await original(sessao, url, pasta)
+
+        monkeypatch.setattr(retro_tags, "_download_apple_cover", espiao)
+        amb.arquivo("a.flac")
+        _rodar_com(amb, dry_run=True)
+        assert destinos and all(d != str(amb.pasta) for d in destinos)
+        assert _temporarios(amb.pasta) == []
+
+    def test_nao_usa_o_registro_de_desfazer(self, amb):
+        diario = _DiarioFalso(amb)
+        amb.arquivo("a.flac")
+        _rodar_com(amb, dry_run=True, journal=diario)
+        assert "begin" not in _ordem(amb) and "finish" not in _ordem(amb)
+        assert "Para desfazer" not in amb.texto
+
+    def test_sem_simulacao_o_texto_continua_o_de_sempre(self, amb):
+        amb.arquivo("a.flac")
+        _rodar(amb)
+        assert "SIMULAÇÃO" not in amb.texto and "[simulação]" not in amb.texto
+        assert "Correção de tags concluída" in amb.texto
+
+    def test_erro_ao_gravar_na_copia_e_reportado_sem_derrubar(self, amb):
+        amb.erro_ao_gravar = OSError("disco cheio")
+        amb.arquivo("a.flac")
+        stats = _rodar_com(amb, dry_run=True)
+        assert stats["errors"] == 1
+
+
+class TestRegistroDeDesfazer:
+    def test_begin_antes_e_finish_depois_da_gravacao(self, amb):
+        diario = _DiarioFalso(amb)
+        amb.arquivo("a.flac")
+        _rodar_com(amb, journal=diario)
+        assert _ordem(amb) == ["begin", "flac", "finish"]
+
+    def test_finish_roda_mesmo_quando_a_gravacao_falha(self, amb):
+        diario = _DiarioFalso(amb)
+        amb.erro_ao_gravar = OSError("quebrou no meio")
+        amb.arquivo("a.flac")
+        stats = _rodar_com(amb, journal=diario)
+        assert stats["errors"] == 1
+        assert _ordem(amb) == ["begin", "finish"]
+
+    def test_sem_backup_o_arquivo_nao_e_alterado(self, amb):
+        diario = _DiarioFalso(amb)
+        diario.erro_no_begin = OSError("sem espaço no disco")
+        amb.arquivo("a.flac")
+        stats = _rodar_com(amb, journal=diario)
+        assert stats["errors"] == 1
+        assert amb.tags("flac") == []
+        assert "NÃO foi alterado" in amb.texto
+        assert _temporarios(amb.pasta) == []
+
+    def test_cada_arquivo_tem_o_proprio_par_begin_finish(self, amb):
+        diario = _DiarioFalso(amb)
+        amb.arquivo("a.flac", "1")
+        amb.arquivo("b.flac", "2")
+        _rodar_com(amb, journal=diario)
+        assert _ordem(amb) == ["begin", "flac", "finish"] * 2
+
+    def test_avisa_como_desfazer(self, amb):
+        diario = _DiarioFalso(amb, run_id="20261013_190000", recorded=3)
+        amb.arquivo("a.flac")
+        _rodar_com(amb, journal=diario)
+        assert "qobuz-dl tags --undo 20261013_190000" in amb.texto
+        assert "3 arquivos com backup" in amb.texto
+
+    def test_nao_avisa_quando_nada_foi_registrado(self, amb):
+        diario = _DiarioFalso(amb, recorded=0)
+        amb.arquivo("a.flac")
+        _rodar_com(amb, journal=diario)
+        assert "Para desfazer" not in amb.texto
+
+    def test_avisa_arquivos_sem_backup(self, amb):
+        diario = _DiarioFalso(amb, unbacked=2)
+        amb.arquivo("a.flac")
+        _rodar_com(amb, journal=diario)
+        assert "2 arquivo(s) de formato não reconhecido ficaram sem backup" in amb.texto
+
+    def test_sem_registro_nada_muda(self, amb):
+        amb.arquivo("a.flac")
+        _rodar_com(amb)
+        assert _ordem(amb) == ["flac"]
+        assert "Para desfazer" not in amb.texto
+
+
+class TestResumoPorCampoECapa:
+    def test_conta_faixas_por_campo_alterado(self, amb):
+        amb.arquivo("a.flac", "1")
+        amb.arquivo("b.flac", "2")
+        stats = _rodar(amb)
+        assert stats["field_changes"] == {"v": 2}
+        assert "Campos alterados (faixas por campo):" in amb.texto
+
+    def test_nada_alterado_nao_imprime_a_tabela_de_campos(self, amb):
+        amb.muda_texto = amb.muda_capa = False
+        amb.arquivo("a.flac")
+        stats = _rodar(amb)
+        assert stats["field_changes"] == {}
+        assert "Campos alterados" not in amb.texto
+
+    def test_conta_o_destino_das_capas(self, amb):
+        amb.arquivo("a.flac", "1")
+        amb.arquivo("b.flac", "2")
+        amb.substituir = True
+        stats = _rodar(amb)
+        assert stats["cover_outcomes"] == {"replaced": 2}
+        assert "Capas (o que houve em cada faixa):" in amb.texto
+        assert "capa trocada" in amb.texto
+
+    def test_capas_nao_encontradas_aparecem_no_resumo(self, amb):
+        amb.apple = (None, None, "nenhum candidato")
+        amb.arquivo("a.flac")
+        stats = _rodar(amb)
+        assert stats["cover_outcomes"] == {"not_found": 1}
+        assert "não encontrada na Apple" in amb.texto
+
+    def test_modo_so_tags_nao_fala_de_capas(self, amb):
+        amb.arquivo("a.flac")
+        stats = _rodar_com(amb, tags_only=True)
+        assert stats["cover_outcomes"] == {}
+        assert "Capas (o que houve" not in amb.texto

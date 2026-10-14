@@ -119,6 +119,7 @@ class TestCoverLine:
             ("embed_failed", False, "Y"),
             ("error", False, "Y"),
             ("no_compare", False, "Y"),
+            ("kept_shape", False, "M"),
             ("not_searched", False, "M"),
         ],
     )
@@ -137,6 +138,7 @@ class TestCoverLine:
         assert "capa atual foi mantida" in linha("not_found", False, None)[1]
         assert "não deu para comparar" in linha("no_compare", False, None)[1]
         assert "igual ou maior" not in linha("no_compare", False, None)[1]
+        assert "não é quadrada" in linha("kept_shape", False, None)[1]
 
     def test_desfechos_de_atencao(self):
         assert retro_tags._COVER_ATTENTION == {
@@ -561,3 +563,46 @@ class TestDownloadAppleCover:
             http, "u", str(tmp_path / "nao-existe")
         )
         assert r is None
+
+
+class TestChangedTagKeys:
+    def test_nova_removida_e_alterada(self):
+        antes = {"ARTIST": ["A"], "OLD": ["x"], "SAME": ["s"]}
+        depois = {"ARTIST": ["B"], "NEW": ["y"], "SAME": ["s"]}
+        assert retro_tags.changed_tag_keys(antes, depois) == ["ARTIST", "NEW", "OLD"]
+
+    def test_valor_igual_em_formatos_diferentes_nao_conta(self):
+        assert retro_tags.changed_tag_keys({"A": "x"}, {"A": ["x"]}) == []
+
+    def test_entradas_invalidas(self):
+        assert retro_tags.changed_tag_keys(None, {"A": ["x"]}) == ["A"]
+        assert retro_tags.changed_tag_keys(None, None) == []
+
+
+class TestSummaryDetailLines:
+    def _texto(self, *a, **kw):
+        import re
+
+        return re.sub(
+            r"\x1b\[[0-9;]*m", "", "\n".join(retro_tags._summary_detail_lines(*a, **kw))
+        )
+
+    def test_ordena_por_quantidade_e_limita(self):
+        campos = {f"K{i:02d}": i for i in range(1, 15)}
+        texto = self._texto(
+            {"field_changes": campos, "cover_outcomes": {}}, False, False, top=3
+        )
+        assert texto.index("K14") < texto.index("K13") < texto.index("K12")
+        assert "K11" not in texto and "e mais 11 campo(s)" in texto
+
+    def test_titulo_da_simulacao(self):
+        texto = self._texto({"field_changes": {"A": 1}}, False, True)
+        assert "Campos que seriam alterados" in texto
+
+    def test_sem_dados_nao_gera_linhas(self):
+        assert retro_tags._summary_detail_lines({}, False, False) == []
+
+    def test_so_tags_omite_as_capas(self):
+        stats = {"field_changes": {}, "cover_outcomes": {"replaced": 3}}
+        assert self._texto(stats, True, False) == ""
+        assert "capa trocada" in self._texto(stats, False, False)

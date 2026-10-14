@@ -302,7 +302,8 @@ def tags_args(subparsers, default_folder=None):
             "em alta resolução da Apple/iTunes, mas só quando a correspondência "
             "é validada (sem certeza, a capa atual é mantida). Não mexe em letras. "
             "Escolha o que alterar: --tags-only (só tags), --covers-only (só capas) "
-            "ou nenhuma das duas / --both (tags e capas, o padrão)."
+            "ou nenhuma das duas / --both (tags e capas, o padrão). Use --dry-run "
+            "para simular sem gravar e --undo para desfazer a última execução."
         ),
         help="modo de correção retroativa de tags de metadados",
     )
@@ -354,6 +355,64 @@ def tags_args(subparsers, default_folder=None):
         action="store_true",
         default=False,
         help="regrava as tags E troca a capa quando validada (é o padrão)",
+    )
+    tags.add_argument(
+        "--dry-run",
+        dest="dry_run",
+        action="store_true",
+        default=False,
+        help=(
+            "SIMULA: mostra o diff real de cada arquivo sem gravar nada na sua "
+            "pasta (também vale para --undo)"
+        ),
+    )
+    tags.add_argument(
+        "--no-undo",
+        dest="no_undo",
+        action="store_true",
+        default=False,
+        help=(
+            "não guarda os metadados originais; sem isso cada execução cria um "
+            "registro para desfazer (são mantidas as 5 últimas)"
+        ),
+    )
+    undo = tags.add_mutually_exclusive_group()
+    undo.add_argument(
+        "--undo",
+        dest="undo",
+        nargs="?",
+        const="last",
+        default=None,
+        metavar="ID",
+        help=(
+            "desfaz uma execução do tags (a mais recente, ou a do ID dado; veja "
+            "--undo-list) e não consulta o Qobuz"
+        ),
+    )
+    undo.add_argument(
+        "--undo-list",
+        dest="undo_list",
+        action="store_true",
+        default=False,
+        help="lista as execuções do tags que podem ser desfeitas",
+    )
+    tags.add_argument(
+        "--suggest-names",
+        dest="suggest_names",
+        action="store_true",
+        default=False,
+        help=(
+            "só lê as tags da pasta e sugere artistas com vírgula no nome (como "
+            '"Tyler, The Creator") para o artists_with_comma do config.ini; '
+            "não consulta o Qobuz nem grava nada"
+        ),
+    )
+    tags.add_argument(
+        "--undo-force",
+        dest="undo_force",
+        action="store_true",
+        default=False,
+        help="com --undo: restaura mesmo arquivos alterados depois do tags",
     )
     return tags
 

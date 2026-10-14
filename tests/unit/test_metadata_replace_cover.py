@@ -127,10 +127,12 @@ class TestFlac:
 
     def test_compara_por_area_nao_por_lado(self, mundo):
         mundo.flac_pics = [b"atual"]
-        mundo.dims[b"atual"] = (1000, 1000)  # 1.000.000 px
+        # Atual retangular de propósito: a regra da proporção (capa quadrada
+        # atual não cede lugar a uma não quadrada) fica de fora e só a área conta.
+        mundo.dims[b"atual"] = (1200, 800)  # 960.000 px
         # Lado maior, mas menos pixels no total: não substitui.
         assert _decidir("a.flac", mundo.candidata((2000, 400))) is False
-        # 900x1200 = 1.080.000 px > 1.000.000: substitui, mesmo com um lado menor.
+        # 900x1200 = 1.080.000 px > 960.000: substitui, mesmo com um lado menor.
         assert _decidir("a.flac", mundo.candidata((900, 1200), b"c2")) is True
 
     def test_precisa_superar_todas_as_capas_embutidas(self, mundo):
@@ -362,3 +364,45 @@ class TestMotivoDaComparacao:
         assert metadata.last_cover_compare_reason() == "unreadable"
         assert _decidir("a.flac", mundo.candidata((100, 100))) is True
         assert metadata.last_cover_compare_reason() is None
+
+
+# --------------------------------------------------------------------
+# Proporção: capa quadrada atual não é trocada por uma não quadrada
+# --------------------------------------------------------------------
+class TestProporcaoDaCapa:
+    def test_atual_quadrada_candidata_retangular_maior_nao_troca(self, mundo):
+        mundo.flac_pics = [b"atual"]
+        mundo.dims[b"atual"] = (1000, 1000)
+        assert _decidir("a.flac", mundo.candidata((3000, 1500))) is False
+        assert metadata.last_cover_compare_reason() == "not_square"
+
+    def test_atual_quadrada_candidata_quadrada_maior_troca(self, mundo):
+        mundo.flac_pics = [b"atual"]
+        mundo.dims[b"atual"] = (1000, 1000)
+        assert _decidir("a.flac", mundo.candidata((3000, 3000))) is True
+        assert metadata.last_cover_compare_reason() is None
+
+    def test_tolerancia_de_3_por_cento_ainda_e_quadrada(self, mundo):
+        mundo.flac_pics = [b"atual"]
+        mundo.dims[b"atual"] = (1000, 1000)
+        assert _decidir("a.flac", mundo.candidata((3000, 2950))) is True
+
+    def test_atual_retangular_nao_bloqueia_a_troca(self, mundo):
+        mundo.flac_pics = [b"atual"]
+        mundo.dims[b"atual"] = (1000, 500)
+        assert _decidir("a.flac", mundo.candidata((3000, 1500))) is True
+
+    def test_sem_capa_atual_aceita_qualquer_proporcao(self, mundo):
+        assert _decidir("a.flac", mundo.candidata((3000, 1500))) is True
+
+    @pytest.mark.parametrize(
+        "dims, esperado",
+        [
+            ((100, 100), True),
+            ((100, 97), True),
+            ((100, 90), False),
+            ((300, 100), False),
+        ],
+    )
+    def test_is_square(self, dims, esperado):
+        assert metadata._is_square(dims) is esperado

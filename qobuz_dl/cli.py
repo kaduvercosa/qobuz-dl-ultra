@@ -351,6 +351,121 @@ def _pick_accent_color() -> str:
     return rgb
 
 
+_UNDO_STATUS_TEXT = {
+    "restored": ("restaurado", None),
+    "would_restore": ("seria restaurado", None),
+    "changed_since": (
+        "pulado: foi alterado depois do tags (use --undo-force para restaurar)",
+        "warn",
+    ),
+    "missing": ("pulado: o arquivo não existe mais", "warn"),
+    "verify_failed": ("restaurado, mas a conferência final não bateu", "error"),
+    "error": ("erro ao restaurar", "error"),
+}
+
+
+def _handle_tags_suggest_names(target_dir: str, settings) -> int:
+    """`tags --suggest-names`: só lê as tags da pasta; não consulta o Qobuz nem grava."""
+    from qobuz_dl import name_suggest
+    from qobuz_dl.metadata import _nomes_protegidos
+
+    if not os.path.isdir(target_dir):
+        ui.error(f"A pasta não existe no dispositivo: '{target_dir}'")
+        return 1
+    ui.step(f"Procurando artistas com vírgula no nome em {target_dir} (só leitura)...")
+
+    def progress(done: int, total: int) -> None:
+        ui.emit(f"  {done}/{total} arquivos lidos")
+
+    scanned = name_suggest.scan_directory(target_dir, progress=progress)
+    suggestions = name_suggest.suggest_from_lists(
+        scanned, protected=_nomes_protegidos(settings=settings)
+    )
+    if not suggestions:
+        ui.ok("Nenhum artista com vírgula faltando: nada para adicionar ao config.ini.")
+        return 0
+    ui.step("Possíveis artistas com vírgula no nome (revise antes de usar):")
+    for item in suggestions:
+        ui.emit(f"  • {item['name']}  ({item['files']} faixas)")
+    ui.emit(
+        "  Eles aparecem sempre lado a lado, como se fossem um nome só. Se for o "
+        "caso, adicione na seção [qobuz] do config.ini:"
+    )
+    ui.emit(
+        "  "
+        + name_suggest.config_line(
+            getattr(settings, "artists_with_comma", ()) or (), suggestions
+        )
+    )
+    return 0
+
+
+def _handle_tags_undo(arguments, base_dir: str) -> int:
+    """`tags --undo [ID]` e `tags --undo-list`. Não consulta o Qobuz. Devolve o exit code."""
+    from qobuz_dl import tags_journal
+
+    runs = tags_journal.list_runs(base_dir)
+
+    if getattr(arguments, "undo_list", False):
+        if not runs:
+            ui.warn("Nenhuma execução do tags guardada para desfazer.")
+            return 0
+        ui.step("Execuções do tags que podem ser desfeitas (da mais recente):")
+        for run in runs:
+            note = " (interrompida no meio da gravação)" if run["pending"] else ""
+            ui.emit(
+                f"  {run['id']}  modo={run['mode']}  "
+                f"{run['files']} arquivo(s)  pasta={run['root']}{note}"
+            )
+        ui.emit(
+            "  Para desfazer: qobuz-dl tags --undo [ID]   (sem ID = a mais recente)"
+        )
+        return 0
+
+    run_id = getattr(arguments, "undo", None)
+    dry_run = bool(getattr(arguments, "dry_run", False))
+    force = bool(getattr(arguments, "undo_force", False))
+
+    def on_file(status: str, path: str) -> None:
+        text, level = _UNDO_STATUS_TEXT.get(status, (status, None))
+        line = f"{os.path.basename(path)}: {text}"
+        if level == "warn":
+            ui.warn(line)
+        elif level == "error":
+            ui.error(line)
+        else:
+            ui.emit(f"  {line}")
+
+    if not runs:
+        ui.error("Nenhuma execução do tags guardada: não há o que desfazer.")
+        return 1
+    ui.step(
+        "Simulando o desfazer (nada será gravado)..."
+        if dry_run
+        else "Desfazendo a execução do tags..."
+    )
+    result = tags_journal.undo_run(
+        base_dir, run_id=run_id, force=force, dry_run=dry_run, on_file=on_file
+    )
+    if result is None:
+        ui.error(
+            f"Execução '{run_id}' não encontrada. Veja as disponíveis com: "
+            "qobuz-dl tags --undo-list"
+        )
+        return 1
+
+    ui.emit("")
+    ui.emit(f"Execução {result['run']}:")
+    if dry_run:
+        ui.emit(f"  seriam restaurados : {result['would_restore']}")
+    else:
+        ui.emit(f"  restaurados        : {result['restored']}")
+    ui.emit(f"  alterados depois   : {result['changed_since']}")
+    ui.emit(f"  não encontrados    : {result['missing']}")
+    ui.emit(f"  falhas             : {result['errors'] + result['verify_failed']}")
+    return 1 if (result["errors"] or result["verify_failed"]) else 0
+
+
 def _purge_databases(config_path: str, downloads_db: str) -> list[str]:
     """Apaga TODOS os bancos SQLite do programa (``--purge``).
 
@@ -1073,7 +1188,7 @@ _COMMAND_DESCRIPTIONS_PT = {
     "interactive": "Busca interativa: procura faixas/álbuns e escolhe o que baixar na hora.",
     "lucky": "Baixa os N primeiros resultados de uma busca no Qobuz, sem passar URL.",
     "lyrics": "Varre uma pasta já baixada e injeta letras/traduções que estejam faltando.",
-    "tags": "Varre uma pasta já baixada, regrava/corrige as tags de metadados (com ou sem multi-tags) e troca a capa pela da Apple/iTunes quando validada. Escolha: --tags-only (só tags), --covers-only (só capas) ou o padrão (os dois).",
+    "tags": "Varre uma pasta já baixada, regrava/corrige as tags de metadados (com ou sem multi-tags) e troca a capa pela da Apple/iTunes quando validada. Escolha: --tags-only (só tags), --covers-only (só capas) ou o padrão (os dois). Use --dry-run para simular e --undo para desfazer.",
     "sync-playlist": "Sincroniza uma pasta local com uma playlist do Qobuz (baixa o que falta, remove o que saiu).",
     "sync-favorites": "Sincroniza os favoritos da conta com o catálogo local (novos/removidos) e baixa o que falta.",
     "scan": "Casa sua pasta de música com o catálogo (tag de ID, UPC, nome, fuzzy) e grava sentinelas.",
@@ -1570,8 +1685,16 @@ async def async_main():
         sys.exit(0)
 
     if arguments.command == "tags":
+        # Desfazer não precisa do Qobuz nem da pasta: resolve antes de autenticar.
+        if getattr(arguments, "undo", None) or getattr(arguments, "undo_list", False):
+            sys.exit(_handle_tags_undo(arguments, CONFIG_PATH))
+
         from qobuz_dl.qopy import Client
-        from qobuz_dl.retro_tags import resolve_library_dir, retag_directory
+        from qobuz_dl.retro_tags import (
+            resolve_library_dir,
+            resolve_mode,
+            retag_directory,
+        )
 
         # Sem pasta no comando, usa a pasta padrão do config.ini (chave
         # "directory"), a mesma que os downloads já usam.
@@ -1583,6 +1706,9 @@ async def async_main():
             )
         tags_settings = QobuzDLSettings.from_arguments_configparser(arguments, config)
         tags_settings.default_folder = target_dir
+        # Só leitura das tags locais: também não precisa autenticar no Qobuz.
+        if getattr(arguments, "suggest_names", False):
+            sys.exit(_handle_tags_suggest_names(target_dir, tags_settings))
         try:
             tags_client = await Client.create(
                 email,
@@ -1595,6 +1721,27 @@ async def async_main():
         except Exception as e:
             ui.error(f"Não foi possível autenticar no Qobuz para corrigir as tags: {e}")
             sys.exit(1)
+        tags_dry_run = bool(getattr(arguments, "dry_run", False))
+        tags_journal_run = None
+        if not tags_dry_run and not getattr(arguments, "no_undo", False):
+            from qobuz_dl.tags_journal import Journal
+
+            try:
+                tags_journal_run = Journal.create(
+                    CONFIG_PATH,
+                    resolve_mode(
+                        bool(getattr(arguments, "covers_only", False)),
+                        bool(getattr(arguments, "tags_only", False)),
+                    ),
+                    target_dir,
+                )
+            except OSError as e:
+                await tags_client.close()
+                ui.error(
+                    f"Não foi possível criar o registro para desfazer ({e}). "
+                    "Nada foi alterado. Use --no-undo para rodar sem backup."
+                )
+                sys.exit(1)
         try:
             await retag_directory(
                 target_dir,
@@ -1602,6 +1749,8 @@ async def async_main():
                 tags_settings,
                 covers_only=bool(getattr(arguments, "covers_only", False)),
                 tags_only=bool(getattr(arguments, "tags_only", False)),
+                dry_run=tags_dry_run,
+                journal=tags_journal_run,
             )
         except KeyboardInterrupt:
             ui.error("Operação interrompida manualmente pelo usuário (CTRL+C).")

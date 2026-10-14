@@ -17,6 +17,7 @@
 # ============================================================================
 
 import asyncio
+import collections
 import difflib
 import logging
 import os
@@ -692,6 +693,17 @@ def count_changed_tags(before_text, after_text) -> int:
     )
 
 
+def changed_tag_keys(before_text, after_text) -> list:
+    """Chaves de tags cujo valor mudou (nova, removida ou alterada), em ordem."""
+    before_text = before_text if isinstance(before_text, dict) else {}
+    after_text = after_text if isinstance(after_text, dict) else {}
+    return [
+        key
+        for key in sorted(set(before_text) | set(after_text), key=str)
+        if _tag_lines(before_text.get(key, [])) != _tag_lines(after_text.get(key, []))
+    ]
+
+
 def _file_state(tags_changed: bool, cover_changed: bool, attention: bool):
     """(cor, texto) do resultado do arquivo: verde / amarelo / cinza."""
     if tags_changed and cover_changed:
@@ -720,6 +732,11 @@ def _cover_line(outcome: str, cover_changed: bool, cover_source: Optional[str]):
         return (
             MUTED,
             "mantida -- a capa atual já tem resolução igual ou maior que a da Apple",
+        )
+    if outcome == "kept_shape":
+        return (
+            MUTED,
+            "mantida -- a capa da Apple não é quadrada (a atual é)",
         )
     if outcome == "no_compare":
         return (
@@ -812,6 +829,44 @@ def _legend_lines() -> list:
     ]
 
 
+_COVER_OUTCOME_LABELS = (
+    ("replaced", "capa trocada", GREEN),
+    ("kept", "mantida (a atual já era igual ou maior)", MUTED),
+    ("kept_shape", "mantida (a da Apple não é quadrada)", MUTED),
+    ("no_compare", "mantida (não deu para comparar resoluções)", YELLOW),
+    ("not_found", "não encontrada na Apple", YELLOW),
+    ("download_failed", "achada, mas o download falhou", YELLOW),
+    ("embed_failed", "baixada, mas não deu para embutir", YELLOW),
+    ("error", "erro na etapa da Apple", YELLOW),
+)
+
+
+def _summary_detail_lines(stats: dict, tags_only: bool, dry_run: bool, top: int = 10):
+    """Linhas extras do resumo: campos mais alterados e destino das capas."""
+    lines = []
+    fields = stats.get("field_changes") or {}
+    if fields:
+        ranked = sorted(fields.items(), key=lambda kv: (-kv[1], kv[0]))
+        lines.append("")
+        lines.append(
+            f"{CYAN} Campos {'que seriam alterados' if dry_run else 'alterados'}"
+            f" (faixas por campo):{RESET}"
+        )
+        for key, count in ranked[:top]:
+            lines.append(f"{CYAN} • {str(key).ljust(26)}:{RESET} {GREEN}{count}{OFF}")
+        if len(ranked) > top:
+            lines.append(f"{MUTED}   … e mais {len(ranked) - top} campo(s){OFF}")
+    outcomes = stats.get("cover_outcomes") or {}
+    if outcomes and not tags_only:
+        lines.append("")
+        lines.append(f"{CYAN} Capas (o que houve em cada faixa):{RESET}")
+        for outcome, text, color in _COVER_OUTCOME_LABELS:
+            count = outcomes.get(outcome, 0)
+            if count:
+                lines.append(f"{CYAN} • {text.ljust(44)}:{RESET} {color}{count}{OFF}")
+    return lines
+
+
 def resolve_mode(covers_only: bool = False, tags_only: bool = False) -> str:
     """'both' (padrão), 'tags' (só tags) ou 'covers' (só capas)."""
     if covers_only and tags_only:
@@ -820,7 +875,13 @@ def resolve_mode(covers_only: bool = False, tags_only: bool = False) -> str:
 
 
 async def retag_directory(
-    directory_path, client, settings, covers_only=False, tags_only=False
+    directory_path,
+    client,
+    settings,
+    covers_only=False,
+    tags_only=False,
+    dry_run=False,
+    journal=None,
 ):
     """Reescreve tags e tenta substituir capas por versoes Apple/iTunes.
 
@@ -834,6 +895,11 @@ async def retag_directory(
     tags_only=True: regrava as tags e NAO consulta a Apple; a capa embutida e
     as linhas de capa do comentario ficam como estao.
     Os dois juntos nao fazem sentido (ValueError); nenhum dos dois = ambos.
+
+    dry_run=True: SIMULA. Faz tudo (consulta o Qobuz e a Apple) mas grava numa
+    COPIA temporaria de cada arquivo e mostra o diff real; a biblioteca nao e
+    tocada. journal: `tags_journal.Journal` que guarda os metadados originais
+    antes de cada gravacao (para `tags --undo`); None = sem registro.
     """
     mode = resolve_mode(covers_only, tags_only)
     covers_only, tags_only = mode == "covers", mode == "tags"
@@ -844,6 +910,11 @@ async def retag_directory(
 
     ui.emit(f"\n{CYAN}[*] Iniciando correção retroativa de tags...{OFF}")
     ui.emit(f"{CYAN} • Pasta raiz  :{RESET} {directory_path}")
+    if dry_run:
+        ui.emit(
+            f"{YELLOW} • SIMULAÇÃO   :{RESET} nada será gravado na sua pasta "
+            "(as alterações abaixo são o que SERIA feito)"
+        )
     if covers_only:
         ui.emit(
             f"{CYAN} • Modo        :{RESET} SOMENTE CAPAS (nenhuma tag será regravada)"
@@ -876,6 +947,9 @@ async def retag_directory(
         "apple_embedded": 0,
         "apple_not_found": 0,
         "apple_failed": 0,
+        # Para o resumo final: quais campos mais mudaram e o que houve com as capas.
+        "field_changes": collections.Counter(),
+        "cover_outcomes": collections.Counter(),
     }
 
     if not files:
@@ -902,6 +976,8 @@ async def retag_directory(
             )
         },
     )
+
+    dry_workdir = tempfile.mkdtemp(prefix="qdl_dry_") if dry_run else None
 
     try:
         for index, file_path in enumerate(files, 1):
@@ -952,6 +1028,8 @@ async def retag_directory(
                 metadata.tag_mp3 if extension == ".mp3" else metadata.tag_flac
             )
             root_dir = os.path.dirname(file_path)
+            # Na simulação nem a capa temporária da Apple toca a pasta do usuário.
+            dl_dir = dry_workdir if dry_run else root_dir
 
             cover_path: Optional[str] = None
             cover_source: Optional[str] = None
@@ -1017,7 +1095,7 @@ async def retag_directory(
                         if previous is not None and previous is not album_decision:
                             _discard_shared_cover(previous)
                         path = await _download_apple_cover(
-                            http_session, apple_cover_url, root_dir
+                            http_session, apple_cover_url, dl_dir
                         )
                         album_decision["path"] = path
                         shared_holder["decision"] = album_decision if path else None
@@ -1042,7 +1120,7 @@ async def retag_directory(
                     cover_path = await _download_apple_cover(
                         http_session,
                         apple_cover_url,
-                        root_dir,
+                        dl_dir,
                     )
 
                     if cover_path:
@@ -1084,7 +1162,13 @@ async def retag_directory(
                         pass
                 cover_path = None
                 cover_source = None
-                if compare_reason == "unreadable":
+                if compare_reason == "not_square":
+                    cover_outcome = "kept_shape"
+                    cover_status = (
+                        "A capa da Apple não é quadrada e a atual é -- a atual "
+                        "foi preservada"
+                    )
+                elif compare_reason == "unreadable":
                     cover_outcome = "no_compare"
                     cover_status = (
                         "Não foi possível ler as dimensões da capa (da Apple ou da "
@@ -1098,7 +1182,21 @@ async def retag_directory(
 
             before = await loop.run_in_executor(None, snapshot_tags, file_path)
 
+            work_path = file_path  # arquivo que de fato recebe a gravação
             try:
+                if dry_run:
+                    # Simulação: grava numa cópia e compara com o original.
+                    work_path = os.path.join(dry_workdir, os.path.basename(file_path))
+                    await loop.run_in_executor(None, shutil.copy2, file_path, work_path)
+                elif journal is not None:
+                    try:
+                        await loop.run_in_executor(None, journal.begin, file_path)
+                    except Exception as exc:
+                        raise RuntimeError(
+                            "não foi possível guardar o backup para desfazer "
+                            f"({exc}); o arquivo NÃO foi alterado"
+                        ) from exc
+
                 if covers_only:
                     # Modo "so capas": nenhuma tag e regravada; so a imagem
                     # (e a origem da capa no comentario) quando ha capa nova.
@@ -1107,7 +1205,7 @@ async def retag_directory(
                             None,
                             functools.partial(
                                 metadata.replace_cover_only,
-                                file_path,
+                                work_path,
                                 cover_path,
                                 cover_source=cover_source,
                                 settings=settings,
@@ -1123,9 +1221,9 @@ async def retag_directory(
                         None,
                         functools.partial(
                             tag_function,
-                            file_path,
+                            work_path,
                             root_dir,
-                            file_path,
+                            work_path,
                             item,
                             album,
                             istrack,
@@ -1139,7 +1237,7 @@ async def retag_directory(
                         ),
                     )
 
-                after = await loop.run_in_executor(None, snapshot_tags, file_path)
+                after = await loop.run_in_executor(None, snapshot_tags, work_path)
 
             except Exception as exc:
                 stats["errors"] += 1
@@ -1148,6 +1246,18 @@ async def retag_directory(
                 continue
 
             finally:
+                if journal is not None and not dry_run:
+                    try:
+                        await loop.run_in_executor(None, journal.finish, file_path)
+                    except Exception as exc:  # noqa: BLE001
+                        logger.debug(
+                            "Falha ao fechar o registro de %s: %s", file_path, exc
+                        )
+                if dry_run and work_path != file_path:
+                    try:
+                        os.remove(work_path)
+                    except OSError:
+                        pass
                 if cover_path and not shared_cover:
                     try:
                         os.remove(cover_path)
@@ -1177,11 +1287,18 @@ async def retag_directory(
                 stats["updated"] += 1
             else:
                 stats["unchanged"] += 1
+            if tags_changed:
+                for changed_key in changed_tag_keys(before_text, after_text):
+                    stats["field_changes"][changed_key] += 1
+            if not tags_only:
+                stats["cover_outcomes"][cover_outcome] += 1
 
             columns = _term_width()
             state_color, state_text = _file_state(
                 tags_changed, cover_changed, cover_outcome in _COVER_ATTENTION
             )
+            if dry_run:
+                state_text += " [simulação]"
 
             # Cabeçalho do álbum: uma vez, quando o álbum muda.
             if album_key and album_key != last_album_key:
@@ -1232,9 +1349,14 @@ async def retag_directory(
                 ui.emit(line)
 
         ui.emit("")
-        ui.emit(f"{GREEN}[+] Correção de tags concluída.{OFF}")
+        if dry_run:
+            ui.emit(
+                f"{GREEN}[+] Simulação concluída -- nenhum arquivo foi alterado.{OFF}"
+            )
+        else:
+            ui.emit(f"{GREEN}[+] Correção de tags concluída.{OFF}")
         ui.emit("")
-        ui.emit(f"{CYAN} Resumo:{RESET}")
+        ui.emit(f"{CYAN} Resumo{' da simulação' if dry_run else ''}:{RESET}")
         for text_label, key, color_on, explanation in (
             (
                 "Arquivos analisados",
@@ -1242,7 +1364,12 @@ async def retag_directory(
                 None,
                 "faixas .flac/.mp3 encontradas na pasta",
             ),
-            ("Atualizados", "updated", GREEN, "faixas com tags e/ou capa alteradas"),
+            (
+                "Seriam atualizados" if dry_run else "Atualizados",
+                "updated",
+                GREEN,
+                "faixas com tags e/ou capa alteradas",
+            ),
             ("Já corretos", "unchanged", None, "faixas que já estavam como deveriam"),
             (
                 "Sem ID Qobuz",
@@ -1252,10 +1379,12 @@ async def retag_directory(
             ),
             ("Não encontrados", "not_found", YELLOW, "ID não encontrado na Qobuz"),
             (
-                "Capas Apple embutidas",
+                "Capas que seriam trocadas" if dry_run else "Capas Apple embutidas",
                 "apple_embedded",
                 GREEN,
-                "faixas que receberam a capa da Apple",
+                "faixas que receberiam a capa da Apple"
+                if dry_run
+                else "faixas que receberam a capa da Apple",
             ),
             (
                 "Capas Apple não encontradas",
@@ -1280,10 +1409,32 @@ async def retag_directory(
                 f"{value_color}{value}{OFF}  {MUTED}{explanation}{OFF}"
             )
 
+        for summary_line in _summary_detail_lines(stats, tags_only, dry_run):
+            ui.emit(summary_line)
+
         if stats["no_id"]:
             ui.emit(
                 f"{YELLOW}[i] Arquivos sem ID Qobuz não podem ser corrigidos "
                 f"automaticamente.{OFF}"
+            )
+
+        if journal is not None and not dry_run:
+            if journal.recorded:
+                ui.emit(
+                    f"{CYAN}[i] Para desfazer esta execução:{RESET} "
+                    f"qobuz-dl tags --undo {journal.run_id}   "
+                    f"{MUTED}({journal.recorded} arquivo"
+                    f"{'s' if journal.recorded != 1 else ''} com backup){OFF}"
+                )
+            if journal.unbacked:
+                ui.emit(
+                    f"{YELLOW}[!] {journal.unbacked} arquivo(s) de formato não "
+                    f"reconhecido ficaram sem backup para desfazer.{OFF}"
+                )
+        elif dry_run and stats["updated"]:
+            ui.emit(
+                f"{CYAN}[i] Para aplicar de verdade, rode o mesmo comando sem "
+                f"--dry-run.{RESET}"
             )
 
         return stats
@@ -1291,4 +1442,6 @@ async def retag_directory(
     finally:
         if shared_holder["decision"] is not None:
             _discard_shared_cover(shared_holder["decision"])
+        if dry_workdir:
+            shutil.rmtree(dry_workdir, ignore_errors=True)
         await http_session.aclose()

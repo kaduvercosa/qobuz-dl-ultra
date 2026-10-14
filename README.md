@@ -287,8 +287,7 @@ Use a flag `-—multi-tags` para garantir que faixas complexas com múltiplos ar
 python -m qobuz_dl dl “URL” -—multi-tags
 ```
 
-**Artistas com vírgula no nome:**  
-Nomes como `Tyler, The Creator` ou `Earth, Wind & Fire` são reconhecidos e **não** são divididos em dois artistas (nem com `--multi-tags`). Há uma lista embutida e, além dela, qualquer artista que a API do Qobuz entregue como entrada estruturada com vírgula no nome é protegido automaticamente. Para incluir outros, adicione na seção `[qobuz]` do `config.ini` (separados por `;`):
+**Artistas com vírgula no nome:** nomes como `Tyler, The Creator` ou `Earth, Wind & Fire` são reconhecidos e **não** são divididos em dois artistas (nem com `--multi-tags`). Há uma lista embutida e, além dela, qualquer artista que a API do Qobuz entregue como entrada estruturada com vírgula no nome é protegido automaticamente. Para incluir outros, adicione na seção `[qobuz]` do `config.ini` (separados por `;`):
 
 ```ini
 artists_with_comma = Tyler, The Creator; Earth, Wind & Fire
@@ -354,28 +353,19 @@ A Edição Ultra inclui poderosos gerenciadores de biblioteca local para acompan
   python -m qobuz_dl lyrics “/caminho/para/sua/pasta/local/de/musica”
   ```
 
-* **Correção Retroativa de Tags (`tags`):**  
- Arquivos já baixados com tags erradas, incompletas ou no formato antigo? O comando `tags` varre a pasta **no dispositivo** (o banco de dados não é consultado), lê o ID Qobuz gravado em cada arquivo FLAC/MP3 e regrava as tags de metadados (artista, álbum, compositor, gênero, data, faixa/disco, ISRC, IDs, comentário técnico) exatamente como um download novo faria, respeitando as opções `no_*_tag` do `config.ini`. Letras (`.lrc`) não são alteradas.  
- Você escolhe o formato dos campos multivalorados em cada execução; sem flag, vale o `multi_value_tags` do `config.ini`. Se nenhuma pasta for informada, o comando usa a pasta padrão do `config.ini` (a mesma dos downloads).
+* **Correção Retroativa de Tags (`tags`):**
+  Arquivos já baixados com tags erradas, incompletas ou no formato antigo? O comando `tags` varre a pasta **no dispositivo** (o banco de dados não é consultado), lê o ID Qobuz gravado em cada arquivo FLAC/MP3 e regrava as tags de metadados (artista, álbum, compositor, gênero, data, faixa/disco, ISRC, IDs, comentário técnico) exatamente como um download novo faria, respeitando as opções `no_*_tag` do `config.ini`. Letras (`.lrc`) não são alteradas. Você escolhe o formato dos campos multivalorados em cada execução; sem flag, vale o `multi_value_tags` do `config.ini`. Se nenhuma pasta for informada, o comando usa a pasta padrão do `config.ini` (a mesma dos downloads).
 
-  O `tags` também **troca a capa embutida** pela versão em alta resolução da Apple/iTunes, usando as mesmas regras de validação dos downloads (UPC/ISRC primeiro, depois busca por texto com artista, álbum e título compatíveis).  
-  Quando a capa é trocada, a origem fica registrada no comentário da faixa (`Capa: Apple/iTunes`). Quando a Apple não tem uma correspondência segura, a capa que já estava no arquivo é preservada e o motivo aparece no log (por exemplo, `artista incompatível` ou `título completo da faixa incompatível`).  
-  O resumo final conta `Capas Apple embutidas`, `Capas Apple não encontradas` e `Falhas na etapa Apple`; os arquivos temporários de capa (`.apple-cover-*.jpg`) são apagados logo após cada arquivo.
+  O `tags` também **troca a capa embutida** pela versão em alta resolução da Apple/iTunes, usando as mesmas regras de validação dos downloads (UPC/ISRC primeiro, depois busca por texto com artista, álbum e título compatíveis). Quando a capa é trocada, a origem fica registrada no comentário da faixa (`Capa: Apple/iTunes`). Quando a Apple não tem uma correspondência segura, a capa que já estava no arquivo é preservada e o motivo aparece no log (por exemplo, `artista incompatível` ou `título completo da faixa incompatível`). O resumo final conta `Capas Apple embutidas`, `Capas Apple não encontradas` e `Falhas na etapa Apple`; os arquivos temporários de capa (`.apple-cover-*.jpg`) são apagados logo após cada arquivo.
 
-  **Diff das tags alteradas e títulos com sufixo de edição.**  
-  Quando as tags de um arquivo mudam, o log lista logo abaixo de `↳ Tags: alteradas` exatamente o que mudou (`+` tag nova, `-` removida, `~ antes → depois`; no `COMMENT`, só as linhas que mudaram).  
-  Se a capa atual é mantida, as linhas de capa do comentário (`Capa embutida:`/`Capa:`) são preservadas em vez de apagadas. Na busca por texto da Apple, sufixos que só indicam a edição do álbum — `(Bonus Track)`, `(Deluxe)`, `(Explicit)` — não impedem mais a correspondência (ex.: `Fim Do Mundo` ↔ `Fim do Mundo (Bonus Track)` em `LOBOS (Deluxe)`).  
-  Marcadores de outra gravação — `(Ao Vivo)`/`(Live)`, `(Acoustic)`, `(Demo)`, `(Remix)`, `(Instrumental)` — continuam sendo rejeitados, a não ser que o álbum pedido seja do mesmo tipo (um álbum ao vivo na Qobuz aceita a faixa ao vivo da Apple).
+  **Diff das tags alteradas e títulos com sufixo de edição.** Quando as tags de um arquivo mudam, o log lista logo abaixo de `↳ Tags: alteradas` exatamente o que mudou (`+` tag nova, `-` removida, `~ antes → depois`; no `COMMENT`, só as linhas que mudaram). Se a capa atual é mantida, as linhas de capa do comentário (`Capa embutida:`/`Capa:`) são preservadas em vez de apagadas. Na busca por texto da Apple, sufixos que só indicam a edição do álbum — `(Bonus Track)`, `(Deluxe)`, `(Explicit)` — não impedem mais a correspondência (ex.: `Fim Do Mundo` ↔ `Fim do Mundo (Bonus Track)` em `LOBOS (Deluxe)`). Marcadores de outra gravação — `(Ao Vivo)`/`(Live)`, `(Acoustic)`, `(Demo)`, `(Remix)`, `(Instrumental)` — continuam sendo rejeitados, a não ser que o álbum pedido seja do mesmo tipo (um álbum ao vivo na Qobuz aceita a faixa ao vivo da Apple).
 
-  **Busca da capa dentro do álbum certo.**  
-  A busca por faixa não decide pelo primeiro resultado: quando ela não traz um candidato idêntico, o `tags` localiza o álbum pedido na Apple (mesmo artista, mesmo nome, mesmo tipo de versão), lista as faixas dele e confere a faixa lá dentro.  
-  Todos os candidatos de todas as etapas e países são avaliados e a capa só é escolhida no fim, preferindo o álbum de título idêntico ao pedido (ex.: `Lobos` em vez de `LOBOS (Deluxe)`).  
-  Só um candidato perfeito (artista, álbum e título idênticos) encerra a busca mais cedo. As respostas de álbum são reaproveitadas durante a execução, então um álbum inteiro não é consultado uma vez por faixa.
+  **Busca da capa dentro do álbum certo.** A busca por faixa não decide pelo primeiro resultado: quando ela não traz um candidato idêntico, o `tags` localiza o álbum pedido na Apple (mesmo artista, mesmo nome, mesmo tipo de versão), lista as faixas dele e confere a faixa lá dentro. Todos os candidatos de todas as etapas e países são avaliados e a capa só é escolhida no fim, preferindo o álbum de título idêntico ao pedido (ex.: `Lobos` em vez de `LOBOS (Deluxe)`). Só um candidato perfeito (artista, álbum e título idênticos) encerra a busca mais cedo. As respostas de álbum são reaproveitadas durante a execução, então um álbum inteiro não é consultado uma vez por faixa.
 
   **O que alterar: só tags, só capas ou os dois.** Por padrão o `tags` faz as duas coisas. Para escolher:
 
 | Opção | Tags | Capa | Consulta a Apple? |
-| :--- | :--- | :--- | :--- |
+|:--- |:--- |:--- |:--- |
 | *(nenhuma)* ou `--both` | regrava | troca quando validada | sim |
 | `--tags-only` | regrava | **não é tocada** (a embutida e as linhas de capa do comentário ficam como estão) | **não** |
 | `--covers-only` | **não é tocada** | troca quando validada e de resolução maior (a origem/tamanho vai para o comentário e para `COVER_SOURCE`) | sim |
@@ -389,6 +379,29 @@ A Edição Ultra inclui poderosos gerenciadores de biblioteca local para acompan
   python -m qobuz_dl tags “/caminho/para/sua/pasta/local/de/musica” --covers-only
   python -m qobuz_dl tags “/caminho/para/sua/pasta/local/de/musica” --both
   ```
+
+  **Simular antes (`--dry-run`) e desfazer (`--undo`).** O `tags` reescreve muitos arquivos de uma vez, então há duas redes de segurança:
+
+  * `--dry-run` **simula**: consulta o Qobuz e a Apple, grava numa cópia temporária de cada arquivo e mostra o diff real (`[simulação]`), sem tocar na sua pasta. O resumo final diz quantos arquivos *seriam* atualizados e quais campos mais mudariam.
+  * Em toda execução de verdade, antes de gravar cada arquivo o `tags` guarda os **metadados originais** (tags e capa, byte a byte; o áudio nunca é copiado) em `<pasta do config>/tags_undo/`. São mantidas as 5 últimas execuções. `--no-undo` desliga o registro.
+
+  ```bash
+  python -m qobuz_dl tags “/caminho/para/sua/pasta/local/de/musica” --dry-run   # só mostra o que seria feito
+  python -m qobuz_dl tags --undo-list                                            # execuções que dá para desfazer
+  python -m qobuz_dl tags --undo                                                 # desfaz a mais recente
+  python -m qobuz_dl tags --undo 20261013_190000                                 # desfaz uma execução específica
+  python -m qobuz_dl tags --undo --dry-run                                       # simula o desfazer
+  ```
+
+  O `--undo` só restaura arquivos que continuam como o `tags` os deixou; se algum foi alterado depois por outro programa, ele é pulado e avisado (`--undo-force` restaura mesmo assim). O `--undo` não precisa de login. Um registro de capa pesa o tamanho das capas trocadas (guardadas uma vez por álbum).
+
+  **Descobrir nomes com vírgula (`--suggest-names`).** Artistas como `Tyler, The Creator` ou `Crosby, Stills, Nash & Young` têm vírgula no nome e seriam separados em vários artistas. O comando varre a sua pasta, procura pares de nomes que *sempre* aparecem juntos (em pelo menos 3 arquivos) e imprime a linha pronta para colar no `config.ini`. Não grava nada nos arquivos e não precisa de login:
+
+  ```bash
+  python -m qobuz_dl tags “/caminho/para/sua/pasta/local/de/musica” --suggest-names
+  ```
+
+  **Capa da Apple: regras extras.** A capa da Apple só substitui a atual se for maior *e* quadrada (tolerância de 3%); capas retangulares são mantidas e aparecem no resumo como `mantida (a da Apple não é quadrada)`. Se a capa nova passar do limite de 16 MB de um bloco FLAC, ela é recomprimida com o Pillow ou, se o Pillow não estiver disponível (como no a-Shell), com o `ffmpeg`.
 
 * **Limpar Banco de Dados (`-p`, `—purge`):**
   Se você precisar recomeçar do zero, limpar seu histórico de downloads ou corrigir um estado corrompido, pode apagar instantaneamente o banco de dados local com um único comando.

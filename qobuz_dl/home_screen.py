@@ -37,7 +37,10 @@ EXEMPLOS = {
         'lucky -t album -n 1 "Daft Punk Discovery"',
     ),
     "lyrics": ("lyrics [DIR]", "lyrics ~/Music"),
-    "tags": ("tags [--tags-only | --covers-only] [DIR]", "tags --tags-only ~/Music"),
+    "tags": (
+        "tags [--tags-only | --covers-only] [--dry-run] [DIR]",
+        "tags --dry-run ~/Music",
+    ),
     "sync-playlist": (
         "sync-playlist [-y] [-d PASTA] <URL>",
         'sp "https://play.qobuz.com/playlist/12345" -d ~/Music/Mix',
