@@ -296,9 +296,7 @@ def test_lrclib_texto_puro_e_descartado(embed, save):
 
 def test_lrclib_usa_synced_mesmo_com_plain_presente():
     eng = _engine()
-    eng.session.get.return_value = _resp(
-        {"syncedLyrics": SYNC, "plainLyrics": PLAIN}
-    )
+    eng.session.get.return_value = _resp({"syncedLyrics": SYNC, "plainLyrics": PLAIN})
     r = _run(eng)
     assert r["success"] and r["synchronized"] is True
     assert eng._inject_metadata.call_args.args[1] == SYNC
@@ -494,9 +492,10 @@ def test_musixmatch_envia_dicas_de_album_duracao_e_isrc():
     eng = LyricsEngine(session=MagicMock())
     eng._mxm_token = "tok"
     eng.session.get.return_value = _resp(_mxm_ok(SYNC))
-    assert eng._fetch_musixmatch_lyrics(
-        "A", "T", album="Al", duration=174.4, isrc="I"
-    ) == SYNC
+    assert (
+        eng._fetch_musixmatch_lyrics("A", "T", album="Al", duration=174.4, isrc="I")
+        == SYNC
+    )
     params = eng.session.get.call_args.kwargs["params"]
     assert params["q_album"] == "Al"
     assert params["q_duration"] == 174
@@ -518,7 +517,11 @@ def test_musixmatch_repete_sem_dicas_e_depois_com_variantes():
 
     def fake(artista, titulo, **dicas):
         chamadas.append((artista, titulo, bool(dicas)))
-        return SYNC if (artista, titulo, bool(dicas)) == ("Drake", "One Dance", False) else None
+        return (
+            SYNC
+            if (artista, titulo, bool(dicas)) == ("Drake", "One Dance", False)
+            else None
+        )
 
     eng._fetch_musixmatch_lyrics = fake
     eng.session.get.return_value = _resp(status=404)

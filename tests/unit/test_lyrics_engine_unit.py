@@ -203,9 +203,7 @@ def test_inject_metadata_exception(engine, tmp_path, monkeypatch):
 
     monkeypatch.setattr(le_module, "FLAC", mock_flac)
 
-    result = engine._inject_metadata(
-        str(flac_file), "[00:01.000]Letra", source="Qobuz"
-    )
+    result = engine._inject_metadata(str(flac_file), "[00:01.000]Letra", source="Qobuz")
     assert result is False
 
 

@@ -90,9 +90,7 @@ def title_variants(track):
         return out
     no_feat = _TITLE_FEAT_RE.sub("", track).strip()
     no_version = _TITLE_VERSION_PAREN_RE.sub("", _TITLE_VERSION_RE.sub("", track))
-    clean = _TITLE_VERSION_PAREN_RE.sub(
-        "", _TITLE_VERSION_RE.sub("", no_feat)
-    ).strip()
+    clean = _TITLE_VERSION_PAREN_RE.sub("", _TITLE_VERSION_RE.sub("", no_feat)).strip()
     for cand in (no_feat, no_version.strip(), clean):
         if cand and cand.casefold() not in {t.casefold() for t in out}:
             out.append(cand)
@@ -643,9 +641,7 @@ class LyricsEngine:
             attempts = [hints, {}] if has_hints else [{}]
             for extra in attempts:
                 text = self._fetch_musixmatch_lyrics(artist, track, **extra)
-                if has_lrc_timestamps(text) and lrc_fits_duration(
-                    text, query.duration
-                ):
+                if has_lrc_timestamps(text) and lrc_fits_duration(text, query.duration):
                     return LyricsCandidate(text, "Musixmatch", True)
         return None
 
@@ -676,9 +672,7 @@ class LyricsEngine:
                 params["album_name"] = query.album
             if duration:
                 params["duration"] = duration
-            response = self.session.get(
-                url, params=params, headers=headers, timeout=12
-            )
+            response = self.session.get(url, params=params, headers=headers, timeout=12)
             if response.status_code != 200 and "album_name" in params:
                 params = {k: v for k, v in params.items() if k != "album_name"}
                 response = self.session.get(
