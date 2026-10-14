@@ -161,13 +161,13 @@ def test_inject_metadata_flac(engine, tmp_path, monkeypatch):
 
     ok = engine._inject_metadata(
         str(flac_file),
-        "Letra de teste",
+        "[00:01.000]Letra de teste",
         source="Qobuz",
         language="pt",
         bilingual=True,
     )
     assert ok is True
-    assert fake_flac["LYRICS"] == "Letra de teste"
+    assert fake_flac["LYRICS"] == "[00:01.000]Letra de teste"
     assert fake_flac["LYRICS_SOURCE"] == "Qobuz"
     assert fake_flac["LYRICS_LANG"] == "pt"
     assert fake_flac["LYRICS_BILINGUAL"] == "1"
@@ -183,7 +183,7 @@ def test_inject_metadata_mp3(engine, tmp_path, monkeypatch):
 
     ok = engine._inject_metadata(
         str(mp3_file),
-        "Letra MP3",
+        "[00:01.000]Letra MP3",
         source="LRCLIB",
         language="en",
         bilingual=False,
@@ -203,16 +203,38 @@ def test_inject_metadata_exception(engine, tmp_path, monkeypatch):
 
     monkeypatch.setattr(le_module, "FLAC", mock_flac)
 
-    result = engine._inject_metadata(str(flac_file), "Letra", source="Qobuz")
+    result = engine._inject_metadata(
+        str(flac_file), "[00:01.000]Letra", source="Qobuz"
+    )
     assert result is False
 
 
+def test_inject_metadata_recusa_letra_plana(engine, tmp_path, monkeypatch):
+    """Letra sem timestamps nunca chega a abrir o arquivo de audio."""
+    flac_file = tmp_path / "song.flac"
+    flac_file.write_bytes(b"dummy")
+    abriu = []
+    monkeypatch.setattr(le_module, "FLAC", lambda path: abriu.append(path))
+
+    assert engine._inject_metadata(str(flac_file), "Letra plana") is False
+    assert engine._inject_metadata(str(flac_file), "") is False
+    assert abriu == []
+
+
+def test_save_lrc_file_recusa_letra_plana(engine, tmp_path):
+    audio_file = tmp_path / "test.flac"
+    audio_file.write_bytes(b"dummy")
+
+    assert engine._save_lrc_file(str(audio_file), "Letra plana") is False
+    assert not (tmp_path / "test.lrc").exists()
+
+
 def test_fetch_and_inject_qobuz_plain_failure(engine, tmp_path, monkeypatch):
-    """Cobre o print de falha 'Falha ao gravar letras padrao (Qobuz)'."""
+    """Letra plana do Qobuz (sem 'start') e' descartada: nada e' gravado."""
     audio_file = tmp_path / "song.flac"
     audio_file.write_bytes(b"dummy")
 
-    # Letra plana (sem 'start') para cair no bloco de "letras padrão"
+    # Letra plana (sem 'start'): nao pode ser salva nem injetada
     qobuz_resp = {
         "original": {
             "lang": "en",
@@ -220,8 +242,15 @@ def test_fetch_and_inject_qobuz_plain_failure(engine, tmp_path, monkeypatch):
         }
     }
 
-    # Força o _save_lrc_file a falhar para cair no else de erro
-    monkeypatch.setattr(engine, "_save_lrc_file", lambda *args, **kwargs: False)
+    salvou = MagicMock(return_value=True)
+    monkeypatch.setattr(engine, "_save_lrc_file", salvou)
+    # Sem rede: as outras fontes nao devolvem nada.
+    monkeypatch.setattr(
+        engine, "_fetch_musixmatch_lyrics", lambda *args, **kwargs: None
+    )
+    monkeypatch.setattr(
+        engine.session, "get", lambda *a, **k: MagicMock(status_code=404)
+    )
 
     result = engine.fetch_and_inject(
         str(audio_file),
@@ -235,6 +264,7 @@ def test_fetch_and_inject_qobuz_plain_failure(engine, tmp_path, monkeypatch):
 
     assert result["success"] is False
     assert result["saved_external"] is False
+    salvou.assert_not_called()
 
 
 def test_fetch_and_inject_lrclib_only_save_lrc(engine, tmp_path, monkeypatch):

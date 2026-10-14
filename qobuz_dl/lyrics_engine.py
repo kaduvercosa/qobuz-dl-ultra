@@ -1,13 +1,15 @@
 # ============================================================================
 # lyrics_engine.py -- busca, normalizacao, fallback e gravacao de letras.
 # Fluxo principal: LyricsEngine.fetch_and_inject() percorre as FONTES listadas
-# em LyricsEngine.PROVIDERS (Qobuz -> BiniLyrics -> Musixmatch -> LRCLIB -> Genius) e grava
-# a primeira letra encontrada. As rotinas de persistencia sao _save_lrc_file()
-# e _inject_metadata().
+# em LyricsEngine.PROVIDERS (Qobuz -> BiniLyrics -> Musixmatch -> LRCLIB) e grava
+# a primeira letra SINCRONIZADA encontrada. Letra plana (sem timestamps) e'
+# sempre descartada: nenhuma fonte a devolve e as rotinas de persistencia
+# (_save_lrc_file() e _inject_metadata()) se recusam a grava-la.
 #
 # COMO ADICIONAR UMA FONTE NOVA
 #   1. Escreva um metodo `_provider_<nome>(self, query)` que devolva um
-#      LyricsCandidate (ou None se nao achou nada / a fonte nao serve).
+#      LyricsCandidate sincronizado (ou None se nao achou nada, se a fonte
+#      so tem letra plana ou se ela nao serve).
 #   2. Inclua o nome do metodo em LyricsEngine.PROVIDERS; a posicao na tupla
 #      e a prioridade. Pronto: pausas instrumentais, gravacao, mensagens e
 #      tratamento de erro sao feitos por fetch_and_inject().
@@ -32,6 +34,101 @@ from qobuz_dl.settings import QobuzDLSettings
 
 logger = logging.getLogger(__name__)
 
+# Marca de tempo LRC ([mm:ss.xx] / [mm:ss.mmm]). Sem ao menos uma, o texto e'
+# letra plana e nunca pode ser salvo nem injetado.
+_LRC_TIMESTAMP_RE = re.compile(r"\[\d{2,}:\d{2}(?:\.\d+)?\]")
+
+
+def has_lrc_timestamps(text) -> bool:
+    """True se `text` tem pelo menos uma marca de tempo LRC."""
+    return bool(text) and bool(_LRC_TIMESTAMP_RE.search(text))
+
+
+# Separadores de artistas (so servem para achar o artista principal).
+_ARTIST_SPLIT_RE = re.compile(
+    r"\s*(?:,|;|&|\bfeat\.?|\bft\.?|\bfeaturing\b|\bwith\b)\s+",
+    re.IGNORECASE,
+)
+# "(feat. X)", "[with Y]" no titulo.
+_TITLE_FEAT_RE = re.compile(
+    r"\s*[\(\[]\s*(?:feat\.?|ft\.?|featuring|with)\b[^\)\]]*[\)\]]",
+    re.IGNORECASE,
+)
+# "- Remastered 2011", "- 2009 Remaster", "- Mono", "- Bonus Track"...
+_TITLE_VERSION_RE = re.compile(
+    r"\s+[-\u2013]\s+(?:\d{4}\s+)?(?:remaster(?:ed)?|mono|stereo|deluxe|bonus track"
+    r"|single version|album version)\b.*$",
+    re.IGNORECASE,
+)
+_TITLE_VERSION_PAREN_RE = re.compile(
+    r"\s*[\(\[]\s*(?:\d{4}\s+)?(?:remaster(?:ed)?|mono|stereo|deluxe|bonus track"
+    r"|single version|album version)\b[^\)\]]*[\)\]]",
+    re.IGNORECASE,
+)
+_LRC_TS_CAPTURE_RE = re.compile(r"\[(\d{2,}):(\d{2})(?:\.(\d+))?\]")
+# Folga entre o ultimo verso e a duracao da faixa (arredondamentos, silencio).
+_LAST_LINE_SLACK_S = 5
+MAX_QUERY_VARIANTS = 4
+
+
+def artist_variants(artist):
+    """Artista exato primeiro; depois o artista principal (sem feat./lista)."""
+    artist = (artist or "").strip()
+    out = [artist] if artist else []
+    if artist:
+        main = _ARTIST_SPLIT_RE.split(artist, maxsplit=1)[0].strip()
+        if main and main.casefold() not in {a.casefold() for a in out}:
+            out.append(main)
+    return out
+
+
+def title_variants(track):
+    """Titulo exato primeiro; depois sem (feat. ...) e sem sufixo de remaster."""
+    track = (track or "").strip()
+    out = [track] if track else []
+    if not track:
+        return out
+    no_feat = _TITLE_FEAT_RE.sub("", track).strip()
+    no_version = _TITLE_VERSION_PAREN_RE.sub("", _TITLE_VERSION_RE.sub("", track))
+    clean = _TITLE_VERSION_PAREN_RE.sub(
+        "", _TITLE_VERSION_RE.sub("", no_feat)
+    ).strip()
+    for cand in (no_feat, no_version.strip(), clean):
+        if cand and cand.casefold() not in {t.casefold() for t in out}:
+            out.append(cand)
+    return out
+
+
+def query_variants(artist, track):
+    """Pares (artista, titulo) a tentar, do mais exato ao mais tolerante."""
+    pairs = []
+    for t in title_variants(track):
+        for a in artist_variants(artist):
+            if (a, t) not in pairs:
+                pairs.append((a, t))
+    # Ordem: exato, so artista limpo, so titulo limpo, ambos.
+    return pairs[:MAX_QUERY_VARIANTS]
+
+
+def lrc_fits_duration(text, duration):
+    """False se o ultimo verso comeca DEPOIS do fim da faixa (versao errada).
+
+    Sem duracao conhecida ou sem timestamps, nao ha o que checar: True.
+    """
+    try:
+        duration = float(duration)
+    except (TypeError, ValueError):
+        return True
+    if duration <= 0:
+        return True
+    last = None
+    for m in _LRC_TS_CAPTURE_RE.finditer(text or ""):
+        frac = (m.group(3) or "0").ljust(3, "0")[:3]
+        secs = int(m.group(1)) * 60 + int(m.group(2)) + int(frac) / 1000
+        last = secs if last is None else max(last, secs)
+    return last is None or last <= duration + _LAST_LINE_SLACK_S
+
+
 try:
     import lyricsgenius
 except ImportError:
@@ -45,7 +142,6 @@ class LyricsQuery:
     artist: str
     track: str
     album: str
-    only_synced: bool = False
     qobuz_lyrics_response: object = None
     qobuz_translation_response: object = None
     isrc: str | None = None
@@ -76,7 +172,6 @@ class LyricsEngine:
         "_provider_binilyrics",
         "_provider_musixmatch",
         "_provider_lrclib",
-        "_provider_genius",
     )
 
     def __init__(self, genius_token=None, session=None, settings=None):
@@ -279,8 +374,12 @@ class LyricsEngine:
 
     def _inject_instrumental_pauses(self, lrc_text):
         """
-        - Adiciona marcador de pausa instrumental '• • •' 0.5s apos a ultima
+        - Adiciona marcador de pausa instrumental '• • •' 0.5s ANTES da proxima
         linha se houver um intervalo maior que 10 segundos na sincronizacao.
+          (Antes ficava 0.5s depois do INICIO da linha anterior: o player pulava
+          para os pontos antes de a linha ser cantada. O LRC por linha so tem o
+          inicio de cada linha, nao o fim, entao ancorar na proxima linha e' a
+          unica forma de nao cortar a linha anterior.)
         - Ignora a injecao no inicio da musica (se a linha anterior estiver em 00:00.000).
         """
         if not lrc_text:
@@ -313,7 +412,7 @@ class LyricsEngine:
 
                 # Se a diferenca for > 10s e o tempo anterior for maior que zero
                 if gap > 10000 and last_time > 0:
-                    inst_time = last_time + 500
+                    inst_time = curr_time - 500
                     pause_line = f"{self._ms_to_lrc_timestamp(inst_time)}• • •"
 
                     # Evita duplicar marcadores no mesmo instante
@@ -328,8 +427,14 @@ class LyricsEngine:
 
         return "\n".join(new_lines)
 
-    def _fetch_musixmatch_lyrics(self, artist, title):
-        """Busca letras sincronizadas no Musixmatch (sincrono)."""
+    def _fetch_musixmatch_lyrics(
+        self, artist, title, album=None, duration=None, isrc=None
+    ):
+        """Busca letras sincronizadas no Musixmatch (sincrono).
+
+        `album`, `duration` (s) e `isrc` sao dicas opcionais que ajudam a achar
+        a gravacao exata; sem elas a busca e' so por artista + titulo.
+        """
         headers = {
             "x-mxm-app-version": "10.1.1",
             "User-Agent": "Musixmatch/2025120901 CFNetwork/1404.0.5 Darwin/22.3.0",
@@ -362,6 +467,12 @@ class LyricsEngine:
                     "usertoken": self._mxm_token,
                     "app_id": "mac-ios-v2.0",
                 }
+                if album:
+                    params["q_album"] = album
+                if duration:
+                    params["q_duration"] = int(round(float(duration)))
+                if isrc:
+                    params["track_isrc"] = isrc
 
                 resp_lyric = self.session.get(
                     "https://apic-appmobile.musixmatch.com/ws/1.1/macro.subtitles.get",
@@ -402,70 +513,43 @@ class LyricsEngine:
     # (fetch_and_inject) registra o erro e segue para a proxima fonte.
     # ------------------------------------------------------------------
     def _provider_qobuz(self, query):
-        """Letra enviada pela propria API do Qobuz (com traducao, se houver)."""
+        """Letra SINCRONIZADA enviada pela API do Qobuz (com traducao, se houver).
+
+        Texto plano do Qobuz e' ignorado: sem timestamps, esta fonte nao serve.
+        """
         lyrics = self.extract_qobuz_lyrics(
             query.qobuz_lyrics_response, query.qobuz_translation_response
         )
         if not lyrics:
             return None
 
-        if query.only_synced:
-            lyrics["plain"] = None
-            for t in lyrics.get("translations", []):
-                t["plain"] = None
-
         original_sync = lyrics.get("synced")
-        original_plain = lyrics.get("plain")
-        if not (original_sync or original_plain):
+        if not original_sync:
             return None
 
-        translations = lyrics.get("translations", [])
+        # So traducoes sincronizadas servem; prefere pt, senao a primeira.
+        translations = [t for t in lyrics.get("translations", []) if t.get("synced")]
         orig_lang = str(lyrics.get("lang") or "unknown").lower()
-
-        # Prefere a traducao em portugues; senao, a primeira disponivel.
         best = next(
             (t for t in translations if "pt" in str(t.get("language", "")).lower()),
             None,
         ) or (translations[0] if translations else None)
 
-        if best and (best.get("synced") or best.get("plain")):
+        if best:
             trans_lang = str(best.get("language") or "unknown").lower()
             lang_tag = f"{orig_lang}+{trans_lang}"
+            final_sync = self._build_bilingual_lrc(original_sync, best["synced"])
         else:
             lang_tag = orig_lang
+            final_sync = original_sync
 
-        final_sync = original_sync
-        final_plain = original_plain
-        if best:
-            if original_sync and best.get("synced"):
-                final_sync = self._build_bilingual_lrc(
-                    original_sync, best.get("synced")
-                )
-            if original_plain and best.get("plain"):
-                trans_name = str(best.get("language") or "pt").upper()
-                final_plain = (
-                    f"{original_plain}\n\n"
-                    f"--- TRADUCAO ({trans_name}) ---\n\n"
-                    f"{best.get('plain')}"
-                )
-
-        if final_sync:
-            return LyricsCandidate(
-                final_sync,
-                "Qobuz",
-                True,
-                language=lang_tag,
-                bilingual=bool(best and best.get("synced")),
-            )
-        if final_plain:
-            return LyricsCandidate(
-                final_plain,
-                "Qobuz",
-                False,
-                language=lang_tag,
-                bilingual=bool(best and best.get("plain")),
-            )
-        return None
+        return LyricsCandidate(
+            final_sync,
+            "Qobuz",
+            True,
+            language=lang_tag,
+            bilingual=bool(best),
+        )
 
     def _provider_binilyrics(self, query):
         """BiniLyrics: TTML estilo Apple Music (sync por palavra/linha).
@@ -514,8 +598,8 @@ class LyricsEngine:
             return None
         doc = binilyrics.parse_ttml(ttml.text)
 
-        synchronized = doc.timing != "plain"
-        if not synchronized and query.only_synced:
+        # Letra plana (TTML sem tempos) nao serve.
+        if doc.timing == "plain":
             return None
 
         target = getattr(self.settings, "lyrics_translation_lang", "pt")
@@ -523,55 +607,55 @@ class LyricsEngine:
         language = str(doc.language or "unknown").lower()
         bilingual = False
 
-        if synchronized:
-            # Por palavra so se o projeto pedir (settings.lyrics_word_sync):
-            # a maioria dos players nao entende o LRC estendido.
-            use_words = doc.timing == "word" and getattr(
-                self.settings, "lyrics_word_sync", False
-            )
-            text = (
-                binilyrics.to_word_lrc(doc)
-                if use_words
-                else binilyrics.to_line_lrc(doc)
-            )
-            if trans_lang:
-                trans = binilyrics.translation_lrc(doc, trans_lang)
-                if trans:
-                    text = self._build_bilingual_lrc(text, trans)
-                    bilingual = True
-        else:
-            text = binilyrics.to_plain(doc)
-            if trans_lang:
-                trans = binilyrics.translation_plain(doc, trans_lang)
-                if trans:
-                    label = trans_lang.upper()
-                    text = f"{text}\n\n--- TRADUCAO ({label}) ---\n\n{trans}"
-                    bilingual = True
+        # Por palavra so se o projeto pedir (settings.lyrics_word_sync):
+        # a maioria dos players nao entende o LRC estendido.
+        use_words = doc.timing == "word" and getattr(
+            self.settings, "lyrics_word_sync", False
+        )
+        text = binilyrics.to_word_lrc(doc) if use_words else binilyrics.to_line_lrc(doc)
+        if trans_lang:
+            trans = binilyrics.translation_lrc(doc, trans_lang)
+            if trans:
+                text = self._build_bilingual_lrc(text, trans)
+                bilingual = True
 
-        if not text.strip():
+        if not has_lrc_timestamps(text):
             return None
         if bilingual:
             language = f"{language}+{trans_lang.lower()}"
         return LyricsCandidate(
             text,
             binilyrics.SOURCE_LABEL,
-            synchronized,
+            True,
             language=language,
             bilingual=bilingual,
         )
 
     def _provider_musixmatch(self, query):
-        """Musixmatch (letra sincronizada ou, as vezes, texto puro)."""
-        text = self._fetch_musixmatch_lyrics(query.artist, query.track)
-        if not text:
-            return None
-        synced = bool(re.search(r"\[\d{2,}:\d{2}(?:\.\d+)?\]", text))
-        if query.only_synced and not synced:
-            return None
-        return LyricsCandidate(text, "Musixmatch", synced)
+        """Musixmatch: so letra sincronizada (texto puro e' descartado).
+
+        Usa album/duracao/ISRC como dicas; se com elas nao vier nada, repete so
+        com artista + titulo e depois com as variantes limpas (sem feat. etc.).
+        """
+        hints = {"album": query.album, "duration": query.duration, "isrc": query.isrc}
+        has_hints = any(hints.values())
+        for artist, track in query_variants(query.artist, query.track):
+            attempts = [hints, {}] if has_hints else [{}]
+            for extra in attempts:
+                text = self._fetch_musixmatch_lyrics(artist, track, **extra)
+                if has_lrc_timestamps(text) and lrc_fits_duration(
+                    text, query.duration
+                ):
+                    return LyricsCandidate(text, "Musixmatch", True)
+        return None
 
     def _provider_lrclib(self, query):
-        """LRCLIB: tenta com o album e repete sem ele se nao achar."""
+        """LRCLIB: so `syncedLyrics`.
+
+        Para cada variante (artista, titulo) tenta com album + duracao e repete
+        sem o album. A duracao da faixa entra na busca e o resultado e'
+        rejeitado se a duracao dele destoar (outra versao).
+        """
         url = "https://lrclib.net/api/get"
         headers = {
             "User-Agent": (
@@ -579,32 +663,48 @@ class LyricsEngine:
                 "(https://github.com/kaduvercosa/qobuz-dl-ultra)"
             )
         }
-        params = {
-            "artist_name": query.artist,
-            "track_name": query.track,
-            "album_name": query.album,
-        }
-        response = self.session.get(url, params=params, headers=headers, timeout=12)
-        if response.status_code != 200:
-            params = {"artist_name": query.artist, "track_name": query.track}
-            response = self.session.get(url, params=params, headers=headers, timeout=12)
-        if response.status_code != 200:
-            return None
+        try:
+            duration = int(round(float(query.duration)))
+        except (TypeError, ValueError):
+            duration = None
+        if duration is not None and duration <= 0:
+            duration = None
 
-        data = response.json()
-        if data.get("syncedLyrics"):
-            return LyricsCandidate(data["syncedLyrics"], "LRCLIB", True)
-        if data.get("plainLyrics") and not query.only_synced:
-            return LyricsCandidate(data["plainLyrics"], "LRCLIB", False)
+        for artist, track in query_variants(query.artist, query.track):
+            params = {"artist_name": artist, "track_name": track}
+            if query.album:
+                params["album_name"] = query.album
+            if duration:
+                params["duration"] = duration
+            response = self.session.get(
+                url, params=params, headers=headers, timeout=12
+            )
+            if response.status_code != 200 and "album_name" in params:
+                params = {k: v for k, v in params.items() if k != "album_name"}
+                response = self.session.get(
+                    url, params=params, headers=headers, timeout=12
+                )
+            if response.status_code != 200:
+                continue
+
+            data = response.json() or {}
+            synced = data.get("syncedLyrics")
+            if not has_lrc_timestamps(synced):
+                continue
+            found = data.get("duration")
+            if duration and found:
+                try:
+                    if abs(float(found) - duration) > binilyrics.DURATION_TOLERANCE_S:
+                        continue
+                except (TypeError, ValueError):
+                    pass
+            if not lrc_fits_duration(synced, duration):
+                continue
+            return LyricsCandidate(synced, "LRCLIB", True)
         return None
 
     def _provider_genius(self, query):
-        """Genius: ultimo recurso, so texto puro (nao serve com only_synced)."""
-        if not self.genius or query.only_synced:
-            return None
-        song = self.genius.search_song(query.track, query.artist)
-        if song and song.lyrics:
-            return LyricsCandidate(song.lyrics, "Genius", False)
+        """Genius so tem texto puro: desativado (nunca devolve letra)."""
         return None
 
     # ------------------------------------------------------------------
@@ -612,8 +712,8 @@ class LyricsEngine:
     # ------------------------------------------------------------------
     @staticmethod
     def _delivery_message(candidate, embed_lyrics, save_lrc, ok):
-        kind = "sincronizadas" if candidate.synchronized else "padrão"
-        ext = ".lrc" if candidate.synchronized else ".txt"
+        kind = "sincronizadas"
+        ext = ".lrc"
         if not ok:
             return f" {RED}❌ Falha ao gravar letras {kind} ({candidate.source}){RESET}"
         if embed_lyrics and save_lrc:
@@ -667,9 +767,9 @@ class LyricsEngine:
         duration=None,
     ):
         """
-        Percorre as fontes de LyricsEngine.PROVIDERS (Qobuz -> Musixmatch ->
-        LRCLIB -> Genius) e grava a primeira letra encontrada, respeitando as
-        opcoes de saida. A traducao em portugues e priorizada quando estiver
+        Percorre as fontes de LyricsEngine.PROVIDERS (Qobuz -> BiniLyrics ->
+        Musixmatch -> LRCLIB) e grava a primeira letra SINCRONIZADA encontrada,
+        respeitando as opcoes de saida. Letra plana e' sempre descartada. A traducao em portugues e priorizada quando estiver
         disponivel. Se uma fonte falhar (rede, API), segue para a proxima.
         Retorna dict com status da operacao para o chamador conferir.
 
@@ -708,7 +808,6 @@ class LyricsEngine:
             artist=artist,
             track=track,
             album=album,
-            only_synced=getattr(self.settings, "only_synced_lyrics", False),
             qobuz_lyrics_response=qobuz_lyrics_response,
             qobuz_translation_response=qobuz_translation_response,
             isrc=isrc,
@@ -721,11 +820,14 @@ class LyricsEngine:
         for provider_name in self.PROVIDERS:
             try:
                 candidate = getattr(self, provider_name)(query)
-                if candidate is not None and candidate.text:
-                    if candidate.synchronized:
-                        candidate.text = self._inject_instrumental_pauses(
-                            candidate.text
-                        )
+                # Barreira final: so letra sincronizada passa, qualquer que
+                # seja a fonte (inclusive as adicionadas no futuro).
+                if candidate is not None and not (
+                    candidate.synchronized and has_lrc_timestamps(candidate.text)
+                ):
+                    candidate = None
+                if candidate is not None:
+                    candidate.text = self._inject_instrumental_pauses(candidate.text)
             except Exception as e:
                 # Uma fonte com problema nao pode impedir as seguintes.
                 last_error = e
@@ -759,8 +861,12 @@ class LyricsEngine:
     ):
         """
         Salva a letra sincronizada em .lrc com fonte e idioma no cabecalho.
-        Retorna True/False para indicar sucesso.
+        Retorna True/False para indicar sucesso. Letra plana (sem timestamps)
+        nunca e' salva: devolve False sem tocar no disco.
         """
+        if not has_lrc_timestamps(synced_lyrics):
+            logger.debug("Letra plana recusada: .lrc nao gravado")
+            return False
         try:
             base_name = os.path.splitext(audio_file_path)[0]
             lrc_path = f"{base_name}.lrc"
@@ -795,7 +901,8 @@ class LyricsEngine:
         traceback resumido), nao mais engolidas em silencio.
         Retorna True/False para permitir que o chamador confira o resultado real.
         """
-        if not lyrics:
+        if not has_lrc_timestamps(lyrics):
+            logger.debug("Letra plana recusada: metadata nao alterado")
             return False
 
         ext = os.path.splitext(file_path)[1].lower()

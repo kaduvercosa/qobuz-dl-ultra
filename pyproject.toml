@@ -184,7 +184,7 @@ exclude_also = [
 [tool.mypy]
 # Configuracao DE PROPOSITO permissiva pra introduzir o mypy numa base de
 # codigo grande que nunca foi checada -- ver .github/workflows/tests.yml
-# (job "verificacao-de-tipos") e .mypy-baseline.txt pra entender o
+# (job "verificacao-de-tipos") e mypy-baseline.txt pra entender o
 # mecanismo de baseline (so' reclama de erro NOVO, nao dos ja existentes).
 # Aperte estas opcoes aos poucos conforme o baseline for encolhendo, nao
 # de uma vez.

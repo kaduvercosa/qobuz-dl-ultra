@@ -341,19 +341,17 @@ def test_provider_sem_candidato_correto_nao_baixa_ttml():
 
 
 @pytest.mark.unit
-def test_provider_texto_puro_respeita_only_synced():
+def test_provider_texto_puro_e_sempre_descartado():
     def rotas(url, kw):
         if url == bl.API_URL:
             return _resp(json_data={"results": [dict(STUDIO, timing_type="plain")]})
         return _resp(text=TTML_PLAIN)
 
     eng = _engine(rotas)
-    eng.settings = MagicMock(only_synced_lyrics=True, lyrics_translation_lang="pt")
-    assert _buscar(eng)["success"] is False
-
-    eng2 = _engine(rotas)
-    r = _buscar(eng2)
-    assert r["success"] and r["synchronized"] is False
+    r = _buscar(eng)
+    assert r["success"] is False
+    eng._inject_metadata.assert_not_called()
+    eng._save_lrc_file.assert_not_called()
 
 
 @pytest.mark.unit

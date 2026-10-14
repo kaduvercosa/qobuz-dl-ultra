@@ -1,6 +1,8 @@
 """Testes do fluxo de qobuz_dl/lyrics_engine.py: Musixmatch, orquestracao
-de fetch_and_inject (Qobuz -> Musixmatch -> LRCLIB -> Genius), Genius no
-__init__ e close(). Sem rede e sem tocar em arquivos de audio reais.
+de fetch_and_inject (Qobuz -> BiniLyrics -> Musixmatch -> LRCLIB), Genius no
+__init__ e close(). Regra central: SO letra sincronizada e' aceita; letra
+plana (sem timestamps) e' sempre descartada. Sem rede e sem tocar em arquivos
+de audio reais.
 """
 
 from types import SimpleNamespace
@@ -173,7 +175,7 @@ def _qobuz(**over):
 def test_qobuz_sincronizada_bilingue_prefere_pt(embed, save):
     eng = _engine()
     eng.extract_qobuz_lyrics.return_value = _qobuz()
-    eng._build_bilingual_lrc = MagicMock(return_value="BILINGUE")
+    eng._build_bilingual_lrc = MagicMock(return_value="[00:01.00]BILINGUE")
     r = _run(eng, embed_lyrics=embed, save_lrc=save)
     eng._build_bilingual_lrc.assert_called_once_with(SYNC, "[00:01.00]um")
     assert r["success"] and r["source"] == "Qobuz"
@@ -210,36 +212,41 @@ def test_qobuz_gravacao_falha_marca_sem_sucesso():
 
 
 @pytest.mark.parametrize("embed,save", [(True, True), (True, False), (False, True)])
-def test_qobuz_so_texto_puro_com_traducao(embed, save):
+def test_qobuz_so_texto_puro_e_descartado(embed, save):
     eng = _engine()
     eng.extract_qobuz_lyrics.return_value = _qobuz(synced=None)
-    r = _run(eng, embed_lyrics=embed, save_lrc=save)
-    texto = (
-        eng._inject_metadata.call_args.args[1]
-        if embed
-        else eng._save_lrc_file.call_args.args[1]
-    )
-    assert "--- TRADUCAO (PT) ---" in texto
-    assert r["success"] and r["synchronized"] is False and r["bilingual"] is True
-
-
-def test_only_synced_descarta_texto_puro_do_qobuz_e_segue_adiante():
-    eng = _engine(settings=SimpleNamespace(only_synced_lyrics=True))
-    eng.extract_qobuz_lyrics.return_value = _qobuz(synced=None)
     eng.session.get.return_value = _resp(status=404)
-    r = _run(eng)
+    r = _run(eng, embed_lyrics=embed, save_lrc=save)
     assert r["success"] is False
-    assert eng.session.get.call_count == 2
+    eng._inject_metadata.assert_not_called()
+    eng._save_lrc_file.assert_not_called()
+
+
+def test_qobuz_traducao_so_texto_puro_nao_vira_bilingue():
+    eng = _engine()
+    eng.extract_qobuz_lyrics.return_value = _qobuz(
+        translations=[{"language": "pt", "synced": None, "plain": "um"}]
+    )
+    r = _run(eng)
+    assert r["success"] and r["synchronized"] is True
+    assert r["bilingual"] is False and r["language"] == "en"
+
+
+def test_texto_puro_do_qobuz_segue_adiante_para_proxima_fonte():
+    eng = _engine()
+    eng.extract_qobuz_lyrics.return_value = _qobuz(synced=None)
+    eng.session.get.return_value = _resp({"syncedLyrics": SYNC})
+    r = _run(eng)
+    assert r["source"] == "LRCLIB" and r["synchronized"] is True
 
 
 @pytest.mark.parametrize("embed,save", [(True, True), (True, False), (False, True)])
-@pytest.mark.parametrize("letra,sincronizada", [(SYNC, True), (PLAIN, False)])
-def test_musixmatch_fallback(embed, save, letra, sincronizada):
+def test_musixmatch_fallback(embed, save):
     eng = _engine()
-    eng._fetch_musixmatch_lyrics.return_value = letra
+    eng._fetch_musixmatch_lyrics.return_value = SYNC
     r = _run(eng, embed_lyrics=embed, save_lrc=save)
     assert r["success"] and r["source"] == "Musixmatch"
-    assert r["synchronized"] is sincronizada
+    assert r["synchronized"] is True
 
 
 def test_musixmatch_sem_gravar_nao_marca_sucesso():
@@ -250,8 +257,8 @@ def test_musixmatch_sem_gravar_nao_marca_sucesso():
     assert _run(eng)["success"] is False
 
 
-def test_musixmatch_texto_puro_ignorado_com_only_synced():
-    eng = _engine(settings=SimpleNamespace(only_synced_lyrics=True))
+def test_musixmatch_texto_puro_e_ignorado():
+    eng = _engine()
     eng._fetch_musixmatch_lyrics.return_value = PLAIN
     eng.session.get.return_value = _resp({"syncedLyrics": SYNC, "plainLyrics": PLAIN})
     r = _run(eng)
@@ -270,50 +277,44 @@ def test_lrclib_sincronizada(embed, save):
 
 def test_lrclib_repete_busca_sem_album_quando_primeira_falha():
     eng = _engine()
-    eng.session.get.side_effect = [_resp(status=404), _resp({"plainLyrics": PLAIN})]
+    eng.session.get.side_effect = [_resp(status=404), _resp({"syncedLyrics": SYNC})]
     r = _run(eng)
     primeira, segunda = (c.kwargs["params"] for c in eng.session.get.call_args_list)
     assert "album_name" in primeira and "album_name" not in segunda
-    assert r["source"] == "LRCLIB" and r["synchronized"] is False
+    assert r["source"] == "LRCLIB" and r["synchronized"] is True
 
 
 @pytest.mark.parametrize("embed,save", [(True, True), (True, False), (False, True)])
-def test_lrclib_texto_puro(embed, save):
+def test_lrclib_texto_puro_e_descartado(embed, save):
     eng = _engine()
     eng.session.get.return_value = _resp({"plainLyrics": PLAIN})
     r = _run(eng, embed_lyrics=embed, save_lrc=save)
-    assert r["success"] and r["synchronized"] is False
+    assert r["success"] is False
+    eng._inject_metadata.assert_not_called()
+    eng._save_lrc_file.assert_not_called()
 
 
-def test_lrclib_only_synced_ignora_texto_puro():
-    eng = _engine(settings=SimpleNamespace(only_synced_lyrics=True))
-    eng.session.get.return_value = _resp({"plainLyrics": PLAIN})
-    assert _run(eng)["success"] is False
+def test_lrclib_usa_synced_mesmo_com_plain_presente():
+    eng = _engine()
+    eng.session.get.return_value = _resp(
+        {"syncedLyrics": SYNC, "plainLyrics": PLAIN}
+    )
+    r = _run(eng)
+    assert r["success"] and r["synchronized"] is True
+    assert eng._inject_metadata.call_args.args[1] == SYNC
 
 
 @pytest.mark.parametrize("embed,save", [(True, True), (True, False), (False, True)])
-def test_genius_ultimo_recurso(embed, save):
+def test_genius_nunca_e_usado(embed, save):
+    """Genius so tem texto puro: nem e' consultado, nem grava nada."""
     eng = _engine()
     eng.session.get.return_value = _resp(status=404)
     eng.genius = MagicMock()
     eng.genius.search_song.return_value = SimpleNamespace(lyrics=PLAIN)
     r = _run(eng, embed_lyrics=embed, save_lrc=save)
-    eng.genius.search_song.assert_called_once_with("Tit", "Art")
-    assert r["success"] and r["source"] == "Genius"
-
-
-def test_genius_sem_resultado_e_ignorado_com_only_synced():
-    eng = _engine()
-    eng.session.get.return_value = _resp(status=404)
-    eng.genius = MagicMock()
-    eng.genius.search_song.return_value = None
-    assert _run(eng)["success"] is False
-
-    eng2 = _engine(settings=SimpleNamespace(only_synced_lyrics=True))
-    eng2.session.get.return_value = _resp(status=404)
-    eng2.genius = MagicMock()
-    _run(eng2)
-    eng2.genius.search_song.assert_not_called()
+    eng.genius.search_song.assert_not_called()
+    assert "_provider_genius" not in LyricsEngine.PROVIDERS
+    assert r["success"] is False
 
 
 def test_nenhuma_letra_encontrada():
@@ -378,3 +379,164 @@ def test_falha_ao_gravar_imprime_mensagem_de_erro(monkeypatch):
     assert r["success"] is False and r["source"] is None
     assert any("Falha ao gravar" in s for s in saidas)
     assert not any("injetadas" in s for s in saidas)
+
+
+# ------------------------------------------------ barreira so-sincronizada
+class _FonteFalsa:
+    """Fonte futura mal-comportada: devolve candidatos que nao deveriam passar."""
+
+    def __init__(self, candidato):
+        self.candidato = candidato
+
+    def __call__(self, query):
+        return self.candidato
+
+
+@pytest.mark.parametrize(
+    "candidato",
+    [
+        le.LyricsCandidate(PLAIN, "X", False),
+        le.LyricsCandidate(PLAIN, "X", True),  # marcada como sync, sem timestamps
+    ],
+)
+def test_barreira_final_descarta_candidato_sem_timestamps(candidato):
+    eng = _engine()
+    eng.PROVIDERS = ("_fonte",)
+    eng._fonte = _FonteFalsa(candidato)
+    r = _run(eng)
+    assert r["success"] is False
+    eng._inject_metadata.assert_not_called()
+    eng._save_lrc_file.assert_not_called()
+
+
+def test_has_lrc_timestamps():
+    assert le.has_lrc_timestamps("[00:01.00]a")
+    assert le.has_lrc_timestamps("x\n[01:02.345]b")
+    assert not le.has_lrc_timestamps(PLAIN)
+    assert not le.has_lrc_timestamps("")
+    assert not le.has_lrc_timestamps(None)
+
+
+# ------------------------------------------------- variantes de busca
+def test_artist_variants():
+    assert le.artist_variants("Drake, Rihanna") == ["Drake, Rihanna", "Drake"]
+    assert le.artist_variants("A feat. B") == ["A feat. B", "A"]
+    assert le.artist_variants("Beyoncé") == ["Beyoncé"]
+    assert le.artist_variants("") == []
+
+
+def test_title_variants():
+    assert le.title_variants("One Dance (feat. Kyla)") == [
+        "One Dance (feat. Kyla)",
+        "One Dance",
+    ]
+    assert le.title_variants("Bohemian Rhapsody - 2011 Remaster") == [
+        "Bohemian Rhapsody - 2011 Remaster",
+        "Bohemian Rhapsody",
+    ]
+    assert le.title_variants("Halo") == ["Halo"]
+
+
+def test_query_variants_exato_primeiro_e_limitado():
+    pares = le.query_variants("Drake, Rihanna", "One Dance (feat. Kyla) - Remastered")
+    assert pares[0] == ("Drake, Rihanna", "One Dance (feat. Kyla) - Remastered")
+    assert len(pares) <= le.MAX_QUERY_VARIANTS
+    assert le.query_variants("Beyoncé", "Halo") == [("Beyoncé", "Halo")]
+
+
+def test_lrc_fits_duration():
+    assert le.lrc_fits_duration("[03:00.00]x", 180)
+    assert not le.lrc_fits_duration("[04:00.00]x", 180)
+    assert le.lrc_fits_duration("[04:00.00]x", None)
+    assert le.lrc_fits_duration(PLAIN, 180)
+
+
+# ----------------------------------------------- LRCLIB: duracao e variantes
+def test_lrclib_envia_duracao():
+    eng = _engine()
+    eng.session.get.return_value = _resp({"syncedLyrics": SYNC, "duration": 174})
+    r = _run(eng, duration=174)
+    assert r["source"] == "LRCLIB"
+    assert eng.session.get.call_args.kwargs["params"]["duration"] == 174
+
+
+def test_lrclib_sem_duracao_nao_envia_parametro():
+    eng = _engine()
+    eng.session.get.return_value = _resp({"syncedLyrics": SYNC})
+    _run(eng)
+    assert "duration" not in eng.session.get.call_args.kwargs["params"]
+
+
+def test_lrclib_rejeita_resultado_com_duracao_diferente():
+    eng = _engine()
+    eng.session.get.return_value = _resp({"syncedLyrics": SYNC, "duration": 260})
+    assert _run(eng, duration=200)["success"] is False
+
+
+def test_lrclib_tenta_variante_do_artista_e_titulo_quando_exata_falha():
+    eng = _engine()
+    eng.session.get.side_effect = lambda url, **kw: (
+        _resp({"syncedLyrics": SYNC})
+        if kw["params"]["artist_name"] == "Drake"
+        and kw["params"]["track_name"] == "One Dance (feat. Kyla)"
+        else _resp(status=404)
+    )
+    r = eng.fetch_and_inject(
+        "/m/a.flac", "Drake, Rihanna", "One Dance (feat. Kyla)", "Views"
+    )
+    assert r["source"] == "LRCLIB"
+    primeira = eng.session.get.call_args_list[0].kwargs["params"]
+    assert primeira["artist_name"] == "Drake, Rihanna"  # exata vem primeiro
+
+
+# ----------------------------------------- Musixmatch: dicas e variantes
+def test_musixmatch_envia_dicas_de_album_duracao_e_isrc():
+    eng = LyricsEngine(session=MagicMock())
+    eng._mxm_token = "tok"
+    eng.session.get.return_value = _resp(_mxm_ok(SYNC))
+    assert eng._fetch_musixmatch_lyrics(
+        "A", "T", album="Al", duration=174.4, isrc="I"
+    ) == SYNC
+    params = eng.session.get.call_args.kwargs["params"]
+    assert params["q_album"] == "Al"
+    assert params["q_duration"] == 174
+    assert params["track_isrc"] == "I"
+
+
+def test_musixmatch_sem_dicas_nao_envia_parametros_extras():
+    eng = LyricsEngine(session=MagicMock())
+    eng._mxm_token = "tok"
+    eng.session.get.return_value = _resp(_mxm_ok(SYNC))
+    eng._fetch_musixmatch_lyrics("A", "T")
+    params = eng.session.get.call_args.kwargs["params"]
+    assert not {"q_album", "q_duration", "track_isrc"} & set(params)
+
+
+def test_musixmatch_repete_sem_dicas_e_depois_com_variantes():
+    eng = _engine()
+    chamadas = []
+
+    def fake(artista, titulo, **dicas):
+        chamadas.append((artista, titulo, bool(dicas)))
+        return SYNC if (artista, titulo, bool(dicas)) == ("Drake", "One Dance", False) else None
+
+    eng._fetch_musixmatch_lyrics = fake
+    eng.session.get.return_value = _resp(status=404)
+    r = eng.fetch_and_inject(
+        "/m/a.flac",
+        "Drake, Rihanna",
+        "One Dance (feat. Kyla)",
+        "Views",
+        isrc="X",
+        duration=174,
+    )
+    assert r["source"] == "Musixmatch"
+    assert chamadas[0] == ("Drake, Rihanna", "One Dance (feat. Kyla)", True)
+    assert chamadas[1] == ("Drake, Rihanna", "One Dance (feat. Kyla)", False)
+
+
+def test_musixmatch_rejeita_letra_que_passa_do_fim_da_faixa():
+    eng = _engine()
+    eng._fetch_musixmatch_lyrics.return_value = "[09:00.00]x"
+    eng.session.get.return_value = _resp(status=404)
+    assert _run(eng, duration=100)["success"] is False
