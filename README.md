@@ -155,7 +155,7 @@ pip3 install -r requirements.txt
 
 <a name="opcao-c-docker"></a>
 ### Opção C: 🐳 Uso com Docker (NAS e Servidores Caseiros)
-A Edição Ultra é totalmente conteinerizada e inclui as dependências (Python, FFmpeg e os extras de capas, velocidade, letras e análise). Este é o método de instalação recomendado para Synology, QNAP, Unraid e servidores headless.
+A Edição Ultimate é totalmente conteinerizada e inclui as dependências (Python, FFmpeg e os extras de capas, velocidade, letras e análise). Este é o método de instalação recomendado para Synology, QNAP, Unraid e servidores headless.
 
 ```bash
 # Baixar a imagem oficial mais recente
@@ -364,11 +364,11 @@ A Edição Ultra inclui poderosos gerenciadores de biblioteca local para acompan
 
   **O que alterar: só tags, só capas ou os dois.** Por padrão o `tags` faz as duas coisas. Para escolher:
 
-| Opção | Tags | Capa | Consulta a Apple? |
-|:--- |:--- |:--- |:--- |
-| *(nenhuma)* ou `--both` | regrava | troca quando validada | sim |
-| `--tags-only` | regrava | **não é tocada** (a embutida e as linhas de capa do comentário ficam como estão) | **não** |
-| `--covers-only` | **não é tocada** | troca quando validada e de resolução maior (a origem/tamanho vai para o comentário e para `COVER_SOURCE`) | sim |
+  | Opção | Tags | Capa | Consulta a Apple? |
+  |---|---|---|---|
+  | *(nenhuma)* ou `--both` | regrava | troca quando validada | sim |
+  | `--tags-only` | regrava | **não é tocada** (a embutida e as linhas de capa do comentário ficam como estão) | **não** |
+  | `--covers-only` | **não é tocada** | troca quando validada e de resolução maior (a origem/tamanho vai para o comentário e para `COVER_SOURCE`) | sim |
 
   As três opções são excludentes entre si. Em `--tags-only` o log mostra `Modo: SOMENTE TAGS`, a linha `Capa` aparece como `não tocada` e o resumo omite as contagens da Apple.
 
@@ -399,6 +399,23 @@ A Edição Ultra inclui poderosos gerenciadores de biblioteca local para acompan
 
   ```bash
   python -m qobuz_dl tags “/caminho/para/sua/pasta/local/de/musica” --suggest-names
+  ```
+
+  **Escolha do modo.** Rodando o `tags` num terminal, sem `--tags-only`, `--covers-only` ou `--both`, ele pergunta o que atualizar (tags e capas / só tags / só capas; Enter = tags e capas). Em scripts, cron ou pipes (sem terminal interativo) não pergunta nada e usa o padrão.
+
+  **Retomar e rodar só o que mudou (`--resume`, `--incremental`).** Em bibliotecas grandes uma execução pode levar horas e ser interrompida (CTRL+C, rede, bateria). O `tags` anota, por pasta e por modo, cada arquivo que terminou de processar:
+
+  * `--resume` continua a última execução interrompida, pulando o que ela já tinha feito. Se a execução anterior terminou normalmente, avisa e processa tudo.
+  * `--incremental` pula tudo o que já foi processado e não mudou desde então: só pega arquivos novos ou alterados por outro programa.
+  * Sem nenhuma das duas, processa tudo de novo (é assim que se tentam outra vez as capas da Apple que não foram achadas). Arquivos com erro, falha de download ou de gravação da capa nunca são marcados e são tentados na próxima vez. A simulação (`--dry-run`) só lê esse estado, nunca grava.
+
+  **Relatório da biblioteca (`--report`).** Para saber *onde* rodar o `tags` antes de rodá-lo, o comando varre a pasta (só leitura, sem login, sem rede) e gera um relatório com os problemas por álbum e por faixa: sem capa, capa pequena (< 500 px) ou não quadrada, sem ISRC, ID Qobuz ausente ou inválido, sem artista do álbum, sem data, sem número da faixa. É HTML por padrão (abre em qualquer navegador, com filtro por álbum); se o nome terminar em `.csv`, sai uma planilha:
+
+  ```bash
+  python -m qobuz_dl tags “/caminho/para/sua/pasta/local/de/musica” --report                  # relatorio_biblioteca.html
+  python -m qobuz_dl tags “/caminho/para/sua/pasta/local/de/musica” --report problemas.csv
+  python -m qobuz_dl tags “/caminho/para/sua/pasta/local/de/musica” --resume
+  python -m qobuz_dl tags “/caminho/para/sua/pasta/local/de/musica” --incremental
   ```
 
   **Capa da Apple: regras extras.** A capa da Apple só substitui a atual se for maior *e* quadrada (tolerância de 3%); capas retangulares são mantidas e aparecem no resumo como `mantida (a da Apple não é quadrada)`. Se a capa nova passar do limite de 16 MB de um bloco FLAC, ela é recomprimida com o Pillow ou, se o Pillow não estiver disponível (como no a-Shell), com o `ffmpeg`.
@@ -454,7 +471,7 @@ Você pode personalizar profundamente seu `config.ini` ou usar as flags CLI `-ff
 #### 📝 Tabela de Referência de Variáveis Completas
 
 | Categoria / Variável | Descrição | Exemplo de Saída |
-| :--- | :--- | :--- |
+| :---| :--- | :--- |
 | **Artistas & Compositores** | | |
 | `{album_artist}` | O principal artista do álbum (lida com compilações graciosamente). | `Daft Punk` |
 | `{artist}` / `{track_artist}` | O artista performático da faixa específica. | `Pharrell Williams` |

@@ -190,8 +190,8 @@ class TestTagFlac:
         assert fake.tags.vendor == ""
 
     def test_multi_value_tags_grava_lista_de_artistas(self, monkeypatch, tmp_path):
-        """Com multi_value_tags=True, ARTIST continua como texto único
-        separado por vírgula; a implementação atual não cria ARTISTS."""
+        """Com multi_value_tags=True, ARTIST recebe VÁRIOS valores no próprio
+        campo (uma lista); não existe um campo plural ARTISTS separado."""
         fake = FakeFLAC()
         monkeypatch.setattr(metadata, "FLAC", lambda path: fake)
 
@@ -214,22 +214,9 @@ class TestTagFlac:
             settings=QobuzDLSettings(multi_value_tags=True),
         )
 
-        # O comportamento atual grava ARTIST como texto único separado por
-        # vírgula. Não há campo ARTISTS separado na implementação atual.
+        # ARTIST vira lista de valores; não há campo ARTISTS separado.
         assert fake["ARTIST"] == ["Artista Um", "Artista Dois"]
         assert "ARTISTS" not in fake
-
-    def test_campos_multivalorados_mapeados_para_campos_plurais(self):
-        """Verifica o mapeamento declarado atualmente em DISPLAY_JOINED_FIELDS."""
-        assert metadata.DISPLAY_JOINED_FIELDS == {
-            "ARTIST": "ARTISTS",
-            "ALBUMARTIST": "ALBUMARTISTS",
-            "COMPOSER": "COMPOSERS",
-            "GENRE": "GENRES",
-            "ARTISTSORT": "ARTISTSORTS",
-            "ALBUMARTISTSORT": "ALBUMARTISTSORTS",
-        }
-        assert set(metadata.DISPLAY_JOINED_FIELDS) <= metadata.MULTI_VALUE_FIELDS
 
     def test_sem_multi_value_tags_mantem_virgula(self, monkeypatch, tmp_path):
         fake = FakeFLAC()

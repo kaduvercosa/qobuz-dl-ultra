@@ -39,21 +39,10 @@ MULTI_VALUE_FIELDS = {
 }
 
 
-# # Campos multivalorados: com multi_value_tags o campo principal (ARTIST,
-# # ALBUMARTIST, COMPOSER, GENRE) continua sendo UM texto "A, B" -- é o que
-# # os players exibem, separado por vírgula -- e a lista de verdade vai no
-# # campo plural (ARTISTS, ALBUMARTISTS, COMPOSERS, GENRES; ARTISTS e
-# # ALBUMARTISTS seguem a convenção do MusicBrainz Picard), que bibliotecas
-# # e taggers leem como valores separados. Assim não depende de como cada
-# # player junta tags multivaloradas ("; ", "/" ou só o 1º valor).
-DISPLAY_JOINED_FIELDS = {
-    "ARTIST": "ARTISTS",
-    "ALBUMARTIST": "ALBUMARTISTS",
-    "COMPOSER": "COMPOSERS",
-    "GENRE": "GENRES",
-    "ARTISTSORT": "ARTISTSORTS",
-    "ALBUMARTISTSORT": "ALBUMARTISTSORTS",
-}
+# # Campos multivalorados: com multi_value_tags, cada campo de
+# # MULTI_VALUE_FIELDS (ARTIST, ALBUMARTIST, COMPOSER, GENRE e os *SORT) é
+# # gravado como VÁRIOS valores no próprio campo (ARTIST=["A", "B"]); não há
+# # campos plurais separados (ARTISTS, ALBUMARTISTS...).
 
 
 def _split_multi_value(value: str) -> list:
@@ -178,7 +167,7 @@ ID3_LEGEND = {
     "album": id3.TALB,
     "artist": id3.TPE1,
     "title": id3.TIT2,
-    "date": id3.TDAT,
+    "date": id3.TDRC,
     "mediatype": id3.TMED,
     "genre": id3.TCON,
     "composer": id3.TCOM,

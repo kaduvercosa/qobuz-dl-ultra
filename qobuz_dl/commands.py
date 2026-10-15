@@ -366,6 +366,27 @@ def tags_args(subparsers, default_folder=None):
             "pasta (também vale para --undo)"
         ),
     )
+    skip = tags.add_mutually_exclusive_group()
+    skip.add_argument(
+        "--resume",
+        dest="resume",
+        action="store_true",
+        default=False,
+        help=(
+            "continua uma execução interrompida (CTRL+C, queda de rede): pula os "
+            "arquivos que ela já tinha terminado"
+        ),
+    )
+    skip.add_argument(
+        "--incremental",
+        dest="incremental",
+        action="store_true",
+        default=False,
+        help=(
+            "só processa arquivos novos ou alterados desde a última execução "
+            "do tags nesta pasta (e neste modo)"
+        ),
+    )
     tags.add_argument(
         "--no-undo",
         dest="no_undo",
@@ -405,6 +426,20 @@ def tags_args(subparsers, default_folder=None):
             "só lê as tags da pasta e sugere artistas com vírgula no nome (como "
             '"Tyler, The Creator") para o artists_with_comma do config.ini; '
             "não consulta o Qobuz nem grava nada"
+        ),
+    )
+    tags.add_argument(
+        "--report",
+        dest="report",
+        nargs="?",
+        const="relatorio_biblioteca.html",
+        default=None,
+        metavar="ARQUIVO",
+        help=(
+            "só lê a pasta e gera um relatório do que está faltando (sem capa, "
+            "sem ISRC, ID Qobuz inválido...): HTML, ou CSV se o nome terminar "
+            "em .csv (padrão: relatorio_biblioteca.html); não consulta o Qobuz "
+            "nem grava nos arquivos de música"
         ),
     )
     tags.add_argument(

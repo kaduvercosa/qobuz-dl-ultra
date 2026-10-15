@@ -882,6 +882,7 @@ async def retag_directory(
     tags_only=False,
     dry_run=False,
     journal=None,
+    progress=None,
 ):
     """Reescreve tags e tenta substituir capas por versoes Apple/iTunes.
 
@@ -900,6 +901,11 @@ async def retag_directory(
     COPIA temporaria de cada arquivo e mostra o diff real; a biblioteca nao e
     tocada. journal: `tags_journal.Journal` que guarda os metadados originais
     antes de cada gravacao (para `tags --undo`); None = sem registro.
+
+    progress: `tags_progress.Progress`. Com ``enable_skip()`` ligado, arquivos
+    ja processados (e inalterados desde entao) sao pulados; cada arquivo
+    concluido e marcado para `--resume`/`--incremental`. Na simulacao o
+    progresso so e lido, nunca gravado.
     """
     mode = resolve_mode(covers_only, tags_only)
     covers_only, tags_only = mode == "covers", mode == "tags"
@@ -936,9 +942,11 @@ async def retag_directory(
     for legend_line in _legend_lines():
         ui.emit(legend_line)
 
-    files = find_audio_files(directory_path)
+    all_files = find_audio_files(directory_path)
+    files = [f for f in all_files if not (progress and progress.is_done(f))]
     stats = {
-        "total": len(files),
+        "total": len(all_files),
+        "skipped_done": len(all_files) - len(files),
         "updated": 0,
         "unchanged": 0,
         "no_id": 0,
@@ -952,8 +960,23 @@ async def retag_directory(
         "cover_outcomes": collections.Counter(),
     }
 
-    if not files:
+    if not all_files:
         ui.emit(f"{YELLOW}[!] Nenhum arquivo .flac/.mp3 encontrado na pasta.{OFF}")
+        return stats
+
+    if stats["skipped_done"]:
+        ui.emit(
+            f"{CYAN}[i] {stats['skipped_done']} arquivo(s) já processados e sem "
+            f"alteração serão pulados (rode sem --incremental/--resume para "
+            f"refazer tudo).{OFF}"
+        )
+    if not files:
+        ui.emit(
+            f"{GREEN}[+] Nada a fazer: todos os arquivos já foram processados.{OFF}"
+        )
+        if progress and not dry_run:
+            progress.start(keep_done=True)
+            progress.finish()
         return stats
 
     loop = asyncio.get_running_loop()
@@ -978,6 +1001,11 @@ async def retag_directory(
     )
 
     dry_workdir = tempfile.mkdtemp(prefix="qdl_dry_") if dry_run else None
+    track_progress = progress if (progress and not dry_run) else None
+    if track_progress:
+        # Execução completa zera a lista; retomar/incremental mantém o que já foi feito.
+        track_progress.start(keep_done=track_progress._skip_enabled)
+    completed = False
 
     try:
         for index, file_path in enumerate(files, 1):
@@ -1348,6 +1376,13 @@ async def retag_directory(
             ):
                 ui.emit(line)
 
+            if track_progress:
+                track_progress.mark(file_path, None if tags_only else cover_outcome)
+
+        completed = True
+        if track_progress:
+            track_progress.finish()
+
         ui.emit("")
         if dry_run:
             ui.emit(
@@ -1371,6 +1406,12 @@ async def retag_directory(
                 "faixas com tags e/ou capa alteradas",
             ),
             ("Já corretos", "unchanged", None, "faixas que já estavam como deveriam"),
+            (
+                "Pulados (já feitos)",
+                "skipped_done",
+                None,
+                "processados antes e sem alteração (--incremental/--resume)",
+            ),
             (
                 "Sem ID Qobuz",
                 "no_id",
@@ -1402,6 +1443,8 @@ async def retag_directory(
         ):
             if tags_only and key.startswith("apple_"):
                 continue  # sem etapa Apple neste modo
+            if key == "skipped_done" and not stats[key]:
+                continue  # só aparece quando houve arquivos pulados
             value = stats[key]
             value_color = color_on if (color_on and value) else MUTED
             ui.emit(
@@ -1440,6 +1483,8 @@ async def retag_directory(
         return stats
 
     finally:
+        if track_progress and not completed:
+            track_progress.save()
         if shared_holder["decision"] is not None:
             _discard_shared_cover(shared_holder["decision"])
         if dry_workdir:

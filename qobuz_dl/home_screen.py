@@ -38,8 +38,8 @@ EXEMPLOS = {
     ),
     "lyrics": ("lyrics [DIR]", "lyrics ~/Music"),
     "tags": (
-        "tags [--tags-only | --covers-only] [--dry-run] [DIR]",
-        "tags --dry-run ~/Music",
+        "tags [--tags-only | --covers-only] [--dry-run] [--resume | --incremental] [DIR]",
+        "tags --report ~/Music",
     ),
     "sync-playlist": (
         "sync-playlist [-y] [-d PASTA] <URL>",
@@ -336,6 +336,79 @@ def render_home(
     todas = list(flags) + [("-h, --help", "mostra a ajuda geral (ou de um comando)")]
     paineis.append(_painel_flags(todas, caixa, st))
     paineis.append(_painel_dicas(caixa, st))
+
+    linhas = []
+    for i, p in enumerate(paineis):
+        if i:
+            linhas.append("")
+        linhas += p
+    return "\n".join(margem + l if l else l for l in linhas)
+
+
+def render_checks(
+    titulo: str,
+    itens,
+    acoes=(),
+    resumo: str = "",
+    largura: int = None,
+    cor: bool = True,
+    destaque: str = "\033[36m",
+    mudo: str = "\033[2m",
+    reset: str = "\033[0m",
+    negrito: str = "\033[1m",
+    verde: str = "\033[32m",
+    amarelo: str = "\033[33m",
+    vermelho: str = "\033[31m",
+) -> str:
+    """Painéis de um diagnóstico (usado pelo `doctor`), no mesmo estilo da tela inicial.
+
+    itens: lista de (nivel, nome, detalhe) com nivel "PASS", "WARN" ou "FAIL".
+    acoes: lista de (nome, o que fazer): vira o painel "Próximos passos".
+    resumo: linha final dentro do painel de resumo.
+    """
+    if largura is None:
+        largura = shutil.get_terminal_size((100, 24)).columns
+    largura = max(LARGURA_MIN, largura)
+    caixa = min(largura, LARGURA_MAX)
+    margem = " " * ((largura - caixa) // 2)
+    st = _Estilo(cor, destaque, mudo, reset, negrito)
+    interno = caixa - 4
+    cores = {"PASS": verde, "WARN": amarelo, "FAIL": vermelho}
+    marcas = {"PASS": "ok  ", "WARN": "aviso", "FAIL": "FALHA"}
+    pre = 7
+
+    def colorir(nivel: str, texto: str) -> str:
+        ini = cores.get(nivel, "") if cor else ""
+        return f"{ini}{texto}{reset}" if ini else texto
+
+    linhas_itens = []
+    for nivel, nome, detalhe in itens:
+        marca = colorir(nivel, marcas.get(nivel, nivel).ljust(pre - 1)) + " "
+        cabeca = st.neg(nome)
+        if (
+            detalhe
+            and _largura_visivel(nome) + 2 + _largura_visivel(detalhe) <= interno - pre
+        ):
+            # cabe numa linha só: "nome  detalhe"
+            linhas_itens.append(marca + cabeca + "  " + st.mudo(detalhe))
+            continue
+        for i, l in enumerate(_quebrar(nome, interno - pre)):
+            linhas_itens.append((marca if i == 0 else " " * pre) + st.neg(l))
+        if detalhe:
+            linhas_itens += [
+                " " * pre + st.mudo(l) for l in _quebrar(detalhe, interno - pre)
+            ]
+    paineis = [_painel(titulo, linhas_itens, caixa, st)]
+
+    if acoes:
+        blocos = []
+        for nome, fazer in acoes:
+            bloco = [st.dest(l) for l in _quebrar(nome, interno)]
+            bloco += ["  " + l for l in _quebrar(fazer, interno - 2)]
+            blocos.append(bloco)
+        paineis.append(_painel("Próximos passos", _com_separadores(blocos), caixa, st))
+    if resumo:
+        paineis.append(_painel("Resumo", _quebrar(resumo, interno), caixa, st))
 
     linhas = []
     for i, p in enumerate(paineis):

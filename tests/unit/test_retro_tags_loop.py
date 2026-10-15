@@ -2042,3 +2042,128 @@ class TestResumoPorCampoECapa:
         stats = _rodar_com(amb, tags_only=True)
         assert stats["cover_outcomes"] == {}
         assert "Capas (o que houve" not in amb.texto
+
+
+# ---------------------------------------------------------------------------
+# Retomar (--resume) e só o que mudou (--incremental)
+# ---------------------------------------------------------------------------
+class TestProgressoNoLaco:
+    @pytest.fixture
+    def prog(self, tmp_path):
+        from qobuz_dl.tags_progress import Progress
+
+        def abrir(amb, modo="both", pular=False):
+            p = Progress.open(str(tmp_path / "config"), str(amb.pasta), modo)
+            if pular:
+                p.enable_skip()
+            return p
+
+        return abrir
+
+    def test_primeira_execucao_marca_tudo_e_conclui(self, amb, prog):
+        amb.arquivo("a.flac", "1")
+        amb.arquivo("b.flac", "2")
+        p = prog(amb)
+        stats = _rodar_com(amb, progress=p)
+        assert stats["updated"] == 2 and stats["skipped_done"] == 0
+        depois = prog(amb, pular=True)
+        assert depois.complete
+        assert all(depois.is_done(str(amb.pasta / n)) for n in ("a.flac", "b.flac"))
+
+    def test_incremental_pula_o_que_ja_foi_feito(self, amb, prog):
+        amb.arquivo("a.flac", "1")
+        _rodar_com(amb, progress=prog(amb))
+        amb.arquivo("b.flac", "2")  # novo
+        amb.chamadas.clear()
+
+        stats = _rodar_com(amb, progress=prog(amb, pular=True))
+
+        assert [c[1] for c in amb.tags("flac")] == ["b.flac"]
+        assert stats["total"] == 2 and stats["skipped_done"] == 1
+        assert stats["updated"] == 1
+        assert "1 arquivo(s) já processados" in amb.texto
+        assert "Pulados (já feitos)" in amb.texto
+
+    def test_sem_flag_refaz_tudo(self, amb, prog):
+        amb.arquivo("a.flac", "1")
+        _rodar_com(amb, progress=prog(amb))
+        amb.chamadas.clear()
+        stats = _rodar_com(amb, progress=prog(amb))  # skip desligado
+        assert stats["skipped_done"] == 0 and len(amb.tags("flac")) == 1
+        assert "Pulados (já feitos)" not in amb.texto
+
+    def test_nada_a_fazer_quando_tudo_esta_pronto(self, amb, prog):
+        amb.arquivo("a.flac", "1")
+        _rodar_com(amb, progress=prog(amb))
+        amb.chamadas.clear()
+        stats = _rodar_com(amb, progress=prog(amb, pular=True))
+        assert amb.chamadas == []
+        assert stats["skipped_done"] == 1 and stats["updated"] == 0
+        assert "Nada a fazer" in amb.texto
+
+    def test_erro_ao_gravar_nao_marca_e_tenta_de_novo(self, amb, prog):
+        amb.arquivo("a.flac", "1")
+        amb.erro_ao_gravar = OSError("disco")
+        stats = _rodar_com(amb, progress=prog(amb))
+        assert stats["errors"] == 1
+        amb.erro_ao_gravar = None
+        stats = _rodar_com(amb, progress=prog(amb, pular=True))
+        assert stats["updated"] == 1 and stats["skipped_done"] == 0
+
+    def test_interrompida_pode_ser_retomada(self, amb, prog, monkeypatch):
+        amb.arquivo("a.flac", "1")
+        amb.arquivo("b.flac", "2")
+        amb.arquivo("c.flac", "3")
+        original = retro_tags.metadata.tag_flac
+
+        def cai_no_segundo(filename, *a, **kw):
+            if os.path.basename(filename) == "b.flac":
+                raise KeyboardInterrupt
+            return original(filename, *a, **kw)
+
+        monkeypatch.setattr(retro_tags.metadata, "tag_flac", cai_no_segundo)
+        with pytest.raises(KeyboardInterrupt):
+            _rodar_com(amb, progress=prog(amb))
+        monkeypatch.setattr(retro_tags.metadata, "tag_flac", original)
+
+        interrompida = prog(amb)
+        assert interrompida.interrupted
+        interrompida.enable_skip()
+        amb.chamadas.clear()
+        stats = _rodar_com(amb, progress=interrompida)
+        assert sorted(c[1] for c in amb.tags("flac")) == ["b.flac", "c.flac"]
+        assert stats["skipped_done"] == 1
+        assert prog(amb).complete
+
+    def test_simulacao_le_mas_nunca_grava_o_progresso(self, amb, prog):
+        amb.arquivo("a.flac", "1")
+        _rodar_com(amb, progress=prog(amb))
+        amb.arquivo("b.flac", "2")
+        estado = open(prog(amb).state_path, encoding="utf-8").read()
+        amb.chamadas.clear()
+
+        stats = _rodar_com(amb, dry_run=True, progress=prog(amb, pular=True))
+
+        assert stats["skipped_done"] == 1 and stats["updated"] == 1
+        assert open(prog(amb).state_path, encoding="utf-8").read() == estado
+
+    def test_falha_transitoria_de_capa_nao_marca(self, amb, prog):
+        amb.arquivo("a.flac", "1")
+        amb.baixar_bytes = None  # download da capa falha
+        _rodar_com(amb, progress=prog(amb))
+        depois = prog(amb, pular=True)
+        assert not depois.is_done(str(amb.pasta / "a.flac"))
+
+    def test_so_tags_ignora_o_resultado_da_capa(self, amb, prog):
+        amb.arquivo("a.flac", "1")
+        amb.baixar_bytes = None
+        asyncio.run(
+            retro_tags.retag_directory(
+                str(amb.pasta),
+                SimpleNamespace(),
+                SimpleNamespace(multi_value_tags=True),
+                tags_only=True,
+                progress=prog(amb, "tags"),
+            )
+        )
+        assert prog(amb, "tags", pular=True).is_done(str(amb.pasta / "a.flac"))

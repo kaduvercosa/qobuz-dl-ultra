@@ -400,6 +400,135 @@ def _handle_tags_suggest_names(target_dir: str, settings) -> int:
     return 0
 
 
+def auth_failure_hint(exc: BaseException) -> str:
+    """Próxima ação para uma falha de login, de acordo com o tipo do erro.
+
+    Rede fora do ar, token vencido/inválido, assinatura inativa e cofre de
+    senhas (keyring) pedem coisas diferentes; uma frase só serviria mal a todos.
+    """
+    from qobuz_dl.exceptions import (
+        AuthenticationError,
+        InvalidAppCredentialsError,
+        InvalidAppSecretError,
+        NoActiveSubscriptionError,
+    )
+
+    name = type(exc).__name__.lower()
+    text = str(exc).lower()
+    if isinstance(exc, NoActiveSubscriptionError):
+        return (
+            "Sua conta não tem assinatura ativa de streaming/download: confira "
+            "a assinatura no site da Qobuz."
+        )
+    if isinstance(exc, (InvalidAppCredentialsError, InvalidAppSecretError)):
+        return (
+            "O app_id/secret do Qobuz foi recusado. Atualize o programa "
+            "(pip install -U qobuz-dl-ultra) ou rode: qobuz-dl -r"
+        )
+    if isinstance(exc, AuthenticationError) or any(
+        word in text for word in ("401", "unauthorized", "invalid token", "token")
+    ):
+        return (
+            "O token pode ter expirado ou sido revogado. Rode: qobuz-dl -r e "
+            "informe o token novamente."
+        )
+    if "keyring" in name or "keyring" in text:
+        return (
+            "Não foi possível ler o cofre de senhas (keyring). Rode: qobuz-dl "
+            "doctor; ou use disable_keyring = true no config.ini."
+        )
+    if (
+        isinstance(exc, (ConnectionError, TimeoutError))
+        or any(word in name for word in ("connect", "timeout", "network", "dns"))
+        or any(
+            word in text
+            for word in (
+                "name or service",
+                "temporary failure",
+                "connection",
+                "timed out",
+                "network",
+                "nodename",
+            )
+        )
+    ):
+        return (
+            "Parece problema de rede. Verifique sua conexão com a internet (ou "
+            "VPN/proxy) e tente de novo."
+        )
+    return "Rode: qobuz-dl doctor para diagnosticar o ambiente e a configuração."
+
+
+def _choose_tags_mode(arguments) -> None:
+    """Pergunta o que o `tags` deve atualizar quando o usuário não disse (só em terminal).
+
+    Sem terminal interativo (script, cron, pipe) ou com --tags-only/--covers-only/
+    --both, não pergunta nada e o padrão (tags e capas) continua valendo.
+    """
+    if (
+        getattr(arguments, "tags_only", False)
+        or getattr(arguments, "covers_only", False)
+        or getattr(arguments, "both", False)
+    ):
+        return
+    try:
+        interactive = sys.stdin.isatty() and sys.stdout.isatty()
+    except (AttributeError, ValueError):
+        interactive = False
+    if not interactive:
+        return
+    ui.emit_always("")
+    ui.emit_always("O que atualizar?")
+    ui.emit_always("  1) tags e capas   (padrão)")
+    ui.emit_always("  2) só tags        (a capa não é pesquisada nem alterada)")
+    ui.emit_always("  3) só capas       (nenhuma tag é regravada)")
+    try:
+        answer = input("Escolha [1-3, Enter = 1]: ").strip()
+    except (EOFError, KeyboardInterrupt):
+        answer = ""
+        ui.emit_always("")
+    if answer == "2":
+        arguments.tags_only = True
+    elif answer == "3":
+        arguments.covers_only = True
+    elif answer not in ("", "1"):
+        ui.warn(f"Opção '{answer}' não reconhecida: usando tags e capas.")
+
+
+def _handle_tags_report(target_dir: str, destination: str) -> int:
+    """`tags --report [ARQUIVO]`: só leitura; grava um HTML/CSV com os problemas."""
+    from qobuz_dl import library_report
+
+    if not os.path.isdir(target_dir):
+        ui.error(f"A pasta não existe no dispositivo: '{target_dir}'")
+        return 1
+    ui.step(f"Analisando a biblioteca em {target_dir} (só leitura)...")
+
+    def progress(done: int, total: int) -> None:
+        ui.emit(f"  {done}/{total} arquivos lidos")
+
+    records = library_report.scan_directory(target_dir, progress=progress)
+    if not records:
+        ui.warn("Nenhum arquivo .flac/.mp3 encontrado na pasta.")
+        return 1
+    try:
+        written = library_report.write_report(records, destination, target_dir)
+    except OSError as exc:
+        ui.error(
+            f"Não foi possível gravar o relatório em '{destination}': {exc}. "
+            "Escolha outro local, por exemplo: --report ~/relatorio.html"
+        )
+        return 1
+    summary = library_report.summarize(records)
+    ui.ok(
+        f"{summary['total']} faixas analisadas, {summary['with_issues']} com problemas."
+    )
+    for code, count in summary["per_issue"].most_common(5):
+        ui.emit(f"  • {library_report.ISSUES[code][0]}: {count}")
+    ui.ok(f"Relatório salvo em: {written}")
+    return 0
+
+
 def _handle_tags_undo(arguments, base_dir: str) -> int:
     """`tags --undo [ID]` e `tags --undo-list`. Não consulta o Qobuz. Devolve o exit code."""
     from qobuz_dl import tags_journal
@@ -821,6 +950,7 @@ async def _auth_command(
         )
     except Exception as e:
         ui.error(f"Falha ao autenticar com a API: {e}")
+        ui.detail(auth_failure_hint(e))
         if update_credentials:
             ui.error("As alterações NÃO foram salvas.")
         return False
@@ -1267,7 +1397,9 @@ async def _initial_checks():
         os.makedirs(CONFIG_PATH, exist_ok=True)
         if "-r" not in sys.argv and "--reset" not in sys.argv:
             await _reset_config(CONFIG_FILE)
-    if len(sys.argv) < 2:
+    # `qobuz-dl` e `qobuz-dl -h` mostram os painéis; `qobuz-dl <comando> -h`
+    # continua com a ajuda completa do argparse.
+    if len(sys.argv) < 2 or sys.argv[1:] in (["-h"], ["--help"]):
         _print_welcome_screen()
         sys.exit(0)
 
@@ -1709,6 +1841,9 @@ async def async_main():
         # Só leitura das tags locais: também não precisa autenticar no Qobuz.
         if getattr(arguments, "suggest_names", False):
             sys.exit(_handle_tags_suggest_names(target_dir, tags_settings))
+        if getattr(arguments, "report", None):
+            sys.exit(_handle_tags_report(target_dir, arguments.report))
+        _choose_tags_mode(arguments)
         try:
             tags_client = await Client.create(
                 email,
@@ -1720,6 +1855,7 @@ async def async_main():
             )
         except Exception as e:
             ui.error(f"Não foi possível autenticar no Qobuz para corrigir as tags: {e}")
+            ui.detail(auth_failure_hint(e))
             sys.exit(1)
         tags_dry_run = bool(getattr(arguments, "dry_run", False))
         tags_journal_run = None
@@ -1742,6 +1878,31 @@ async def async_main():
                     "Nada foi alterado. Use --no-undo para rodar sem backup."
                 )
                 sys.exit(1)
+        from qobuz_dl.tags_progress import Progress
+
+        tags_progress = Progress.open(
+            CONFIG_PATH,
+            target_dir,
+            resolve_mode(
+                bool(getattr(arguments, "covers_only", False)),
+                bool(getattr(arguments, "tags_only", False)),
+            ),
+        )
+        if getattr(arguments, "incremental", False):
+            tags_progress.enable_skip()
+        elif getattr(arguments, "resume", False):
+            if tags_progress.interrupted:
+                tags_progress.enable_skip()
+                ui.step("Retomando a execução interrompida desta pasta...")
+            else:
+                ui.warn(
+                    "Não há execução interrompida nesta pasta e modo: processando tudo."
+                )
+        elif tags_progress.interrupted and not tags_dry_run:
+            ui.warn(
+                "A última execução desta pasta foi interrompida. Para continuar "
+                "de onde parou, rode de novo com --resume."
+            )
         try:
             await retag_directory(
                 target_dir,
@@ -1751,10 +1912,15 @@ async def async_main():
                 tags_only=bool(getattr(arguments, "tags_only", False)),
                 dry_run=tags_dry_run,
                 journal=tags_journal_run,
+                progress=tags_progress,
             )
         except KeyboardInterrupt:
             ui.error("Operação interrompida manualmente pelo usuário (CTRL+C).")
             ui.warn("Os arquivos já processados estão seguros. Saindo...")
+            if not tags_dry_run:
+                ui.emit(
+                    "  Para continuar de onde parou, rode o mesmo comando com --resume."
+                )
         finally:
             await tags_client.close()
         sys.exit(0)

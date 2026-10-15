@@ -297,3 +297,22 @@ def test_execucao_real_com_registro_e_desfazer_completo(cenario, formato, monkey
     resultado = tags_journal.undo_run(config)
     assert resultado["restored"] == 1
     assert open(arquivo, "rb").read() == antes
+
+
+@pytest.mark.parametrize("multi", [False, True])
+def test_mp3_grava_a_data_de_lancamento(tmp_path, multi):
+    """Regressão: o MP3 saía sem data (o frame TDAT sozinho é descartado no
+    salvamento; o certo é TDRC, que o mutagen converte para TYER+TDAT no v2.3)."""
+    arquivo = str(tmp_path / "faixa.mp3")
+    _audio(arquivo, "mp3")
+    metadata.tag_mp3(
+        arquivo,
+        str(tmp_path),
+        arquivo,
+        _item(),
+        _album(),
+        False,
+        False,
+        settings=QobuzDLSettings(multi_value_tags=multi),
+    )
+    assert str(ID3(arquivo)["TDRC"]) == "2024-05-01"

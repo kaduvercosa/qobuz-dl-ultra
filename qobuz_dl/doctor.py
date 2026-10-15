@@ -364,26 +364,88 @@ def resolve_directory(config_file: str) -> Optional[str]:
     )
 
 
+# Próximo passo para cada verificação que não está OK. Só entra o que o
+# usuário pode de fato fazer; avisos puramente informativos (opcionais) ficam de fora.
+_ACOES = (
+    (
+        "Python",
+        "instale o Python 3.10 ou mais novo e reinstale: pip install -U qobuz-dl-ultra",
+    ),
+    ("Dependências", "pip install -U qobuz-dl-ultra"),
+    ("config.ini", "rode: qobuz-dl -r (cria/refaz o config.ini)"),
+    (
+        "Sintaxe do config",
+        "corrija a linha indicada no config.ini ou rode: qobuz-dl -r",
+    ),
+    ("config:", "rode: qobuz-dl -r e preencha o campo"),
+    ("Permissão do config", "restrinja o acesso: chmod 600 no config.ini"),
+    ("Token", "rode: qobuz-dl -r para guardar o token no keyring"),
+    (
+        "Keyring",
+        "use disable_keyring = true no config.ini ou instale um backend (keyrings.alt)",
+    ),
+    (
+        "Escrita na pasta",
+        "dê permissão de escrita à pasta ou troque 'directory' no config.ini",
+    ),
+    ("Pasta de downloads", "crie a pasta ou ajuste 'directory' no config.ini"),
+    (
+        "ffmpeg",
+        "instale o ffmpeg (usado para verificar arquivos e recompactar capas grandes sem Pillow)",
+    ),
+    ("ffprobe", "instale o ffmpeg completo (inclui o ffprobe)"),
+    ("fpcalc", "instale o Chromaprint (fpcalc) só se for usar --find-duplicates"),
+)
+
+
+def next_action(check: Check) -> Optional[str]:
+    """O que fazer para resolver uma verificação com FAIL/WARN (None se nada a fazer)."""
+    if check.level == PASS or check.name.startswith("Opcional:"):
+        return None
+    for prefix, action in _ACOES:
+        if check.name == prefix or (
+            prefix.endswith(":") and check.name.startswith(prefix)
+        ):
+            return action
+    return None
+
+
 def render(results: list[Check]) -> int:
     """Imprime pela camada ``ui`` e devolve o código de saída (1 se houve FAIL)."""
     from qobuz_dl import ui
+    from qobuz_dl.color import GREEN, HIGHLIGHT, MUTED, RED, RESET, YELLOW
+    from qobuz_dl.home_screen import render_checks
 
-    ui.banner("QOBUZ-DL-ULTRA  ·  DOCTOR")
-    for r in results:
-        line = f"{r.level:<4}  {r.name}" + (f": {r.detail}" if r.detail else "")
-        if r.level == FAIL:
-            ui.error(line)
-        elif r.level == WARN:
-            ui.warn(line)
-        else:
-            ui.emit_always(f"  {line}")
     fails = sum(1 for r in results if r.level == FAIL)
     warns = sum(1 for r in results if r.level == WARN)
-    ui.blank()
+    acoes = []
+    for r in results:
+        action = next_action(r)
+        if action:
+            acoes.append((r.name, action))
     if fails:
-        ui.error(f"{fails} verificação(ões) FALHARAM, {warns} aviso(s).")
+        resumo = f"{fails} verificação(ões) FALHARAM, {warns} aviso(s)."
     else:
-        ui.ok(f"Nenhuma falha. {warns} aviso(s) informativo(s).")
+        resumo = f"Nenhuma falha. {warns} aviso(s) informativo(s)."
+
+    texto = render_checks(
+        "Doctor · saúde do ambiente",
+        [(r.level, r.name, r.detail) for r in results],
+        acoes=acoes,
+        resumo=resumo,
+        largura=ui.width(),
+        cor=bool(ui.c(RESET)),
+        destaque=HIGHLIGHT,
+        mudo=MUTED,
+        reset=RESET,
+        negrito=ui.c("\033[1m"),
+        verde=GREEN,
+        amarelo=YELLOW,
+        vermelho=RED,
+    )
+    ui.blank()
+    ui.emit_always(texto)
+    ui.blank()
     return 1 if fails else 0
 
 
