@@ -45,6 +45,7 @@ from qobuz_dl.color import INFO as CYAN
 from qobuz_dl.color import WARNING as YELLOW
 from qobuz_dl.db import create_db, handle_download_id
 from qobuz_dl.exceptions import NonStreamable
+from qobuz_dl.playlist_links import link_existing_track, playlist_root
 from qobuz_dl.settings import QobuzDLSettings
 from qobuz_dl.utils import classify_release_type as _classify_release_type
 from qobuz_dl.utils import (
@@ -727,7 +728,7 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
                         role_st = "class:type_album"
                     elif role_tab.startswith("Feat."):
                         role_st = "class:type_ep"
-                    elif role_tab == "--":
+                    elif role_tab == "—":
                         role_st = ""
                     else:
                         role_st = "class:type_track"
@@ -1324,6 +1325,9 @@ class QobuzDL:
         self.force_english = force_english
         self.no_credits = no_credits
         self.settings = settings or QobuzDLSettings()
+        # Raiz dos downloads: o downloader usa pra achar <raiz>/Playlist/ e
+        # tirar das playlists as faixas que acabaram de entrar num álbum.
+        self.settings.library_root = self.directory
         self.booklet_only = booklet_only
         self.playlist_as_albums = playlist_as_albums
 
@@ -1400,9 +1404,20 @@ class QobuzDL:
         (banco local), instanciar o downloader.Download de fato, tratar
         erros sem derrubar o programa inteiro (loga e segue pro próximo
         item), e aplicar o --delay entre downloads se configurado."""
-        if await handle_download_id(
+        _row = await handle_download_id(
             self.downloads_db, item_id, add_id=False, quality=self.quality
-        ):
+        )
+        if _row:
+            # Faixa de playlist que já existe em outra pasta (álbum ou outra
+            # playlist): não baixa de novo, mas a playlist passa a apontar
+            # pro arquivo existente (aparece no .m3u e o sync a reconhece).
+            if is_playlist and alt_path:
+                try:
+                    link_existing_track(
+                        alt_path, item_id, _row[1] if len(_row) > 1 else ""
+                    )
+                except Exception as e:
+                    logger.debug(f"Falha ao ligar faixa à playlist: {e}")
             # Avisa QUAL item foi pulado (com a posição na playlist, quando
             # houver) e o MOTIVO. Antes era um logger.info genérico, que não
             # aparecia no terminal e não dizia qual faixa tinha sido pulada.
@@ -1539,8 +1554,15 @@ class QobuzDL:
                 )
                 return False
             content_name = content[0]["name"]
+            # Playlists ficam em <downloads>/Playlist/<nome> (como Album/EP/
+            # Single já têm a sua pasta); artista/gravadora seguem na raiz.
+            _base_dir = (
+                playlist_root(self.directory)
+                if url_type == "playlist"
+                else self.directory
+            )
             new_path = create_and_return_dir(
-                os.path.join(self.directory, sanitize_filename(content_name))
+                os.path.join(_base_dir, sanitize_filename(content_name))
             )
 
             # --- --filter-label: descarta, já na listagem do artista, os
@@ -2121,7 +2143,7 @@ class QobuzDL:
             # Faixas: a coluna "TIPO" era sempre "Track" (inútil). Troca por
             # a FUNÇÃO do artista pesquisado na faixa (Principal, Feat.,
             # Compositor...). `type` continua no meta (filtros/estilos).
-            # Sem artista de referência (favoritos) fica "--".
+            # Sem artista de referência (favoritos) fica "—".
             if item_type == "track" or fav_subtype == "tracks":
                 role, role_full = funcao_do_artista(i, ref_artist)
                 meta_data["role"] = role
@@ -2833,7 +2855,7 @@ class QobuzDL:
             source_count = len(track_ids)
             playlist_name = name or "Playlist"
             pl_directory = os.path.join(
-                self.directory, sanitize_filename(playlist_name)
+                playlist_root(self.directory), sanitize_filename(playlist_name)
             )
         else:
             if file_path is None:
@@ -2856,7 +2878,7 @@ class QobuzDL:
             )
             playlist_name = name or os.path.splitext(os.path.basename(file_path))[0]
             pl_directory = os.path.join(
-                self.directory, sanitize_filename(playlist_name)
+                playlist_root(self.directory), sanitize_filename(playlist_name)
             )
             track_ids = await self.client.get_track_ids_from_list(tracks_list)
             source_count = len(tracks_list)

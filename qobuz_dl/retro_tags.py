@@ -482,7 +482,8 @@ async def _fetch_apple_cover_for_track(
         upc=album_data.get("upc") or album.get("upc"),
         isrc=item.get("isrc"),
         artist=artist_data.get("name", ""),
-        album=album_data.get("title") or album.get("title", ""),
+        # Título + versão (Deluxe etc.): a capa muda de uma edição pra outra.
+        album=_album_full_title(album_data) or _album_full_title(album),
         track_title=track_title,
         # Single so' casa com "X - Single"; album/EP nunca recebe capa de single.
         release_kind=_release_kind(album) or _release_kind(album_data),

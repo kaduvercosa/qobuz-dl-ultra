@@ -13,6 +13,8 @@ from qobuz_dl.color import GREEN, OFF, RED
 from qobuz_dl.color import INFO as CYAN
 from qobuz_dl.color import WARNING as YELLOW
 
+from qobuz_dl.playlist_links import remove_link, valid_links
+
 logger = logging.getLogger(__name__)
 
 
@@ -212,12 +214,17 @@ async def sync_playlist(qobuz_dl, url, folder, auto_confirm=False):
             f"e serão ignorados.{OFF}"
         )
 
-    local_id_set = set(local_tracks.keys())
+    # Faixas que pertencem à playlist mas moram na pasta de um álbum (ver
+    # playlist_links.py) contam como já sincronizadas. Se saírem da playlist
+    # só o LINK é removido: o arquivo é do álbum e nunca é apagado aqui.
+    linked_ids = set(valid_links(target_folder)) - set(local_tracks)
+    local_id_set = set(local_tracks.keys()) | linked_ids
     remote_id_set = set(remote_ids.keys())
+    orphan_links = linked_ids - remote_id_set
 
     # # Faixas remotas ausentes precisam ser baixadas; IDs locais ausentes do remoto são órfãos.
     to_download_ids = remote_id_set - local_id_set
-    to_delete_ids = local_id_set - remote_id_set
+    to_delete_ids = set(local_tracks.keys()) - remote_id_set
     already_synced = local_id_set & remote_id_set
 
     logger.info(f"\n{CYAN}[3/4] Resumo da sincronização:{OFF}")
@@ -226,6 +233,8 @@ async def sync_playlist(qobuz_dl, url, folder, auto_confirm=False):
     logger.info(f"    Já sincronizadas: {len(already_synced)} faixas")
 
     if not to_download_ids and not to_delete_ids:
+        for _tid in orphan_links:
+            remove_link(target_folder, _tid)
         logger.info(f"\n{GREEN}✓ A pasta já está sincronizada com a playlist!{OFF}")
 
         if not getattr(qobuz_dl, "no_m3u_for_playlists", False):
@@ -353,6 +362,9 @@ async def sync_playlist(qobuz_dl, url, folder, auto_confirm=False):
             lrc_path = os.path.splitext(fpath)[0] + ".lrc"
             if os.path.isfile(lrc_path) and not _remove_orphan(lrc_path):
                 deletions_ok = False
+
+        for _tid in orphan_links:
+            remove_link(target_folder, _tid)
 
         _clean_empty_dirs(target_folder, exclude_dirs={"_Playlists"})
 

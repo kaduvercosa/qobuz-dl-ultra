@@ -70,6 +70,11 @@ class QobuzDLSettings:
         self.default_quality = kwargs.get("default_quality", 6)
         self.default_limit = kwargs.get("default_limit", 20)
         self.no_m3u = kwargs.get("no_m3u", False)
+        # Ao baixar um álbum/faixa, tira das playlists a cópia duplicada e
+        # deixa só a do álbum (a playlist aponta pra ela). Ver playlist_links.py.
+        self.playlist_dedupe = kwargs.get("playlist_dedupe", True)
+        # Raiz dos downloads; preenchida por QobuzDL.__init__.
+        self.library_root = kwargs.get("library_root")
         self.albums_only = kwargs.get("albums_only", False)
         self.no_fallback = kwargs.get("no_fallback", False)
         self.no_database = kwargs.get("no_database", False)

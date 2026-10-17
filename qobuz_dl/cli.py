@@ -1200,8 +1200,13 @@ async def _handle_commands(qobuz: QobuzDL, arguments):
         elif arguments.command in ("sync-playlist", "sp"):
             from qobuz_dl.sync_playlist import sync_playlist
 
+            from qobuz_dl.playlist_links import playlist_root
+
             await sync_playlist(
-                qobuz, arguments.URL, qobuz.directory, auto_confirm=arguments.yes
+                qobuz,
+                arguments.URL,
+                playlist_root(qobuz.directory),
+                auto_confirm=arguments.yes,
             )
         elif arguments.command in ("sync-favorites", "sf"):
             from qobuz_dl.library_cmd import cmd_sync_favorites
@@ -1986,6 +1991,11 @@ async def async_main():
     settings = QobuzDLSettings.from_arguments_configparser(arguments, config)
     settings.user_auth_token = token
     settings.legacy_charmap = legacy_charmap
+    # [qobuz] playlist_dedupe = false desliga a limpeza de faixas duplicadas
+    # entre playlist e álbum (padrão: ligada).
+    settings.playlist_dedupe = config.getboolean(
+        section, "playlist_dedupe", fallback=True
+    )
 
     formats_to_validate = {
         "folder_format": getattr(arguments, "folder_format", None) or folder_format,

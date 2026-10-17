@@ -88,53 +88,68 @@ def make_m3u(pl_directory, remote_items=None):
     pl_full_path = os.path.join(pl_directory, pl_name)
 
     # 1. Varre a pasta local e extrai as tags de cada arquivo de áudio.
-    local_files_info = []
+    def _read_info(f, audio_full_path):
+        # Lê as tags de UM arquivo (antes inline no loop do os.walk).
+        info = {
+            "path": audio_full_path,
+            "title": "",
+            "artist": "",
+            "isrc": "",
+            "qobuz_id": "",
+            "duration": 0,
+        }
+        try:
+            # Duração genérica via mutagen.File (funciona para
+            # qualquer formato suportado).
+            audio_gen = File(audio_full_path)
+            if audio_gen and audio_gen.info:
+                info["duration"] = int(audio_gen.info.length)
+
+            # Leitura das tags específicas de cada formato.
+            if audio_full_path.lower().endswith(".flac"):
+                audio = FLAC(audio_full_path)
+                info["qobuz_id"] = audio.get("QOBUZTRACKID", [None])[0]
+                info["isrc"] = audio.get("ISRC", [None])[0]
+                info["title"] = audio.get("TITLE", [""])[0]
+                info["artist"] = audio.get("ARTIST", [""])[0]
+            else:
+                audio = ID3(audio_full_path)
+                # Frames TXXX customizados precisam ser varridos
+                # manualmente (não têm chave direta como TIT2/TPE1).
+                for frame in audio.getall("TXXX"):
+                    if frame.desc.upper() == "QOBUZTRACKID":
+                        info["qobuz_id"] = frame.text[0]
+                        break
+                isrc_frame = audio.get("TSRC")
+                info["isrc"] = isrc_frame.text[0] if isrc_frame else None
+                tit2 = audio.get("TIT2")
+                info["title"] = tit2.text[0] if tit2 else ""
+                tpe1 = audio.get("TPE1")
+                info["artist"] = tpe1.text[0] if tpe1 else ""
+        except Exception as e:
+            logger.debug(f"Erro ao ler tags de {f}: {e}")
+            info["title"] = os.path.splitext(f)[0]  # título de fallback
+
+        return info
+
+    audio_paths = []
     for local, dirs, files in os.walk(pl_directory):
         dirs.sort()
         for f in files:
             if os.path.splitext(f)[-1].lower() in EXTENSIONS:
-                audio_full_path = os.path.abspath(os.path.join(local, f))
-                info = {
-                    "path": audio_full_path,
-                    "title": "",
-                    "artist": "",
-                    "isrc": "",
-                    "qobuz_id": "",
-                    "duration": 0,
-                }
-                try:
-                    # Duração genérica via mutagen.File (funciona para
-                    # qualquer formato suportado).
-                    audio_gen = File(audio_full_path)
-                    if audio_gen and audio_gen.info:
-                        info["duration"] = int(audio_gen.info.length)
+                audio_paths.append((f, os.path.abspath(os.path.join(local, f))))
 
-                    # Leitura das tags específicas de cada formato.
-                    if audio_full_path.lower().endswith(".flac"):
-                        audio = FLAC(audio_full_path)
-                        info["qobuz_id"] = audio.get("QOBUZTRACKID", [None])[0]
-                        info["isrc"] = audio.get("ISRC", [None])[0]
-                        info["title"] = audio.get("TITLE", [""])[0]
-                        info["artist"] = audio.get("ARTIST", [""])[0]
-                    else:
-                        audio = ID3(audio_full_path)
-                        # Frames TXXX customizados precisam ser varridos
-                        # manualmente (não têm chave direta como TIT2/TPE1).
-                        for frame in audio.getall("TXXX"):
-                            if frame.desc.upper() == "QOBUZTRACKID":
-                                info["qobuz_id"] = frame.text[0]
-                                break
-                        isrc_frame = audio.get("TSRC")
-                        info["isrc"] = isrc_frame.text[0] if isrc_frame else None
-                        tit2 = audio.get("TIT2")
-                        info["title"] = tit2.text[0] if tit2 else ""
-                        tpe1 = audio.get("TPE1")
-                        info["artist"] = tpe1.text[0] if tpe1 else ""
-                except Exception as e:
-                    logger.debug(f"Erro ao ler tags de {f}: {e}")
-                    info["title"] = os.path.splitext(f)[0]  # título de fallback
+    # Faixas que moram na pasta do álbum mas pertencem à playlist (ver
+    # playlist_links.py): entram no .m3u como se estivessem aqui.
+    from qobuz_dl.playlist_links import valid_links
 
-                local_files_info.append(info)
+    _seen = {p for _f, p in audio_paths}
+    for _tid, _p in valid_links(pl_directory).items():
+        if _p not in _seen:
+            _seen.add(_p)
+            audio_paths.append((os.path.basename(_p), os.path.abspath(_p)))
+
+    local_files_info = [_read_info(f, p) for f, p in audio_paths]
 
     ordered_files = []
 
@@ -894,6 +909,68 @@ def extrair_titulo_completo(texto: str) -> str:
     return texto
 
 
+# --------------------------------------------------------------------------
+# EDIÇÃO DO ÁLBUM (Deluxe x padrão etc.)
+#
+# A capa do Deluxe costuma ser outra, então a edição pedida TEM que ser a
+# mesma do candidato da Apple. Isso é conferido por CONJUNTO de palavras de
+# edição, e não por similaridade de texto (que deixa "Rare" casar com
+# "Rare (Deluxe)"). "Explicit"/"Clean" não mudam a capa: são neutros.
+# --------------------------------------------------------------------------
+_EDICOES_ALBUM = {
+    "deluxe": re.compile(r"\bdeluxe\b"),
+    "super": re.compile(r"\bsuper\b"),
+    "expanded": re.compile(r"\b(?:expanded|expandida)\b"),
+    "platinum": re.compile(r"\bplatinum\b"),
+    "collector": re.compile(r"\bcollectors?\b"),
+    "anniversary": re.compile(r"\b(?:anniversary|aniversario)\b"),
+    "tour": re.compile(r"\btour\b"),
+    "special": re.compile(r"\bspecial\b"),
+    "complete": re.compile(r"\bcomplete\b"),
+    "ultimate": re.compile(r"\bultimate\b"),
+    "remaster": re.compile(r"\bremaster(?:ed)?\b"),
+    "bonus": re.compile(r"\bbonus\b"),
+}
+_PALAVRAS_NEUTRAS_ALBUM = re.compile(r"\b(?:explicit|explicito|clean|edited|censored)\b")
+
+
+def edicao_album(texto: str) -> frozenset:
+    """Palavras de edição do ÁLBUM (deluxe, expanded, anniversary...)."""
+    base = extrair_titulo_completo(texto)
+    return frozenset(nome for nome, rx in _EDICOES_ALBUM.items() if rx.search(base))
+
+
+def titulo_album_comparavel(texto: str) -> str:
+    """Título de álbum para comparar por similaridade: sem Explicit/Clean e
+    sem parênteses repetidos ("Rare (Deluxe - Explicit) (Deluxe)" vira
+    "rare (deluxe)"). A edição em si é conferida em edicao_album()."""
+    t = _PALAVRAS_NEUTRAS_ALBUM.sub(" ", extrair_titulo_completo(texto))
+    t = re.sub(r"\(\s+", "(", t)
+    t = re.sub(r"\s+\)", ")", t)
+    t = re.sub(r"\(\s*\)", " ", t)
+    t = re.sub(r"\s+", " ", t).strip()
+    for _ in range(3):
+        novo = re.sub(r"(\([^()]*\))(?:\s*\1)+", r"\1", t)
+        if novo == t:
+            break
+        t = novo
+    return t
+
+
+def album_titulo_completo(album: dict) -> str:
+    """Título do álbum JUNTO com a versão ("Rare" + "Deluxe" -> "Rare (Deluxe)").
+
+    A Qobuz guarda título e versão em campos separados. Sem a versão, a busca
+    da capa na Apple procurava "Rare" e voltava a capa da edição padrão.
+    """
+    album = album or {}
+    titulo = (album.get("title") or "").strip()
+    versao = (album.get("version") or "").strip()
+    if versao and versao.casefold() not in titulo.casefold():
+        titulo = f"{titulo} ({versao})"
+    return titulo
+
+
 # Sufixos de edicao que NAO mudam a gravacao: so' dizem em qual edicao do
 # album a faixa aparece (a Apple escreve "Ressaca (Bonus Track)" no Deluxe;
 # a Qobuz guarda so' "Ressaca"). Ficam de fora de proposito: Remaster,
@@ -1120,7 +1197,8 @@ async def get_apple_hq_cover(
     q_artist = extrair_essencia(artist or "")
     q_album = extrair_essencia(album or "")
     q_track = extrair_essencia(track_title or "")
-    q_album_full = extrair_titulo_completo(album or "")
+    q_album_full = titulo_album_comparavel(album or "")
+    q_edition = edicao_album(album or "")
     # Titulo da faixa comparavel: sem "(Bonus Track)"/"(Deluxe)" e sem o
     # parenteses "(Ao Vivo)". Um album ao vivo implica faixa ao vivo mesmo
     # quando a Qobuz omite o sufixo no titulo da faixa.
@@ -1271,6 +1349,27 @@ async def get_apple_hq_cover(
             )
             closeness = sum(scores) / len(scores)
 
+            # --- Edição do álbum (Deluxe x padrão...): a capa muda de uma
+            # edição pra outra. O UPC identifica a release exata e fica de
+            # fora. O ISRC identifica a GRAVAÇÃO (que está em várias edições),
+            # então exige edição idêntica nos dois sentidos. Na busca textual,
+            # se o pedido tem edição (Deluxe...), o candidato tem que ser a
+            # mesma; pedido SEM edição continua aceitando a Deluxe quando a
+            # faixa só existe nela (ex.: Jão, "Ressaca (Bonus Track)"), com
+            # preferência pela edição idêntica.
+            if q_album and exact != "upc" and (exact == "isrc" or q_edition):
+                candidate_edition = edicao_album(candidate_album)
+                if candidate_edition != q_edition:
+                    reject(
+                        f"edição do álbum incompatível "
+                        f"(pedido={sorted(q_edition) or 'padrão'}, "
+                        f"Apple={sorted(candidate_edition) or 'padrão'}; "
+                        f"álbum Apple={candidate_album!r})",
+                        label,
+                        closeness,
+                    )
+                    continue
+
             # --- Lookup exato por UPC/ISRC: o identificador ja' diz que e' a
             # mesma release/gravacao, entao nao reprovamos por artista/titulo
             # (colaboracoes, "- Single", versao no titulo etc.).
@@ -1316,7 +1415,7 @@ async def get_apple_hq_cover(
                     score += (
                         0.05
                         * difflib.SequenceMatcher(
-                            None, q_album_full, extrair_titulo_completo(candidate_album)
+                            None, q_album_full, titulo_album_comparavel(candidate_album)
                         ).ratio()
                     )
                 if score > best_score or best_url is None:
@@ -1386,7 +1485,7 @@ async def get_apple_hq_cover(
                     album_full_score = difflib.SequenceMatcher(
                         None,
                         q_album_full,
-                        extrair_titulo_completo(candidate_album),
+                        titulo_album_comparavel(candidate_album),
                     ).ratio()
                     if album_full_score < thresholds["full_album"]:
                         reject(
@@ -1441,7 +1540,7 @@ async def get_apple_hq_cover(
             # vence. A validação da imagem (HEAD) fica para o melhor colocado.
             album_full_sim = (
                 difflib.SequenceMatcher(
-                    None, q_album_full, extrair_titulo_completo(candidate_album)
+                    None, q_album_full, titulo_album_comparavel(candidate_album)
                 ).ratio()
                 if q_album_full
                 else 1.0
@@ -1636,6 +1735,8 @@ async def get_apple_hq_cover(
                 continue
             if marcadores_versao(name) != requested_markers:
                 continue
+            if q_edition and edicao_album(name) != q_edition:
+                continue
             if release_kind in ("single", "full") and (
                 apple_release_kind(name) != release_kind
             ):
@@ -1643,7 +1744,7 @@ async def get_apple_hq_cover(
             if any(w in name.casefold() and w not in requested_text for w in junk):
                 continue
             similarity = difflib.SequenceMatcher(
-                None, q_album_full, extrair_titulo_completo(name)
+                None, q_album_full, titulo_album_comparavel(name)
             ).ratio()
             picks.append((-similarity, order, collection_id, name, result))
 
@@ -1748,6 +1849,8 @@ async def get_apple_hq_cover(
                 continue
             if marcadores_versao(candidate_album) != requested_album_markers:
                 continue
+            if q_edition and edicao_album(candidate_album) != q_edition:
+                continue
             if release_kind in ("single", "full") and (
                 apple_release_kind(candidate_album) != release_kind
             ):
@@ -1756,7 +1859,7 @@ async def get_apple_hq_cover(
             if any(w in lowered and w not in requested_text for w in album_junk):
                 continue
             similarity = difflib.SequenceMatcher(
-                None, q_album_full, extrair_titulo_completo(candidate_album)
+                None, q_album_full, titulo_album_comparavel(candidate_album)
             ).ratio()
             picks.append((-similarity, order, collection_id, candidate_album))
 

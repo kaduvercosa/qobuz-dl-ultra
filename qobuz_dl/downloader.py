@@ -13,7 +13,13 @@ from qobuz_dl.constants import (
     DEFAULT_MULTIPLE_DISC_TRACK,
 )
 from qobuz_dl.db import handle_download_id
+from qobuz_dl.playlist_links import (
+    absorb_playlist_copies,
+    scan_dest_folder,
+)
 from qobuz_dl.utils import (
+    album_titulo_completo,
+    classify_release_type,
     clean_filename,
     verify_audio_integrity,
     get_apple_hq_cover,
@@ -467,6 +473,45 @@ class Download:
                 await report_track(i, t_num, "pulada", "Apenas amostra/demo (30s)")
                 return "skipped"
 
+    async def _absorb_playlist_copies(self, dest_files=None, dest_dir=None, **reg):
+        """Álbum/faixa avulsa concluído: tira das playlists a cópia duplicada.
+
+        `dest_files`: {id da faixa: caminho do arquivo no álbum}; ou
+        `dest_dir`: pasta do álbum, varrida aqui (só se o recurso estiver
+        ligado). Nunca derruba o download (erro vira log de debug).
+        """
+        if getattr(self, "is_playlist", False):
+            return
+        cfg = getattr(self, "settings", None)
+        root = getattr(cfg, "library_root", None)
+        if not root or not getattr(cfg, "playlist_dedupe", True):
+            return
+        try:
+            if dest_files is None and dest_dir:
+                dest_files = await asyncio.to_thread(scan_dest_folder, dest_dir)
+            if not dest_files:
+                return
+            stats = await absorb_playlist_copies(
+                root,
+                self.download_db,
+                dest_files,
+                reg={"quality": self.quality, **reg},
+            )
+        except Exception as e:
+            logger.debug(f"Limpeza de duplicatas playlist/álbum falhou: {e}")
+            return
+        n = len(stats["absorbed"])
+        if n:
+            ui.ok(
+                f"{n} faixa(s) que estavam em playlist agora ficam só neste "
+                "álbum (a playlist aponta para elas)"
+            )
+        for kept in stats["kept"]:
+            ui.skip(
+                "Cópia da playlist mantida (qualidade maior que a do álbum): "
+                f"{os.path.basename(kept)}"
+            )
+
     async def download_release(self, suppress_header=False):
         """Download a full album/release with all tracks."""
         album_meta = await self.client.get_album_meta(self.item_id)
@@ -653,8 +698,11 @@ class Download:
                         album_meta,
                         fallback=album_meta.get("artist", {}).get("name", ""),
                     ),
-                    album=album_meta.get("title", ""),
+                    # Título + versão: "Rare" + "Deluxe" -> "Rare (Deluxe)".
+                    # Só o título buscava a capa da edição padrão.
+                    album=album_titulo_completo(album_meta),
                     upc=album_meta.get("upc", ""),
+                    release_kind=_apple_release_kind(album_meta),
                 )
 
             if "goodies" in album_meta:
@@ -857,6 +905,17 @@ class Download:
                     sampling_rate=sampling_rate,
                     saved_path=final_dirn,
                     url=url,
+                    release_date=release_date,
+                    artist=db_artist,
+                    album=db_album,
+                )
+
+                await self._absorb_playlist_copies(
+                    dest_dir=final_dirn,
+                    file_format=file_format,
+                    quality_met=quality_met,
+                    bit_depth=bit_depth,
+                    sampling_rate=sampling_rate,
                     release_date=release_date,
                     artist=db_artist,
                     album=db_album,
@@ -1131,9 +1190,12 @@ class Download:
                                 .get("artist", {})
                                 .get("name", ""),
                             ),
-                            album=track_meta.get("album", {}).get("title", ""),
+                            album=album_titulo_completo(track_meta.get("album", {})),
                             upc=track_meta.get("album", {}).get("upc", ""),
                             isrc=track_meta.get("isrc", ""),
+                            release_kind=_apple_release_kind(
+                                track_meta.get("album", {})
+                            ),
                             track_title=track_meta.get("title", ""),
                         )
 
@@ -1229,6 +1291,21 @@ class Download:
                 artist=db_artist,
                 album=db_album,
             )
+
+            # Faixa avulsa (não playlist): se ela também está numa playlist,
+            # fica só esta cópia (ver playlist_links.py).
+            _file = getattr(self, "last_downloaded_file", None)
+            if _file and os.path.isfile(_file):
+                await self._absorb_playlist_copies(
+                    dest_files={str(self.item_id): _file},
+                    file_format=file_format,
+                    quality_met=quality_met,
+                    bit_depth=bit_depth,
+                    sampling_rate=sampling_rate,
+                    release_date=release_date,
+                    artist=db_artist,
+                    album=db_album,
+                )
 
         is_batch_or_playlist = (
             getattr(self, "is_playlist", False)
@@ -2620,8 +2697,36 @@ _APPLE_HEADERS = {
 }
 
 
+def _apple_release_kind(album):
+    """'single' ou 'full' (EP/álbum/ao vivo/coletânea) do álbum Qobuz; None se
+    não der pra saber. Single só casa com "X - Single" da Apple e álbum/EP nunca
+    recebe a capa de um single."""
+    if not isinstance(album, dict) or not album:
+        return None
+    try:
+        tracks = (album.get("tracks") or {}).get("items") or []
+        kind = classify_release_type(
+            title=album.get("title"),
+            version=album.get("version"),
+            track_count=album.get("tracks_count") or len(tracks),
+            duration_seconds=album.get("duration"),
+            api_release_type=album.get("release_type") or album.get("product_type"),
+        )
+    except Exception:
+        return None
+    if not kind:
+        return None
+    return "single" if kind == "single" else "full"
+
+
 async def _try_apple_cover_bytes(
-    session, artist=None, album=None, upc=None, isrc=None, track_title=None
+    session,
+    artist=None,
+    album=None,
+    upc=None,
+    isrc=None,
+    track_title=None,
+    release_kind=None,
 ):
     """
     Tenta achar E baixar a capa da Apple, em cascata de resolucoes ate
@@ -2646,6 +2751,7 @@ async def _try_apple_cover_bytes(
             artist=artist,
             album=album,
             track_title=track_title,
+            release_kind=release_kind,
         )
     except Exception as e:
         logger.debug(f"Busca de capa na Apple falhou, indo pra Qobuz: {e}")
@@ -2705,6 +2811,7 @@ async def _get_cover_and_embed(
     upc=None,
     isrc=None,
     track_title=None,
+    release_kind=None,
 ):
     """
     Baixa a capa salva (cover.jpg) e a capa de embed.
@@ -2763,7 +2870,13 @@ async def _get_cover_and_embed(
     # tanto a versao salva quanto a de embed (nao ha' distincao de
     # "saved_art_size" vs "embedded_art_size" pra' capa da Apple).
     apple_bytes = await _try_apple_cover_bytes(
-        session, artist=artist, album=album, upc=upc, isrc=isrc, track_title=track_title
+        session,
+        artist=artist,
+        album=album,
+        upc=upc,
+        isrc=isrc,
+        track_title=track_title,
+        release_kind=release_kind,
     )
     if apple_bytes:
         if precisa_salva:

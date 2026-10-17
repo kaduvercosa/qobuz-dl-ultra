@@ -16,6 +16,11 @@ DEFAULT_FOLDER = (
     "{release_type}/{album_artist} - {album_title} ({year}) [{format} {bit_depth}]"
 )
 
+# Pasta-raiz das playlists dentro do diretório de downloads. Cada tipo de
+# lançamento já tem a sua (Album/, EP/, Single/ -- ver DEFAULT_FOLDER); as
+# playlists ficam em "Playlist/<nome da playlist>" em vez de soltas na raiz.
+PLAYLIST_FOLDER = "Playlist"
+
 # Formato padrao: so' numero + titulo. O artista nao e' repetido no
 # nome do arquivo porque ja' aparece no nivel da pasta (ALBUMARTIST).
 # Quem quiser o artista por faixa pode setar no config:
