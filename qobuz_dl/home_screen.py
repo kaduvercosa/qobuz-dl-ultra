@@ -272,23 +272,34 @@ def _painel_inicio(largura: int, st: _Estilo) -> list:
     return _painel("Início rápido", _com_separadores(blocos), largura, st)
 
 
-def _painel_flags(flags: list, largura: int, st: _Estilo) -> list:
+def _painel_flags(
+    flags: list,
+    largura: int,
+    st: _Estilo,
+    titulo: str = "Flags globais",
+    separadores: bool = False,
+) -> list:
+    """Painel de flags/opções. separadores=True: uma linha horizontal entre cada item."""
     interno = largura - 4
     w_op = max((_largura_visivel(f) for f, _ in flags), default=0) + 2
     lado_a_lado = w_op <= interno // 2
     if lado_a_lado:
-        linhas = []
+        blocos = []
         for flag, desc in flags:
+            bloco = []
             for i, p in enumerate(_quebrar(desc, interno - w_op)):
                 esq = st.dest(flag.ljust(w_op)) if i == 0 else " " * w_op
-                linhas.append(esq + p)
-        return _painel("Flags globais", linhas, largura, st)
+                bloco.append(esq + p)
+            blocos.append(bloco)
+        if separadores:
+            return _painel(titulo, _com_separadores(blocos), largura, st)
+        return _painel(titulo, [l for bloco in blocos for l in bloco], largura, st)
     blocos = []
     for flag, desc in flags:
         bloco = [st.dest(l) for l in _quebrar(flag, interno)]
         bloco += ["  " + st.mudo(l) for l in _quebrar(desc, interno - 2)]
         blocos.append(bloco)
-    return _painel("Flags globais", _com_separadores(blocos), largura, st)
+    return _painel(titulo, _com_separadores(blocos), largura, st)
 
 
 def _painel_dicas(largura: int, st: _Estilo) -> list:
@@ -409,6 +420,199 @@ def render_checks(
         paineis.append(_painel("Próximos passos", _com_separadores(blocos), caixa, st))
     if resumo:
         paineis.append(_painel("Resumo", _quebrar(resumo, interno), caixa, st))
+
+    linhas = []
+    for i, p in enumerate(paineis):
+        if i:
+            linhas.append("")
+        linhas += p
+    return "\n".join(margem + l if l else l for l in linhas)
+
+
+# Comandos que baixam (dl, interactive, lucky...) compartilham dezenas de opções.
+# Para a ajuda não virar uma lista única e embaralhada, elas saem em grupos, na
+# ordem em que costumam ser usadas: primeiro O QUE baixar, depois a qualidade,
+# onde salvar, capa, letras, tags. A chave é a opção longa (a primeira "--xxx").
+GRUPOS_DOWNLOAD = [
+    (
+        "Busca e seleção",
+        [
+            "--type",
+            "--number",
+            "--limit",
+            "--sort-date",
+            "--filter-label",
+            "--since",
+            "--before",
+            "--albums-only",
+            "--blacklist",
+            "--smart-discography",
+            "--playlist-as-albums",
+        ],
+    ),
+    (
+        "Qualidade e execução",
+        [
+            "--quality",
+            "--no-fallback",
+            "--verify-download",
+            "--dry-run",
+            "--tag-only",
+            "--no-db",
+            "--max-workers",
+            "--segment-workers",
+            "--delay",
+            "--progress-json",
+        ],
+    ),
+    (
+        "Pastas e nomes",
+        [
+            "--directory",
+            "--folder-format",
+            "--fallback-folder-format",
+            "--track-format",
+            "--multiple-disc-prefix",
+            "--multiple-disc-one-dir",
+            "--multiple-disc-track-format",
+            "--no-m3u",
+            "--no-sentinel",
+        ],
+    ),
+    (
+        "Capa",
+        [
+            "--embed-art",
+            "--og-cover",
+            "--no-cover",
+            "--embedded-art-size",
+            "--saved-art-size",
+        ],
+    ),
+    (
+        "Letras",
+        ["--no-lyrics", "--no-embed-lyrics", "--no-lrc-files", "--lyrics-word-sync"],
+    ),
+    (
+        "Tags e metadados",
+        [
+            "--multi-tags",
+            "--no-multi-tags",
+            "--musicbrainz",
+            "--native-lang",
+            "--no-*-tag",  # as demais --no-<campo>-tag, na ordem em que aparecem
+        ],
+    ),
+    ("Créditos e encarte", ["--no-credits", "--with-credits", "--booklet-only"]),
+]
+GRUPO_OUTRAS = "Outras"
+
+
+def _chave_opcao(flag: str) -> str:
+    """Opção longa de '-q, --quality int' -> '--quality' (ou a 1ª opção se não houver)."""
+    partes = [p.strip(",") for p in flag.replace("[", " ").split() if p.startswith("-")]
+    longas = [p for p in partes if p.startswith("--")]
+    return (longas or partes or [flag])[0]
+
+
+def agrupar_opcoes(opcoes) -> list:
+    """Divide as opções de um comando de download em grupos ordenados.
+
+    Devolve [(titulo, [(flag, descricao), ...]), ...]. Opções que não estão na
+    tabela (novas, ou -h) vão para "Outras opções", no fim: nada se perde.
+    """
+    por_chave = {}
+    for item in opcoes:
+        por_chave.setdefault(_chave_opcao(item[0]), []).append(item)
+    usadas = set()
+    grupos = []
+    for titulo, chaves in GRUPOS_DOWNLOAD:
+        itens = []
+        for chave in chaves:
+            if chave == "--no-*-tag":
+                for k, v in por_chave.items():
+                    if k.startswith("--no-") and k.endswith("-tag") and k not in usadas:
+                        itens += v
+                        usadas.add(k)
+            elif chave in por_chave and chave not in usadas:
+                itens += por_chave[chave]
+                usadas.add(chave)
+        if itens:
+            grupos.append((titulo, itens))
+    resto = [i for k, v in por_chave.items() if k not in usadas for i in v]
+    if resto:
+        grupos.append((GRUPO_OUTRAS, resto))
+    return grupos
+
+
+def _ajuda_por_ultimo(itens: list) -> list:
+    """Põe `-h, --help` no fim da lista (ele é só um lembrete, não uma opção de uso)."""
+    ajuda = [i for i in itens if _chave_opcao(i[0]) in ("--help", "-h")]
+    return [i for i in itens if i not in ajuda] + ajuda
+
+
+def render_ajuda_comando(
+    uso: str,
+    descricao: str,
+    grupos,
+    exemplo: str = "",
+    largura: int = None,
+    cor: bool = True,
+    destaque: str = "\033[36m",
+    mudo: str = "\033[2m",
+    reset: str = "\033[0m",
+    negrito: str = "\033[1m",
+) -> str:
+    """Ajuda de UM comando (`qobuz-dl <comando> -h`) nos mesmos painéis da tela inicial.
+
+    uso:      linha de uso completa, ex.: "qobuz-dl dl [opções] <URL_OU_ARQUIVO>".
+    grupos:   [(título, [(rótulo, descrição), ...]), ...] lidos do parser real,
+              na ordem do parser. Cada grupo vira um painel; "Chaves de formato"
+              e outros painéis extras do comando ficam no fim.
+    exemplo:  comando de exemplo (sem o prefixo "qobuz-dl "); vazio = sem exemplo.
+
+    O grupo genérico "Opções" dos comandos de download (`dl`, `interactive`,
+    `lucky`) tem dezenas de flags misturadas: ele é repartido por assunto, na
+    ordem em que se usa (busca → qualidade → pastas → letras → tags → créditos),
+    e o que não estiver na tabela cai em "Outras opções" (nada some). Os grupos
+    que o próprio parser define (capa, tags, discos...) mantêm o título dele.
+    """
+    if largura is None:
+        largura = shutil.get_terminal_size((100, 24)).columns
+    largura = max(LARGURA_MIN, largura)
+    caixa = min(largura, LARGURA_MAX)
+    margem = " " * ((largura - caixa) // 2)
+    st = _Estilo(cor, destaque, mudo, reset, negrito)
+    interno = caixa - 4
+
+    corpo = _quebrar(descricao, interno) if descricao else []
+    corpo_uso = [
+        (st.mudo("uso ".ljust(4)) if i == 0 else " " * 4) + l
+        for i, l in enumerate(_quebrar(uso, interno - 4))
+    ]
+    if exemplo:
+        corpo_uso += [
+            (st.neg("ex  ") if i == 0 else " " * 4) + l
+            for i, l in enumerate(_quebrar(f"{PROG} {exemplo}", interno - 4))
+        ]
+    linhas_uso = corpo + ([SEP] if corpo and corpo_uso else []) + corpo_uso
+    paineis = [_painel("Uso", linhas_uso, caixa, st)]
+
+    for titulo, itens in grupos:
+        itens = list(itens)
+        if not itens:
+            continue
+        if titulo == "Opções":
+            itens = _ajuda_por_ultimo(itens)
+            if any(_chave_opcao(f) == "--folder-format" for f, _ in itens):
+                for sub, parte in agrupar_opcoes(itens):
+                    paineis.append(
+                        _painel_flags(
+                            parte, caixa, st, f"{titulo} · {sub}", separadores=True
+                        )
+                    )
+                continue
+        paineis.append(_painel_flags(itens, caixa, st, titulo, separadores=True))
 
     linhas = []
     for i, p in enumerate(paineis):

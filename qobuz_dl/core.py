@@ -258,6 +258,11 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
     # Primeiro item visível no modo TABELA (guardado entre redesenhos pra
     # a rolagem ser estável, sem "pular" a cada tecla).
     view = {"top": 0}
+    # Linhas do cartão focado DEPOIS da linha do cursor (a borda superior): é
+    # quanto a janela precisa manter visível abaixo dele para o cartão não ser
+    # cortado. Cada cartão tem altura diferente (focado = mais linhas), então o
+    # valor é medido no desenho em vez de fixo.
+    card_state = {"below": 4}
 
     def get_header_text():
         # Desenha o título + (se a tela for larga o bastante) o cabeçalho
@@ -479,6 +484,7 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
             hovered = i == cursor_pos
             checked = i in selected_indices
 
+            hovered_start = len(res)
             if hovered:
                 res.append(("[SetCursorPosition]", ""))
 
@@ -964,6 +970,9 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
                 bot_r = "┛" if checked else "╯"
                 hz = "━" if checked else "─"
                 res.append((border_st, f" {bot_l}{hz * (inner_w + 2)}{bot_r}\n"))
+                if hovered:
+                    card_lines = sum(t.count("\n") for _, t in res[hovered_start:])
+                    card_state["below"] = max(0, card_lines - 1)
             else:
                 empty_prefix = " " * len(prefix)
                 edge = borders["bot"] if i == visible[-1] else borders["mid"]
@@ -993,7 +1002,6 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
         res = []
 
         compact_mobile = columns <= 72
-        ultra_narrow = columns <= 48
         if options_dicts:
             if compact_mobile and is_multi:
                 # Contador curto e estável em telas estreitas.
@@ -1008,35 +1016,36 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
                     ("class:meta", f" Item {cursor_pos + 1} de {len(options_dicts)}\n")
                 )
 
+        # Atalhos: escolhe a MAIOR versão que cabe na largura (do mais completo ao
+        # mais curto), em vez de limiares fixos que cortavam o texto em ~50 colunas.
         if is_multi:
             if not compact_mobile:
                 res.append(
                     ("class:checkbox", f" * Selecionados: {len(selected_indices)}\n")
                 )
-            if ultra_narrow:
-                footer_msg = " [↑↓]Mover [Esp]Marcar [t]Todos [↵]OK"
-            else:
-                footer_msg = (
-                    " [↑↓/jk] Mover [Espaço] Marcar [t] Todos [Enter] OK"
-                    if compact_mobile
-                    else " [↑↓/jk] Mover   [Espaço] Selecionar   [t] Todos   [1-9] Ir para   [Enter] Confirmar"
-                )
+            variants = (
+                " [↑↓/jk] Mover   [Espaço] Selecionar   [t] Todos   [1-9] Ir para   [Enter] Confirmar",
+                " [↑↓/jk] Mover [Espaço] Marcar [t] Todos [Enter] OK",
+                " [↑↓]Mover [Esp]Marcar [t]Todos [↵]OK",
+                " ↑↓ Esp t ↵",
+            )
         elif item_category == "artist":
-            footer_msg = (
-                " [↑↓]Mover [↵]Abrir"
-                if ultra_narrow
-                else " [↑↓/jk] Mover [Enter] Abrir"
-                if compact_mobile
-                else " [↑↓/jk] Mover   [1-9] Ir para   [Enter] Abrir artista"
+            variants = (
+                " [↑↓/jk] Mover   [1-9] Ir para   [Enter] Abrir artista",
+                " [↑↓/jk] Mover [Enter] Abrir",
+                " [↑↓]Mover [↵]Abrir",
+                " ↑↓ ↵",
             )
         else:
-            footer_msg = (
-                " [↑↓]Mover [↵]OK"
-                if ultra_narrow
-                else " [↑↓/jk] Mover [Enter] OK"
-                if compact_mobile
-                else " [↑↓/jk] Mover   [1-9] Ir para   [Enter] Confirmar"
+            variants = (
+                " [↑↓/jk] Mover   [1-9] Ir para   [Enter] Confirmar",
+                " [↑↓/jk] Mover [Enter] OK",
+                " [↑↓]Mover [↵]OK",
+                " ↑↓ ↵",
             )
+        footer_msg = next(
+            (v for v in variants if get_cwidth(v) <= columns - 1), variants[-1]
+        )
 
         if get_cwidth(footer_msg) > columns:
             trunc_msg = ""
@@ -1074,7 +1083,7 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
             # evita que o item focado encoste no rodapé e fique visualmente
             # cortado quando a janela do terminal é baixa.
             top=lambda: 0 if _table_is_active() else 1,
-            bottom=lambda: 0 if _table_is_active() else 4,
+            bottom=lambda: 0 if _table_is_active() else card_state["below"],
         ),
         wrap_lines=False,
     )
@@ -1105,10 +1114,20 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
         height=Dimension.exact(1),
     )
 
+    def _footer_height() -> Dimension:
+        # No celular (<= 72 colunas) o rodapé multi tem só 2 linhas (contador e
+        # atalhos; "Selecionados" já está no contador): reservar 3 desperdiçava
+        # uma linha da lista.
+        try:
+            columns = get_app().output.get_size().columns
+        except Exception:
+            columns, _ = shutil.get_terminal_size((80, 24))
+        return Dimension.exact(2 if columns <= 72 else _FOOTER_LINES)
+
     footer_window = Window(
         content=FormattedTextControl(text=get_footer_text),
         dont_extend_height=True,
-        height=Dimension.exact(_FOOTER_LINES),
+        height=_footer_height,
     )
 
     # Alguns terminais móveis (incluindo a-Shell com a barra de atalhos aberta)

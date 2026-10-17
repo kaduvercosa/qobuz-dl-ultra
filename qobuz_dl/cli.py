@@ -1269,14 +1269,14 @@ def _print_logo(cols: int):
         pad1 = " " * max((cols - art_width) // 2, 0)
         pad2 = " " * max((cols - len(line2[0])) // 2, 0)
         for row in line1:
-            ui.emit(f"{CYAN}{pad1}{row}{OFF}")
+            ui.emit_always(f"{CYAN}{pad1}{row}{OFF}")
         for row in line2:
-            ui.emit(f"{CYAN}{pad2}{row}{OFF}")
+            ui.emit_always(f"{CYAN}{pad2}{row}{OFF}")
     else:
         line_short = _render_logo_word("QDL")
         pad_short = " " * max((cols - len(line_short[0])) // 2, 0)
         for row in line_short:
-            ui.emit(f"{CYAN}{pad_short}{row}{OFF}")
+            ui.emit_always(f"{CYAN}{pad_short}{row}{OFF}")
 
 
 def _extract_subcommands(parser: argparse.ArgumentParser):
@@ -1318,7 +1318,7 @@ _COMMAND_DESCRIPTIONS_PT = {
     "interactive": "Busca interativa: procura faixas/álbuns e escolhe o que baixar na hora.",
     "lucky": "Baixa os N primeiros resultados de uma busca no Qobuz, sem passar URL.",
     "lyrics": "Varre uma pasta já baixada e injeta letras/traduções que estejam faltando.",
-    "tags": "Varre uma pasta já baixada, regrava/corrige as tags de metadados (com ou sem multi-tags) e troca a capa pela da Apple/iTunes quando validada. Escolha: --tags-only (só tags), --covers-only (só capas) ou o padrão (os dois). Use --dry-run para simular e --undo para desfazer.",
+    "tags": "Varre uma pasta já baixada, regrava/corrige as tags de metadados (com ou sem multi-tags) e troca a capa pela da Apple/iTunes quando validada. Escolha: --tags-only (só tags), --covers-only (só capas) ou o padrão (os dois). Use --dry-run para simular, --undo para desfazer, --resume/--incremental em bibliotecas grandes e --report para um relatório da pasta.",
     "sync-playlist": "Sincroniza uma pasta local com uma playlist do Qobuz (baixa o que falta, remove o que saiu).",
     "sync-favorites": "Sincroniza os favoritos da conta com o catálogo local (novos/removidos) e baixa o que falta.",
     "scan": "Casa sua pasta de música com o catálogo (tag de ID, UPC, nome, fuzzy) e grava sentinelas.",
@@ -1346,11 +1346,11 @@ def _print_welcome_screen():
     from qobuz_dl.home_screen import render_home
 
     cols = ui.width()
-    ui.blank()
+    ui.emit_always("")
     _print_logo(cols)
     version_line = f"v{__version__}"
     pad_version = " " * max((cols - len(version_line)) // 2, 0)
-    ui.emit(f"{RESET}{pad_version}{version_line}\n")
+    ui.emit_always(f"{RESET}{pad_version}{version_line}\n")
     parser = qobuz_dl_args()
 
     comandos = []
@@ -1377,7 +1377,7 @@ def _print_welcome_screen():
         flags.append((flag_str, _FLAG_DESCRIPTIONS_PT.get(dest, help_text or "")))
 
     negrito = ui.c("\033[1m")
-    ui.emit(
+    ui.emit_always(
         render_home(
             comandos,
             flags,
@@ -1389,7 +1389,27 @@ def _print_welcome_screen():
             negrito=negrito,
         )
     )
-    ui.blank()
+    ui.emit_always("")
+
+
+def _print_command_help(argv: list) -> bool:
+    """`qobuz-dl <comando> -h` em painéis. False se não achou o comando (usa o argparse).
+
+    A tela é montada por `ColoredArgumentParser.print_help` a partir do parser
+    real, então um comando ou flag novo aparece sozinho.
+    """
+    parser = qobuz_dl_args()
+    sub_action = next(
+        (a for a in parser._actions if isinstance(a, argparse._SubParsersAction)),
+        None,
+    )
+    command = next((a for a in argv if not a.startswith("-")), None)
+    if sub_action is None or command not in sub_action.choices:
+        return False
+    ui.emit_always("")
+    sub_action.choices[command].print_help()
+    ui.emit_always("")
+    return True
 
 
 async def _initial_checks():
@@ -1397,11 +1417,30 @@ async def _initial_checks():
         os.makedirs(CONFIG_PATH, exist_ok=True)
         if "-r" not in sys.argv and "--reset" not in sys.argv:
             await _reset_config(CONFIG_FILE)
-    # `qobuz-dl` e `qobuz-dl -h` mostram os painéis; `qobuz-dl <comando> -h`
-    # continua com a ajuda completa do argparse.
-    if len(sys.argv) < 2 or sys.argv[1:] in (["-h"], ["--help"]):
+    # Ajuda em painéis, onde quer que -h/--help apareça na linha de comando:
+    # sem comando (`qobuz-dl -h`, `qobuz-dl -v --help`, `--log-level debug -h`)
+    # mostra a tela geral; com comando (`qobuz-dl tags -h`) mostra a do comando.
+    if len(sys.argv) < 2:
         _print_welcome_screen()
         sys.exit(0)
+    if any(arg in ("-h", "--help") for arg in sys.argv[1:]):
+        command = _find_command(sys.argv[1:])
+        if command is None:
+            _print_welcome_screen()
+            sys.exit(0)
+        if _print_command_help([command]):
+            sys.exit(0)
+
+
+def _find_command(argv: list):
+    """Primeiro argumento que é o nome (ou apelido) de um subcomando; None se não há."""
+    parser = qobuz_dl_args()
+    sub_action = next(
+        (a for a in parser._actions if isinstance(a, argparse._SubParsersAction)),
+        None,
+    )
+    names = set(sub_action.choices) if sub_action is not None else set()
+    return next((arg for arg in argv if arg in names), None)
 
 
 def check_for_updates():

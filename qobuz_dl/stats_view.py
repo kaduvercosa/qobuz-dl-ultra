@@ -114,7 +114,7 @@ def render_stats(db_path, show_all_artists=False):
                 ui.emit(f"      {gauge} {count}")
             else:
                 name = ui.truncate(artist, name_col)
-                ui.emit(f"  {rank:>2}. {name:<{name_col}} {gauge} {count}")
+                ui.emit(f"  {rank:>2}. {ui.pad_cells(name, name_col)} {gauge} {count}")
         ui.blank()
 
     # --- Lista completa de artistas ---

@@ -32,22 +32,22 @@ __Pesquise, explore e baixe músicas Lossless e Hi-Res do [Qobuz](https://www.qo
 
 ### 🎧 Mecanismo Audiófilo e de Metadados
 * **Otimizado para Roon e DAP:** Metadados, capas e letras são meticulosamente formatados para garantir integração perfeita e imediata com servidores Roon e Tocadores de Áudio Digital (DAPs).
-* **Tagging Direto de URL do Álbum:** Gera e incorpora automaticamente um link clicável direto `QOBUZ ALBUM URL` nos metadados da faixa (Vorbis Comments para FLAC, quadro `TXXX` para MP3). Isso permite o acesso com um clique à página original do álbum no Qobuz diretamente de editores de tags como o Mp3tag ou reprodutores audiófilos compatíveis. Você pode opcionalmente desativar essa tag não padrão usando a flag `-—no-album-url-tag` (ou `no_album_url_tag = true` no arquivo de configuração).
-* **Letras Sincronizadas Prontas para o Roon:** O mecanismo formata e incorpora inteligentemente dados `.lrc` com marcação de tempo diretamente nos arquivos de áudio (Vorbis Comments `[LYRICS]`), garantindo que o Roon exiba nativamente letras roláveis em estilo karaokê na visualização “Tocando Agora” (Now Playing). Se você preferir uma estrutura de pastas minimalista e organizada, pode desativar totalmente a geração de arquivos `.lrc` externos via CLI (`-—no-lrc-files`). Por outro lado, se preferir arquivos externos sem inflar os metadados do áudio, use a nova flag `-—no-embed-lyrics` (ou defina `embed_lyrics = false` na configuração). A fonte **BiniLyrics** (letras estilo Apple Music, escolhidas pelo ISRC da faixa) já entra na busca automaticamente; use `-—lyrics-word-sync` (ou `lyrics_word_sync = true`) no config.ini para gravar a sincronização por palavra quando ela existir — a maioria dos players só entende por linha.
+* **Tagging Direto de URL do Álbum:** Gera e incorpora automaticamente um link clicável direto `QOBUZ ALBUM URL` nos metadados da faixa (Vorbis Comments para FLAC, quadro `TXXX` para MP3). Isso permite o acesso com um clique à página original do álbum no Qobuz diretamente de editores de tags como o Mp3tag ou reprodutores audiófilos compatíveis. Você pode opcionalmente desativar essa tag não padrão usando a flag `--no-album-url-tag` (ou `no_album_url_tag = true` no arquivo de configuração).
+* **Letras Sincronizadas Prontas para o Roon:** O mecanismo formata e incorpora inteligentemente dados `.lrc` com marcação de tempo diretamente nos arquivos de áudio (Vorbis Comments `[LYRICS]`), garantindo que o Roon exiba nativamente letras roláveis em estilo karaokê na visualização “Tocando Agora” (Now Playing). Se você preferir uma estrutura de pastas minimalista e organizada, pode desativar totalmente a geração de arquivos `.lrc` externos via CLI (`--no-lrc-files`). Por outro lado, se preferir arquivos externos sem inflar os metadados do áudio, use a nova flag `--no-embed-lyrics` (ou defina `embed_lyrics = false` na configuração). A fonte **BiniLyrics** (letras estilo Apple Music, escolhidas pelo ISRC da faixa) já entra na busca automaticamente; use `--lyrics-word-sync` (ou `lyrics_word_sync = true`) no config.ini para gravar a sincronização por palavra quando ela existir — a maioria dos players só entende por linha.
 * **Controle Amplo de Tags:** O mecanismo de tags reformulado suporta metadados altamente detalhados de música clássica. Quase todas as tags podem ser ativadas/desativadas via argumentos de linha de comando (CLI).
 * **Tradução Inteligente de Gêneros:** Traduz automaticamente gêneros persistentes em francês (ex.: *Électronique*, *Bande Originale*) para o inglês padrão, garantindo que sua biblioteca permaneça consistente e pesquisável.
-* **Tagging Nativo Multi-Artista / Multi-Valor e Análise Profunda de Intérpretes:** Detecta e separa automaticamente artistas principais, participações especiais e extrai *todos* os compositores/letristas de strings de metadados complexas do Qobuz. Com a nova flag CLI `-—multi-tags`, o mecanismo divide inteligentemente metadados separados por vírgula em tags multi-valor discretas para FLAC (Vorbis Comments) e MP3 (ID3v2.4), garantindo interpretação impecável da biblioteca por players avançados como Roon, MusicBee ou Plexamp.
+* **Tagging Nativo Multi-Artista / Multi-Valor e Análise Profunda de Intérpretes:** Detecta e separa automaticamente artistas principais, participações especiais e extrai *todos* os compositores/letristas de strings de metadados complexas do Qobuz. Com a nova flag CLI `--multi-tags`, o mecanismo divide inteligentemente metadados separados por vírgula em tags multi-valor discretas para FLAC (Vorbis Comments) e MP3 (ID3v2.4), garantindo interpretação impecável da biblioteca por players avançados como Roon, MusicBee ou Plexamp.
 * **Suporte Nativo a ReplayGain:** Extrai e incorpora automaticamente as tags `REPLAYGAIN_TRACK_GAIN` e `REPLAYGAIN_TRACK_PEAK` diretamente dos dados ocultos da API do Qobuz. Isso garante nivelamento de volume perfeito e não destrutivo de fábrica para tocadores de áudio digital (DAPs) de alta fidelidade e servidores audiófilos como o Roon.
 * **Mecanismo Automático de Letras e Tagger Retroativo:** Busca e injeta letras sincronizadas (`.lrc`) e não sincronizadas usando o LRCLIB (com fallback para a API do Genius). Inclui o comando dedicado `lyrics` para escanear retroativamente e injetar letras ausentes em sua biblioteca local existente sem precisar baixar novamente o áudio.
-* **Encartes Digitais Aprimorados (Digital Booklets):** Compila automaticamente um arquivo `.txt` formatado com lista de faixas completa, duração, créditos detalhados, metadados e resenhas. Ao concluir, o mecanismo varre a pasta, remove as marcações de tempo dos arquivos `.lrc` e anexa as letras em texto puro de todo o álbum diretamente no encarte. “Goodies” oficiais em PDF também são baixados junto. **Agora você pode usar a flag `-—booklet-only` para baixar exclusivamente esses arquivos de metadados, capas e PDFs, ignorando graciosamente todas as faixas de áudio pesadas.**
+* **Encartes Digitais Aprimorados (Digital Booklets):** Compila automaticamente um arquivo `.txt` formatado com lista de faixas completa, duração, créditos detalhados, metadados e resenhas. Ao concluir, o mecanismo varre a pasta, remove as marcações de tempo dos arquivos `.lrc` e anexa as letras em texto puro de todo o álbum diretamente no encarte. “Goodies” oficiais em PDF também são baixados junto. **Agora você pode usar a flag `--booklet-only` para baixar exclusivamente esses arquivos de metadados, capas e PDFs, ignorando graciosamente todas as faixas de áudio pesadas.**
 * **Correção do Campo de Compositor:** Extrai meticulosamente cada compositor individual da string completa de intérpretes, acabando com o problema de metadados de compositores truncados ou “aleatórios”.
 * **Formatação Inteligente de Datas:** Padroniza as datas de lançamento em entradas únicas e limpas, evitando conflitos de tags duplicadas de ano/data em softwares de reprodução.
-* **Modo Bit-Perfect & Purista:** Desative completamente as tags de volume ReplayGain e Peak usando a flag CLI `-—no-replaygain-tag` (ou `no_replaygain_tag = true` no config.ini). Isso garante que seus arquivos de áudio permaneçam estritamente bit-perfect e intocados por quaisquer instruções de nivelamento de volume via software, ideal para DACs de alta fidelidade e DAPs dedicados.
+* **Modo Bit-Perfect & Purista:** Desative completamente as tags de volume ReplayGain e Peak usando a flag CLI `--no-replaygain-tag` (ou `no_replaygain_tag = true` no config.ini). Isso garante que seus arquivos de áudio permaneçam estritamente bit-perfect e intocados por quaisquer instruções de nivelamento de volume via software, ideal para DACs de alta fidelidade e DAPs dedicados.
 
 ### 🚀 Mecanismo de Download Resiliente
 
 * **Fila À Prova de Falhas:** Tratamento avançado de exceções no nível da faixa. Se uma única faixa estiver bloqueada geograficamente ou ausente nos servidores (erro 404), o mecanismo a pula normalmente e continua baixando o restante do seu álbum ou playlist sem travar.
-* **Recuperação e Sincronização de Banco de Dados:** Inclui um mecanismo especializado `-—sync-db` para restaurar entradas ausentes em seu banco de dados local escaneando suas pastas de música existentes.
+* **Recuperação e Sincronização de Banco de Dados:** Inclui um mecanismo especializado `--sync-db` para restaurar entradas ausentes em seu banco de dados local escaneando suas pastas de música existentes.
 * **Sincronização Bidirecional de Playlists (`sync-playlist`):** Um poderoso mecanismo de espelhamento para playlists dinâmicas. Mantenha suas pastas locais perfeitamente sincronizadas com as alterações online (baixando novas faixas e excluindo de forma limpa as que foram removidas). **A v2.0.1 introduz a Lógica Inteligente de Pastas (Smart Folder Logic):** ao usar `-d .` ou caminhos genéricos, ele cria automaticamente uma subpasta com o nome da playlist, evitando a exclusão acidental de arquivos no seu diretório raiz.
 * **Tabela Profissional de Faixas Ausentes:** Se o mecanismo de sincronização detectar faixas na sua playlist online que estejam ausentes no seu disco local, ele gera uma tabela ASCII limpa e colorida com Título, Artista e ID para fácil acompanhamento.
 * **Busca Reversa Inteligente (Reverse Lookup):** Identifica automaticamente arquivos antigos lendo suas tags **ISRC** ou **UPC** e consultando a API do Qobuz para restaurar os IDs corretos no banco de dados.
@@ -78,7 +78,7 @@ O Qobuz-DL Ultra permite profunda personalização da estrutura da sua bibliotec
 -  **`.m3u` Inteligente Baseado na API:** A ordem de reprodução é garantida por um arquivo `.m3u` gerado dinamicamente que espelha com perfeição a sequência exata ditada pelos servidores do Qobuz, independentemente dos nomes físicos dos arquivos.
 -  **Gerenciamento Inteligente de Capas:** Elimina o bug de “Conflito de Capas”. O mecanismo gerencia dinamicamente as artes incorporadas, garantindo que cada faixa receba sua capa exclusiva correta sem deixar arquivos `cover.jpg` duplicados na pasta.
 -  **Capas em Alta Resolução da Apple/iTunes:** Antes de usar a capa do Qobuz, o programa procura a mesma capa na Apple/iTunes (até 10000×10000 px). A busca começa pelo **UPC** do álbum e pelo **ISRC** da faixa (identificadores exatos) e só depois cai para a busca por texto, que exige artista, álbum e título compatíveis. Colaborações são reconhecidas (um álbum de `Cardi B` casa com `Cardi B & Bruno Mars` na Apple), e resultados de karaokê, tributo, instrumental, edições ao vivo ou deluxe diferentes do que você baixou são recusados: sem certeza, a capa do Qobuz é mantida. Se a versão maior passar de 16 MB, o programa desce em cascata (6000, 3000, 1200 e 600 px).
--  **Substituição de Modo de Álbum (`-—playlist-as-albums`):** *Novo recurso.* Se você usa playlists para buscar músicas específicas, essa flag ignora completamente a lógica de Pasta Plana. O mecanismo vai “explodir” a playlist, direcionando cada faixa para sua respectiva pasta de álbum original usando o seu `folder_format` padrão, mantendo os números de faixa originais e baixando a capa específica de cada álbum.
+-  **Substituição de Modo de Álbum (`--playlist-as-albums`):** *Novo recurso.* Se você usa playlists para buscar músicas específicas, essa flag ignora completamente a lógica de Pasta Plana. O mecanismo vai “explodir” a playlist, direcionando cada faixa para sua respectiva pasta de álbum original usando o seu `folder_format` padrão, mantendo os números de faixa originais e baixando a capa específica de cada álbum.
 -  **Variáveis Poderosas:** `folder_format` e `track_format` agora suportam dezenas de novas variáveis (ex.: `{isrc}`, `{barcode}`, `{label}`, `{track_composer}`).
 *  **Tipo de Lançamento (`{release_type}`):** Identifica automaticamente a categoria de publicação a partir das APIs do Qobuz (ex.: `Album`, `EP`, `Single`), permitindo que você encaminhe dinamicamente downloads para subdiretórios ou use como prefixo de nomenclatura sem impor uma estrutura fixa.
 
@@ -162,7 +162,7 @@ A Edição Ultimate é totalmente conteinerizada e inclui as dependências (Pyth
 docker pull ghcr.io/kaduvercosa/qobuz-dl-ultra:latest
 
 # Exemplo: Executar um download e mapeá-lo para a pasta de músicas do seu NAS
-docker run -it —rm \
+docker run -it --rm \
   -v /caminho/para/suas/musicas/no/nas:/home/qobuz/QobuzDownloads \
   -v /caminho/para/config:/home/qobuz/.config/qobuz-dl \
   ghcr.io/kaduvercosa/qobuz-dl-ultra:latest dl “https://play.qobuz.com/album/...”
@@ -216,25 +216,24 @@ Como o Qobuz bloqueou logins diretos por senha para aplicativos de terceiros, vo
 4. Na barra lateral esquerda, expanda **Local Storage** (Armazenamento Local) e clique em `https://play.qobuz.com`.
 5. Na lista de chaves, procure por **`localuser`**.
 6. Na parte inferior do painel (ou expandindo o valor JSON), localize a string **`token`**.
-7. Abra o terminal e force o assistente de login executando `qobuz-dl -r` (ou `—reset`). Quando o prompt aparecer, selecione o método Auth Token e cole sua sequência alfanumérica!
+7. Abra o terminal e force o assistente de login executando `qobuz-dl -r` (ou `--reset`). Quando o prompt aparecer, selecione o método Auth Token e cole sua sequência alfanumérica!
 
 ## 💻 Uso e Exemplos Rápidos
 
-```text
-[Comandos Globais e Gerenciamento de Banco de Dados]
-usage: python -m qobuz_dl [-h] [-r] [-p] [—sync-db [PATH]] [-sc] {interactive,i,fun,dl,lucky,lyrics,sync-playlist,sp,stats} ...
+**Ajuda no terminal.** `qobuz-dl` (sem argumentos) e `qobuz-dl -h` abrem a tela inicial, com os comandos, as flags globais e um início rápido. Para um comando específico use `qobuz-dl <comando> -h` (por exemplo `qobuz-dl dl -h`): a ajuda vem nos mesmos painéis da tela inicial — **Uso** (com um exemplo pronto),  
 
-[Uso de Download]
-usage: python -m qobuz_dl dl [-h] [-d PATH] [-q int] [—albums-only] [—no-m3u] [—no-fallback] [—no-db] 
-                             [-ff PATTERN] [-tf PATTERN] [-s] [-e] [—no-cover]
-                             [-b PATH]
-                             [—embedded-art-size {50,100,150,300,600,max,org}] 
-                             [—saved-art-size {50,100,150,300,600,max,org}] 
-                             [—multiple-disc-prefix PREFIX] [—multiple-disc-one-dir] 
-                             [—no-lyrics] [—no-lrc-files] [—native-lang] [—no-credits] [—with-credits] [—booklet-only] [—delay SECONDS] [—playlist-as-albums]
-                             [—no-album-artist-tag] [—no-track-composer-tag] ... 
-                             SOURCE [SOURCE ...]
+**Argumentos** e **Opções**. Nos comandos de download (`dl`, `interactive`, `lucky`) as opções vêm separadas por assunto, na ordem em que você as usa (busca → qualidade → pastas e nomes → letras → tags → créditos, depois capa, discos e saída), e cada opção fica separada da seguinte por uma linha horizontal. A ajuda do `dl`/`interactive` termina com um painel  
+
+**Chaves de formato** que lista as variáveis aceitas por `-ff`, `-fbff` e `-tf`. O layout se adapta à tela: com 96 colunas ou mais as opções ficam em duas colunas; em telas estreitas (celular, a-Shell no iPad em pé) viram cartões empilhados e nenhuma linha passa da largura. Sem cores quando a saída não é um terminal (por exemplo `> ajuda.txt`).
+
+```text
+qobuz-dl dl [opções] <URL_OU_ARQUIVO>
+qobuz-dl lucky [opções] <BUSCA>
+qobuz-dl tags [opções] [PASTA]
+qobuz-dl scan [opções] [PASTA]
+qobuz-dl <comando> -h        # ajuda completa do comando
 ```
+
 
 **Sincronização Bidirecional de Playlist:**
 *(Dica: Adicione `-y` para ignorar os avisos de confirmação. A flag `-d` opera com segurança, criando automaticamente uma subpasta para a playlist).*
@@ -247,12 +246,12 @@ python -m qobuz_dl sp “URL” -d “C:\Caminho\Para\Pasta\Local\Da\Playlist”
 Por padrão, as playlists são baixadas em uma única pasta plana. Use esta flag se você usa playlists como uma “ferramenta de descoberta” e deseja que o mecanismo encaminhe dinamicamente cada faixa para sua respectiva pasta de álbum original, com sua arte de capa específica e metadados originais da faixa.
 
 ```
-python -m qobuz_dl dl “URL_DA_PLAYLIST” -—playlist-as-albums
+python -m qobuz_dl dl “URL_DA_PLAYLIST” --playlist-as-albums
 ```
 
 **Download em Massa / Lote (Retomada Inteligente):**
 Tem uma lista enorme de lançamentos para baixar? Crie um arquivo de texto comum (ex.: `list.txt`), cole suas URLs do Qobuz **e do Last.fm** nele (uma por linha) e passe-o para o mecanismo. O analisador inteligente baixará automaticamente seus links do Qobuz e roteará perfeitamente as playlists do Last.fm pelo mecanismo de Fuzzy Matching para processar toda a sua fila de uma só vez!
-*Recurso da Edição Ultimate:* O arquivo de texto atua como um banco de dados vivo. Assim que um lançamento ou playlist completa é baixado com sucesso, o mecanismo anexa uma tag `[DONE]` ao lado da URL no arquivo. Se sua conexão cair ou você interromper o processo (`CTRL+C`), basta executar exatamente o mesmo comando novamente e o mecanismo pulará instantaneamente os links concluídos, retomando perfeitamente de onde parou.
+*Recurso da Edição Ultra:* O arquivo de texto atua como um banco de dados vivo. Assim que um lançamento ou playlist completa é baixado com sucesso, o mecanismo anexa uma tag `[DONE]` ao lado da URL no arquivo. Se sua conexão cair ou você interromper o processo (`CTRL+C`), basta executar exatamente o mesmo comando novamente e o mecanismo pulará instantaneamente os links concluídos, retomando perfeitamente de onde parou.
 
 ```
 python -m qobuz_dl dl list.txt
@@ -270,21 +269,21 @@ python -m qobuz_dl dl https://play.qobuz.com/artist/123456 -b blacklist.txt
 Embora o mecanismo mascare nativamente sua pegada digital (Stealth Spoofing) para simular um navegador Chrome real, baixar 100 faixas em 10 segundos ainda é fisicamente impossível para um ser humano e pode acionar banimentos baseados em volume. Use este comando para grandes discografias para desativar o multithreading e adicionar um intervalo forçado entre as faixas, garantindo a máxima segurança para sua conta.
 
 ```
-python -m qobuz_dl dl <URL> —delay 1
+python -m qobuz_dl dl <URL> --delay 1
 ```
 
 **Forçar Encartes e Créditos (Substituição de Configuração):**
 Se você definiu `no_credits = true` no seu `config.ini` para manter suas pastas limpas, pode substituir temporariamente esse comportamento para forçar a geração do Encarte Digital e do Tracklist.txt para uma obra-prima específica.
 
 ```
-python -m qobuz_dl dl <URL> -—with-credits
+python -m qobuz_dl dl <URL> --with-credits
 ```
 
 **Análise de Múltiplas Tags e Intérpretes:**
-Use a flag `-—multi-tags` para garantir que faixas complexas com múltiplos artistas e compositores sejam divididas em campos limpos e individuais nas tags de áudio.
+Use a flag `--multi-tags` para garantir que faixas complexas com múltiplos artistas e compositores sejam divididas em campos limpos e individuais nas tags de áudio.
 
 ```
-python -m qobuz_dl dl “URL” -—multi-tags
+python -m qobuz_dl dl “URL” --multi-tags
 ```
 
 **Artistas com vírgula no nome:** nomes como `Tyler, The Creator` ou `Earth, Wind & Fire` são reconhecidos e **não** são divididos em dois artistas (nem com `--multi-tags`). Há uma lista embutida e, além dela, qualquer artista que a API do Qobuz entregue como entrada estruturada com vírgula no nome é protegido automaticamente. Para incluir outros, adicione na seção `[qobuz]` do `config.ini` (separados por `;`):
@@ -297,21 +296,21 @@ artists_with_comma = Tyler, The Creator; Earth, Wind & Fire
 Quer completar os metadados da sua biblioteca sem baixar gigabytes de áudio? Este comando busca apenas a arte da capa, gera o encarte com lista de faixas/créditos, baixa os Goodies em PDF oficiais e ignora com segurança todas as faixas de áudio.
 
 ```
-python -m qobuz_dl dl https://play.qobuz.com/album/qxjbxh1dc3xyb -—booklet-only
+python -m qobuz_dl dl https://play.qobuz.com/album/qxjbxh1dc3xyb --booklet-only
 ```
 
 **Modo de Pasta Minimalista (Sem arquivos .lrc externos):**
 Baixa o álbum e injeta as letras sincronizadas exclusivamente nos metadados do FLAC/MP3, mantendo suas pastas completamente limpas de arquivos de texto externos.
 
 ```
-python -m qobuz_dl dl https://play.qobuz.com/album/qxjbxh1dc3xyb -—no-lrc-files
+python -m qobuz_dl dl https://play.qobuz.com/album/qxjbxh1dc3xyb --no-lrc-files
 ```
 
 **Roteamento Avançado de Discografia:**
 Salve múltiplos discos de um lançamento em uma única pasta em vez de dividi-los.
 
 ```
-python -m qobuz_dl dl https://play.qobuz.com/artist/2038380 -—multiple-disc-one-dir
+python -m qobuz_dl dl https://play.qobuz.com/artist/2038380 --multiple-disc-one-dir
 ```
 
 **Modo Interativo Last.fm (Modo Fun):**
@@ -324,19 +323,19 @@ python -m qobuz_dl fun -l 10
 Baixe uma faixa mantendo o arquivo estritamente bit-perfect, sem gravar quaisquer tags de nivelamento de volume (útil para DSPs e DAPs de hardware).
 
 ```
-python -m qobuz_dl dl “URL” -—no-replaygain-tag
+python -m qobuz_dl dl “URL” --no-replaygain-tag
 ```
 
 ### 🗄️ Gerenciamento de Banco de Dados e Biblioteca
 A Edição Ultra inclui poderosos gerenciadores de biblioteca local para acompanhar seus downloads, evitar duplicatas e corrigir seus metadados retroativamente.
 
-* **Sincronização Inteligente de Biblioteca (`-—sync-db`):**
+* **Sincronização Inteligente de Biblioteca (`--sync-db`):**
   Já possui uma biblioteca local de FLACs baixados? Não precisa começar do zero. Execute este comando para realizar uma *Busca Reversa* no seu diretório de downloads. O mecanismo escaneará seus arquivos existentes e os injetará automaticamente no banco de dados local para evitar downloads duplicados no futuro.
 
   ```
-  python -m qobuz_dl -—sync-db
+  python -m qobuz_dl --sync-db
   ```
-  *(Nota: Você também pode especificar um caminho personalizado para escanear, ex.: `-—sync-db “/caminho/para/suas/musicas”`)*
+  *(Nota: Você também pode especificar um caminho personalizado para escanear, ex.: `--sync-db “/caminho/para/suas/musicas”`)*
 
 * **Sincronização Dinâmica de Playlists (`sync-playlist` / `sp`):**
   Playlists são entidades vivas. Em vez de baixar novamente uma playlist inteira toda vez que o autor adiciona uma nova música, aponte este comando para a sua pasta existente. Ele escaneará as tags locais, consultará a API do Qobuz e calculará o delta exato: baixando apenas as faixas ausentes, excluindo de forma limpa as removidas (junto com seus respectivos arquivos `.lrc`) e regenerando a ordem no `.m3u`.
@@ -420,11 +419,11 @@ A Edição Ultra inclui poderosos gerenciadores de biblioteca local para acompan
 
   **Capa da Apple: regras extras.** A capa da Apple só substitui a atual se for maior *e* quadrada (tolerância de 3%); capas retangulares são mantidas e aparecem no resumo como `mantida (a da Apple não é quadrada)`. Se a capa nova passar do limite de 16 MB de um bloco FLAC, ela é recomprimida com o Pillow ou, se o Pillow não estiver disponível (como no a-Shell), com o `ffmpeg`.
 
-* **Limpar Banco de Dados (`-p`, `—purge`):**
+* **Limpar Banco de Dados (`-p`, `--purge`):**
   Se você precisar recomeçar do zero, limpar seu histórico de downloads ou corrigir um estado corrompido, pode apagar instantaneamente o banco de dados local com um único comando.
 
   ```bash
-  python -m qobuz_dl —purge
+  python -m qobuz_dl --purge
   ```
 
 * **Estatísticas do Usuário (`stats`):**
@@ -440,29 +439,29 @@ Inspirado no libsync, agora existe um catálogo local (`library.db`, ao lado do 
 
 ```bash
 qobuz-dl sync-favorites                  # mostra o diff (novos/removidos) e atualiza o catálogo
-qobuz-dl sync-favorites —download-new   # baixa o que foi favoritado desde a última vez
-qobuz-dl sync-favorites —download-missing —limit 20 -y
-qobuz-dl sync-favorites —download-new —every 60   # modo contínuo (NAS/servidor)
-qobuz-dl sync-favorites —dry-run        # só simula
+qobuz-dl sync-favorites --download-new   # baixa o que foi favoritado desde a última vez
+qobuz-dl sync-favorites --download-missing --limit 20 -y
+qobuz-dl sync-favorites --download-new --every 60   # modo contínuo (NAS/servidor)
+qobuz-dl sync-favorites --dry-run        # só simula
 
 qobuz-dl scan “/musica”                  # casa pastas do disco com o catálogo (offline)
-qobuz-dl scan —dry-run —json rel.json  # classifica sem gravar e salva o relatório
+qobuz-dl scan --dry-run --json rel.json  # classifica sem gravar e salva o relatório
 
 qobuz-dl library                         # status do catálogo
 qobuz-dl library missing                 # favoritos ainda não baixados
 qobuz-dl library history                 # últimas sincronizações
-qobuz-dl library reconcile [DIR] [—fix] # sentinelas do disco ⇄ catálogo
+qobuz-dl library reconcile [PASTA] [--fix] # sentinelas do disco ⇄ catálogo
 qobuz-dl library reset-stuck             # destrava álbuns presos após um CTRL+C
 qobuz-dl library unmark <ID>             # desmarca um álbum (e remove a sentinela)
 
-qobuz-dl doctor [—json]                 # diagnóstico: ambiente, config, keyring, bancos
+qobuz-dl doctor [--json]                 # diagnóstico: ambiente, config, keyring, bancos
 ```
 
-**Primeira vez com uma biblioteca grande:** rode `sync-favorites` (sem download) e depois `scan`, para marcar o que você já tem antes de usar `—download-missing`.
+**Primeira vez com uma biblioteca grande:** rode `sync-favorites` (sem download) e depois `scan`, para marcar o que você já tem antes de usar `--download-missing`.
 
-**Como o scan decide.** Ordem: tag `QOBUZALBUMID` → UPC (`BARCODE`) → nome exato normalizado → fuzzy. Só marca sozinho quando o match é único e a profundidade de bits e o número de faixas batem; qualquer dúvida (2 candidatos, faixas faltando, pasta `[INCOMPLETE]`, fuzzy) vai para revisão manual. Álbuns multi-disco (`CD 01`, `CD 02`) contam como um só. Pastas com tag de ID que não estão nos favoritos são *adotadas* (`—no-adopt` desativa).
+**Como o scan decide.** Ordem: tag `QOBUZALBUMID` → UPC (`BARCODE`) → nome exato normalizado → fuzzy. Só marca sozinho quando o match é único e a profundidade de bits e o número de faixas batem; qualquer dúvida (2 candidatos, faixas faltando, pasta `[INCOMPLETE]`, fuzzy) vai para revisão manual. Álbuns multi-disco (`CD 01`, `CD 02`) contam como um só. Pastas com tag de ID que não estão nos favoritos são *adotadas* (`--no-adopt` desativa).
 
-**Sentinela.** Cada álbum baixado recebe um `.streamrip.json` (mesmo formato do libsync) com serviço, ID e faixas. Serve para reconstruir o estado após perder o banco e detectar pastas movidas. Desative com `—no-sentinel` ou `write_sentinel = false` no `config.ini` (útil em montagens somente-leitura).
+**Sentinela.** Cada álbum baixado recebe um `.streamrip.json` (mesmo formato do libsync) com serviço, ID e faixas. Serve para reconstruir o estado após perder o banco e detectar pastas movidas. Desative com `--no-sentinel` ou `write_sentinel = false` no `config.ini` (útil em montagens somente-leitura).
 
 ### 🛠️ Principais Variáveis de Formatação
 
@@ -534,7 +533,7 @@ Selecione **`yes`** se estiver em um ambiente de servidor ou NAS. Isso ignora o 
 
 ### 🩺 Verificação manual de integridade de áudio
 
-A verificação de integridade por decodificação real pode ser ativada em cada download com `—verify-download` (ou `verify_after_download = true` no `config.ini`). O utilitário manual não é instalado pelo pacote nem incluído na imagem Docker; a partir de um checkout do código-fonte, rode:
+A verificação de integridade por decodificação real pode ser ativada em cada download com `--verify-download` (ou `verify_after_download = true` no `config.ini`). O utilitário manual não é instalado pelo pacote nem incluído na imagem Docker; a partir de um checkout do código-fonte, rode:
 
 ```bash
 python check_audio.py

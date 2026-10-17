@@ -44,7 +44,9 @@ class TestCLIBasicCommands:
             sys.argv = original_argv
 
         captured = capsys.readouterr()
-        assert "usage:" in captured.out.lower() or "uso:" in captured.out.lower()
+        # A ajuda agora é em painéis: o título do primeiro painel é "Uso" (sem ":").
+        saida = captured.out.lower()
+        assert "usage:" in saida or "uso:" in saida or "╭─ uso" in saida
 
     @patch("qobuz_dl.qopy.Client.create", new_callable=AsyncMock)
     @patch("qobuz_dl.cli._initial_checks")

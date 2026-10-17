@@ -6,11 +6,8 @@
 
 import argparse
 import os
-import re
 import shutil
 
-from qobuz_dl.color import BG
-from qobuz_dl.color import INFO as CYAN
 from qobuz_dl.color import RESET as OFF
 
 
@@ -42,44 +39,135 @@ class ColoredArgumentParser(argparse.ArgumentParser):
         super().__init__(*args, **kwargs)
 
     def print_help(self, file=None):
-        """Print help message with Portuguese translations and color highlighting."""
+        """Imprime a ajuda em painéis (mesmo estilo da tela inicial)."""
         if file is None:
             import sys
 
             file = sys.stdout
+        try:
+            texto = self._ajuda_em_paineis()
+        except Exception:
+            # Rede de segurança: nunca deixar `-h` quebrar por causa do visual.
+            texto = self._ajuda_argparse()
+        file.write(texto.lstrip("\n") + "\n")
 
-        help_text = self.format_help()
+    # Ajuda em painéis ------------------------------------------------------
+    def _ajuda_em_paineis(self):
+        from qobuz_dl import ui
+        from qobuz_dl.color import HIGHLIGHT, MUTED
+        from qobuz_dl.home_screen import EXEMPLOS, render_ajuda_comando
 
-        help_text = help_text.replace(
-            "positional arguments:", "argumentos posicionais:"
+        formatter = self._get_formatter()
+        traducao = {
+            "positional arguments": "Argumentos",
+            "options": "Opções",
+            "optional arguments": "Opções",
+        }
+        grupos = []
+        for grupo in self._action_groups:
+            itens = []
+            for acao in grupo._group_actions:
+                if acao.help is argparse.SUPPRESS:
+                    continue
+                if isinstance(acao, argparse._SubParsersAction):
+                    for sub in acao._choices_actions:
+                        nomes = [
+                            n
+                            for n, sp in acao.choices.items()
+                            if sp is acao.choices[sub.dest] and n != sub.dest
+                        ]
+                        rotulo = sub.dest + (f" ({', '.join(nomes)})" if nomes else "")
+                        itens.append((rotulo, sub.help or ""))
+                    continue
+                if acao.option_strings:
+                    rotulo = ", ".join(acao.option_strings)
+                    if acao.nargs != 0:
+                        meta = formatter._format_args(
+                            acao, formatter._get_default_metavar_for_optional(acao)
+                        )
+                        rotulo += f" {meta}"
+                else:
+                    rotulo = formatter._format_args(
+                        acao, formatter._get_default_metavar_for_positional(acao)
+                    )
+                try:
+                    texto = formatter._expand_help(acao) if acao.help else ""
+                except Exception:
+                    texto = acao.help or ""
+                texto = texto.replace(
+                    "show this help message and exit",
+                    "mostra esta mensagem de ajuda e sai",
+                )
+                itens.append((rotulo, texto))
+            titulo = traducao.get(grupo.title or "", grupo.title or "Opções")
+            grupos.append((titulo[:1].upper() + titulo[1:], itens))
+        grupos += list(getattr(self, "paineis_extras", ()))
+
+        uso = " ".join(self.format_usage().split())
+        for prefixo in ("usage:", "Uso:"):
+            if uso.startswith(prefixo):
+                uso = uso[len(prefixo) :].strip()
+        nome = self.prog.split()[-1]
+        exemplo = (self.epilog or "").strip() or EXEMPLOS.get(nome, ("", ""))[1]
+        negrito = ui.c("\033[1m")
+        return render_ajuda_comando(
+            uso,
+            self.description or "",
+            grupos,
+            exemplo=exemplo,
+            largura=ui.width(max_width=10_000, min_width=24),
+            cor=bool(negrito),
+            destaque=HIGHLIGHT,
+            mudo=MUTED,
+            reset=OFF,
+            negrito=negrito,
         )
+
+    def _ajuda_argparse(self):
+        """Ajuda antiga (texto corrido do argparse, traduzida e colorida)."""
+        help_text = self.format_help()
+        help_text = help_text.replace("positional arguments:", "argumentos posicionais:")
         help_text = help_text.replace("options:", "opções gerais:")
         help_text = help_text.replace("optional arguments:", "opções:")
         help_text = help_text.replace(
             "show this help message and exit", "mostra esta mensagem de ajuda e sai"
         )
         help_text = help_text.replace("usage:", "Uso:")
+        for titulo, itens in getattr(self, "paineis_extras", ()):
+            help_text += f"\n{titulo}:\n"
+            for rotulo, texto in itens:
+                help_text += f"  {rotulo}: {texto}\n"
+        return help_text
 
-        help_text = re.sub(
-            r"^([\w][\w\s]*:)$", f"\n{CYAN}{BG}\\1{OFF}", help_text, flags=re.MULTILINE
-        )
 
-        def colorize_responsive(match):
-            """Apply color to command-line flags in help text."""
-            spaces = match.group(1)
-            flag_title = match.group(2)
-            explanation = match.group(3)
-            return f"{spaces}{CYAN}{flag_title}{OFF}{explanation}"
-
-        help_text = re.sub(
-            r"^(\s+)(-[^\n]{2,}?)( {2,}.*|)$",
-            colorize_responsive,
-            help_text,
-            flags=re.MULTILINE,
-        )
-
-        help_text = help_text.lstrip("\n")
-        file.write(help_text)
+# ----------------------------------------------------------------------------
+# Chaves dos padrões de nome (-ff, -fbff, -tf): aparecem num painel próprio no
+# fim da ajuda, em vez de lotar a descrição de cada opção.
+# ----------------------------------------------------------------------------
+CHAVES_PASTA = (
+    "album_id, album_url, album_title, album_title_base, album_artist, "
+    "album_genre, album_composer, label, copyright, upc, barcode, "
+    "release_date, year, release_type, media_type, format, bit_depth, "
+    "sampling_rate, album_version, disc_count, track_count"
+)
+CHAVES_FAIXA = (
+    "album_title, album_title_base, album_artist, track_id, track_artist, "
+    "track_composer, track_number, isrc, bit_depth, sampling_rate, "
+    "track_title, track_title_base, version, year, disc_number, release_date"
+)
+NOTA_RELEASE_TYPE = (
+    "release_type (Album/EP/Single/Compilation/Live) é calculado com correção "
+    "de heurística e é o que o padrão usa; media_type vem cru da API da Qobuz "
+    "e pode divergir em alguns lançamentos -- prefira release_type."
+)
+PAINEL_CHAVES = (
+    "Chaves de formato",
+    [
+        ("Pasta (-ff, -fbff)", CHAVES_PASTA),
+        ("Faixa (-tf)", CHAVES_FAIXA),
+        ("Nota", NOTA_RELEASE_TYPE),
+    ],
+)
 
 
 # ----------------------------------------------------------------------------
@@ -108,7 +196,7 @@ def fun_args(subparsers, default_limit):
     interactive.add_argument(
         "-l",
         "--limit",
-        metavar="int",
+        metavar="N",
         default=default_limit,
         help=f"limite de resultados da pesquisa (padrão: {default_limit})",
     )
@@ -122,6 +210,7 @@ def fun_args(subparsers, default_limit):
     )
     interactive.add_argument(
         "--filter-label",
+        metavar="GRAVADORA",
         type=str,
         default=None,
         help="Baixa só lançamentos desta gravadora (nome, ID numérico ou URL da gravadora no Qobuz)",
@@ -136,25 +225,26 @@ def lucky_args(subparsers):
     """Define the 'lucky' subcommand and its arguments."""
     lucky = subparsers.add_parser(
         "lucky",
-        usage="qobuz-dl lucky [opções] <QUERY>",
+        usage="qobuz-dl lucky [opções] <BUSCA>",
         description="Baixa os primeiros <n> resultados retornados de uma pesquisa no Qobuz.",
         help="modo de download por busca automática",
     )
     lucky.add_argument(
         "-t",
         "--type",
+        metavar="TIPO",
         default="album",
         help="tipo de item a pesquisar (artist, album, track, playlist) (padrão: album)",
     )
     lucky.add_argument(
         "-n",
         "--number",
-        metavar="int",
+        metavar="N",
         type=int,
         default=1,
         help="número de resultados para baixar (padrão: 1)",
     )
-    lucky.add_argument("QUERY", nargs="+", help="termo de busca")
+    lucky.add_argument("QUERY", metavar="BUSCA", nargs="+", help="termo de busca")
     return lucky
 
 
@@ -165,25 +255,27 @@ def dl_args(subparsers):
     """Define the 'dl' subcommand and its arguments."""
     download = subparsers.add_parser(
         "dl",
-        usage="qobuz-dl dl [opções] <SOURCE>",
+        usage="qobuz-dl dl [opções] <URL_OU_ARQUIVO>",
         description="Baixa por URL de álbum, faixa, artista, gravadora ou playlist do Qobuz, ou um arquivo de texto com uma lista dessas URLs.",
         help="modo de download direto",
     )
     download.add_argument(
         "SOURCE",
-        metavar="SOURCE",
+        metavar="URL_OU_ARQUIVO",
         nargs="+",
         help=("uma ou mais URLs (separadas por espaço) ou um arquivo de texto"),
     )
     download.add_argument(
         "-b",
         "--blacklist",
+        metavar="ARQUIVO",
         help="Caminho para um arquivo de texto contendo palavras-chave para ignorar (blacklist)",
         type=str,
         default=None,
     )
     download.add_argument(
         "--filter-label",
+        metavar="GRAVADORA",
         type=str,
         default=None,
         help="Baixa só lançamentos desta gravadora (nome, ID numérico ou URL da gravadora no Qobuz)",
@@ -196,14 +288,14 @@ def dl_args(subparsers):
     )
     download.add_argument(
         "--since",
-        metavar="DATE",
+        metavar="DATA",
         type=str,
         default=None,
         help="Baixa apenas lançamentos a partir desta data (YYYY-MM-DD ou YYYY).",
     )
     download.add_argument(
         "--before",
-        metavar="DATE",
+        metavar="DATA",
         type=str,
         default=None,
         help="Baixa apenas lançamentos anteriores a esta data (YYYY-MM-DD ou YYYY).",
@@ -272,13 +364,13 @@ def lyrics_args(subparsers, default_folder=None):
     """Define the 'lyrics' subcommand and its arguments."""
     lyrics = subparsers.add_parser(
         "lyrics",
-        usage="qobuz-dl lyrics [opções] [DIR]",
+        usage="qobuz-dl lyrics [opções] [PASTA]",
         description="Escaneia retroativamente um diretório e injeta letras ou traduções ausentes nos arquivos de áudio.",
         help="modo de injeção retroativa de letras",
     )
     lyrics.add_argument(
         "DIR",
-        metavar="DIRECTORY",
+        metavar="PASTA",
         nargs="?",
         default=None,
         help=f'O diretório local contendo os arquivos a serem escaneados (padrão: "{default_folder}")',
@@ -293,7 +385,7 @@ def tags_args(subparsers, default_folder=None):
     """Define the 'tags' subcommand (retroactive metadata tag correction)."""
     tags = subparsers.add_parser(
         "tags",
-        usage="qobuz-dl tags [opções] [DIR]",
+        usage="qobuz-dl tags [opções] [PASTA]",
         description=(
             "Escaneia retroativamente um diretório e regrava as tags de metadados "
             "(artista, álbum, compositor, gênero, data, faixa/disco, IDs...) dos "
@@ -309,7 +401,7 @@ def tags_args(subparsers, default_folder=None):
     )
     tags.add_argument(
         "DIR",
-        metavar="DIRECTORY",
+        metavar="PASTA",
         nargs="?",
         default=None,
         help=f'O diretório local contendo os arquivos a serem corrigidos (padrão: a pasta do config.ini, atualmente "{default_folder}")',
@@ -486,7 +578,7 @@ def import_playlist_args(subparsers):
     ip = subparsers.add_parser(
         "import-playlist",
         aliases=["ip"],
-        usage="qobuz-dl import-playlist [opções] <SOURCE>",
+        usage="qobuz-dl import-playlist [opções] <URL_OU_ARQUIVO>",
         description=(
             "Importa uma playlist de qualquer plataforma via URL ou arquivo exportado "
             "(TXT, CSV, JSON) e baixa/copia as faixas correspondentes do Qobuz.\n\n"
@@ -502,6 +594,7 @@ def import_playlist_args(subparsers):
     )
     ip.add_argument(
         "SOURCE",
+        metavar="URL_OU_ARQUIVO",
         help=(
             "URL de playlist (Spotify, Deezer, Apple Music) "
             "ou caminho para arquivo exportado (.txt, .csv, .json)."
@@ -510,6 +603,7 @@ def import_playlist_args(subparsers):
     ip.add_argument(
         "--name",
         "-n",
+        metavar="NOME",
         type=str,
         default=None,
         help="Nome da pasta local onde as faixas serão salvas (padrão: nome do arquivo).",
@@ -569,10 +663,11 @@ def add_output_args(parser, suppress=False):
 # ----------------------------------------------------------------------------
 def add_common_arg(custom_parser, default_folder, default_quality):
     """Add common download arguments (quality, directory, formats, tags, etc.) to a subcommand parser."""
+    custom_parser.paineis_extras = [PAINEL_CHAVES]
     custom_parser.add_argument(
         "-d",
         "--directory",
-        metavar="PATH",
+        metavar="PASTA",
         default=default_folder,
         help=f'diretório para os downloads (padrão: "{default_folder}")',
     )
@@ -586,7 +681,7 @@ def add_common_arg(custom_parser, default_folder, default_quality):
     custom_parser.add_argument(
         "-q",
         "--quality",
-        metavar="int",
+        metavar="QUALIDADE",
         type=int,
         default=default_quality,
         choices=[5, 6, 7, 27],
@@ -616,34 +711,28 @@ def add_common_arg(custom_parser, default_folder, default_quality):
     custom_parser.add_argument(
         "-ff",
         "--folder-format",
-        metavar="PATTERN",
-        help="""padrão para formatar nomes de pastas, ex:
-        "{album_artist} - {album_title} ({year}) {{{barcode}}}". chaves disponíveis:
-        album_id, album_url, album_title, album_title_base, album_artist, album_genre,
-        album_composer, label, copyright, upc, barcode, release_date, year, release_type,
-        media_type, format, bit_depth, sampling_rate, album_version, disc_count, track_count.
-        Nota: release_type (Album/EP/Single/Compilation/Live) é calculado com correção de
-        heurística e é o que o padrão usa; media_type vem cru da API da Qobuz e pode
-        divergir em alguns lançamentos -- prefira release_type. Você pode usar '/' para
-        criar subdiretórios.""",
+        metavar="PADRÃO",
+        help=(
+            'padrão para formatar nomes de pastas, ex: "{album_artist} - '
+            '{album_title} ({year}) {{{barcode}}}". Use "/" para criar '
+            "subpastas. As chaves disponíveis estão no fim desta ajuda."
+        ),
     )
     custom_parser.add_argument(
         "-fbff",
         "--fallback-folder-format",
-        metavar="PATTERN",
+        metavar="PADRÃO",
         help="""padrão alternativo (fallback) para pastas quando o formato principal falhar.""",
     )
     custom_parser.add_argument(
         "-tf",
         "--track-format",
-        metavar="PATTERN",
-        help="""padrão para formatar nomes das faixas. ex:
-        "{track_number} - {track_title}"
-        chaves disponíveis:
-        album_title, album_title_base, album_artist, track_id, track_artist, track_composer,
-        track_number, isrc, bit_depth, sampling_rate, track_title, track_title_base
-        version, year, disc_number, release_date.
-        Não pode conter caracteres bloqueados pelo sistema operativo.""",
+        metavar="PADRÃO",
+        help=(
+            'padrão para formatar nomes das faixas, ex: "{track_number} - '
+            '{track_title}". Não pode conter caracteres bloqueados pelo '
+            "sistema operacional. As chaves disponíveis estão no fim desta ajuda."
+        ),
     )
     custom_parser.add_argument(
         "-s",
@@ -673,6 +762,7 @@ def add_common_arg(custom_parser, default_folder, default_quality):
     )
     custom_parser.add_argument(
         "--delay",
+        metavar="SEGUNDOS",
         type=int,
         default=0,
         help="Aguarda uma quantidade específica de segundos entre o download das faixas.",
@@ -862,7 +952,7 @@ def add_common_arg(custom_parser, default_folder, default_quality):
     multiple_disc_group.add_argument(
         "--multiple-disc-prefix",
         default=None,
-        metavar="PREFIX",
+        metavar="PREFIXO",
         help="Define o prefixo para álbuns com múltiplos discos (padrão: CD, ou o valor do config.ini)",
     )
     multiple_disc_group.add_argument(
@@ -872,7 +962,7 @@ def add_common_arg(custom_parser, default_folder, default_quality):
     )
     multiple_disc_group.add_argument(
         "--multiple-disc-track-format",
-        metavar="FORMAT",
+        metavar="FORMATO",
         help="formato da faixa para lançamentos com múltiplos discos",
     )
 
@@ -1014,7 +1104,7 @@ def scan_args(subparsers):
     scan = subparsers.add_parser(
         "scan",
         aliases=["library-scan"],
-        usage="qobuz-dl scan [opções] [DIR]",
+        usage="qobuz-dl scan [opções] [PASTA]",
         description=(
             "Varre uma pasta de música e casa cada álbum com o catálogo local "
             "(por tag QOBUZALBUMID, UPC, nome e fuzzy), marcando como baixado o "
@@ -1024,6 +1114,7 @@ def scan_args(subparsers):
     )
     scan.add_argument(
         "DIR",
+        metavar="PASTA",
         nargs="?",
         default=None,
         help="pasta a varrer (padrão: diretório de downloads)",
@@ -1118,6 +1209,7 @@ def library_args(subparsers):
     )
     lib.add_argument(
         "TARGET",
+        metavar="ALVO",
         nargs="?",
         default=None,
         help="pasta (reconcile) ou ID do álbum (unmark)",
@@ -1186,14 +1278,14 @@ def qobuz_dl_args(default_quality=6, default_limit=20, default_folder=None):
     )
     parser.add_argument(
         "--sync-db",
-        metavar="PATH",
+        metavar="PASTA",
         nargs="?",
         const="DEFAULT",
         help="escaneia um diretório local para restaurar IDs ausentes do Qobuz no banco de dados",
     )
     parser.add_argument(
         "--find-duplicates",
-        metavar="PATH",
+        metavar="PASTA",
         nargs="?",
         const="DEFAULT",
         help=(
@@ -1203,7 +1295,7 @@ def qobuz_dl_args(default_quality=6, default_limit=20, default_folder=None):
     )
     parser.add_argument(
         "--watch",
-        metavar="PATH",
+        metavar="PASTA",
         nargs="?",
         const="DEFAULT",
         help=(

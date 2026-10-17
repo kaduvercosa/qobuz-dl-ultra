@@ -452,14 +452,14 @@ def banner(title, cols=None):
     n = cols if cols is not None else width()
     bar = heavy_bar_char() * n
     emit(f"\n{c(HIGHLIGHT)}{bar}{c(RESET)}")
-    emit(f"{c(BG)}{c(HIGHLIGHT)}{title.center(n)}{c(RESET)}")
+    emit(f"{c(BG)}{c(HIGHLIGHT)}{center_cells(title, n)}{c(RESET)}")
     emit(f"{c(HIGHLIGHT)}{bar}{c(RESET)}\n")
 
 
 def section(title):
     # Subtítulo de bloco dentro de um relatório maior.
     """Print a section header."""
-    emit(f"  {c(BG)}{title}{c(RESET)}")
+    emit(f"  {c(BG)}{truncate(title, max(1, width() - 2))}{c(RESET)}")
 
 
 def kv(label, value, label_width=30, narrow_stack=False):
@@ -628,6 +628,24 @@ def truncate(text, limit):
             break
         result += char
     return result + "..."
+
+
+def pad_cells(text, cols):
+    """Completa ``text`` com espaços à direita até ``cols`` células de terminal.
+
+    ``str.ljust``/``f"{x:<n}"`` contam caracteres, não células: emoji e
+    caracteres CJK ocupam 2 células e a linha passava da largura da tela.
+    """
+    text = str(text)
+    return text + " " * max(0, int(cols) - _cell_width(text))
+
+
+def center_cells(text, cols):
+    """Centraliza ``text`` em ``cols`` células (igual a ``str.center`` em ASCII)."""
+    text = truncate(text, cols)
+    pad = max(0, int(cols) - _cell_width(text))
+    left = pad // 2 + (pad & int(cols) & 1)  # mesma regra do str.center
+    return " " * left + text + " " * (pad - left)
 
 
 # --------------------------------------------------------------------------
