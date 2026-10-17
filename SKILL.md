@@ -89,7 +89,7 @@ Tamanhos aproximados em linhas. **“Mexa aqui quando…”** é o atalho para a
 
 ### 3.2 API Qobuz e download
 | Módulo | Papel | Mexa aqui quando… |
-| :—|:—|:—|
+| :--- |:--- |:--- |
 | `qopy.py` (~1270) | Cliente **assíncrono** da API (`Client.create`, `api_call`, `get_track_url`), assinatura/criptografia, fallback de qualidade | endpoints, autenticação, parsing de resposta |
 | `bundle.py` | Extrai `app_id`/segredos do `bundle.js` do Web Player (baseado em Spoofbuz). Pode quebrar quando o Qobuz muda o site | erro de app_id/secret |
 | `downloader.py` (~3130) | Classe `Download`: álbum/faixa/playlist, fallback de qualidade, download segmentado (bypass Akamai), capa, booklet, letras, nomes de arquivo/pasta. **Ponto de entrada:** `Download(...).download_id_by_type(...)` | fluxo de download |
@@ -133,7 +133,7 @@ Tamanhos aproximados em linhas. **“Mexa aqui quando…”** é o atalho para a
 
 ### 3.5 Camada de terminal
 | Módulo | Papel |
-| :— |:—|
+| :--- |:--- |
 | `ui.py` (~750) | **Única** saída de tela: `ui.emit()` com um lock e uma fonte de verdade p/ largura/breakpoints. Evita `print`/`logging`/`tqdm` brigando |
 | `color.py` | ANSI/TrueColor, `NO_COLOR`/`FORCE_COLOR`, TTY, cor de destaque (accent) |
 | `fuzzy.py` | Similaridade de texto (usa `rapidfuzz` se existir; senão `difflib`) |
@@ -187,7 +187,7 @@ Definidos em `commands.py`, roteados em `cli.py::_handle_commands`. `DOWNLOAD_CO
 **Diretório de config** (`utils.get_config_paths()`), nesta ordem: `CONFIG_DIR` → `QOBUZ_DL_IOS_HOME` → detecção automática de iOS/a-Shell (`HOME` contém `Containers/Data/Application` ⇒ `~/Documents`) → `platformdirs.user_config_dir()`. Dentro dele, pasta `qobuz-dl/`:
 
 | Arquivo | Conteúdo |
-|:---|:---|
+|:--- |:--- |
 | `config.ini` | Seção `[qobuz]` (ou `[DEFAULT]` se não houver `[qobuz]`). Token em `user_token` **e** `user_auth_token` (mantidos sincronizados) ou no **Keyring** do SO |
 | `qobuz_dl.db` | Dedup de downloads (`downloads`, PK `id+quality`) |
 | `library.db` | Catálogo da biblioteca (`albums`, `sync_runs`) |
@@ -301,7 +301,7 @@ Pendências abertas também estão em `todo.md`.
 Mais recente primeiro. Uma linha por alteração pedida.
 
 | Data | Alteração | Arquivos principais |
-| :--- |:--- |:---|
+| :--- |:--- |:--- |
 | 2026-10-16 | Ajuda de comando unificada: `qobuz-dl <comando> -h` agora chama o `print_help` do próprio subparser (`cli._print_command_help`), e `home_screen.render_ajuda_comando` é o único renderizador (o `render_command_help` paralelo foi removido). Nos comandos de download o grupo genérico "Opções" é repartido por assunto na ordem de uso (`GRUPOS_DOWNLOAD`/`agrupar_opcoes`: busca → qualidade → pastas → letras → tags → créditos → "Outras"); os grupos do próprio parser (tags, capa, discos, paralelo, saída) e o painel "Chaves de formato" mantêm o título e vão depois; `-h` fica por último e o exemplo (`EXEMPLOS`) entra no painel Uso. Teste da tela interativa (`test_core_tui_cartao_visivel`) é pulado no iOS (segfault no a-Shell) | `qobuz_dl/home_screen.py`, `qobuz_dl/cli.py`, `qobuz_dl/commands.py`, `tests/unit/test_ux_paineis.py`, `tests/unit/test_core_tui_cartao_visivel.py` |
 | 2026-10-15 | Larguras em células de terminal: `ui.banner` centralizava com `str.center` e `stats` preenchia o nome do artista com `f"{x:<n}"`, ambos contando caracteres — títulos com emoji (`🔍 INSPETOR DE ÁUDIO`) saíam 1 coluna acima da tela e artistas em japonês/emoji passavam do limite; novos `ui.pad_cells` e `ui.center_cells`, e `ui.section` agora corta títulos longos. README: bloco `usage:` antigo trocado pela descrição da ajuda em painéis, `[DIR]` → `[PASTA]` e 39 flags escritas com travessão (`—delay`, `-—multi-tags`…) corrigidas para `--` (não funcionavam ao copiar); testes novos | `qobuz_dl/ui.py`, `qobuz_dl/stats_view.py`, `README.md`, `tests/ui/test_ui_larguras.py` |
 | 2026-10-15 | Rótulos das opções na ajuda em português (`PASTA`, `DATA`, `PADRÃO`, `PREFIXO`, `FORMATO`, `GRAVADORA`, `BUSCA`, `URL_OU_ARQUIVO`, `N`, `QUALIDADE`…; só o `metavar`, os nomes internos como `args.SOURCE` não mudaram) e lista de chaves de `-ff`/`-fbff`/`-tf` movida para o painel "Chaves de formato" no fim da ajuda (`PAINEL_CHAVES` em `commands.py`; qualquer parser pode ter `paineis_extras`); corrigida vírgula que faltava entre `track_title_base` e `version`; testes novos | `qobuz_dl/commands.py`, `qobuz_dl/home_screen.py`, `tests/ui/test_ajuda_comando.py` |
