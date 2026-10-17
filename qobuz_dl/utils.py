@@ -931,7 +931,9 @@ _EDICOES_ALBUM = {
     "remaster": re.compile(r"\bremaster(?:ed)?\b"),
     "bonus": re.compile(r"\bbonus\b"),
 }
-_PALAVRAS_NEUTRAS_ALBUM = re.compile(r"\b(?:explicit|explicito|clean|edited|censored)\b")
+_PALAVRAS_NEUTRAS_ALBUM = re.compile(
+    r"\b(?:explicit|explicito|clean|edited|censored)\b"
+)
 
 
 def edicao_album(texto: str) -> frozenset:

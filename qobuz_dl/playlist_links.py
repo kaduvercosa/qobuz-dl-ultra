@@ -237,8 +237,7 @@ def _db_set_path(db_path, track_id, new_path):
     try:
         with _conn(db_path) as c:
             c.execute(
-                "UPDATE downloads SET saved_path=? "
-                "WHERE id=? AND media_type='track'",
+                "UPDATE downloads SET saved_path=? WHERE id=? AND media_type='track'",
                 (new_path, str(track_id)),
             )
     except sqlite3.Error as e:
@@ -434,6 +433,4 @@ async def absorb_playlist_copies(library_root, db_path, dest_files, reg=None):
 
 def scan_dest_folder(dest_dir, reader=read_track_id):
     """{id: caminho} do que está numa pasta de álbum (1º arquivo por id)."""
-    return {
-        tid: paths[0] for tid, paths in scan_track_paths(dest_dir, reader).items()
-    }
+    return {tid: paths[0] for tid, paths in scan_track_paths(dest_dir, reader).items()}

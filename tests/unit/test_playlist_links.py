@@ -3,7 +3,6 @@
 import os
 import sqlite3
 
-import pytest
 
 from qobuz_dl import playlist_links as pl
 
@@ -81,7 +80,9 @@ class TestLinks:
         pl_dir = str(tmp_path / "Playlist" / "P")
         alvo = _touch(tmp_path / "Album" / "A" / "1.flac")
         pl.add_link(pl_dir, 1, alvo)
-        assert pl.load_links(pl_dir) == {"1": os.path.join("..", "..", "Album", "A", "1.flac")}
+        assert pl.load_links(pl_dir) == {
+            "1": os.path.join("..", "..", "Album", "A", "1.flac")
+        }
         assert pl.valid_links(pl_dir) == {"1": os.path.normpath(alvo)}
         os.remove(alvo)
         assert pl.valid_links(pl_dir) == {}
@@ -106,7 +107,9 @@ class TestLinks:
         assert pl.link_existing_track(pl_dir, "1", dentro) is False
         fora = _touch(tmp_path / "A" / "1.flac")
         assert pl.link_existing_track(pl_dir, "1", fora) is True
-        assert pl.link_existing_track(pl_dir, "2", str(tmp_path / "nao_existe")) is False
+        assert (
+            pl.link_existing_track(pl_dir, "2", str(tmp_path / "nao_existe")) is False
+        )
 
 
 class TestAbsorb:
@@ -127,7 +130,9 @@ class TestAbsorb:
         assert [t for t, _o, _n in st["absorbed"]] == ["1"]
         assert not os.path.exists(copia)
         assert os.path.exists(album)
-        assert os.path.exists(os.path.join(root, "Minha", "2.flac"))  # outra faixa intacta
+        assert os.path.exists(
+            os.path.join(root, "Minha", "2.flac")
+        )  # outra faixa intacta
         pl_dir = os.path.join(root, "Minha")
         assert pl.valid_links(pl_dir) == {"1": os.path.normpath(album)}
         linhas = open(m3u, encoding="utf-8").read().split("\n")
