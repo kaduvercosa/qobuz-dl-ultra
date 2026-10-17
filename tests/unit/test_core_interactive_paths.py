@@ -24,7 +24,7 @@ async def _done(*args, **kwargs):
     return None
 
 
-def _metadata(self, item, item_type, mode_dict, fav_subtype=None):
+def _metadata(self, item, item_type, mode_dict, fav_subtype=None, ref_artist=None):
     return {
         "id": item.get("id"),
         "title": item.get("title", "Unknown"),

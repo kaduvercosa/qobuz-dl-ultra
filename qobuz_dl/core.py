@@ -38,6 +38,7 @@ except ImportError as exc:
 
 import qobuz_dl.postprocess as postprocess
 from qobuz_dl import downloader, qopy, ui
+from qobuz_dl.artist_role import funcao_do_artista
 from qobuz_dl.bundle import Bundle
 from qobuz_dl.color import GREEN, OFF, RED, RESET
 from qobuz_dl.color import INFO as CYAN
@@ -66,9 +67,13 @@ HEADER_STAGGER_DELAY = 1.5
 # --------------------------------------------------------------------------
 from qobuz_dl.interactive_ui import (
     _align_text,
+    _center_text,
     _get_table_layout,
     _hex_accent,
+    _quality_tier,
     _shade,  # noqa: F401 -- usado só em testes
+    _short_duration,
+    _short_quality,
     prompt_style,
     pt_style,
 )
@@ -298,7 +303,14 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
             res.append(("class:meta", hdr_pref + "│ "))
 
             for idx, (h, w) in enumerate(zip(headers, widths)):
-                res.append(("class:table_header", _align_text(h, w)))
+                # Faixas: FUNÇÃO, DURAÇÃO e QUALIDADE (3 últimas) centralizadas.
+                centro = item_category == "track" and idx >= 3
+                res.append(
+                    (
+                        "class:table_header",
+                        (_center_text if centro else _align_text)(h, w),
+                    )
+                )
 
                 if idx < len(headers) - 1:
                     res.append(("class:meta", " │ "))
@@ -308,6 +320,32 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
             res.append(("class:meta", hdr_pref + borders["mid"]))
 
         return res
+
+    def _schedule_height_recheck():
+        # BUGFIX (última linha cortada até o primeiro clique): a fatia de
+        # linhas da tabela é calculada com a altura do Window do desenho
+        # ANTERIOR (render_info) ou, no primeiro desenho/depois de girar ou
+        # redimensionar, com uma estimativa. Se a estimativa difere da altura
+        # real, a última linha aparece cortada até algo forçar novo desenho.
+        # Depois de cada desenho, compara a altura medida com a usada e, se
+        # diferirem, pede UM redesenho (no máximo 3 seguidos, sem laço).
+        def _recheck():
+            try:
+                info = list_window.render_info
+                h = info.window_height if info is not None else 0
+                if h > 0 and h != view.get("avail"):
+                    if view.get("rechecks", 0) < 3:
+                        view["rechecks"] = view.get("rechecks", 0) + 1
+                        get_app().invalidate()
+                else:
+                    view["rechecks"] = 0
+            except Exception:
+                pass
+
+        try:
+            asyncio.get_running_loop().call_soon(_recheck)
+        except RuntimeError:
+            pass
 
     def get_list_text():
         # ------------------------------------------------------------
@@ -460,8 +498,11 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
             avail = (
                 info.window_height
                 if info is not None and info.window_height > 0
-                else term_rows - _HEADER_LINES - _FOOTER_LINES
+                # -1: bottom_safe_area (1 linha) também sai da altura útil.
+                else term_rows - _HEADER_LINES - _FOOTER_LINES - 1
             )
+            view["avail"] = avail
+            _schedule_height_recheck()
             n_items = len(options_dicts)
             k = max(1, avail // 2)
             margin = 1 if k >= 3 else 0
@@ -544,7 +585,7 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
                 ql = meta.get("quality", "")
                 typ = meta.get("type", "")
 
-                ql_color = "fg:#c59b27 bold" if "24b" in ql else f"fg:{_hex_accent}"
+                ql_color = f"class:quality_{_quality_tier(ql)}"
                 ql_st = (
                     "class:hovered"
                     if hovered
@@ -670,15 +711,34 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
                     tit_str = meta.get("title", "")
                     art = meta.get("artist", "")
                     alb = meta.get("album", "")
-                    dur = meta.get("duration", "")
+                    dur = _short_duration(meta.get("duration", ""))
+
+                    # Função do artista pesquisado (ver artist_role.py).
+                    # Meta antigo, sem "role", cai no tipo como antes.
+                    role_tab = meta.get("role", typ)
+                    role_full = meta.get("role_full", role_tab)
+                    if "role" not in meta:
+                        role_st = typ_st
+                    elif hovered:
+                        role_st = "class:hovered"
+                    elif checked:
+                        role_st = "class:highlight"
+                    elif role_tab.startswith("Principal"):
+                        role_st = "class:type_album"
+                    elif role_tab.startswith("Feat."):
+                        role_st = "class:type_ep"
+                    elif role_tab == "--":
+                        role_st = ""
+                    else:
+                        role_st = "class:type_track"
 
                     if is_table:
                         tit_align = _align_text(tit_str, widths[0])
                         art_align = _align_text(art, widths[1])
                         alb_align = _align_text(alb, widths[2])
-                        typ_align = _align_text(typ, widths[3])
-                        dur_align = _align_text(dur, widths[4])
-                        ql_align = _align_text(ql, widths[5])
+                        typ_align = _center_text(role_tab, widths[3])
+                        dur_align = _center_text(dur, widths[4])
+                        ql_align = _center_text(_short_quality(ql), widths[5])
 
                         if hovered:
                             p1 = f"│ {tit_align} │ {art_align} │ {alb_align} │ {typ_align} │ {dur_align} │ "
@@ -702,7 +762,7 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
                                     (style, " │ "),
                                     (style, alb_align),
                                     (style, " │ "),
-                                    (typ_st, typ_align),
+                                    (role_st, typ_align),
                                     (style, " │ "),
                                     (style, dur_align),
                                     (style, " │ "),
@@ -806,7 +866,7 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
                                     border_style=border_st,
                                 )
                                 add_card_line(
-                                    [(row_st, f"   📀 {typ} · ⏱ {dur}")],
+                                    [(row_st, f"   🎭 {role_full} · ⏱ {dur}")],
                                     hovered=hovered,
                                     is_checked=checked,
                                     border_style=border_st,
@@ -825,7 +885,7 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
                                     border_style=border_st,
                                 )
                                 add_card_line(
-                                    [(row_st, f"   📀 {typ} · ⏱ {dur}")],
+                                    [(row_st, f"   🎭 {role_full} · ⏱ {dur}")],
                                     hovered=hovered,
                                     is_checked=checked,
                                     border_style=border_st,
@@ -840,7 +900,7 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
                             add_card_line(
                                 [
                                     (style, f"   👤 {art} · "),
-                                    (typ_st, typ),
+                                    (role_st, role_tab),
                                     (style, f" · ⏱ {dur}"),
                                 ],
                                 hovered=hovered,
@@ -1962,7 +2022,9 @@ class QobuzDL:
 
         return results
 
-    def _extract_rich_metadata(self, i, item_type, mode_dict, fav_subtype=None):
+    def _extract_rich_metadata(
+        self, i, item_type, mode_dict, fav_subtype=None, ref_artist=None
+    ):
         """Converte o JSON bruto da API do Qobuz (item `i`) num dict
         "meta" enxuto e pronto pra exibir na TUI (ver get_list_text em
         _tui_select). Aqui mora a HEURÍSTICA que classifica um álbum como
@@ -2056,6 +2118,14 @@ class QobuzDL:
                 "label": lbl,
                 "id": i.get("id"),
             }
+            # Faixas: a coluna "TIPO" era sempre "Track" (inútil). Troca por
+            # a FUNÇÃO do artista pesquisado na faixa (Principal, Feat.,
+            # Compositor...). `type` continua no meta (filtros/estilos).
+            # Sem artista de referência (favoritos) fica "--".
+            if item_type == "track" or fav_subtype == "tracks":
+                role, role_full = funcao_do_artista(i, ref_artist)
+                meta_data["role"] = role
+                meta_data["role_full"] = role_full
         else:
             name = i.get("name", "Unknown")
             count = (
@@ -2180,7 +2250,11 @@ class QobuzDL:
                 if not isinstance(i, dict):
                     continue
                 meta_data = self._extract_rich_metadata(
-                    i, item_type, mode_dict, fav_subtype
+                    i,
+                    item_type,
+                    mode_dict,
+                    fav_subtype,
+                    ref_artist=query if item_type == "track" else None,
                 )
 
                 if sub_filter:
@@ -2465,7 +2539,10 @@ class QobuzDL:
                                     track_options = []
                                     for t in top_tracks:
                                         meta_data = self._extract_rich_metadata(
-                                            t, "track", {"requires_extra": True}
+                                            t,
+                                            "track",
+                                            {"requires_extra": True},
+                                            ref_artist=art_name,
                                         )
                                         url = f"{WEB_URL}track/{t.get('id')}"
                                         track_options.append(

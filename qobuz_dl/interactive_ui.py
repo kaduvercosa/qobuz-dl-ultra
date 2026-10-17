@@ -93,6 +93,10 @@ _hex_type_single = _shade(-0.2)
 _hex_type_track = _shade(0.3)
 _hex_type_comp = _shade(-0.3)
 
+# Qualidade: 4 degraus em tons da cor de destaque, do mais escuro (menor
+# qualidade) ao mais claro (maior). Ver _quality_tier().
+_hex_quality = [_shade(-0.35), _hex_accent, _shade(0.25), _shade(0.5)]
+
 pt_style = Style.from_dict(
     {
         "title": f"fg:{_hex_accent} bold",
@@ -110,6 +114,10 @@ pt_style = Style.from_dict(
         "type_track": f"fg:{_hex_type_track}",
         "type_comp": f"fg:{_hex_type_comp}",
         "type_other": f"fg:{_hex_type_track}",
+        "quality_0": f"fg:{_hex_quality[0]}",
+        "quality_1": f"fg:{_hex_quality[1]}",
+        "quality_2": f"fg:{_hex_quality[2]} bold",
+        "quality_3": f"fg:{_hex_quality[3]} bold",
     }
 )
 
@@ -150,19 +158,66 @@ def _align_text(text, width):
     return text + " " * (width - current_w)
 
 
+def _center_text(text, width):
+    """Como _align_text, mas centraliza (sobra dividida dos dois lados;
+    se não couber, corta com "..." igual _align_text)."""
+    text = str(text) if text is not None else ""
+    if get_cwidth(text) >= width:
+        return _align_text(text, width)
+    sobra = width - get_cwidth(text)
+    esq = sobra // 2
+    return " " * esq + text + " " * (sobra - esq)
+
+
 # Largura mínima útil (em caracteres) da coluna de texto livre ("flex") de
 # cada categoria. Se, depois de reservar as colunas fixas, sobrar menos que
 # isso, a tela é estreita demais pra tabela e a TUI cai no modo cartão --
 # melhor um cartão legível do que uma tabela com título de 8 caracteres.
-_MIN_FLEX = {"album": 34, "track": 36, "playlist": 28, "artist": 20}
+_MIN_FLEX = {"album": 34, "track": 42, "playlist": 28, "artist": 20}
 
 # Soma das colunas fixas + separadores " │ " de cada categoria.
 _FIXED_W = {
     "album": 12 + 4 + 6 + 12 + 5 * 3,
-    "track": 12 + 10 + 12 + 5 * 3,
+    "track": 12 + 7 + 9 + 5 * 3,
     "playlist": 6 + 10 + 3 * 3,
     "artist": 15 + 1 * 3,
 }
+
+
+def _short_duration(valor):
+    """"00:03:20" -> "03:20" (faixas quase nunca passam de 1h). Com horas
+    fica "1:02:03". Qualquer coisa fora do padrão ("--:--") volta igual."""
+    partes = str(valor or "").split(":")
+    if len(partes) == 3 and all(p.isdigit() for p in partes):
+        h, m, s = (int(p) for p in partes)
+        return f"{m:02d}:{s:02d}" if h == 0 else f"{h}:{m:02d}:{s:02d}"
+    return str(valor or "")
+
+
+_RE_QUALIDADE = re.compile(r"(\d+)\s*b(?:it)?\s*/\s*(\d+(?:[.,]\d+)?)\s*kHz", re.I)
+
+
+def _short_quality(valor):
+    """"24b/44.1kHz" -> "24/44" (taxa truncada: 88.2 -> 88, 96.0 -> 96).
+    Texto fora do padrão volta igual."""
+    m = _RE_QUALIDADE.search(str(valor or ""))
+    if not m:
+        return str(valor or "")
+    taxa = int(float(m.group(2).replace(",", ".")))
+    return f"{m.group(1)}/{taxa}"
+
+
+def _quality_tier(valor):
+    """Degrau de cor da qualidade (0 = menor, 3 = maior):
+    0: 16 bit / MP3 / desconhecido   1: 24 bit até 48 kHz
+    2: 24 bit 88.2-96 kHz            3: 24 bit acima de 96 kHz"""
+    m = _RE_QUALIDADE.search(str(valor or ""))
+    if not m or int(m.group(1)) < 24:
+        return 0
+    taxa = float(m.group(2).replace(",", "."))
+    if taxa <= 48:
+        return 1
+    return 2 if taxa <= 96 else 3
 
 
 def _get_table_layout(columns, is_multi, item_category):
@@ -205,8 +260,8 @@ def _get_table_layout(columns, is_multi, item_category):
         w_tit = int(flex * 0.40)
         w_art = int(flex * 0.30)
         w_alb = flex - w_tit - w_art
-        widths = [w_tit, w_art, w_alb, 12, 10, 12]
-        headers = ["FAIXA", "ARTISTA", "ÁLBUM", "TIPO", "DURAÇÃO", "QUALIDADE"]
+        widths = [w_tit, w_art, w_alb, 12, 7, 9]
+        headers = ["FAIXA", "ARTISTA", "ÁLBUM", "FUNÇÃO", "DURAÇÃO", "QUALIDADE"]
 
     elif item_category == "playlist":
         w_nom = int(flex * 0.60)

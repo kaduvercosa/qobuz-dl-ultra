@@ -27,7 +27,7 @@ def _client(**overrides):
     return SimpleNamespace(**methods)
 
 
-def _metadata(self, item, item_type, mode_dict, fav_subtype=None):
+def _metadata(self, item, item_type, mode_dict, fav_subtype=None, ref_artist=None):
     title = item.get("title") or item.get("name") or "Unknown"
     tracks_count = int(item.get("tracks_count") or 0)
 
