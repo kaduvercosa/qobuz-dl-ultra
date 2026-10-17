@@ -15,7 +15,8 @@ def _subparsers():
     p = qobuz_dl_args()
     act = next(
         a for a in p._actions
-        if a.__class__.__name__ == "_SubParsersAction")
+        if a.__class__.__name__ == "_SubParsersAction"
+    )
     return dict(act.choices)
 
 
