@@ -13,10 +13,7 @@ LARGURAS = [24, 30, 36, 40, 46, 60, 80, 95, 96, 100, 110, 140]
 
 def _subparsers():
     p = qobuz_dl_args()
-    act = next(
-        a for a in p._actions
-        if a.__class__.__name__ == "_SubParsersAction"
-    )
+    act = next(a for a in p._actions if a.__class__.__name__ == "_SubParsersAction")
     return dict(act.choices)
 
 

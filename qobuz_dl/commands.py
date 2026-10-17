@@ -126,7 +126,9 @@ class ColoredArgumentParser(argparse.ArgumentParser):
     def _ajuda_argparse(self):
         """Ajuda antiga (texto corrido do argparse, traduzida e colorida)."""
         help_text = self.format_help()
-        help_text = help_text.replace("positional arguments:", "argumentos posicionais:")
+        help_text = help_text.replace(
+            "positional arguments:", "argumentos posicionais:"
+        )
         help_text = help_text.replace("options:", "opções gerais:")
         help_text = help_text.replace("optional arguments:", "opções:")
         help_text = help_text.replace(

@@ -34,7 +34,9 @@ def test_center_cells_igual_ao_str_center_em_ascii(n):
             assert ui.center_cells(texto, n) == texto.center(n)
 
 
-@pytest.mark.parametrize("texto", ["🔍 INSPETOR DE ÁUDIO", "宇多田ヒカル", "Daft Punk 🎧"])
+@pytest.mark.parametrize(
+    "texto", ["🔍 INSPETOR DE ÁUDIO", "宇多田ヒカル", "Daft Punk 🎧"]
+)
 @pytest.mark.parametrize("n", [12, 20, 31, 40, 41])
 def test_center_cells_ocupa_exatamente_n_celulas(texto, n):
     assert _celulas(ui.center_cells(texto, n)) == n

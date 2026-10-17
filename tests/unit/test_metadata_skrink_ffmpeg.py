@@ -143,4 +143,3 @@ class TestShrinkImageToFitSemPillow:
 
         assert resultado is not None
         assert len(resultado) <= tamanho // 2
-
