@@ -1,4 +1,5 @@
 """Funcao do artista pesquisado numa faixa (coluna FUNCAO da TUI)."""
+
 import pytest
 
 from qobuz_dl.artist_role import (

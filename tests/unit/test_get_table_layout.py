@@ -87,7 +87,14 @@ class TestGetTableLayoutCategorias:
 
     def test_headers_da_track_estao_corretos(self):
         _, _, headers, _ = _get_table_layout(120, is_multi=False, item_category="track")
-        assert headers == ["FAIXA", "ARTISTA", "ÁLBUM", "FUNÇÃO", "DURAÇÃO", "QUALIDADE"]
+        assert headers == [
+            "FAIXA",
+            "ARTISTA",
+            "ÁLBUM",
+            "FUNÇÃO",
+            "DURAÇÃO",
+            "QUALIDADE",
+        ]
 
     def test_headers_da_playlist_estao_corretos(self):
         _, _, headers, _ = _get_table_layout(

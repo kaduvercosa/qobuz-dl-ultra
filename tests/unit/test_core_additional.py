@@ -217,7 +217,9 @@ async def test_search_favoritos_playlists_consume_gateway_do_cliente():
         get_user_playlists=get_user_playlists,
     )
 
-    def extract_rich_metadata(item, item_type, mode_dict, fav_subtype=None, ref_artist=None ):
+    def extract_rich_metadata(
+        item, item_type, mode_dict, fav_subtype=None, ref_artist=None
+    ):
         return {"name": item.get("name", "Unknown"), "id": item.get("id")}
 
     app = SimpleNamespace(

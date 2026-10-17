@@ -185,7 +185,7 @@ _FIXED_W = {
 
 
 def _short_duration(valor):
-    """"00:03:20" -> "03:20" (faixas quase nunca passam de 1h). Com horas
+    """ "00:03:20" -> "03:20" (faixas quase nunca passam de 1h). Com horas
     fica "1:02:03". Qualquer coisa fora do padrão ("--:--") volta igual."""
     partes = str(valor or "").split(":")
     if len(partes) == 3 and all(p.isdigit() for p in partes):
@@ -198,7 +198,7 @@ _RE_QUALIDADE = re.compile(r"(\d+)\s*b(?:it)?\s*/\s*(\d+(?:[.,]\d+)?)\s*kHz", re
 
 
 def _short_quality(valor):
-    """"24b/44.1kHz" -> "24/44" (taxa truncada: 88.2 -> 88, 96.0 -> 96).
+    """ "24b/44.1kHz" -> "24/44" (taxa truncada: 88.2 -> 88, 96.0 -> 96).
     Texto fora do padrão volta igual."""
     m = _RE_QUALIDADE.search(str(valor or ""))
     if not m:
