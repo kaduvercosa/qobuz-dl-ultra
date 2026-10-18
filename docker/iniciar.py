@@ -113,7 +113,9 @@ def rodar_assistente() -> None:
     )
     codigo = subprocess.run([sys.executable, "-m", "qobuz_dl", "-r"]).returncode
     if codigo != 0:
-        erro(f"O assistente terminou com erro (código {codigo}). Rode o comando de novo.")
+        erro(
+            f"O assistente terminou com erro (código {codigo}). Rode o comando de novo."
+        )
 
 
 def consertar(config_file: str) -> str:
@@ -136,7 +138,12 @@ def consertar(config_file: str) -> str:
         return "sem_token"
 
     mudancas = []
-    if q.get("disable_keyring", "false").strip().lower() not in {"true", "yes", "y", "1"}:
+    if q.get("disable_keyring", "false").strip().lower() not in {
+        "true",
+        "yes",
+        "y",
+        "1",
+    }:
         q["disable_keyring"] = "true"
         mudancas.append("disable_keyring = true (o container não tem Keyring)")
     if not dentro_da_pasta_de_musica(q.get("directory", "")):

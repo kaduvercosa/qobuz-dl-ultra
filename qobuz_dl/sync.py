@@ -44,21 +44,15 @@ def _read_local_tags(file_path):
         audio = FLAC(file_path)
 
         # # Tenta primeiro a tag nova (QDL_*); cai para a tag legada (QOBUZ*) se ausente.
-        track_id_list = (
-            audio.get("QDL_TRACK_ID") or audio.get("QOBUZTRACKID") or [None]
-        )
+        track_id_list = audio.get("QDL_TRACK_ID") or audio.get("QOBUZTRACKID") or [None]
         track_id = track_id_list[0]
 
-        album_id_list = (
-            audio.get("QDL_ALBUM_ID") or audio.get("QOBUZALBUMID") or [None]
-        )
+        album_id_list = audio.get("QDL_ALBUM_ID") or audio.get("QOBUZALBUMID") or [None]
         album_id = album_id_list[0]
 
         isrc = audio.get("isrc", [None])[0]
 
-        artist_name = (
-            audio.get("ALBUMARTIST") or audio.get("ARTIST") or [""]
-        )[0]
+        artist_name = (audio.get("ALBUMARTIST") or audio.get("ARTIST") or [""])[0]
         album_name = audio.get("ALBUM", [""])[0]
         release_date = audio.get("DATE", [""])[0]
         bit_depth = getattr(audio.info, "bits_per_sample", 16)
@@ -97,16 +91,12 @@ def _read_local_tags(file_path):
         talb = audio.get("TALB")
         tdrc = audio.get("TDRC") or audio.get("TYER")
 
-        artist_name = (
-            tpe2.text[0] if tpe2 else (tpe1.text[0] if tpe1 else "")
-        )
+        artist_name = tpe2.text[0] if tpe2 else (tpe1.text[0] if tpe1 else "")
         album_name = talb.text[0] if talb else ""
         release_date = str(tdrc.text[0]) if tdrc else ""
         bit_depth = 16
         # ID3 só lê tags; não tem .info (isso é do MP3/FLAC).
-        mp3_rate = getattr(
-            getattr(audio, "info", None), "sample_rate", None
-        )
+        mp3_rate = getattr(getattr(audio, "info", None), "sample_rate", None)
         sampling_rate = mp3_rate / 1000.0 if mp3_rate else None
 
     return (
