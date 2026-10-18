@@ -532,7 +532,6 @@ class TestHandleDownloadId:
 
         assert resultado is None
 
-
     async def test_lookup_verifica_existencia_do_arquivo_fora_do_event_loop(
         self, tmp_path, monkeypatch
     ):

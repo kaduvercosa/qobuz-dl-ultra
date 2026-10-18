@@ -3097,8 +3097,8 @@ async def tqdm_download_segments(
                             if not abort_event.is_set():
                                 decrypted_data = await asyncio.to_thread(
                                     _decrypt_qobuz_segment,
-                                    seg_data, 
-                                    raw_key, 
+                                    seg_data,
+                                    raw_key,
                                     segment_uuid,
                                 )
                                 await file.write(decrypted_data)

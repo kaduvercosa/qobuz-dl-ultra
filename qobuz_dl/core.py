@@ -1741,7 +1741,9 @@ class QobuzDL:
                         version_tag = item.get("version") or ""
 
                         display_name = (
-                            f"{base_title} ({version_tag})" if version_tag else base_title
+                            f"{base_title} ({version_tag})"
+                            if version_tag
+                            else base_title
                         )
                         display_lower = display_name.lower()
 
@@ -1798,7 +1800,9 @@ class QobuzDL:
                         outcomes.append(
                             await self.download_from_id(
                                 item["id"],
-                                True if type_dict["iterable_key"] == "albums" else False,
+                                True
+                                if type_dict["iterable_key"] == "albums"
+                                else False,
                                 new_path,
                                 is_playlist=is_playlist,
                                 playlist_index=idx,
@@ -2948,7 +2952,9 @@ class QobuzDL:
                         # Semáforo antes do stagger (ver nota no lote de playlist).
                         async with semaphore:
                             if stagger_index < batch_workers:
-                                await asyncio.sleep(stagger_index * HEADER_STAGGER_DELAY)
+                                await asyncio.sleep(
+                                    stagger_index * HEADER_STAGGER_DELAY
+                                )
                             return await self.download_from_id(
                                 t_id,
                                 album=False,
@@ -2960,9 +2966,7 @@ class QobuzDL:
                                 suppress_header=True,
                             )
 
-                    pending_tasks.append(
-                        asyncio.create_task(_bounded_track_download())
-                    )
+                    pending_tasks.append(asyncio.create_task(_bounded_track_download()))
                 else:
                     outcomes.append(
                         await self.download_from_id(
