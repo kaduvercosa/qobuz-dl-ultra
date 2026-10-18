@@ -222,7 +222,6 @@ class QobuzDLSettings:
             ),
             "dry_run": getattr(arguments, "dry_run", False),
             "tag_only": getattr(arguments, "tag_only", False),
-            "musicbrainz": getattr(arguments, "musicbrainz", False),
             "since_date": getattr(arguments, "since", None)
             or config.get(section, "since_date", fallback="")
             or None,
