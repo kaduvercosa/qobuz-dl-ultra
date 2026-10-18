@@ -218,7 +218,7 @@ def test_excecao_generica_nao_cacheia():
 def test_cria_client_proprio_quando_session_e_none(payload_completo):
     mock_client = _make_client(payload_completo)
     with (
-        patch("qobuz_dl.musicbrainz.httpx.AsyncClient", return_value=mock_client),
+        patch("qobuz_dl.musicbrainz.make_client", return_value=mock_client),
         patch("qobuz_dl.musicbrainz.asyncio.sleep", new_callable=AsyncMock),
     ):
         resultado = asyncio.run(mb.lookup_by_isrc("ISRCX06"))

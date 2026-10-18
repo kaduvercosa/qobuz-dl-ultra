@@ -721,3 +721,152 @@ class TestNomesComVirgula:
         assert metadata._valores_multi("ARTIST", "A, B", {}) == ["A", "B"]
         assert metadata._valores_multi("TITLE", "A, B", {}) is None
         assert metadata._valores_multi("ARTIST", "Solo", {}) is None
+
+
+# --------------------------------------------------------------------
+# Numeração ausente: não inventar "1"
+# --------------------------------------------------------------------
+class TestNumeracaoAusente:
+    def test_flac_sem_numeracao_da_api_nao_grava_as_tags(self, monkeypatch, tmp_path):
+        fake = FakeFLAC()
+        monkeypatch.setattr(metadata, "FLAC", lambda path: fake)
+        origem = tmp_path / "tmp.flac"
+        origem.write_bytes(b"dummy")
+        item = _item()
+        album = _album()
+        for chave in ("track_number", "media_number"):
+            item.pop(chave)
+        for chave in ("tracks_count", "media_count"):
+            album.pop(chave)
+
+        metadata.tag_flac(
+            str(origem),
+            str(tmp_path),
+            str(tmp_path / "final.flac"),
+            item,
+            album,
+            istrack=False,
+            em_image=False,
+            settings=QobuzDLSettings(),
+        )
+
+        for tag in ("TRACKNUMBER", "TRACKTOTAL", "DISCNUMBER", "DISCTOTAL"):
+            assert tag not in fake
+
+    def test_mp3_sem_total_grava_so_o_numero_e_sem_numero_nao_grava_frame(
+        self, monkeypatch, tmp_path
+    ):
+        monkeypatch.setattr(metadata.id3, "ID3", FakeID3)
+        audios = []
+        original_init = FakeID3.__init__
+
+        def _init_e_registra(self, filename=None):
+            original_init(self, filename)
+            audios.append(self)
+
+        monkeypatch.setattr(FakeID3, "__init__", _init_e_registra)
+        origem = tmp_path / "tmp.mp3"
+        origem.write_bytes(b"dummy")
+        item = _item()
+        album = _album()
+        album.pop("tracks_count")
+        item.pop("media_number")
+        album.pop("media_count")
+
+        metadata.tag_mp3(
+            str(origem),
+            str(tmp_path),
+            str(tmp_path / "final.mp3"),
+            item,
+            album,
+            istrack=False,
+            settings=QobuzDLSettings(),
+        )
+
+        assert audios[0]["TRCK"].text == ["3"]
+        assert "TPOS" not in audios[0]
+
+
+# --------------------------------------------------------------------
+# IDs do MusicBrainz
+# --------------------------------------------------------------------
+class TestIdsMusicBrainzNosArquivos:
+    _IDS = {"track": "rec-1", "album": "rel-1", "artists": ["art-1", "art-2"]}
+
+    def test_flac_grava_tags_vorbis_do_musicbrainz(self, monkeypatch, tmp_path):
+        fake = FakeFLAC()
+        monkeypatch.setattr(metadata, "FLAC", lambda path: fake)
+        origem = tmp_path / "tmp.flac"
+        origem.write_bytes(b"dummy")
+
+        metadata.tag_flac(
+            str(origem),
+            str(tmp_path),
+            str(tmp_path / "final.flac"),
+            _item(),
+            _album(),
+            istrack=False,
+            em_image=False,
+            settings=QobuzDLSettings(),
+            musicbrainz_ids=self._IDS,
+        )
+
+        assert fake["MUSICBRAINZ_TRACKID"] == "rec-1"
+        assert fake["MUSICBRAINZ_ALBUMID"] == "rel-1"
+        assert fake["MUSICBRAINZ_ARTISTID"] == ["art-1", "art-2"]
+
+    def test_mp3_grava_frames_no_padrao_do_picard(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(metadata.id3, "ID3", FakeID3)
+        audios = []
+        original_init = FakeID3.__init__
+
+        def _init_e_registra(self, filename=None):
+            original_init(self, filename)
+            audios.append(self)
+
+        monkeypatch.setattr(FakeID3, "__init__", _init_e_registra)
+        origem = tmp_path / "tmp.mp3"
+        origem.write_bytes(b"dummy")
+
+        metadata.tag_mp3(
+            str(origem),
+            str(tmp_path),
+            str(tmp_path / "final.mp3"),
+            _item(),
+            _album(),
+            istrack=False,
+            settings=QobuzDLSettings(),
+            musicbrainz_ids=self._IDS,
+        )
+
+        frames = {(type(f).__name__, getattr(f, "desc", getattr(f, "owner", ""))): f
+                  for f in audios[0].added}
+        ufid = frames[("UFID", "http://musicbrainz.org")]
+        assert ufid.data == b"rec-1"
+        assert frames[("TXXX", "MusicBrainz Album Id")].text == ["rel-1"]
+        assert frames[("TXXX", "MusicBrainz Artist Id")].text == ["art-1", "art-2"]
+
+    def test_mp3_sem_ids_nao_grava_frames_musicbrainz(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(metadata.id3, "ID3", FakeID3)
+        audios = []
+        original_init = FakeID3.__init__
+
+        def _init_e_registra(self, filename=None):
+            original_init(self, filename)
+            audios.append(self)
+
+        monkeypatch.setattr(FakeID3, "__init__", _init_e_registra)
+        origem = tmp_path / "tmp.mp3"
+        origem.write_bytes(b"dummy")
+
+        metadata.tag_mp3(
+            str(origem),
+            str(tmp_path),
+            str(tmp_path / "final.mp3"),
+            _item(),
+            _album(),
+            istrack=False,
+            settings=QobuzDLSettings(),
+        )
+
+        assert not [f for f in audios[0].added if type(f).__name__ == "UFID"]

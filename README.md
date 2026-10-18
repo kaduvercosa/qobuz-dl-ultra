@@ -408,6 +408,14 @@ no_album_url_tag = true
 no_conductor_tag = true
 no_ensemble_tag = true
 no_work_tag = true
+
+# Defina como 'true' para não gravar créditos de produção (LYRICIST, PRODUCER, MIXER, ENGINEER, ARRANGER)
+no_credits_tag = true
+
+# Defina como 'true' para gravar os IDs do MusicBrainz (MUSICBRAINZ_TRACKID, MUSICBRAINZ_ALBUMID,
+# MUSICBRAINZ_ARTISTID). So grava quando titulo, versao, album e artista conferem; custa cerca de 1 s
+# por faixa. Tambem pode ser ativado por download com a flag --musicbrainz
+musicbrainz = true
 ```
 *(Nota: Se você estiver atualizando de uma versão anterior, a chave legada `default_folder` ainda é totalmente suportada para compatibilidade retroativa.)*
 

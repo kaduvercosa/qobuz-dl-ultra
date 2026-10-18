@@ -36,6 +36,11 @@ MULTI_VALUE_FIELDS = {
     "ALBUMARTISTSORT",
     "COMPOSER",
     "GENRE",
+    "LYRICIST",
+    "PRODUCER",
+    "MIXER",
+    "ENGINEER",
+    "ARRANGER",
 }
 
 
@@ -189,6 +194,11 @@ ID3_LEGEND = {
     "replaygain_track_gain": id3.TXXX,
     "replaygain_track_peak": id3.TXXX,
     "conductor": id3.TPE3,
+    "lyricist": id3.TEXT,
+    "producer": id3.TXXX,
+    "mixer": id3.TXXX,
+    "engineer": id3.TXXX,
+    "arranger": id3.TXXX,
     "ensemble": id3.TXXX,
     "work": id3.TIT1,
 }
@@ -318,6 +328,81 @@ def _format_genres(genres: list) -> str:
 
 
 # # Procura a imagem temporária de embed na pasta atual e na pasta pai.
+# Funções do campo `performers` da API -> tag de crédito. As funções são
+# comparadas sem maiúsculas/símbolos ("Mixing Engineer" == "MixingEngineer").
+_CREDIT_ROLES = {
+    "LYRICIST": {"lyricist", "composerlyricist"},
+    "PRODUCER": {"producer", "coproducer", "executiveproducer"},
+    "MIXER": {"mixer", "mixingengineer"},
+    "ENGINEER": {"engineer", "recordingengineer", "soundengineer"},
+    "ARRANGER": {"arranger"},
+}
+
+
+def _extract_credits(performers_str, protegidos=()) -> dict:
+    """Extrai créditos de produção do texto `performers` da API.
+
+    O texto vem como "Nome, Funcao1, Funcao2 - Outro Nome, Funcao". Devolve
+    {TAG: [nomes]} só para as tags que têm pelo menos um nome.
+    """
+    if not performers_str or not isinstance(performers_str, str):
+        return {}
+    encontrados: dict = {tag: [] for tag in _CREDIT_ROLES}
+    for bloco in performers_str.split(" - "):
+        partes = _split_protegido(bloco, ",", protegidos)
+        if len(partes) <= 1:
+            continue
+        nome = partes[0].strip()
+        if not nome:
+            continue
+        funcoes = {re.sub(r"[^a-z]", "", f.lower()) for f in partes[1:]}
+        for tag, aceitas in _CREDIT_ROLES.items():
+            if funcoes & aceitas and nome not in encontrados[tag]:
+                encontrados[tag].append(nome)
+    return {tag: nomes for tag, nomes in encontrados.items() if nomes}
+
+
+def track_artist_names(qobuz_album: dict, qobuz_item: dict) -> list:
+    """Lista de artistas da faixa (principal + participações), como na tag ARTIST."""
+    multi: dict = {}
+    _get_tags_to_add(qobuz_album, qobuz_item, QobuzDLSettings(), multi_out=multi)
+    return list(multi.get("ARTIST") or [])
+
+
+def _escrever_ids_musicbrainz_id3(audio, mb_tags: dict) -> None:
+    """Frames ID3 no padrão do Picard: UFID da gravação e TXXX de álbum/artista."""
+    faixa = mb_tags.get("MUSICBRAINZ_TRACKID")
+    if faixa:
+        audio.add(
+            id3.UFID(owner="http://musicbrainz.org", data=str(faixa).encode("ascii"))
+        )
+    album = mb_tags.get("MUSICBRAINZ_ALBUMID")
+    if album:
+        audio.add(id3.TXXX(encoding=3, desc="MusicBrainz Album Id", text=str(album)))
+    artistas = mb_tags.get("MUSICBRAINZ_ARTISTID")
+    if artistas:
+        valores = (
+            [str(a) for a in artistas]
+            if isinstance(artistas, (list, tuple))
+            else [str(artistas)]
+        )
+        audio.add(id3.TXXX(encoding=3, desc="MusicBrainz Artist Id", text=valores))
+
+
+def _tem_valor(valor) -> bool:
+    """True se a API trouxe um valor utilizável (None e texto vazio não contam)."""
+    return valor is not None and str(valor).strip() != ""
+
+
+def _numero_de_total(numero, total):
+    """Formata "n/total" para TRCK/TPOS; só "n" sem total; None sem número."""
+    if not _tem_valor(numero):
+        return None
+    if not _tem_valor(total):
+        return str(numero)
+    return f"{numero}/{total}"
+
+
 def _get_cover_path(root_dir, override=None):
     """
     Auxiliary function to locate the embedded cover art path.
@@ -854,14 +939,16 @@ def tag_flac(
     if em_image:
         _set_cover_source(tags, cover_source)
 
-    if not settings.no_track_number_tag:
-        tags["TRACKNUMBER"] = str(qobuz_item.get("track_number", "1"))
-    if not settings.no_track_total_tag:
-        tags["TRACKTOTAL"] = str(qobuz_album.get("tracks_count", "1"))
-    if not settings.no_disc_number_tag:
-        tags["DISCNUMBER"] = str(qobuz_item.get("media_number", "1"))
-    if not settings.no_disc_total_tag:
-        tags["DISCTOTAL"] = str(qobuz_album.get("media_count", "1"))
+    # Numeracao so e' gravada quando a API informou o valor: um "1" inventado
+    # seria um dado errado, pior que tag ausente.
+    if not settings.no_track_number_tag and _tem_valor(qobuz_item.get("track_number")):
+        tags["TRACKNUMBER"] = str(qobuz_item["track_number"])
+    if not settings.no_track_total_tag and _tem_valor(qobuz_album.get("tracks_count")):
+        tags["TRACKTOTAL"] = str(qobuz_album["tracks_count"])
+    if not settings.no_disc_number_tag and _tem_valor(qobuz_item.get("media_number")):
+        tags["DISCNUMBER"] = str(qobuz_item["media_number"])
+    if not settings.no_disc_total_tag and _tem_valor(qobuz_album.get("media_count")):
+        tags["DISCTOTAL"] = str(qobuz_album["media_count"])
 
     _bit = qobuz_item.get("maximum_bit_depth", 16)
     _rate = qobuz_item.get("maximum_sampling_rate", 44.1)
@@ -1082,6 +1169,11 @@ def tag_mp3(
 
     tags["COMMENT"] = base_comment
 
+    # IDs do MusicBrainz não passam pelo ID3_LEGEND (descrições do Picard).
+    _escrever_ids_musicbrainz_id3(
+        audio, {k: tags.pop(k) for k in list(tags) if k.startswith("MUSICBRAINZ_")}
+    )
+
     # Grava os frames ID3.
     #
     # Com multi_value_tags desativado:
@@ -1132,14 +1224,19 @@ def tag_mp3(
                 text=write_values,
             )
 
-    _trck_n = qobuz_item.get("track_number", "1")
-    _trck_total = qobuz_album.get("tracks_count", "1")
-    # # TRCK/TPOS usam o formato número/total reconhecido por players.
-    audio["TRCK"] = id3.TRCK(encoding=3, text=f"{_trck_n}/{_trck_total}")
+    # # TRCK/TPOS usam o formato número/total reconhecido por players. Sem o
+    # # número da faixa/disco, o frame não é gravado; sem o total, vai só o número.
+    _trck = _numero_de_total(
+        qobuz_item.get("track_number"), qobuz_album.get("tracks_count")
+    )
+    if _trck:
+        audio["TRCK"] = id3.TRCK(encoding=3, text=_trck)
 
-    _tpos_n = qobuz_item.get("media_number", "1")
-    _tpos_total = qobuz_album.get("media_count", "1")
-    audio["TPOS"] = id3.TPOS(encoding=3, text=f"{_tpos_n}/{_tpos_total}")
+    _tpos = _numero_de_total(
+        qobuz_item.get("media_number"), qobuz_album.get("media_count")
+    )
+    if _tpos:
+        audio["TPOS"] = id3.TPOS(encoding=3, text=_tpos)
 
     if em_image:
         _embed_id3_img(root_dir, audio, cover_override=embed_cover_path)
@@ -1425,7 +1522,8 @@ def _get_tags_to_add(
             else None
         )
 
-        raw_genres = qobuz_album.get("genres_list", [])
+        # Copia: a lista pertence ao dicionario da API e nao deve ser alterada.
+        raw_genres = list(qobuz_album.get("genres_list") or [])
         if main_genre:
             if raw_genres:
                 raw_genres[0] = main_genre
@@ -1443,7 +1541,7 @@ def _get_tags_to_add(
 
         tags["GENRE"] = ", ".join(final_genres)
         multi_out["GENRE"] = list(final_genres)
-    if not settings.no_label_tag:
+    if not settings.no_copyright_tag:
         tags["COPYRIGHT"] = _format_copyright(qobuz_album.get("copyright", "n/a"))
     if not settings.no_label_tag:
         tags["LABEL"] = re.sub(
@@ -1517,6 +1615,11 @@ def _get_tags_to_add(
                 if any(role in roles for role in ["Orchestra", "Ensemble", "Choir"]):
                     ensembles.append(name)
 
+    if not getattr(settings, "no_credits_tag", False):
+        for _tag, _nomes in _extract_credits(performers_str, protegidos).items():
+            tags[_tag] = ", ".join(_nomes)
+            multi_out[_tag] = list(_nomes)
+
     if conductors and not getattr(settings, "no_conductor_tag", False):
         tags["CONDUCTOR"] = conductors if len(conductors) > 1 else conductors[0]
     if ensembles and not getattr(settings, "no_ensemble_tag", False):
@@ -1536,6 +1639,19 @@ def _get_tags_to_add(
             raw_title = str(qobuz_album.get("title", "album"))
             slug = re.sub(r"[^a-z0-9]+", "-", raw_title.lower()).strip("-")
             tags["QOBUZ ALBUM URL"] = f"https://www.qobuz.com/album/{slug}/{album_id}"
+
+    # IDs do MusicBrainz (modo --musicbrainz): so' chegam aqui se a busca
+    # estrita confirmou titulo, versao, album e artista.
+    if musicbrainz_ids:
+        if musicbrainz_ids.get("track"):
+            tags["MUSICBRAINZ_TRACKID"] = str(musicbrainz_ids["track"])
+        if musicbrainz_ids.get("album"):
+            tags["MUSICBRAINZ_ALBUMID"] = str(musicbrainz_ids["album"])
+        _ids_artistas = [str(a) for a in musicbrainz_ids.get("artists") or [] if a]
+        if _ids_artistas:
+            tags["MUSICBRAINZ_ARTISTID"] = (
+                _ids_artistas if len(_ids_artistas) > 1 else _ids_artistas[0]
+            )
 
     for _k in MULTI_VALUE_FIELDS:
         _v = tags.get(_k)

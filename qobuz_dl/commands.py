@@ -314,12 +314,6 @@ def dl_args(subparsers):
         default=False,
         help="não grava o arquivo .streamrip.json (sentinela de dedup) nas pastas dos álbuns",
     )
-    download.add_argument(
-        "--musicbrainz",
-        action="store_true",
-        default=False,
-        help="Busca e embute IDs do MusicBrainz (MBID) via ISRC. Requer internet. (~1s/faixa)",
-    )
     return download
 
 
@@ -912,6 +906,14 @@ def add_common_arg(custom_parser, default_folder, default_quality):
         "--no-explicit-tag",
         action="store_true",
         help="não adiciona a tag de conteúdo explícito",
+    )
+    tag_group.add_argument(
+        "--musicbrainz",
+        action="store_true",
+        help=(
+            "grava os IDs do MusicBrainz (faixa, álbum, artista) quando título, "
+            "versão, álbum e artista conferem; adiciona cerca de 1 s por faixa"
+        ),
     )
     tag_group.add_argument(
         "--no-copyright-tag",

@@ -120,6 +120,8 @@ class QobuzDLSettings:
         self.no_disc_total_tag = kwargs.get("no_disc_total_tag", False)
         self.no_composer_tag = kwargs.get("no_composer_tag", False)
         self.no_conductor_tag = kwargs.get("no_conductor_tag", False)
+        self.no_credits_tag = kwargs.get("no_credits_tag", False)
+        self.musicbrainz = kwargs.get("musicbrainz", False)
         self.no_ensemble_tag = kwargs.get("no_ensemble_tag", False)
         self.no_work_tag = kwargs.get("no_work_tag", False)
         self.no_explicit_tag = kwargs.get("no_explicit_tag", False)
@@ -279,6 +281,10 @@ class QobuzDLSettings:
             or config.getboolean(section, "no_composer_tag", fallback=False),
             "no_conductor_tag": getattr(arguments, "no_conductor_tag", False)
             or config.getboolean(section, "no_conductor_tag", fallback=False),
+            "no_credits_tag": getattr(arguments, "no_credits_tag", False)
+            or config.getboolean(section, "no_credits_tag", fallback=False),
+            "musicbrainz": getattr(arguments, "musicbrainz", False)
+            or config.getboolean(section, "musicbrainz", fallback=False),
             "no_ensemble_tag": getattr(arguments, "no_ensemble_tag", False)
             or config.getboolean(section, "no_ensemble_tag", fallback=False),
             "no_work_tag": getattr(arguments, "no_work_tag", False)

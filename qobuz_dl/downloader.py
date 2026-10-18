@@ -44,6 +44,8 @@ from tqdm import tqdm
 
 import qobuz_dl.metadata as metadata
 from qobuz_dl.http_download import make_client
+from qobuz_dl.executors import heavy_executor
+from qobuz_dl import musicbrainz
 from qobuz_dl import ui
 from qobuz_dl.color import (
     OFF,
@@ -1507,7 +1509,7 @@ class Download:
         if os.path.exists(final_file):
             if getattr(self.settings, "verify_after_download", False):
                 ok, message = await loop.run_in_executor(
-                    None, lambda: verify_audio_integrity(final_file)
+                    heavy_executor(), lambda: verify_audio_integrity(final_file)
                 )
                 if not ok:
                     try:
@@ -1585,6 +1587,18 @@ class Download:
         qualities_to_try = FALLBACK_TIERS_LOCAL[start_idx:]
         success = False
         final_fmt = int(self.quality)
+
+        # MusicBrainz (opcional) roda junto com o download, sem atrasá-lo. A
+        # tarefa nunca levanta exceção; se a faixa for descartada antes da
+        # etiquetagem ela simplesmente termina sozinha.
+        mb_task = None
+        if getattr(self.settings, "musicbrainz", False):
+            _album_mb = (
+                track_metadata.get("album") or {}
+                if is_track
+                else album_or_track_metadata
+            )
+            mb_task = asyncio.create_task(_musicbrainz_ids(track_metadata, _album_mb))
 
         for attempt_fmt in qualities_to_try:
             if abort_event.is_set():
@@ -1714,9 +1728,13 @@ class Download:
         extension = ".mp3" if is_mp3 else ".flac"
 
         tag_function = metadata.tag_mp3 if is_mp3 else metadata.tag_flac
+        mb_ids = await mb_task if mb_task is not None else None
+        # So' passa o argumento quando há IDs confirmados: sem --musicbrainz a
+        # chamada continua idêntica à de antes.
+        _mb_kwargs = {"musicbrainz_ids": mb_ids} if mb_ids else {}
         try:
             await loop.run_in_executor(
-                None,
+                heavy_executor(),
                 lambda: tag_function(
                     filename,
                     root_dir,
@@ -1728,6 +1746,7 @@ class Download:
                     settings=self.settings,
                     embed_cover_path=embed_cover_path,
                     cover_source=cover_source,
+                    **_mb_kwargs,
                 ),
             )
         except Exception as e:
@@ -1811,7 +1830,7 @@ class Download:
                     return resultado_letras
 
             resultado_letras = await loop.run_in_executor(
-                None, _inject_lyrics_and_print
+                heavy_executor(), _inject_lyrics_and_print
             )
             if letras_out is not None:
                 letras_out.update(
@@ -1829,7 +1848,9 @@ class Download:
                 """Run post-download audio integrity verification."""
                 return verify_audio_integrity(final_file)
 
-            ok, verify_message = await loop.run_in_executor(None, _run_verify)
+            ok, verify_message = await loop.run_in_executor(
+                heavy_executor(), _run_verify
+            )
             if not ok:
                 with print_lock:
                     tqdm.write(
@@ -3245,6 +3266,37 @@ async def _download_goodies(
             )
     except Exception as e:
         logger.error(f"{RED}Erro ao baixar goodies: {e}", exc_info=True)
+
+
+async def _musicbrainz_ids(track_metadata: dict, album_meta: dict):
+    """IDs do MusicBrainz só se título, versão, álbum e artista conferirem.
+
+    Nunca levanta exceção: qualquer problema vira None (a faixa é tagueada
+    normalmente, só sem os IDs).
+    """
+    try:
+        album_meta = album_meta or {}
+        artistas = metadata.track_artist_names(album_meta, track_metadata)
+        achados = await musicbrainz.lookup_matching(
+            isrc=track_metadata.get("isrc") or "",
+            title=track_metadata.get("title") or "",
+            version=track_metadata.get("version") or "",
+            album=album_meta.get("title") or "",
+            album_version=album_meta.get("version") or "",
+            artists=artistas,
+            upc=album_meta.get("upc") or "",
+            duration=track_metadata.get("duration"),
+            artist_text=_safe_get(track_metadata, "performer", "name") or "",
+        )
+        if not achados:
+            logger.debug(
+                "MusicBrainz: sem correspondência estrita para a faixa %s",
+                track_metadata.get("id"),
+            )
+        return achados
+    except Exception:
+        logger.debug("MusicBrainz: falha ao buscar IDs", exc_info=True)
+        return None
 
 
 def _clean_embed_art(dirn, settings=None):

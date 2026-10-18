@@ -387,24 +387,27 @@ class TestGetTagsToAdd:
         assert tags["COPYRIGHT"] == "\u2117 2024 Gravadora \u00a9 2024 Editora"
         assert tags["LABEL"] == "Gravadora Teste"
 
-    def test_copyright_tag_e_controlada_por_no_label_tag_nao_no_copyright_tag(self):
-        """[BUG CONHECIDO, não corrigido aqui] `_get_tags_to_add` esconde
-        COPYRIGHT atrás de `settings.no_label_tag`, nunca lê
-        `settings.no_copyright_tag` -- apesar dela existir em
-        QobuzDLSettings e ter uma flag própria no CLI (`--no-copyright-tag`,
-        commands.py). Resultado: passar só `--no-copyright-tag` não
-        suprime a tag COPYRIGHT (só `--no-label-tag` suprime, e junto
-        derruba LABEL também). Este teste documenta o comportamento
-        ATUAL -- ver aviso na resposta sobre corrigir isso de verdade."""
-        settings_no_copyright = QobuzDLSettings(no_copyright_tag=True)
-        settings_no_label = QobuzDLSettings(no_label_tag=True)
+    def test_copyright_e_label_sao_controlados_por_flags_independentes(self):
+        """`--no-copyright-tag` suprime só COPYRIGHT e `--no-label-tag` suprime
+        só LABEL (antes, COPYRIGHT dependia de `no_label_tag` por engano)."""
+        tags_no_copyright = _get_tags_to_add(
+            _album(), _item(), QobuzDLSettings(no_copyright_tag=True)
+        )
+        tags_no_label = _get_tags_to_add(
+            _album(), _item(), QobuzDLSettings(no_label_tag=True)
+        )
 
-        tags_no_copyright = _get_tags_to_add(_album(), _item(), settings_no_copyright)
-        tags_no_label = _get_tags_to_add(_album(), _item(), settings_no_label)
-
-        assert "COPYRIGHT" in tags_no_copyright  # comportamento atual (bug)
-        assert "COPYRIGHT" not in tags_no_label
+        assert "COPYRIGHT" not in tags_no_copyright
+        assert "LABEL" in tags_no_copyright
         assert "LABEL" not in tags_no_label
+        assert "COPYRIGHT" in tags_no_label
+
+    def test_genero_nao_altera_a_lista_original_da_api(self):
+        album = _album(genre={"name": "Électronique"}, genres_list=["Rock", "Pop"])
+
+        _get_tags_to_add(album, _item(), QobuzDLSettings())
+
+        assert album["genres_list"] == ["Rock", "Pop"]
 
     def test_compilation_tag_via_classify_release_type(self):
         settings = QobuzDLSettings()
@@ -504,3 +507,83 @@ class TestGetTagsToAdd:
         assert "ITUNESADVISORY" not in tags
         assert "EXPLICIT" not in tags
         assert "RATING" not in tags
+
+
+class TestCreditos:
+    def test_extrai_funcoes_de_producao_do_campo_performers(self):
+        from qobuz_dl.metadata import _extract_credits
+
+        texto = (
+            "Artista, MainArtist - Ana Letra, ComposerLyricist - Pedro Prod, Producer"
+            " - Maria Mix, Mixing Engineer - Rui Eng, RecordingEngineer"
+            " - Lia Arr, Arranger - Sem Funcao Util, Vocals"
+        )
+
+        creditos = _extract_credits(texto)
+
+        assert creditos == {
+            "LYRICIST": ["Ana Letra"],
+            "PRODUCER": ["Pedro Prod"],
+            "MIXER": ["Maria Mix"],
+            "ENGINEER": ["Rui Eng"],
+            "ARRANGER": ["Lia Arr"],
+        }
+
+    def test_sem_performers_ou_sem_funcoes_conhecidas_devolve_vazio(self):
+        from qobuz_dl.metadata import _extract_credits
+
+        assert _extract_credits("") == {}
+        assert _extract_credits(None) == {}
+        assert _extract_credits("Fulano, Vocals") == {}
+
+    def test_creditos_entram_nas_tags_e_no_multi_out(self):
+        item = _item(
+            performers="A, MainArtist - Prod Um, Producer - Prod Dois, Producer, Mixer"
+        )
+        multi: dict = {}
+
+        tags = _get_tags_to_add(_album(), item, QobuzDLSettings(), multi_out=multi)
+
+        assert tags["PRODUCER"] == "Prod Um, Prod Dois"
+        assert multi["PRODUCER"] == ["Prod Um", "Prod Dois"]
+        assert tags["MIXER"] == "Prod Dois"
+
+    def test_no_credits_tag_desliga_so_os_creditos(self):
+        item = _item(performers="A, MainArtist - Prod Um, Producer")
+
+        tags = _get_tags_to_add(_album(), item, QobuzDLSettings(no_credits_tag=True))
+
+        assert "PRODUCER" not in tags
+        assert "ARTIST" in tags
+
+
+class TestIdsMusicBrainz:
+    def test_sem_ids_nao_grava_tags_musicbrainz(self):
+        tags = _get_tags_to_add(_album(), _item(), QobuzDLSettings())
+
+        assert not [k for k in tags if k.startswith("MUSICBRAINZ_")]
+
+    def test_ids_confirmados_viram_tags(self):
+        ids = {"track": "rec-1", "album": "rel-1", "artists": ["art-1", "art-2"]}
+
+        tags = _get_tags_to_add(
+            _album(), _item(), QobuzDLSettings(), musicbrainz_ids=ids
+        )
+
+        assert tags["MUSICBRAINZ_TRACKID"] == "rec-1"
+        assert tags["MUSICBRAINZ_ALBUMID"] == "rel-1"
+        assert tags["MUSICBRAINZ_ARTISTID"] == ["art-1", "art-2"]
+
+    def test_um_unico_artista_vira_texto(self):
+        ids = {"track": "rec-1", "album": "rel-1", "artists": ["art-1"]}
+
+        tags = _get_tags_to_add(
+            _album(), _item(), QobuzDLSettings(), musicbrainz_ids=ids
+        )
+
+        assert tags["MUSICBRAINZ_ARTISTID"] == "art-1"
+
+    def test_track_artist_names_devolve_a_lista_da_tag_artist(self):
+        from qobuz_dl.metadata import track_artist_names
+
+        assert track_artist_names(_album(), _item()) == ["Artista Principal"]
