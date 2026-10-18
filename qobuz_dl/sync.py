@@ -19,6 +19,108 @@ from qobuz_dl.db import handle_download_id
 logger = logging.getLogger(__name__)
 
 
+def _list_audio_files(directory):
+    """Todos os .flac/.mp3 sob `directory` (caminho absoluto, ordem do os.walk)."""
+    found = []
+    for root, _, files in os.walk(directory):
+        for file in files:
+            if file.lower().endswith((".flac", ".mp3")):
+                found.append(os.path.join(root, file))
+    return found
+
+
+def _read_local_tags(file_path):
+    """Lê do arquivo os IDs e metadados usados na reconstrução do banco.
+
+    Retorna ``(track_id, album_id, isrc, artist, album, release_date,
+    bit_depth, sampling_rate)``. Roda em thread: mutagen lê o disco e, com a
+    biblioteca inteira para varrer, travava o event loop a cada arquivo.
+    """
+    track_id = album_id = isrc = None
+    artist_name = album_name = release_date = ""
+    bit_depth = sampling_rate = None
+
+    if file_path.lower().endswith(".flac"):
+        audio = FLAC(file_path)
+
+        # # Tenta primeiro a tag nova (QDL_*); cai para a tag legada (QOBUZ*) se ausente.
+        track_id_list = (
+            audio.get("QDL_TRACK_ID") or audio.get("QOBUZTRACKID") or [None]
+        )
+        track_id = track_id_list[0]
+
+        album_id_list = (
+            audio.get("QDL_ALBUM_ID") or audio.get("QOBUZALBUMID") or [None]
+        )
+        album_id = album_id_list[0]
+
+        isrc = audio.get("isrc", [None])[0]
+
+        artist_name = (
+            audio.get("ALBUMARTIST") or audio.get("ARTIST") or [""]
+        )[0]
+        album_name = audio.get("ALBUM", [""])[0]
+        release_date = audio.get("DATE", [""])[0]
+        bit_depth = getattr(audio.info, "bits_per_sample", 16)
+        sampling_rate = (
+            getattr(audio.info, "sample_rate", 44100) / 1000.0
+            if getattr(audio.info, "sample_rate", None)
+            else None
+        )
+
+    elif file_path.lower().endswith(".mp3"):
+        audio = ID3(file_path)
+
+        # # Mesma hierarquia de busca do FLAC, adaptada aos frames TXXX do MP3.
+        track_txxx = (
+            audio.get("TXXX:QDL_TRACK_ID")
+            or audio.get("TXXX:qdl_track_id")
+            or audio.get("TXXX:QOBUZTRACKID")
+        )
+        if track_txxx:
+            track_id = track_txxx.text[0]
+
+        album_txxx = (
+            audio.get("TXXX:QDL_ALBUM_ID")
+            or audio.get("TXXX:qdl_album_id")
+            or audio.get("TXXX:QOBUZALBUMID")
+        )
+        if album_txxx:
+            album_id = album_txxx.text[0]
+
+        tsrc = audio.get("TSRC")
+        if tsrc:
+            isrc = tsrc.text[0]
+
+        tpe2 = audio.get("TPE2")
+        tpe1 = audio.get("TPE1")
+        talb = audio.get("TALB")
+        tdrc = audio.get("TDRC") or audio.get("TYER")
+
+        artist_name = (
+            tpe2.text[0] if tpe2 else (tpe1.text[0] if tpe1 else "")
+        )
+        album_name = talb.text[0] if talb else ""
+        release_date = str(tdrc.text[0]) if tdrc else ""
+        bit_depth = 16
+        # ID3 só lê tags; não tem .info (isso é do MP3/FLAC).
+        mp3_rate = getattr(
+            getattr(audio, "info", None), "sample_rate", None
+        )
+        sampling_rate = mp3_rate / 1000.0 if mp3_rate else None
+
+    return (
+        track_id,
+        album_id,
+        isrc,
+        artist_name,
+        album_name,
+        release_date,
+        bit_depth,
+        sampling_rate,
+    )
+
+
 # # Reconstrói o banco a partir dos arquivos já baixados, sem repetir chamadas de download.
 async def sync_database(directory, db_path, client):
     """
@@ -39,11 +141,7 @@ async def sync_database(directory, db_path, client):
     logger.info(f"{YELLOW}[*] Escaneando diretório: {directory}{OFF}")
 
     # # Caminho absoluto evita problemas com nomes contendo colchetes ou variação de maiúsculas.
-    all_files = []
-    for root, _, files in os.walk(directory):
-        for file in files:
-            if file.lower().endswith((".flac", ".mp3")):
-                all_files.append(os.path.join(root, file))
+    all_files = await asyncio.to_thread(_list_audio_files, directory)
 
     if not all_files:
         logger.info(
@@ -73,74 +171,16 @@ async def sync_database(directory, db_path, client):
             sampling_rate = None
 
             try:
-                if file_path.lower().endswith(".flac"):
-                    audio = FLAC(file_path)
-
-                    # # Tenta primeiro a tag nova (QDL_*); cai para a tag legada (QOBUZ*) se ausente.
-                    track_id_list = (
-                        audio.get("QDL_TRACK_ID") or audio.get("QOBUZTRACKID") or [None]
-                    )
-                    track_id = track_id_list[0]
-
-                    album_id_list = (
-                        audio.get("QDL_ALBUM_ID") or audio.get("QOBUZALBUMID") or [None]
-                    )
-                    album_id = album_id_list[0]
-
-                    isrc = audio.get("isrc", [None])[0]
-
-                    artist_name = (
-                        audio.get("ALBUMARTIST") or audio.get("ARTIST") or [""]
-                    )[0]
-                    album_name = audio.get("ALBUM", [""])[0]
-                    release_date = audio.get("DATE", [""])[0]
-                    bit_depth = getattr(audio.info, "bits_per_sample", 16)
-                    sampling_rate = (
-                        getattr(audio.info, "sample_rate", 44100) / 1000.0
-                        if getattr(audio.info, "sample_rate", None)
-                        else None
-                    )
-
-                elif file_path.lower().endswith(".mp3"):
-                    audio = ID3(file_path)
-
-                    # # Mesma hierarquia de busca do FLAC, adaptada aos frames TXXX do MP3.
-                    track_txxx = (
-                        audio.get("TXXX:QDL_TRACK_ID")
-                        or audio.get("TXXX:qdl_track_id")
-                        or audio.get("TXXX:QOBUZTRACKID")
-                    )
-                    if track_txxx:
-                        track_id = track_txxx.text[0]
-
-                    album_txxx = (
-                        audio.get("TXXX:QDL_ALBUM_ID")
-                        or audio.get("TXXX:qdl_album_id")
-                        or audio.get("TXXX:QOBUZALBUMID")
-                    )
-                    if album_txxx:
-                        album_id = album_txxx.text[0]
-
-                    tsrc = audio.get("TSRC")
-                    if tsrc:
-                        isrc = tsrc.text[0]
-
-                    tpe2 = audio.get("TPE2")
-                    tpe1 = audio.get("TPE1")
-                    talb = audio.get("TALB")
-                    tdrc = audio.get("TDRC") or audio.get("TYER")
-
-                    artist_name = (
-                        tpe2.text[0] if tpe2 else (tpe1.text[0] if tpe1 else "")
-                    )
-                    album_name = talb.text[0] if talb else ""
-                    release_date = str(tdrc.text[0]) if tdrc else ""
-                    bit_depth = 16
-                    # ID3 só lê tags; não tem .info (isso é do MP3/FLAC).
-                    mp3_rate = getattr(
-                        getattr(audio, "info", None), "sample_rate", None
-                    )
-                    sampling_rate = mp3_rate / 1000.0 if mp3_rate else None
+                (
+                    track_id,
+                    album_id,
+                    isrc,
+                    artist_name,
+                    album_name,
+                    release_date,
+                    bit_depth,
+                    sampling_rate,
+                ) = await asyncio.to_thread(_read_local_tags, file_path)
 
                 # # Arquivos antigos sem ID embutido são recuperados via busca por ISRC na API.
                 if not track_id and isrc:
@@ -302,11 +342,7 @@ async def find_duplicate_tracks(directory):
         f"(híbrido: AcoustID / Metadados)...{OFF}"
     )
 
-    all_files = []
-    for root, _, files in os.walk(directory):
-        for file in files:
-            if file.lower().endswith((".flac", ".mp3")):
-                all_files.append(os.path.join(root, file))
+    all_files = await asyncio.to_thread(_list_audio_files, directory)
 
     if not all_files:
         logger.info(

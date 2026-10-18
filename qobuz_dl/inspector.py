@@ -14,6 +14,7 @@
 #      upsample/transcode de uma fonte lossy disfarçado de FLAC?" via
 #      análise espectral (extra opcional 'analyze': numpy).
 # ==============================================================================
+import asyncio
 import json
 import os
 import subprocess
@@ -1446,7 +1447,7 @@ async def comparar_com_qobuz(client, settings, caminho):
         return 1
     with tempfile.TemporaryDirectory(prefix="qdl_inspect_") as pasta:
         copia = os.path.join(pasta, os.path.basename(caminho))
-        shutil.copy2(caminho, copia)
+        await asyncio.to_thread(shutil.copy2, caminho, copia)
         ui.step("Comparando com o Qobuz (simulação do `tags`, nada será gravado)...")
         await retag_directory(pasta, client, settings, dry_run=True)
     return 0

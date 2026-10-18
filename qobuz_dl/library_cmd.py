@@ -101,6 +101,12 @@ def _make_dedup_writer(downloads_db: Optional[str], quality: int):
     return writer
 
 
+def _gravar_json(caminho, dados):
+    """Grava o relatório em JSON (chamado em thread pelo `scan --json`)."""
+    with open(caminho, "w", encoding="utf-8") as fh:
+        json.dump(dados, fh, ensure_ascii=False, indent=2, default=str)
+
+
 async def cmd_scan(
     args: Any,
     *,
@@ -170,8 +176,7 @@ async def cmd_scan(
 
     json_path = getattr(args, "json", None)
     if json_path:
-        with open(json_path, "w", encoding="utf-8") as fh:
-            json.dump(report, fh, ensure_ascii=False, indent=2, default=str)
+        await asyncio.to_thread(_gravar_json, json_path, report)
         ui.ok(f"Relatório salvo em {json_path}")
     elif report["review"] and not _interactive():
         ui.info("Dica: use --json ARQUIVO para salvar os itens de revisão.")

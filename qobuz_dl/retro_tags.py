@@ -943,7 +943,7 @@ async def retag_directory(
     for legend_line in _legend_lines():
         ui.emit(legend_line)
 
-    all_files = find_audio_files(directory_path)
+    all_files = await asyncio.to_thread(find_audio_files, directory_path)
     files = [f for f in all_files if not (progress and progress.is_done(f))]
     stats = {
         "total": len(all_files),
@@ -1489,5 +1489,7 @@ async def retag_directory(
         if shared_holder["decision"] is not None:
             _discard_shared_cover(shared_holder["decision"])
         if dry_workdir:
+            # Síncrono de propósito: `shutil.rmtree` em thread TRAVA no a-Shell
+            # (iOS; confirmado: copyfile/copy2 em thread funcionam, rmtree não).
             shutil.rmtree(dry_workdir, ignore_errors=True)
         await http_session.aclose()

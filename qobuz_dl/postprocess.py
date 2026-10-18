@@ -358,7 +358,10 @@ async def init_report(
     lock = await _get_lock(path)
 
     async with lock:
-        report = _load_report(path)
+        # Leitura/gravação em thread: o JSON + o report.html inteiros eram
+        # lidos/regerados a cada faixa com o loop parado (o lock por pasta
+        # continua serializando as atualizações da mesma pasta).
+        report = await asyncio.to_thread(_load_report, path)
 
         if not report:
             report = _skeleton(
@@ -417,7 +420,7 @@ async def init_report(
         _atualizar_progresso_item(report)
         _recalc_cabecalho_dinamico(report)
         _recalc_resumo(report)
-        _save_report(path, report)
+        await asyncio.to_thread(_save_report, path, report)
         return path
 
 
@@ -463,7 +466,10 @@ async def update_track_status(
     lock = await _get_lock(path)
 
     async with lock:
-        report = _load_report(path)
+        # Leitura/gravação em thread: o JSON + o report.html inteiros eram
+        # lidos/regerados a cada faixa com o loop parado (o lock por pasta
+        # continua serializando as atualizações da mesma pasta).
+        report = await asyncio.to_thread(_load_report, path)
         is_new = not report
         if is_new:
             report = _skeleton(
@@ -558,7 +564,7 @@ async def update_track_status(
         _atualizar_progresso_item(report)
         _recalc_cabecalho_dinamico(report)
         _recalc_resumo(report)
-        _save_report(path, report)
+        await asyncio.to_thread(_save_report, path, report)
 
 
 async def finalize_report(
@@ -573,7 +579,10 @@ async def finalize_report(
     lock = await _get_lock(path)
 
     async with lock:
-        report = _load_report(path)
+        # Leitura/gravação em thread: o JSON + o report.html inteiros eram
+        # lidos/regerados a cada faixa com o loop parado (o lock por pasta
+        # continua serializando as atualizações da mesma pasta).
+        report = await asyncio.to_thread(_load_report, path)
         if not report:
             return
 
@@ -587,7 +596,7 @@ async def finalize_report(
             report["qualidade"]["alvo_atingida"] = qualidade_atingida
 
         _recalc_resumo(report)
-        _save_report(path, report)
+        await asyncio.to_thread(_save_report, path, report)
 
 
 # ============================================================================

@@ -2,6 +2,7 @@
 # # sync_playlist.py -- sincronização bidirecional entre playlist Qobuz e pasta local.
 # # Compara IDs, baixa faixas ausentes, remove órfãs e atualiza o arquivo .m3u.
 # # ============================================================================
+import asyncio
 import logging
 import os
 
@@ -204,7 +205,7 @@ async def sync_playlist(qobuz_dl, url, folder, auto_confirm=False):
 
     os.makedirs(target_folder, exist_ok=True)
     logger.info(f"{CYAN}[2/4] Escaneando pasta local...{OFF}")
-    local_tracks, untagged = _scan_local_tracks(target_folder)
+    local_tracks, untagged = await asyncio.to_thread(_scan_local_tracks, target_folder)
     logger.info(
         f"{CYAN}      Encontradas {len(local_tracks)} faixas taggeadas localmente.{OFF}"
     )
@@ -366,7 +367,9 @@ async def sync_playlist(qobuz_dl, url, folder, auto_confirm=False):
         for _tid in orphan_links:
             remove_link(target_folder, _tid)
 
-        _clean_empty_dirs(target_folder, exclude_dirs={"_Playlists"})
+        await asyncio.to_thread(
+            _clean_empty_dirs, target_folder, exclude_dirs={"_Playlists"}
+        )
 
     if not getattr(qobuz_dl, "no_m3u_for_playlists", False):
         make_m3u(target_folder, remote_items)

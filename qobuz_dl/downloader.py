@@ -835,7 +835,7 @@ class Download:
             failed_tracks = sum(res is not True for res in results)
 
             if not abort_event.is_set():
-                _clean_embed_art(dirn, self.settings)
+                await asyncio.to_thread(_clean_embed_art, dirn, self.settings)
                 if getattr(self, "fetch_lyrics", False) and not self.no_credits:
                     self._append_lyrics_to_booklet(dirn, album_title)
 
@@ -853,7 +853,8 @@ class Download:
                 )
 
             if aborted_by_user:
-                time.sleep(1.5)
+                # dá tempo das threads de download terminarem sem congelar o loop
+                await asyncio.sleep(1.5)
 
             final_dirn = working_dirn
             if is_standard_album and working_dirn == inprogress_dirn:
@@ -2912,7 +2913,7 @@ async def _get_cover_and_embed(
 
     if precisa_salva and saved_url == embed_url and os.path.isfile(saved_file):
         try:
-            shutil.copyfile(saved_file, embed_file)
+            await asyncio.to_thread(shutil.copyfile, saved_file, embed_file)
             ui.detail("🌁 Reutilizando cover.jpg, para o embed..")
             gravou_qobuz = True
             return _origem_qobuz()

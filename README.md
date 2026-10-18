@@ -277,7 +277,7 @@ Todos os comandos seguintes são executados **dentro dessa pasta** (a que conté
 #### Passo 3: Primeira execução (configuração guiada)
 
 ```bash
-docker compose run —rm qobuz-dl dl “https://play.qobuz.com/album/...”
+docker compose run —rm qobuz-dl dl "https://play.qobuz.com/album/..."
 ```
 
 Na primeira vez o Docker baixa a imagem (pode levar alguns minutos) e abre o **assistente de configuração**. Responda assim:
@@ -297,7 +297,7 @@ O comando é sempre o mesmo; só muda o que vem depois de `qobuz-dl`:
 
 ```bash
 # Baixar um álbum, faixa, artista ou playlist
-docker compose run —rm qobuz-dl dl “URL”
+docker compose run —rm qobuz-dl dl "URL"
 
 # Reescrever as tags da sua biblioteca (sem pasta, usa a pasta de downloads)
 docker compose run —rm qobuz-dl tags
@@ -382,29 +382,29 @@ Se você deseja definir uma pasta de download personalizada, pode editar seu arq
 [qobuz]
 directory = ~/Music/Qobuz_Lossless
 
-# Defina como ‘true’ se estiver executando em um servidor headless (NAS/Docker/WSL) 
+# Defina como 'true' se estiver executando em um servidor headless (NAS/Docker/WSL) 
 # para salvar tokens sem criptografia no config.ini em vez do Keyring do SO.
 disable_keyring = false
 
-# Defina como ‘true’ para restaurar substituições clássicas de caracteres ASCII
+# Defina como 'true' para restaurar substituições clássicas de caracteres ASCII
 legacy_charmap = false
 
-# Defina como ‘true’ para desativar a geração de arquivos .lrc externos
+# Defina como 'true' para desativar a geração de arquivos .lrc externos
 no_lrc_files = true
 
-# Defina como ‘true’ para restaurar substituições clássicas de caracteres ASCII (ex.: substituir ‘/‘ por ‘-‘)
+# Defina como 'true' para restaurar substituições clássicas de caracteres ASCII (ex.: substituir '/' por '-')
 legacy_charmap = false
 
-# Defina como ‘true’ para desativar a geração de arquivos .lrc externos (as letras serão incorporadas apenas nas tags FLAC/MP3)
+# Defina como 'true' para desativar a geração de arquivos .lrc externos (as letras serão incorporadas apenas nas tags FLAC/MP3)
 no_lrc_files = true
 
-# Defina como ‘true’ para desativar estritamente tags de volume ReplayGain para reprodução bit-perfect em hardware
+# Defina como 'true' para desativar estritamente tags de volume ReplayGain para reprodução bit-perfect em hardware
 no_replaygain_tag = true
 
-# Defina como ‘true’ para desativar a gravação da tag não padrão “QOBUZ ALBUM URL” nos arquivos
+# Defina como 'true' para desativar a gravação da tag não padrão "QOBUZ ALBUM URL" nos arquivos
 no_album_url_tag = true
 
-# Defina como ‘true’ para desativar a extração de metadados de música clássica
+# Defina como 'true' para desativar a extração de metadados de música clássica
 no_conductor_tag = true
 no_ensemble_tag = true
 no_work_tag = true
@@ -458,14 +458,14 @@ qobuz-dl inspect ~/Music/faixa.flac --comparar  # o que o `tags` mudaria (simula
 *(Dica: Adicione `-y` para ignorar os avisos de confirmação. A flag `-d` opera com segurança, criando automaticamente uma subpasta para a playlist).*
 
 ```
-python -m qobuz_dl sp “URL” -d “C:\Caminho\Para\Pasta\Local\Da\Playlist”
+python -m qobuz_dl sp "URL" -d "C:\Caminho\Para\Pasta\Local\Da\Playlist"
 ```
 
 **Explodir Playlists em Álbuns:**
 Por padrão, as playlists são baixadas em uma única pasta plana. Use esta flag se você usa playlists como uma “ferramenta de descoberta” e deseja que o mecanismo encaminhe dinamicamente cada faixa para sua respectiva pasta de álbum original, com sua arte de capa específica e metadados originais da faixa.
 
 ```
-python -m qobuz_dl dl “URL_DA_PLAYLIST” --playlist-as-albums
+python -m qobuz_dl dl "URL_DA_PLAYLIST" --playlist-as-albums
 ```
 
 **Download em Massa / Lote (Retomada Inteligente):**
@@ -503,7 +503,7 @@ python -m qobuz_dl dl <URL> --with-credits
 Use a flag `--multi-tags` para garantir que faixas complexas com múltiplos artistas e compositores sejam divididas em campos limpos e individuais nas tags de áudio.
 
 ```
-python -m qobuz_dl dl “URL” --multi-tags
+python -m qobuz_dl dl "URL" --multi-tags
 ```
 
 **Artistas com vírgula no nome:** nomes como `Tyler, The Creator` ou `Earth, Wind & Fire` são reconhecidos e **não** são divididos em dois artistas (nem com `--multi-tags`). Há uma lista embutida e, além dela, qualquer artista que a API do Qobuz entregue como entrada estruturada com vírgula no nome é protegido automaticamente. Para incluir outros, adicione na seção `[qobuz]` do `config.ini` (separados por `;`):
@@ -543,7 +543,7 @@ python -m qobuz_dl fun -l 10
 Baixe uma faixa mantendo o arquivo estritamente bit-perfect, sem gravar quaisquer tags de nivelamento de volume (útil para DSPs e DAPs de hardware).
 
 ```
-python -m qobuz_dl dl “URL” --no-replaygain-tag
+python -m qobuz_dl dl "URL" --no-replaygain-tag
 ```
 
 ### 🗄️ Gerenciamento de Banco de Dados e Biblioteca
@@ -561,7 +561,7 @@ A Edição Ultra inclui poderosos gerenciadores de biblioteca local para acompan
   Playlists são entidades vivas. Em vez de baixar novamente uma playlist inteira toda vez que o autor adiciona uma nova música, aponte este comando para a sua pasta existente. Ele escaneará as tags locais, consultará a API do Qobuz e calculará o delta exato: baixando apenas as faixas ausentes, excluindo de forma limpa as removidas (junto com seus respectivos arquivos `.lrc`) e regenerando a ordem no `.m3u`.
 
   ```
-  python -m qobuz_dl sp “URL_DA_PLAYLIST” -d “/caminho/para/sua/pasta/local”
+  python -m qobuz_dl sp "URL_DA_PLAYLIST" -d "/caminho/para/sua/pasta/local"
   ```
 
 * **Tagger Retroativo de Letras (`lyrics`):**
@@ -569,7 +569,13 @@ A Edição Ultra inclui poderosos gerenciadores de biblioteca local para acompan
   Atualmente o comando lê a pasta raiz configurada no ’config.ini’
 
   ```
-  python -m qobuz_dl lyrics “/caminho/para/sua/pasta/local/de/musica”
+  python -m qobuz_dl lyrics "/caminho/para/sua/pasta/local/de/musica"
+  ```
+
+  Por padrão os arquivos são processados **um de cada vez**. Para acelerar bibliotecas grandes use `--max-workers N` (ou `max_workers` no `config.ini`, o mesmo valor dos downloads): até **4 arquivos ao mesmo tempo** — acima disso o limite é 4, porque os provedores de letra (Musixmatch, LRCLIB, Genius) limitam requisições. O relatório final continua na ordem dos arquivos; só as linhas “Analisando” aparecem misturadas durante a execução.
+
+  ```
+  python -m qobuz_dl lyrics --max-workers 3 "/caminho/para/sua/pasta/local/de/musica"
   ```
 
 * **Correção Retroativa de Tags (`tags`):**
@@ -588,18 +594,18 @@ A Edição Ultra inclui poderosos gerenciadores de biblioteca local para acompan
 
 | Opção | Tags | Capa | Consulta a Apple? |
 |:--- |:--- |:--- |:--- |
-| *(nenhuma)* ou `--both` | _regrava_ | _troca quando validada_ | SIM |
-| `--tags-only` | _regrava_ | _**não é tocada** (a embutida e as linhas de capa do comentário ficam como estão)_ | **NÃO** |
-| `--covers-only` | _**não é tocada**_ | _troca quando validada e de resolução maior (a origem/tamanho vai para o comentário e para `COVER-SOURCE`)_ | SIM |
+| *(nenhuma)* ou `--both` | _regrava_ | _troca quando validada_ | _SIM_ |
+| `--tags-only` | _regrava_ | _**não é tocada** (a embutida e as linhas de capa do comentário ficam como estão)_ | _**NÃO**_ |
+| `--covers-only` | _**não é tocada**_ | _troca quando validada e de resolução maior (a origem/tamanho vai para o comentário e para `COVER-SOURCE`)_ | _SIM_ |
 
   As três opções são excludentes entre si. Em `--tags-only` o log mostra `Modo: SOMENTE TAGS`, a linha `Capa` aparece como `não tocada` e o resumo omite as contagens da Apple.
 
   ```bash
-  python -m qobuz_dl tags “/caminho/para/sua/pasta/local/de/musica” --multi-tags
-  python -m qobuz_dl tags “/caminho/para/sua/pasta/local/de/musica” --no-multi-tags
-  python -m qobuz_dl tags “/caminho/para/sua/pasta/local/de/musica” --tags-only
-  python -m qobuz_dl tags “/caminho/para/sua/pasta/local/de/musica” --covers-only
-  python -m qobuz_dl tags “/caminho/para/sua/pasta/local/de/musica” --both
+  python -m qobuz_dl tags "/caminho/para/sua/pasta/local/de/musica" --multi-tags
+  python -m qobuz_dl tags "/caminho/para/sua/pasta/local/de/musica" --no-multi-tags
+  python -m qobuz_dl tags "/caminho/para/sua/pasta/local/de/musica" --tags-only
+  python -m qobuz_dl tags "/caminho/para/sua/pasta/local/de/musica" --covers-only
+  python -m qobuz_dl tags "/caminho/para/sua/pasta/local/de/musica" --both
   ```
 
   **Simular antes (`--dry-run`) e desfazer (`--undo`).** O `tags` reescreve muitos arquivos de uma vez, então há duas redes de segurança:
@@ -608,7 +614,7 @@ A Edição Ultra inclui poderosos gerenciadores de biblioteca local para acompan
   * Em toda execução de verdade, antes de gravar cada arquivo o `tags` guarda os **metadados originais** (tags e capa, byte a byte; o áudio nunca é copiado) em `<pasta do config>/tags_undo/`. São mantidas as 5 últimas execuções. `--no-undo` desliga o registro.
 
   ```bash
-  python -m qobuz_dl tags “/caminho/para/sua/pasta/local/de/musica” --dry-run   # só mostra o que seria feito
+  python -m qobuz_dl tags "/caminho/para/sua/pasta/local/de/musica" --dry-run   # só mostra o que seria feito
   python -m qobuz_dl tags --undo-list                                            # execuções que dá para desfazer
   python -m qobuz_dl tags --undo                                                 # desfaz a mais recente
   python -m qobuz_dl tags --undo 20261013_190000                                 # desfaz uma execução específica
@@ -620,7 +626,7 @@ A Edição Ultra inclui poderosos gerenciadores de biblioteca local para acompan
   **Descobrir nomes com vírgula (`--suggest-names`).** Artistas como `Tyler, The Creator` ou `Crosby, Stills, Nash & Young` têm vírgula no nome e seriam separados em vários artistas. O comando varre a sua pasta, procura pares de nomes que *sempre* aparecem juntos (em pelo menos 3 arquivos) e imprime a linha pronta para colar no `config.ini`. Não grava nada nos arquivos e não precisa de login:
 
   ```bash
-  python -m qobuz_dl tags “/caminho/para/sua/pasta/local/de/musica” --suggest-names
+  python -m qobuz_dl tags "/caminho/para/sua/pasta/local/de/musica" --suggest-names
   ```
 
   **Escolha do modo.** Rodando o `tags` num terminal, sem `--tags-only`, `--covers-only` ou `--both`, ele pergunta o que atualizar (tags e capas / só tags / só capas; Enter = tags e capas). Em scripts, cron ou pipes (sem terminal interativo) não pergunta nada e usa o padrão.
@@ -634,10 +640,10 @@ A Edição Ultra inclui poderosos gerenciadores de biblioteca local para acompan
   **Relatório da biblioteca (`--report`).** Para saber *onde* rodar o `tags` antes de rodá-lo, o comando varre a pasta (só leitura, sem login, sem rede) e gera um relatório com os problemas por álbum e por faixa: sem capa, capa pequena (< 500 px) ou não quadrada, sem ISRC, ID Qobuz ausente ou inválido, sem artista do álbum, sem data, sem número da faixa. É HTML por padrão (abre em qualquer navegador, com filtro por álbum); se o nome terminar em `.csv`, sai uma planilha:
 
   ```bash
-  python -m qobuz_dl tags “/caminho/para/sua/pasta/local/de/musica” --report                  # relatorio_biblioteca.html
-  python -m qobuz_dl tags “/caminho/para/sua/pasta/local/de/musica” --report problemas.csv
-  python -m qobuz_dl tags “/caminho/para/sua/pasta/local/de/musica” --resume
-  python -m qobuz_dl tags “/caminho/para/sua/pasta/local/de/musica” --incremental
+  python -m qobuz_dl tags "/caminho/para/sua/pasta/local/de/musica" --report                  # relatorio_biblioteca.html
+  python -m qobuz_dl tags "/caminho/para/sua/pasta/local/de/musica" --report problemas.csv
+  python -m qobuz_dl tags "/caminho/para/sua/pasta/local/de/musica" --resume
+  python -m qobuz_dl tags "/caminho/para/sua/pasta/local/de/musica" --incremental
   ```
 
   **Capa da Apple: regras extras.** A capa da Apple só substitui a atual se for maior *e* quadrada (tolerância de 3%); capas retangulares são mantidas e aparecem no resumo como `mantida (a da Apple não é quadrada)`. Se a capa nova passar do limite de 16 MB de um bloco FLAC, ela é recomprimida com o Pillow ou, se o Pillow não estiver disponível (como no a-Shell), com o `ffmpeg`.
@@ -667,7 +673,7 @@ qobuz-dl sync-favorites --download-missing --limit 20 -y
 qobuz-dl sync-favorites --download-new --every 60   # modo contínuo (NAS/servidor)
 qobuz-dl sync-favorites --dry-run        # só simula
 
-qobuz-dl scan “/musica”                  # casa pastas do disco com o catálogo (offline)
+qobuz-dl scan "/musica"                  # casa pastas do disco com o catálogo (offline)
 qobuz-dl scan --dry-run --json rel.json  # classifica sem gravar e salva o relatório
 
 qobuz-dl library                         # status do catálogo

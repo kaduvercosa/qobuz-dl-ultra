@@ -278,7 +278,9 @@ async def download_albums(
                 # Não repita escrita de estado/sentinela aqui.
                 done += 1
                 continue
-            folder = lookup_saved_path(downloads_db, a["source_album_id"])
+            folder = await asyncio.to_thread(
+                lookup_saved_path, downloads_db, a["source_album_id"]
+            )
             if folder and os.path.isdir(folder):
                 await asyncio.to_thread(
                     mark_album_downloaded,

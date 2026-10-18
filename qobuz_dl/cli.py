@@ -821,7 +821,7 @@ async def _reset_config(config_file: str):
         CYAN = nova_cor
 
     ui.emit(f"{ACCENT}\n [*] Atualizando interface...{OFF}", end="")
-    time.sleep(2.0)
+    await asyncio.sleep(2.0)
     ui.emit("\r\033[K", end="")
     _print_welcome_screen()
 
@@ -1840,7 +1840,12 @@ async def async_main():
         lrc_pref = not config.getboolean(section, "no_lrc_files", fallback=False)
         embed_pref = config.getboolean(section, "embed_lyrics", fallback=True)
         trans_lang = config.get(section, "lyrics_translation_lang", fallback="pt")
-        local_settings = QobuzDLSettings(lrc_files=lrc_pref, embed_lyrics=embed_pref)
+        lyrics_workers = getattr(arguments, "max_workers", None) or config.get(
+            section, "max_workers", fallback="1"
+        )
+        local_settings = QobuzDLSettings(
+            lrc_files=lrc_pref, embed_lyrics=embed_pref, max_workers=lyrics_workers
+        )
         local_settings.lyrics_translation_lang = trans_lang
         local_settings.default_folder = target_dir
         lyrics_client = None

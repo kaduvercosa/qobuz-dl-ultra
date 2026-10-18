@@ -377,6 +377,16 @@ def lyrics_args(subparsers, default_folder=None):
         default=None,
         help=f'O diretório local contendo os arquivos a serem escaneados (padrão: "{default_folder}")',
     )
+    lyrics.add_argument(
+        "--max-workers",
+        type=int,
+        metavar="N",
+        help=(
+            "arquivos processados ao mesmo tempo (padrão: 1 -- sequencial; "
+            "também lê max_workers do config.ini). O máximo efetivo é 4, "
+            "porque os provedores de letra limitam requisições"
+        ),
+    )
     return lyrics
 
 

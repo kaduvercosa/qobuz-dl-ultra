@@ -2,6 +2,7 @@
 # retro_tagger.py -- inspecao e atualizacao retroativa de letras na biblioteca.
 # Fluxo: localizar IDs/metadados -> consultar Qobuz -> atualizar letras -> relatorio.
 # ============================================================================
+import asyncio
 import logging
 import os
 import re
@@ -244,6 +245,53 @@ async def fetch_qobuz_lyrics_raw(client, track_id, language=None):
         return None
 
 
+# Provedores de letra (Musixmatch/LRCLIB/Genius) limitam requisições: mesmo que
+# `max_workers` seja alto (pensado para downloads), as letras nunca passam disto.
+_MAX_LYRICS_WORKERS = 4
+
+
+def _lyrics_workers(settings):
+    """Quantos arquivos processar ao mesmo tempo (1 = sequencial, o padrão)."""
+    try:
+        n = int(getattr(settings, "max_workers", 1) or 1)
+    except (TypeError, ValueError):
+        n = 1
+    return max(1, min(n, _MAX_LYRICS_WORKERS))
+
+
+def _collect_audio_files(directory_path):
+    """Lista (ordenada) os .flac/.mp3 de uma pasta, recursivamente."""
+    found = []
+    for root, _, files in os.walk(directory_path):
+        for f in files:
+            if f.lower().endswith((".flac", ".mp3")):
+                found.append(os.path.join(root, f))
+    found.sort()
+    return found
+
+
+def _read_basic_tags(file_path, ext):
+    """Lê (título, artista, álbum) do arquivo; vazio quando a tag não existe."""
+    title, artist, album = "", "", ""
+    if ext == ".flac":
+        try:
+            audio = FLAC(file_path)
+            title = audio.get("TITLE", [""])[0]
+            artist = audio.get("ARTIST", [""])[0] or audio.get("ALBUMARTIST", [""])[0]
+            album = audio.get("ALBUM", [""])[0]
+        except Exception as e:
+            logger.debug(f"Falha ao ler tags do FLAC: {e}")
+    elif ext == ".mp3":
+        try:
+            audio = id3.ID3(file_path)
+            title = audio.get("TIT2").text[0] if audio.get("TIT2") else ""
+            artist = audio.get("TPE1").text[0] if audio.get("TPE1") else ""
+            album = audio.get("TALB").text[0] if audio.get("TALB") else ""
+        except Exception as e:
+            logger.debug(f"Falha ao ler tags do MP3: {e}")
+    return title, artist, album
+
+
 async def process_retroactive_lyrics_async(
     directory_path, client, genius_token=None, settings=None
 ):
@@ -272,13 +320,9 @@ async def process_retroactive_lyrics_async(
     try:
         # Reune primeiro todos os arquivos para ordenar o processamento e calcular
         # o total.
-        files_to_check = []
-        for root, _, files in os.walk(directory_path):
-            for f in files:
-                if f.lower().endswith((".flac", ".mp3")):
-                    files_to_check.append(os.path.join(root, f))
-
-        files_to_check.sort()
+        # Varredura e leitura de tags rodam em thread: com o loop parado, o
+        # cliente HTTP do Qobuz não conseguia nem manter a conexão viva.
+        files_to_check = await asyncio.to_thread(_collect_audio_files, directory_path)
 
         # Guarda uma linha detalhada por arquivo para auditoria das alteracoes.
         report_items = []
@@ -298,39 +342,25 @@ async def process_retroactive_lyrics_async(
             "corrected_wrong_language": 0,
         }
 
-        for file_path in files_to_check:
+        async def _processar_arquivo(file_path, report_items):
+            # `report_items` aqui é a lista DESTE arquivo (sombreia a global),
+            # para o relatório final sair na ordem dos arquivos mesmo quando
+            # vários são processados ao mesmo tempo.
             file_name = os.path.basename(file_path)
             ext = os.path.splitext(file_path)[1].lower()
 
-            title, artist, album = "", "", ""
-            if ext == ".flac":
-                try:
-                    audio = FLAC(file_path)
-                    title = audio.get("TITLE", [""])[0]
-                    artist = (
-                        audio.get("ARTIST", [""])[0]
-                        or audio.get("ALBUMARTIST", [""])[0]
-                    )
-                    album = audio.get("ALBUM", [""])[0]
-                except Exception as e:
-                    logger.debug(f"Falha ao ler tags do FLAC: {e}")
-            elif ext == ".mp3":
-                try:
-                    audio = id3.ID3(file_path)
-                    title = audio.get("TIT2").text[0] if audio.get("TIT2") else ""
-                    artist = audio.get("TPE1").text[0] if audio.get("TPE1") else ""
-                    album = audio.get("TALB").text[0] if audio.get("TALB") else ""
-                except Exception as e:
-                    logger.debug(f"Falha ao ler tags do MP3: {e}")
+            title, artist, album = await asyncio.to_thread(
+                _read_basic_tags, file_path, ext
+            )
 
             if not title:
                 title = os.path.splitext(file_name)[0]
 
-            lookup_hints = _lyrics_lookup_hints(file_path)
+            lookup_hints = await asyncio.to_thread(_lyrics_lookup_hints, file_path)
 
             # IDs gravados pelo downloader sao confiaveis; busca textual e usada
             # apenas como fallback.
-            track_id = extract_track_id(file_path)
+            track_id = await asyncio.to_thread(extract_track_id, file_path)
             track_id_is_trusted = bool(track_id)
 
             # Match textual de seguranca: evita abortar quando arquivos antigos nao possuem Qobuz ID.
@@ -370,7 +400,7 @@ async def process_retroactive_lyrics_async(
                     logger.debug(f"Falha ao casar faixa por busca textual: {e}")
 
             # Estado atual: presenca, idioma e se a letra ja e bilingue.
-            lyrics_state = inspect_existing_lyrics(file_path)
+            lyrics_state = await asyncio.to_thread(inspect_existing_lyrics, file_path)
             has_lyrics = lyrics_state["has_lyrics"]
             is_bilingual = lyrics_state["is_bilingual"]
             existing_lang = lyrics_state["language"]
@@ -408,7 +438,8 @@ async def process_retroactive_lyrics_async(
                 if target_lang and orig_lang == target_lang.lower():
                     expected_lang = target_lang.lower()
                     if not has_lyrics:
-                        result = engine.fetch_and_inject(
+                        result = await asyncio.to_thread(
+                            engine.fetch_and_inject,
                             **lookup_hints,
                             file_path=file_path,
                             artist=artist,
@@ -444,7 +475,8 @@ async def process_retroactive_lyrics_async(
                         or existing_lang != expected_lang
                         or upgrade_to_sync
                     ) and track_id_is_trusted:
-                        result = engine.fetch_and_inject(
+                        result = await asyncio.to_thread(
+                            engine.fetch_and_inject,
                             **lookup_hints,
                             file_path=file_path,
                             artist=artist,
@@ -496,7 +528,8 @@ async def process_retroactive_lyrics_async(
                 elif not qobuz_trans_block:
                     expected_lang = orig_lang
                     if not has_lyrics:
-                        result = engine.fetch_and_inject(
+                        result = await asyncio.to_thread(
+                            engine.fetch_and_inject,
                             **lookup_hints,
                             file_path=file_path,
                             artist=artist,
@@ -532,7 +565,8 @@ async def process_retroactive_lyrics_async(
                         or existing_lang != expected_lang
                         or upgrade_to_sync
                     ) and track_id_is_trusted:
-                        result = engine.fetch_and_inject(
+                        result = await asyncio.to_thread(
+                            engine.fetch_and_inject,
                             **lookup_hints,
                             file_path=file_path,
                             artist=artist,
@@ -584,7 +618,8 @@ async def process_retroactive_lyrics_async(
                 else:
                     expected_lang = f"{orig_lang}+{target_lang.lower()}"
                     if not has_lyrics:
-                        result = engine.fetch_and_inject(
+                        result = await asyncio.to_thread(
+                            engine.fetch_and_inject,
                             **lookup_hints,
                             file_path=file_path,
                             artist=artist,
@@ -620,7 +655,8 @@ async def process_retroactive_lyrics_async(
                         or existing_lang != expected_lang
                         or upgrade_to_sync
                     ) and track_id_is_trusted:
-                        result = engine.fetch_and_inject(
+                        result = await asyncio.to_thread(
+                            engine.fetch_and_inject,
                             **lookup_hints,
                             file_path=file_path,
                             artist=artist,
@@ -661,7 +697,8 @@ async def process_retroactive_lyrics_async(
                             )
 
                     elif not is_bilingual and track_id_is_trusted:
-                        result = engine.fetch_and_inject(
+                        result = await asyncio.to_thread(
+                            engine.fetch_and_inject,
                             **lookup_hints,
                             file_path=file_path,
                             artist=artist,
@@ -713,7 +750,8 @@ async def process_retroactive_lyrics_async(
 
             else:
                 if not has_lyrics:
-                    result = engine.fetch_and_inject(
+                    result = await asyncio.to_thread(
+                        engine.fetch_and_inject,
                         **lookup_hints,
                         file_path=file_path,
                         artist=artist,
@@ -724,7 +762,9 @@ async def process_retroactive_lyrics_async(
                         qobuz_lyrics_response=None,
                         qobuz_translation_response=None,
                     )
-                    check_again = inspect_existing_lyrics(file_path)
+                    check_again = await asyncio.to_thread(
+                        inspect_existing_lyrics, file_path
+                    )
                     if check_again["has_lyrics"] and result["success"]:
                         stats["updated_fallback"] += 1
                         report_items.append(
@@ -752,6 +792,37 @@ async def process_retroactive_lyrics_async(
                             "Ja possui letra; Qobuz nao possui registros de traducao",
                         )
                     )
+
+        n_workers = _lyrics_workers(settings)
+        itens_por_arquivo = {}
+
+        async def _uma(file_path):
+            local = itens_por_arquivo[file_path] = []
+            await _processar_arquivo(file_path, local)
+
+        if n_workers <= 1:
+            for file_path in files_to_check:
+                await _uma(file_path)
+        else:
+            semaforo = asyncio.Semaphore(n_workers)
+
+            async def _limitada(file_path):
+                async with semaforo:
+                    await _uma(file_path)
+
+            tarefas = [asyncio.create_task(_limitada(fp)) for fp in files_to_check]
+            try:
+                await asyncio.gather(*tarefas)
+            except BaseException:
+                # Falha (ou CTRL+C): não deixa tarefas soltas usando a engine
+                # que o `finally` abaixo vai fechar.
+                for tarefa in tarefas:
+                    tarefa.cancel()
+                await asyncio.gather(*tarefas, return_exceptions=True)
+                raise
+
+        for file_path in files_to_check:
+            report_items.extend(itens_por_arquivo.get(file_path, []))
 
         _w = min(_shutil.get_terminal_size((80, 24)).columns, 100)
         _bar = "━" * _w
@@ -868,3 +939,4 @@ async def inject_lyrics_retroactively(
         )
         ui.emit(f"{RED}[!] O processamento retroativo falhou: {e}{OFF}")
         raise
+ 

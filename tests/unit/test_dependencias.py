@@ -14,8 +14,8 @@ HISTORICO DE PROBLEMAS REAIS QUE ESTE ARQUIVO TRAVA
    instala pacotes Python puros.
 """
 
+import importlib.util
 import re
-import subprocess
 import sys
 from pathlib import Path
 
@@ -67,15 +67,21 @@ class TestFonteDeVerdadeUnica:
         assert "install_requires" not in codigo
         assert "python_requires" not in codigo
 
-    def test_requirements_txt_em_sincronia_com_pyproject(self):
+    def test_requirements_txt_em_sincronia_com_pyproject(self, monkeypatch, capsys):
         """Roda o proprio verificador do projeto. Falha aqui = requirements.txt
-        editado a mao; rode `python tools/gerar_requirements.py`."""
-        r = subprocess.run(
-            [sys.executable, str(RAIZ / "tools" / "gerar_requirements.py"), "--check"],
-            capture_output=True,
-            text=True,
-        )
-        assert r.returncode == 0, r.stderr
+        editado a mao; rode `python tools/gerar_requirements.py`.
+
+        Roda EM PROCESSO (carrega o script e chama `main()`), nao num
+        subprocesso: no a-Shell (iOS) um `python3` filho trava com
+        `pyinit_core_reconfigure` / segfault, e isso nao tem relacao com o
+        requirements.txt. O comportamento testado e' o mesmo do `--check`."""
+        script = RAIZ / "tools" / "gerar_requirements.py"
+        spec = importlib.util.spec_from_file_location("gerar_requirements", script)
+        gerador = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(gerador)
+        monkeypatch.setattr(sys, "argv", ["gerar_requirements.py", "--check"])
+        codigo = gerador.main()
+        assert codigo == 0, capsys.readouterr().err
 
 
 class TestNucleoInstalavelEmAmbienteRestrito:

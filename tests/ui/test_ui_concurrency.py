@@ -86,14 +86,27 @@ MENCAO_A_LINHA = re.compile(r"LINHA|worker=|seq=|via-")
 def _rodar_cenario():
     import subprocess
     import sys
+    from pathlib import Path
 
+    raiz = Path(__file__).resolve().parents[2]
+    env = dict(os.environ, NO_COLOR="1", COLUMNS="100")
+    env["PYTHONPATH"] = os.pathsep.join(
+        p for p in (str(raiz), env.get("PYTHONPATH", "")) if p
+    )
     r = subprocess.run(
         [sys.executable, __file__],
         capture_output=True,
         text=True,
-        env=dict(os.environ, NO_COLOR="1", COLUMNS="100"),
+        env=env,
         timeout=180,
     )
+    if r.returncode != 0:
+        # No a-Shell (iOS) um `python3` filho costuma morrer sem mensagem ou
+        # com segfault (`pyinit_core_reconfigure`). Isso e' limite do ambiente,
+        # nao falha do ui.emit(): pula localmente, mas no CI continua valendo.
+        travou = not r.stderr.strip() or "segmentation fault" in r.stderr.lower()
+        if travou and os.environ.get("QOBUZ_REQUIRE_REAL_TOOLS") != "1":
+            pytest.skip("subprocesso python3 instavel neste ambiente (a-Shell/iOS)")
     assert r.returncode == 0, f"o cenario falhou:\n{r.stderr[-2000:]}"
     return r.stdout + r.stderr
 
