@@ -939,4 +939,3 @@ async def inject_lyrics_retroactively(
         )
         ui.emit(f"{RED}[!] O processamento retroativo falhou: {e}{OFF}")
         raise
- 
