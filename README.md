@@ -252,7 +252,7 @@ A imagem Docker já traz tudo pronto (Python, FFmpeg e os extras de capas, veloc
 Confirme que funcionou (os dois comandos devem mostrar uma versão):
 
 ```bash
-docker —version
+docker --version
 docker compose version
 ```
 
@@ -277,7 +277,7 @@ Todos os comandos seguintes são executados **dentro dessa pasta** (a que conté
 #### Passo 3: Primeira execução (configuração guiada)
 
 ```bash
-docker compose run —rm qobuz-dl dl "https://play.qobuz.com/album/..."
+docker compose run --rm qobuz-dl dl "https://play.qobuz.com/album/..."
 ```
 
 Na primeira vez o Docker baixa a imagem (pode levar alguns minutos) e abre o **assistente de configuração**. Responda assim:
@@ -289,7 +289,7 @@ Na primeira vez o Docker baixa a imagem (pode levar alguns minutos) e abre o **a
 
 Terminado o assistente, o download começa. Os arquivos aparecem em `./musicas` e a configuração em `./config`, ambas criadas sozinhas ao lado do `docker-compose.yml`.
 
-> Se o assistente avisar que o login falhou, o token está errado ou expirou. Rode `docker compose run —rm qobuz-dl -r` para refazer a configuração.
+> Se o assistente avisar que o login falhou, o token está errado ou expirou. Rode `docker compose run --rm qobuz-dl -r` para refazer a configuração.
 
 #### Passo 4: Uso diário
 
@@ -297,19 +297,19 @@ O comando é sempre o mesmo; só muda o que vem depois de `qobuz-dl`:
 
 ```bash
 # Baixar um álbum, faixa, artista ou playlist
-docker compose run —rm qobuz-dl dl "URL"
+docker compose run --rm qobuz-dl dl "URL"
 
 # Reescrever as tags da sua biblioteca (sem pasta, usa a pasta de downloads)
-docker compose run —rm qobuz-dl tags
+docker compose run --rm qobuz-dl tags
 
 # Diagnóstico da instalação (config, bancos de dados, pasta de downloads)
-docker compose run —rm qobuz-dl doctor
+docker compose run --rm qobuz-dl doctor
 
 # Refazer a configuração do zero
-docker compose run —rm qobuz-dl -r
+docker compose run --rm qobuz-dl -r
 ```
 
-Dentro do container, a sua pasta `musicas` é sempre `/home/qobuz/QobuzDownloads`. Ao passar caminhos para os comandos, use esse caminho, não o do seu computador. Exemplo: `docker compose run —rm qobuz-dl inspect /home/qobuz/QobuzDownloads/Album/01.flac`.
+Dentro do container, a sua pasta `musicas` é sempre `/home/qobuz/QobuzDownloads`. Ao passar caminhos para os comandos, use esse caminho, não o do seu computador. Exemplo: `docker compose run --rm qobuz-dl inspect /home/qobuz/QobuzDownloads/Album/01.flac`.
 
 #### O que acontece automaticamente a cada comando
 
@@ -321,7 +321,7 @@ Se algo estiver errado, o processo para com uma mensagem explicando o motivo, em
 
 #### Permissões: o que precisa estar certo
 
-- **Usuário sem privilégios.** O container não roda como administrador (root). Ele roda como o usuário `qobuz`, normalmente de UID 1000. Para conferir o número real: `docker compose run —rm —entrypoint id qobuz-dl`.
+- **Usuário sem privilégios.** O container não roda como administrador (root). Ele roda como o usuário `qobuz`, normalmente de UID 1000. Para conferir o número real: `docker compose run --rm --entrypoint id qobuz-dl`.
 - **As pastas do computador precisam ser graváveis por esse usuário.** O serviço `permissoes` faz isso sozinho. O equivalente manual, caso precise, é:
   ```bash
   sudo chown -R 1000:1000 config musicas
@@ -365,9 +365,9 @@ Depois, no `docker-compose.yml`, troque `ghcr.io/kaduvercosa/qobuz-dl-ultra:late
 |:--- |:--- |
 | `Sem permissão para gravar em ...` | A pasta do computador não aceita escrita do usuário `qobuz`. Veja a seção de permissões acima. |
 | `O assistente precisa de um terminal` | O comando foi rodado sem terminal (por exemplo, com `-T` ou por agendador). Rode uma vez normalmente para configurar. |
-| `401 Unauthorized` | Token inválido ou expirado. Rode `docker compose run —rm qobuz-dl -r` e informe um token novo. |
-| `O config.ini existe, mas sem o token` | O arquivo foi copiado de outra máquina com Keyring. Rode `docker compose run —rm qobuz-dl -r`. |
-| Os arquivos não aparecem em `musicas` | Pasta de download fora da pasta montada. O `iniciar.py` corrige sozinho; rode `docker compose run —rm qobuz-dl doctor` para conferir. |
+| `401 Unauthorized` | Token inválido ou expirado. Rode `docker compose run --rm qobuz-dl -r` e informe um token novo. |
+| `O config.ini existe, mas sem o token` | O arquivo foi copiado de outra máquina com Keyring. Rode `docker compose run --rm qobuz-dl -r`. |
+| Os arquivos não aparecem em `musicas` | Pasta de download fora da pasta montada. O `iniciar.py` corrige sozinho; rode `docker compose run --rm qobuz-dl doctor` para conferir. |
 | `docker: command not found` ou `Cannot connect to the Docker daemon` | O Docker não está instalado ou não está rodando (abra o Docker Desktop ou inicie o serviço). |
 
 > **🔒 Segurança:** o `config/config.ini` contém seu token de acesso em texto puro (protegido apenas pela permissão `600`). Nunca envie a pasta `config` para o GitHub nem a compartilhe. Acrescente `config/` e `musicas/` ao seu `.gitignore`.
@@ -555,7 +555,7 @@ A Edição Ultra inclui poderosos gerenciadores de biblioteca local para acompan
   ```
   python -m qobuz_dl --sync-db
   ```
-  *(Nota: Você também pode especificar um caminho personalizado para escanear, ex.: `--sync-db “/caminho/para/suas/musicas”`)*
+  *(Nota: Você também pode especificar um caminho personalizado para escanear, ex.: `--sync-db "/caminho/para/suas/musicas"`)*
 
 * **Sincronização Dinâmica de Playlists (`sync-playlist` / `sp`):**
   Playlists são entidades vivas. Em vez de baixar novamente uma playlist inteira toda vez que o autor adiciona uma nova música, aponte este comando para a sua pasta existente. Ele escaneará as tags locais, consultará a API do Qobuz e calculará o delta exato: baixando apenas as faixas ausentes, excluindo de forma limpa as removidas (junto com seus respectivos arquivos `.lrc`) e regenerando a ordem no `.m3u`.
@@ -757,7 +757,7 @@ Se você estiver executando o `qobuz-dl` em um NAS, Docker ou em um sistema Linu
 
 **A Solução:**
 Ao executar `python -m qobuz_dl -r`, o assistente de configuração agora perguntará: 
-`”Disable OS Keyring and save tokens in config.ini?”` (Desativar Keyring do SO e salvar tokens no config.ini?)
+`"Disable OS Keyring and save tokens in config.ini?"` (Desativar Keyring do SO e salvar tokens no config.ini?)
 Selecione **`yes`** se estiver em um ambiente de servidor ou NAS. Isso ignora o chaveiro do sistema e persiste tokens sem criptografia no `config.ini`. A permissão `0600` restringe o acesso ao usuário atual, mas não criptografa o conteúdo; proteja e nunca compartilhe esse arquivo.
 
 ### 🩺 Verificação manual de integridade de áudio

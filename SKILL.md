@@ -1,14 +1,14 @@
-—
+---
 name: qobuz-dl-ultra
 description: Guia completo do projeto qobuz-dl-ultra (fork em Python do qobuz-dl, CLI/TUI para baixar música do Qobuz com tags, capas, letras e biblioteca local). Leia ANTES de alterar qualquer arquivo do projeto, ao corrigir bugs, adicionar comandos/flags/opções de config, mexer em tags, capas (Apple/iTunes), letras/LRC, modo interativo, testes, CI, Docker ou README. Contém mapa de módulos, convenções, decisões já tomadas, armadilhas e a regra de manutenção deste próprio arquivo.
-—
+---
 
 # QOBUZ-DL-ULTRA — guia do projeto (SKILL.md)
 
-> **Última revisão:** versão do pacote `2.6.5` · atualizado em 2026-10-13.
+> **Última revisão:** versão do pacote `2.6.5.1` · atualizado em 2026-10-18.
 > Idioma do projeto: **português do Brasil** (código-fonte, comentários, mensagens, README, commits e testes).
 
-—
+---
 
 ## 0. REGRA DE MANUTENÇÃO (obrigatória)
 
@@ -27,7 +27,7 @@ Este arquivo é a **memória do projeto**. Ele só serve se estiver sempre igual
 
 **Como usar na prática (para a IA):** ler §1–§4 para se situar; ir direto ao módulo certo pela tabela de §3; consultar §10 (decisões) e §11 (armadilhas) **antes** de “consertar” algo que pode ser proposital.
 
-—
+---
 
 ## 1. Visão geral
 
@@ -45,7 +45,7 @@ Este arquivo é a **memória do projeto**. Ele só serve se estiver sempre igual
 
 **Princípio de portabilidade (importante):** o núcleo deve instalar em ambientes que só aceitam pacotes Python **puros** (a-Shell). Por isso `rapidfuzz`, `Pillow`, `numpy`, etc. são **extras opcionais** com degradação elegante (ver `fuzzy.py`), e `cryptography`/`Pillow` ficam **sem piso de versão** de propósito.
 
-—
+---
 
 ## 2. Estrutura do repositório
 
@@ -68,7 +68,7 @@ qobuz-dl-ultra/
 └── blacklist_example.txt
 ```
 
-—
+---
 
 ## 3. Mapa de módulos (`qobuz_dl/`)
 
@@ -107,7 +107,7 @@ Tamanhos aproximados em linhas. **“Mexa aqui quando…”** é o atalho para a
 | Módulo | Papel | Mexa aqui quando… |
 |:--- |:--- |:--- |
 | `metadata.py` (~1470) | `_get_tags_to_add()` cria tags; `tag_flac()`/`tag_mp3()` gravam. Capas embutidas, gêneros, IDs Qobuz, ReplayGain, tags clássicas. **Multi-tags** (`_split_multi_value`, `_split_protegido`) | qualquer tag |
-| `retro_tags.py` (~1290) | Comando `tags`: regrava tags de arquivos **já baixados** a partir do Qobuz; troca capa quando a Apple/iTunes valida uma melhor. Modos `—tags-only` / `—covers-only` / `—both`. Mostra diff das tags | correção retroativa, capa Apple no `tags` |
+| `retro_tags.py` (~1290) | Comando `tags`: regrava tags de arquivos **já baixados** a partir do Qobuz; troca capa quando a Apple/iTunes valida uma melhor. Modos `--tags-only` / `--covers-only` / `--both`. Mostra diff das tags | correção retroativa, capa Apple no `tags` |
 | `retro_tagger.py` | Inspeção/atualização retroativa de **letras** (comando `lyrics`) | letras retroativas |
 | `lyrics_engine.py` (~840) | `LyricsEngine`: busca, normaliza, faz fallback e grava letras. Ordem em `PROVIDERS`: **Qobuz → BiniLyrics → Musixmatch → LRCLIB → Genius** | nova fonte, LRC, bilíngue |
 | `binilyrics.py` | Fonte BiniLyrics (TTML estilo Apple Music). **Módulo puro (sem rede)**; a rede fica em `LyricsEngine._provider_binilyrics` | LRC por palavra |
@@ -123,10 +123,10 @@ Tamanhos aproximados em linhas. **“Mexa aqui quando…”** é o atalho para a
 | `favorites_sync.py` | `sync-favorites`: conta Qobuz ⇄ catálogo local (diff, histórico, baixar o que falta) | favoritos |
 | `library_cmd.py` | Terminal dos comandos `sync-favorites`, `scan`, `library` (cada `cmd_*` devolve **código de saída**, não chama `sys.exit`) | UX desses comandos |
 | `sentinel.py` | Sentinela por álbum **`.streamrip.json`** (nome herdado do libsync de propósito): dedup pelo sistema de arquivos | dedup por pasta |
-| `sync.py` | `—sync-db` (reconstrói o banco varrendo a biblioteca) e `—find-duplicates` (fingerprint Chromaprint/AcoustID) | reconstruir banco / duplicatas |
+| `sync.py` | `--sync-db` (reconstrói o banco varrendo a biblioteca) e `--find-duplicates` (fingerprint Chromaprint/AcoustID) | reconstruir banco / duplicatas |
 | `postprocess.py` | Relatório de downloads: **`.report.json` oculto** (fonte da verdade, sob lock por pasta), `collection_index.jsonl`, `Tracklist.txt` | relatório pós-download |
 | `report_viewer.py` | Gera página HTML autônoma (estética “Nothing”) a partir do `.report.json` | visual do relatório |
-| `watcher.py` | `—watch`: retro-tagging automático quando aparecem arquivos novos (lib `watchdog`) | modo vigia |
+| `watcher.py` | `--watch`: retro-tagging automático quando aparecem arquivos novos (lib `watchdog`) | modo vigia |
 | `inspector.py` (~1450) | `inspect`: navegador de arquivos em tela cheia, relatório em seções (técnico, tags por assunto, capas, letras, diagnóstico, ffmpeg, autenticidade/gráfico espectral), `--resumo` de pasta, `--json` e `--comparar` (simula o `tags` numa cópia) | inspeção de áudio |
 | `inspect_data.py` | Leitura de UM arquivo sem imprimir nada (FLAC/MP3/M4A/Ogg/Opus): `ler_arquivo`, `agrupar_tags` (nenhuma tag se perde), capas, letras, `diagnose` compartilhado com `library_report`, `verificar_integridade`/`medir_volume` (ffmpeg) | `inspector.py` |
 | `doctor.py` | `doctor`: checagem **somente leitura** do ambiente/config/bancos (herdado dos scripts do libsync) | diagnóstico |
@@ -139,7 +139,7 @@ Tamanhos aproximados em linhas. **“Mexa aqui quando…”** é o atalho para a
 | `color.py` | ANSI/TrueColor, `NO_COLOR`/`FORCE_COLOR`, TTY, cor de destaque (accent) |
 | `fuzzy.py` | Similaridade de texto (usa `rapidfuzz` se existir; senão `difflib`) |
 
-—
+---
 
 ## 4. Comandos da CLI
 
@@ -156,16 +156,16 @@ Definidos em `commands.py`, roteados em `cli.py::_handle_commands`. `DOWNLOAD_CO
 | `scan` | `library-scan` | Casa pastas de álbum com o catálogo |
 | `library` | `lib` | Consulta/gerencia o catálogo local |
 | `lyrics` | — | Letras retroativas |
-| `tags` | — | Tags/capas retroativas (`—tags-only`, `—covers-only`, `—both`, `—multi-tags`/`—no-multi-tags`) |
+| `tags` | — | Tags/capas retroativas (`--tags-only`, `--covers-only`, `--both`, `--multi-tags`/`--no-multi-tags`) |
 | `inspect` | — | Inspeciona arquivo/pasta de áudio (`--resumo`, `--json`, `--completo`, `--sem-espectro`, `--comparar`) |
-| `stats` | — | Estatísticas (`—artistas` etc.) |
+| `stats` | — | Estatísticas (`--artistas` etc.) |
 | `auth` | — | Atualiza as credenciais de login |
 | `user` | — | Mostra informações do usuário e status da assinatura |
 | `doctor` | `check` | Saúde do ambiente |
 
-**Flags globais** (sem subcomando): `-r/—reset`, `-p/—purge`, `—sync-db [PATH]`, `—find-duplicates [PATH]`, `—watch [PATH]`, `-sc/—show-config`, mais `add_output_args` (saída/cores/progresso).
+**Flags globais** (sem subcomando): `-r/--reset`, `-p/--purge`, `--sync-db [PATH]`, `--find-duplicates [PATH]`, `--watch [PATH]`, `-sc/--show-config`, mais `add_output_args` (saída/cores/progresso).
 
-—
+---
 
 ## 5. Fluxos principais
 
@@ -176,12 +176,12 @@ Definidos em `commands.py`, roteados em `cli.py::_handle_commands`. `DOWNLOAD_CO
 `retro_tags.py`: varre arquivos → lê IDs Qobuz das tags → busca metadados atuais → compara e grava (mostra **diff por arquivo**) → opcionalmente busca capa Apple/iTunes validada (`utils.get_apple_hq_cover` + validação por correspondência de texto) e registra `Capa: Apple/iTunes` no comentário. Se a Apple não validar, a capa embutida é **preservada**.
 
 ### 5.3 Letras
-`lyrics_engine.LyricsEngine.fetch_and_inject()` percorre `PROVIDERS` e usa a primeira letra encontrada. Grava `.lrc` (se não desligado) e/ou embute nas tags. LRC bilíngue em `_build_bilingual_lrc`. LRC por palavra (`—lyrics-word-sync`) vem do BiniLyrics.
+`lyrics_engine.LyricsEngine.fetch_and_inject()` percorre `PROVIDERS` e usa a primeira letra encontrada. Grava `.lrc` (se não desligado) e/ou embute nas tags. LRC bilíngue em `_build_bilingual_lrc`. LRC por palavra (`--lyrics-word-sync`) vem do BiniLyrics.
 
 ### 5.4 Biblioteca local
-`sync-favorites` preenche `library.db` → `scan` casa pastas com álbuns (por ID de tag primeiro, depois heurística) e grava sentinelas → `library` consulta. `—sync-db` reconstrói `qobuz_dl.db` a partir do disco.
+`sync-favorites` preenche `library.db` → `scan` casa pastas com álbuns (por ID de tag primeiro, depois heurística) e grava sentinelas → `library` consulta. `--sync-db` reconstrói `qobuz_dl.db` a partir do disco.
 
-—
+---
 
 ## 6. Configuração, arquivos e variáveis
 
@@ -199,7 +199,7 @@ Definidos em `commands.py`, roteados em `cli.py::_handle_commands`. `DOWNLOAD_CO
 
 **Opções de config relevantes (leitura em `settings.py`):** `directory`, `write_sentinel`, `no_lrc_files`, `embed_lyrics`, `fetch_translation`, `only_synced_lyrics`, `lyrics_word_sync`, `artists_with_comma` (lista com `;`), `multi_value_tags`, além das de formato/qualidade/capa descritas no README. Precedência: **flag da CLI > config.ini > padrão**.
 
-—
+---
 
 ## 7. Convenções de código
 
@@ -215,18 +215,18 @@ Definidos em `commands.py`, roteados em `cli.py::_handle_commands`. `DOWNLOAD_CO
 - **Tipos:** mypy permissivo com **baseline** (só reclama de erro novo).
 - **Commits:** mensagens em português, prefixos `update:`, `fix:`, `style:`; commits `style: correções automáticas do Ruff` são do bot.
 
-—
+---
 
 ## 8. Testes
 
-- Rodar tudo: `pip install -e “.[all,dev]”` e `pytest`. Rápido: `pytest -m “not slow”`.
+- Rodar tudo: `pip install -e ".[all,dev]"` e `pytest`. Rápido: `pytest -m "not slow"`.
 - Pastas: `tests/unit/` (maioria; lógica pura), `tests/ui/` (largura, quebra, concorrência, tela inicial), `tests/lyrics/`, `tests/network/` (HTTP **mockado** via pytest-httpx), `tests/regression/` (trava bugs históricos/dependências), `tests/manual/` (**não** roda no pytest; exige credenciais reais).
-- Marcadores (`—strict-markers`): `slow`, `integration`, `asyncio`, `unit`, `network`, `ui`, `regression`, `lyrics`. `asyncio_mode = auto`.
+- Marcadores (`--strict-markers`): `slow`, `integration`, `asyncio`, `unit`, `network`, `ui`, `regression`, `lyrics`. `asyncio_mode = auto`.
 - **`tests/conftest.py` isola o ambiente:** define `CONFIG_DIR` temporário e `NO_COLOR=1` **antes** de importar `qobuz_dl`, e cria um `config.ini` com credenciais **inválidas de propósito** (nenhum teste toca a API real; evita o assistente de 1ª execução travar em `input()`).
 - Regra do projeto: bug corrigido ⇒ **teste de regressão** que falha antes e passa depois.
-- Cobertura: `fail_under = 75` no `pyproject.toml`, mas o CI usa `—cov-fail-under=60` (ver §11).
+- Cobertura: `fail_under = 75` no `pyproject.toml`, mas o CI usa `--cov-fail-under=60` (ver §11).
 
-—
+---
 
 ## 9. CI, build e release
 
@@ -248,7 +248,7 @@ Definidos em `commands.py`, roteados em `cli.py::_handle_commands`. `DOWNLOAD_CO
 
 **`tools/`:** `apple_cover_check.py`, `apple_porque.py`, `apple_text_compare.py` (diagnóstico da correspondência de capa Apple — explicam *por que* uma faixa foi aceita/rejeitada); `canary_check*.py`; `gerar_changelog.py`; `gerar_requirements.py`.
 
-—
+---
 
 ## 10. Decisões do dono e bugs já resolvidos (não desfazer sem pedir)
 
@@ -264,39 +264,39 @@ Definidos em `commands.py`, roteados em `cli.py::_handle_commands`. `DOWNLOAD_CO
 | **Sentinela `.streamrip.json`** | Nome mantido por compatibilidade com libsync/streamrip |
 | **Portabilidade a-Shell** | Sem dependência compilada no núcleo; `fuzzy.py` cai para `difflib`; Pillow sem piso de versão |
 
-—
+---
 
 ## 11. Armadilhas e pendências conhecidas
 
 Pendências abertas também estão em `todo.md`.
 
-1. **Cobertura mínima inconsistente:** `pyproject.toml` (`fail_under = 75`) e `codecov.yml` (alvo 75%) pedem 75%; o CI roda com `—cov-fail-under=60`. Medir a cobertura real e alinhar os três. *(decisão do dono)*
+1. **Cobertura mínima inconsistente:** `pyproject.toml` (`fail_under = 75`) e `codecov.yml` (alvo 75%) pedem 75%; o CI roda com `--cov-fail-under=60`. Medir a cobertura real e alinhar os três. *(decisão do dono)*
 2. **`mypy-baseline.txt` não versionado:** o CI gera um novo a cada execução quando ele não existe, então hoje o mypy não detecta erro *novo*. Gerar uma vez e fazer commit.
-3. **Teclado do iPad (Pontuação Inteligente do iOS):** ao editar `README.md` ou `SKILL.md` pelo iPad, `—` vira `—` e aspas retas viram curvas; isso quebrou comandos (já corrigido no README em 2026-10-13). Desligar em Ajustes > Geral > Teclado e **conferir flags dentro de blocos de código** depois de editar. Em arquivos `.py`, `.toml` e `.yml` o mesmo problema seria erro de sintaxe.
+3. **Teclado do iPad (Pontuação Inteligente do iOS):** ao editar `README.md` ou `SKILL.md` pelo iPad, `--` vira `—` e aspas retas viram curvas; isso quebrou comandos (corrigido no README e no SKILL.md em 2026-10-13 e de novo em 2026-10-18; agora `tests/regression/test_docs_sem_pontuacao_inteligente.py` falha se voltar). Desligar em Ajustes > Geral > Teclado e **conferir flags dentro de blocos de código** depois de editar. Em arquivos `.py`, `.toml` e `.yml` o mesmo problema seria erro de sintaxe.
 4. **README — linha `usage` dos comandos globais desatualizada:** não lista `tags`, `inspect`, `import-playlist`, `sync-favorites`, `scan`, `library`, `doctor`, `auth`, `user`.
 5. **Arquivos grandes:** `core.py` (~2900), `downloader.py` (~3100), `utils.py` (~2000). A quebra em módulos menores está em andamento (`download_utils.py`, `interactive_ui.py`, `stats_view.py` já extraídos). Ao extrair, mover **só** o que já tem teste.
 6. **`bundle.py`** depende do HTML/JS do Qobuz: quebra sem aviso quando o site muda (o canário existe para isso).
 7. **Testes placeholder:** `tests/unit/test_core_remaining_interactive_disabled.py` só tem testes `skip` (`pass`) criados para o iOS; a cobertura real do `interactive()` está em `test_core_interactive_branches.py` e testes estáticos.
 8. **Zip do projeto:** ao compactar para enviar, excluir `.coverage` e `.pytest_cache/` (estão no `.gitignore`, mas foram no zip e pesam ~3 MB).
-9. **Event loop:** nada síncrono e demorado (disco, `os.walk`, mutagen, HTTP) pode rodar direto numa função `async` — use `asyncio.to_thread`. O `LyricsEngine` usa um cliente HTTP **síncrono** (`make_sync_client`): chame `fetch_and_inject` sempre em thread. As letras retroativas são sequenciais por padrão e paralelas com `--max-workers` (teto 4, provedores limitam requisições); ao mexer na engine, não introduza estado compartilhado por arquivo. `tests/regression/test_sem_bloqueio_pesado_no_loop.py` (guarda por AST: falha se uma `async def` chamar I/O pesado direto; se a chamada for legítima, use `to_thread` ou liste a função em `PERMITIDOS` com o motivo), `tests/regression/test_loop_nao_bloqueia.py` e `tests/unit/test_retro_tagger_paralelo.py` guardam esse comportamento. **Nunca `asyncio.to_thread(shutil.rmtree, ...)`**: trava no a-Shell/iOS (`copyfile`/`copy2` em thread funcionam). Deixe o `rmtree` síncrono e registre em `PERMITIDOS`.
+9. **Event loop:** nada síncrono e demorado (disco, `os.walk`, mutagen, HTTP) pode rodar direto numa função `async` — use `asyncio.to_thread`. O `LyricsEngine` usa um cliente HTTP **síncrono** (`make_sync_client`): chame `fetch_and_inject` sempre em thread. As letras retroativas são sequenciais por padrão e paralelas com `--max-workers` (teto 4, provedores limitam requisições); ao mexer na engine, não introduza estado compartilhado por arquivo. `tests/unit/test_sem_bloqueio_pesado_no_loop.py` (guarda por AST: falha se uma `async def` chamar I/O pesado direto; se a chamada for legítima, use `to_thread` ou liste a função em `PERMITIDOS` com o motivo), `tests/regression/test_loop_nao_bloqueia.py` e `tests/unit/test_retro_tagger_paralelo.py` guardam esse comportamento. **Nunca `asyncio.to_thread(shutil.rmtree, ...)`**: trava no a-Shell/iOS (`copyfile`/`copy2` em thread funcionam). Deixe o `rmtree` síncrono e registre em `PERMITIDOS`.
 
 **Resolvidas em 2026-10-13** (não reabrir): `qobuz_dl/pyproject.toml` duplicado removido; teste `test_core_interactive_branches-2026-09-28.py` renomeado; `todo.md` reescrito; README com `—`/aspas curvas dentro de comandos corrigido.
 
-—
+---
 
 ## 12. Checklist de entrega
 
 - [ ] Mudança feita no módulo certo (§3), sem duplicar lógica.
 - [ ] Mensagens/comentários em português.
 - [ ] Saída de tela via `ui.emit()`; cores via `color`.
-- [ ] Teste novo/ajustado (regressão se for bug). `pytest -m “not slow”` verde.
+- [ ] Teste novo/ajustado (regressão se for bug). `pytest -m "not slow"` verde.
 - [ ] `ruff check` sem erros novos.
 - [ ] Dependência nova? Entrou no `pyproject.toml` **e** rodou `tools/gerar_requirements.py`; núcleo continua puro-Python.
 - [ ] Opção nova de config/flag? Entrou em `commands.py`, `settings.py`, `home_screen.py` (uso/exemplo) e README.
 - [ ] README atualizado se o usuário final percebe a mudança.
 - [ ] **Este SKILL.md atualizado + linha no §13** (§0).
 
-—
+---
 
 ## 13. Registro de alterações
 
@@ -304,12 +304,13 @@ Mais recente primeiro. Uma linha por alteração pedida.
 
 | Data | Alteração | Arquivos principais |
 | :--- |:--- |:--- |
-| 2026-10-18 | Event loop: o que restava de I/O pesado síncrono em funções `async` foi para thread — `sync.py` (varredura + leitura de tags de `sync_database`: novos `_list_audio_files`/`_read_local_tags`; `find_duplicate_tracks`), `sync_playlist` (`_scan_local_tracks`, `_clean_empty_dirs`), `favorites_sync` (`lookup_saved_path`), `retro_tags` (`find_audio_files`), `downloader` (`_clean_embed_art`, `copyfile` da capa; espera de 1,5 s após CTRL+C virou `asyncio.sleep`), `inspector` (`copy2`), `library_cmd` (`scan --json`) e a pausa de `_reset_config`. **`shutil.rmtree` em thread TRAVA no a-Shell/iOS** (travou o primeiro teste de `tags --dry-run`; confirmado com um script isolado, enquanto `copyfile` e `copy2` em thread funcionam): o `rmtree` do dry-run ficou síncrono, em `PERMITIDOS` do guarda, e um teste proíbe `rmtree` dentro de `to_thread`. Novo teste-guarda por AST (`tests/regression/test_sem_bloqueio_pesado_no_loop.py`) falha se uma `async def` chamar direto mutagen, `os.walk`, `time.sleep`, `subprocess`, `shutil.copy*/rmtree`, `sqlite3` ou os auxiliares de disco do projeto | `qobuz_dl/{sync,sync_playlist,favorites_sync,retro_tags,downloader,inspector,library_cmd,cli}.py`, `tests/regression/test_sem_bloqueio_pesado_no_loop.py` |
+| 2026-10-18 | Revisão geral: README e SKILL.md voltaram a ter `—` no lugar de `--` (13 flags no README, 25 no SKILL.md), 16 réguas `—` e o front-matter quebrado (Pontuação Inteligente do iPad); corrigidos e criado teste-guarda `test_docs_sem_pontuacao_inteligente.py`. `qobuz_dl/pyproject.toml` duplicado removido de fato (estava versionado apesar de registrado como removido). Versão e caminho do teste de loop corrigidos no SKILL.md | `README.md`, `SKILL.md`, `qobuz_dl/pyproject.toml`, `tests/regression/` |
+| 2026-10-18 | Event loop: o que restava de I/O pesado síncrono em funções `async` foi para thread — `sync.py` (varredura + leitura de tags de `sync_database`: novos `_list_audio_files`/`_read_local_tags`; `find_duplicate_tracks`), `sync_playlist` (`_scan_local_tracks`, `_clean_empty_dirs`), `favorites_sync` (`lookup_saved_path`), `retro_tags` (`find_audio_files`), `downloader` (`_clean_embed_art`, `copyfile` da capa; espera de 1,5 s após CTRL+C virou `asyncio.sleep`), `inspector` (`copy2`), `library_cmd` (`scan --json`) e a pausa de `_reset_config`. **`shutil.rmtree` em thread TRAVA no a-Shell/iOS** (travou o primeiro teste de `tags --dry-run`; confirmado com um script isolado, enquanto `copyfile` e `copy2` em thread funcionam): o `rmtree` do dry-run ficou síncrono, em `PERMITIDOS` do guarda, e um teste proíbe `rmtree` dentro de `to_thread`. Novo teste-guarda por AST (`tests/unit/test_sem_bloqueio_pesado_no_loop.py`) falha se uma `async def` chamar direto mutagen, `os.walk`, `time.sleep`, `subprocess`, `shutil.copy*/rmtree`, `sqlite3` ou os auxiliares de disco do projeto | `qobuz_dl/{sync,sync_playlist,favorites_sync,retro_tags,downloader,inspector,library_cmd,cli}.py`, `tests/unit/test_sem_bloqueio_pesado_no_loop.py` |
 | 2026-10-18 | Letras retroativas em paralelo (opcional): `lyrics --max-workers N` (ou `max_workers` do `config.ini`) processa até **4** arquivos ao mesmo tempo (teto `_MAX_LYRICS_WORKERS`); o padrão continua sequencial. O corpo do laço virou `_processar_arquivo` e cada arquivo grava numa lista própria, então o relatório final sai sempre na ordem dos arquivos; falha ou CTRL+C cancela as outras tarefas antes de fechar a engine. Auditoria do `LyricsEngine`: o único estado compartilhado é `_mxm_token` (condição de corrida inofensiva) e o cliente HTTP síncrono (thread-safe); cada arquivo grava só o próprio `.lrc`/tags. README: documentado o `--max-workers` e aspas curvas dentro de blocos de código trocadas por retas; testes novos | `qobuz_dl/retro_tagger.py`, `qobuz_dl/commands.py`, `qobuz_dl/cli.py`, `README.md`, `tests/unit/test_retro_tagger_paralelo.py` |
 | 2026-10-18 | Event loop livre de I/O síncrono: `postprocess` lê/grava `.report.json` + `report.html` em `asyncio.to_thread` (o lock por pasta continua serializando); `retro_tagger.process_retroactive_lyrics_async` roda `os.walk`, leitura de tags (novos `_collect_audio_files`/`_read_basic_tags`), `extract_track_id`, `inspect_existing_lyrics` e `engine.fetch_and_inject` (cliente HTTP **síncrono**) em thread, mantendo o processamento sequencial; testes novos | `qobuz_dl/postprocess.py`, `qobuz_dl/retro_tagger.py`, `tests/regression/test_loop_nao_bloqueia.py` |
 | 2026-10-17 | `inspect` mostra muito mais, com a organização que já tinha: dados técnicos (bitrate real, encoder, MD5 do FLAC, ALAC/Opus/Ogg), tags agrupadas por assunto (Identificação, Faixa e disco, Códigos, IDs do Qobuz, ReplayGain; o resto vai para "Outras tags": nada some), capas com dimensões/quadrada, letras (embutida, sincronizada, `.lrc` ao lado) e diagnóstico com os mesmos códigos do `tags --report` (`library_report.diagnose`, agora compartilhado). `inspect ARQUIVO` pula o navegador; `inspect PASTA --resumo` lista cada faixa e os totais; `--json` (só JSON); `--completo` decodifica o áudio e mede volume/pico via ffmpeg (ebur128); `--sem-espectro` pula a heurística; `--comparar` roda o `tags --dry-run` numa cópia do arquivo (login). `_extrair_tudo` e o relatório simples continuam como rede de segurança | `qobuz_dl/inspect_data.py`, `qobuz_dl/inspector.py`, `qobuz_dl/library_report.py`, `qobuz_dl/commands.py`, `qobuz_dl/cli.py`, `tests/unit/test_inspect_data.py`, `tests/unit/test_inspector_completo.py` |
 | 2026-10-16 | Ajuda de comando unificada: `qobuz-dl <comando> -h` agora chama o `print_help` do próprio subparser (`cli._print_command_help`), e `home_screen.render_ajuda_comando` é o único renderizador (o `render_command_help` paralelo foi removido). Nos comandos de download o grupo genérico "Opções" é repartido por assunto na ordem de uso (`GRUPOS_DOWNLOAD`/`agrupar_opcoes`: busca → qualidade → pastas → letras → tags → créditos → "Outras"); os grupos do próprio parser (tags, capa, discos, paralelo, saída) e o painel "Chaves de formato" mantêm o título e vão depois; `-h` fica por último e o exemplo (`EXEMPLOS`) entra no painel Uso. Teste da tela interativa (`test_core_tui_cartao_visivel`) é pulado no iOS (segfault no a-Shell) | `qobuz_dl/home_screen.py`, `qobuz_dl/cli.py`, `qobuz_dl/commands.py`, `tests/unit/test_ux_paineis.py`, `tests/unit/test_core_tui_cartao_visivel.py` |
-| 2026-10-15 | Larguras em células de terminal: `ui.banner` centralizava com `str.center` e `stats` preenchia o nome do artista com `f"{x:<n}"`, ambos contando caracteres — títulos com emoji (`🔍 INSPETOR DE ÁUDIO`) saíam 1 coluna acima da tela e artistas em japonês/emoji passavam do limite; novos `ui.pad_cells` e `ui.center_cells`, e `ui.section` agora corta títulos longos. README: bloco `usage:` antigo trocado pela descrição da ajuda em painéis, `[DIR]` → `[PASTA]` e 39 flags escritas com travessão (`—delay`, `-—multi-tags`…) corrigidas para `--` (não funcionavam ao copiar); testes novos | `qobuz_dl/ui.py`, `qobuz_dl/stats_view.py`, `README.md`, `tests/ui/test_ui_larguras.py` |
+| 2026-10-15 | Larguras em células de terminal: `ui.banner` centralizava com `str.center` e `stats` preenchia o nome do artista com `f"{x:<n}"`, ambos contando caracteres — títulos com emoji (`🔍 INSPETOR DE ÁUDIO`) saíam 1 coluna acima da tela e artistas em japonês/emoji passavam do limite; novos `ui.pad_cells` e `ui.center_cells`, e `ui.section` agora corta títulos longos. README: bloco `usage:` antigo trocado pela descrição da ajuda em painéis, `[DIR]` → `[PASTA]` e 39 flags escritas com travessão (`--delay`, `---multi-tags`…) corrigidas para `--` (não funcionavam ao copiar); testes novos | `qobuz_dl/ui.py`, `qobuz_dl/stats_view.py`, `README.md`, `tests/ui/test_ui_larguras.py` |
 | 2026-10-15 | Rótulos das opções na ajuda em português (`PASTA`, `DATA`, `PADRÃO`, `PREFIXO`, `FORMATO`, `GRAVADORA`, `BUSCA`, `URL_OU_ARQUIVO`, `N`, `QUALIDADE`…; só o `metavar`, os nomes internos como `args.SOURCE` não mudaram) e lista de chaves de `-ff`/`-fbff`/`-tf` movida para o painel "Chaves de formato" no fim da ajuda (`PAINEL_CHAVES` em `commands.py`; qualquer parser pode ter `paineis_extras`); corrigida vírgula que faltava entre `track_title_base` e `version`; testes novos | `qobuz_dl/commands.py`, `qobuz_dl/home_screen.py`, `tests/ui/test_ajuda_comando.py` |
 | 2026-10-15 | Ajuda de cada comando (`qobuz-dl <comando> -h`) passa a usar os mesmos painéis da tela inicial (antes era texto corrido do argparse, que não quebrava linha e estourava em tela estreita); `ColoredArgumentParser.print_help` monta os painéis a partir do próprio parser, com rede de segurança para o formato antigo; testes novos | `qobuz_dl/home_screen.py`, `qobuz_dl/commands.py`, `tests/ui/test_ajuda_comando.py` |
 | 2026-10-13 | Criação do SKILL.md com base na leitura do projeto (v2.6.5): mapa de módulos, comandos, fluxos, config, convenções, testes/CI, decisões e armadilhas | `SKILL.md` |
