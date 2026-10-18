@@ -1006,19 +1006,23 @@ def inspect_args(subparsers):
     """Define the 'inspect' subcommand and its arguments."""
     inspect = subparsers.add_parser(
         "inspect",
-        usage="qobuz-dl inspect [caminho]",
+        usage="qobuz-dl inspect [opções] [ARQUIVO_OU_PASTA]",
         description=(
-            "Abre um navegador de arquivos pra escolher uma faixa de áudio local "
-            "e mostra TODAS as tags/metadados dela, mais uma checagem heurística "
-            "de autenticidade (é genuinamente lossless/hi-res, ou é upsample de "
-            "uma fonte lossy disfarçado de FLAC?)."
+            "Mostra TUDO sobre uma faixa de áudio local: dados técnicos, tags "
+            "organizadas por assunto, capas, letras, um diagnóstico do que falta "
+            "corrigir e uma checagem heurística de autenticidade (é genuinamente "
+            "lossless/hi-res ou um upsample de fonte lossy?). Sem argumento abre "
+            "um navegador de arquivos; com um ARQUIVO inspeciona direto; com uma "
+            "PASTA e --resumo, resume todas as faixas dela."
         ),
-        help="inspeciona tags e autenticidade de um arquivo de áudio local",
+        help="inspeciona tags, capa, letras e autenticidade de um arquivo de áudio local",
+        epilog=None,
     )
     inspect.add_argument(
         "caminho",
         nargs="?",
         default=None,
+        metavar="ARQUIVO_OU_PASTA",
         # ANTES: default=default_folder (a pasta de DOWNLOADS, tipo
         # "QobuzDownloads" relativo -- pensada pra onde arquivos NOVOS são
         # salvos, não pra onde a biblioteca de música da pessoa já mora).
@@ -1028,7 +1032,36 @@ def inspect_args(subparsers):
         # iOS/Android/Windows/macOS) rodar de verdade. Agora fica None de
         # propósito quando a pessoa não digita nada, pra essa detecção
         # continuar valendo.
-        help="pasta onde começar a navegação (padrão: detecta pelo dispositivo)",
+        help=(
+            "arquivo de áudio (inspeciona direto) ou pasta (onde começar a "
+            "navegação; padrão: detecta pelo dispositivo)"
+        ),
+    )
+    inspect.add_argument(
+        "--resumo",
+        action="store_true",
+        help="resume todas as faixas da pasta (formato, qualidade, capa, problemas) sem abrir o navegador",
+    )
+    inspect.add_argument(
+        "--json",
+        action="store_true",
+        help="imprime só o JSON do relatório (para scripts); com PASTA, o resumo dela",
+    )
+    inspect.add_argument(
+        "--completo",
+        action="store_true",
+        help="também decodifica o áudio inteiro (integridade) e mede volume e pico com o ffmpeg",
+    )
+    inspect.add_argument(
+        "--sem-espectro",
+        dest="sem_espectro",
+        action="store_true",
+        help="pula a análise espectral de autenticidade (bem mais rápido, ideal no celular)",
+    )
+    inspect.add_argument(
+        "--comparar",
+        action="store_true",
+        help="compara o ARQUIVO com o Qobuz e mostra o que o `tags` mudaria (simulação; precisa de login)",
     )
     return inspect
 

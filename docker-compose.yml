@@ -1,0 +1,65 @@
+# docker-compose.yml -- qobuz-dl-ultra
+#
+# Uso: sempre o mesmo comando, na pasta onde este arquivo está.
+#   docker compose run --rm qobuz-dl dl "URL_DO_ALBUM"
+#   docker compose run --rm qobuz-dl tags /home/qobuz/QobuzDownloads
+#   docker compose run --rm qobuz-dl -r        (refazer a configuração)
+#
+# Na primeira vez o assistente de configuração do programa abre sozinho e
+# pergunta e-mail, token etc. Não precisa criar nenhum arquivo antes.
+#
+# O que acontece a cada comando, nesta ordem:
+#   1) permissoes -> ajusta o dono das pastas para o usuário da imagem
+#   2) qobuz-dl   -> docker/iniciar.py confere a configuração (abre o
+#                    assistente se faltar), corrige o que quebraria no Docker
+#                    (Keyring, pasta de download) e executa o seu comando
+#
+# Pastas no host (ao lado deste arquivo; são criadas sozinhas):
+#   ./config  -> config.ini e banco de dados
+#   ./musicas -> downloads
+# Para usar outras (ex.: pasta compartilhada do NAS), troque o começo das duas
+# linhas "volumes" (o que vem antes dos ":"), nos DOIS serviços.
+#   Exemplo NAS:  - /volume1/musica:/home/qobuz/QobuzDownloads
+#
+# Atualizar a imagem:  docker compose pull
+
+services:
+  permissoes:
+    image: ghcr.io/kaduvercosa/qobuz-dl-ultra:latest
+    restart: "no"
+    user: root
+    entrypoint: ["sh", "-c"]
+    # Usa o NOME do usuário (qobuz), então não depende de saber o UID dele.
+    # Falha de chown (NAS/SMB/Docker Desktop) vira só um aviso: quem decide se
+    # está tudo bem é o teste de escrita do docker/iniciar.py.
+    # Se a sua biblioteca antiga pertence a outro usuário e o comando `tags`
+    # precisa alterá-la, troque "chown qobuz:qobuz /home/qobuz/QobuzDownloads"
+    # por "chown -R qobuz:qobuz /home/qobuz/QobuzDownloads" (pode demorar).
+    command:
+      - |
+        chown -R qobuz:qobuz /home/qobuz/.config/qobuz-dl \
+          || echo "[aviso] não consegui ajustar o dono da pasta de config"
+        chown qobuz:qobuz /home/qobuz/QobuzDownloads \
+          || echo "[aviso] não consegui ajustar o dono da pasta de músicas"
+    volumes:
+      - ./config:/home/qobuz/.config/qobuz-dl
+      - ./musicas:/home/qobuz/QobuzDownloads
+
+  qobuz-dl:
+    image: ghcr.io/kaduvercosa/qobuz-dl-ultra:latest
+    restart: "no"
+    stdin_open: true   # o assistente e as telas interativas precisam de terminal
+    tty: true
+    entrypoint: ["python", "/setup/iniciar.py"]
+    depends_on:
+      permissoes:
+        condition: service_completed_successfully
+    environment:
+      # Sem chaveiro no container: o token fica no config.ini (permissão 600).
+      PYTHON_KEYRING_BACKEND: keyring.backends.fail.Keyring
+    volumes:
+      # Monte a PASTA de config, não o config.ini: o programa grava o arquivo
+      # de forma atômica e precisa poder escrever na pasta.
+      - ./config:/home/qobuz/.config/qobuz-dl
+      - ./musicas:/home/qobuz/QobuzDownloads
+      - ./docker/iniciar.py:/setup/iniciar.py:ro

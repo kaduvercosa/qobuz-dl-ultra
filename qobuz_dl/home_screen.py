@@ -57,7 +57,10 @@ EXEMPLOS = {
         'ip lista.csv -n "Meu Mix" --auto',
     ),
     "stats": ("stats [--artistas]", "stats --artistas"),
-    "inspect": ("inspect [caminho]", "inspect ~/Music"),
+    "inspect": (
+        "inspect [opções] [ARQUIVO_OU_PASTA]",
+        "inspect ~/Music/faixa.flac --completo",
+    ),
     "auth": ("auth", "auth"),
     "user": ("user [--json]", "user"),
 }

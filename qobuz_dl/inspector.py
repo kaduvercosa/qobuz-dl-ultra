@@ -14,11 +14,13 @@
 #      upsample/transcode de uma fonte lossy disfarçado de FLAC?" via
 #      análise espectral (extra opcional 'analyze': numpy).
 # ==============================================================================
+import json
 import os
 import subprocess
+from collections import Counter
 from typing import Any
 
-from qobuz_dl import ui
+from qobuz_dl import inspect_data, ui
 from qobuz_dl.utils import encontrar_binario, format_duration
 
 Application: Any = None
@@ -48,18 +50,7 @@ from qobuz_dl.core import pt_style
 # quem está vendo -- e atualiza sozinho se a pessoa alternar o modo com o
 # arquivo já aberto.
 
-_AUDIO_EXTS = (
-    ".flac",
-    ".mp3",
-    ".m4a",
-    ".alac",
-    ".ogg",
-    ".opus",
-    ".wav",
-    ".aiff",
-    ".ape",
-    ".wv",
-)
+_AUDIO_EXTS = inspect_data.AUDIO_EXTS
 
 
 def _detectar_pasta_padrao():
@@ -1058,8 +1049,166 @@ def _gerar_grafico_html(caminho_audio, genuinidade):
     return destino
 
 
-def _mostrar_relatorio(caminho, dados, genuinidade):
-    """Display full tag report for audio file."""
+def _mostrar_autenticidade(caminho, genuinidade):
+    """Seção "AUTENTICIDADE": veredito da heurística espectral + gráfico em HTML."""
+    ui.blank()
+    ui.section("🔬 AUTENTICIDADE (heurística espectral)")
+    if genuinidade is None:
+        ui.skip("Análise espectral ignorada (--sem-espectro).")
+        return
+    if not genuinidade["disponivel"]:
+        ui.warn(genuinidade["motivo"])
+        return
+    # Aplica a cor correta baseada no dicionário de genuinidade (verde/amarelo/vermelho)
+    cor_fn = {"ok": ui.ok, "warn": ui.warn, "error": ui.error}[genuinidade["cor"]]
+    cor_fn(genuinidade["mensagem"])
+
+    ui.kv("Corte detectado", f"{genuinidade['corte_hz'] / 1000:.2f} kHz")
+    ui.kv("Nyquist esperado", f"{genuinidade['nyquist_hz'] / 1000:.2f} kHz")
+    ui.kv("Banda utilizada", f"{genuinidade['proporcao'] * 100:.0f}%")
+
+    ui.blank()
+    ui.detail("Gerando gráfico de resposta em frequência (HTML)...")
+
+    try:
+        destino = _gerar_grafico_html(caminho, genuinidade)
+        if destino:
+            # Confere que realmente caiu na mesma pasta do áudio,
+            # não em outro lugar -- garantia explícita, não só
+            # confiança no que a função devolveu.
+            assert os.path.dirname(destino) == os.path.dirname(caminho)
+            ui.ok(f"  Gráfico salvo em '{destino}' (abra no navegador)")
+        else:
+            ui.warn("Não havia dados de espectro suficientes pra desenhar o gráfico.")
+    except Exception as e:
+        ui.error(f"Erro ao gerar o gráfico: {e}")
+
+
+def _mostrar_capas(capas):
+    ui.blank()
+    ui.section(f"🖼️  CAPAS EMBUTIDAS ({len(capas)})")
+    if not capas:
+        ui.warn("Nenhuma capa embutida no arquivo.")
+        return
+    for capa in capas:
+        medidas = (
+            f"{capa['largura']}x{capa['altura']}" if capa["largura"] else "dimensões ?"
+        )
+        avisos = []
+        if capa["largura"] and min(capa["largura"], capa["altura"]) < (
+            inspect_data.MIN_COVER_SIDE
+        ):
+            avisos.append(f"pequena (< {inspect_data.MIN_COVER_SIDE}px)")
+        if capa["quadrada"] is False:
+            avisos.append("não quadrada")
+        partes = [
+            capa["origem"],
+            capa["tipo"],
+            capa["mime"],
+            medidas,
+            inspect_data.formatar_tamanho(capa["bytes"]),
+        ]
+        ui.detail(" · ".join(p for p in partes if p))
+        if avisos:
+            ui.detail("atenção: " + ", ".join(avisos), indent=8)
+
+
+def _mostrar_letras(letras):
+    ui.blank()
+    ui.section("🎤 LETRAS")
+    if letras["embutida"]:
+        tipo = "sincronizada" if letras["sincronizada"] else "sem sincronia"
+        extra = f" · {letras['linhas']} linhas" if letras["linhas"] else ""
+        ui.kv("Letra embutida", f"sim ({tipo}){extra}")
+        if letras["previa"]:
+            ui.kv("Começa com", letras["previa"])
+    else:
+        ui.kv("Letra embutida", "não")
+    lrc = letras["lrc"]
+    if lrc:
+        tipo = "sincronizado" if lrc["sincronizada"] else "sem sincronia"
+        ui.kv(
+            "Arquivo .lrc ao lado",
+            f"{lrc['arquivo']} ({tipo}, {lrc['linhas']} linhas)",
+        )
+    else:
+        ui.kv("Arquivo .lrc ao lado", "nenhum")
+
+
+def _mostrar_diagnostico(problemas):
+    ui.blank()
+    ui.section("🩺 DIAGNÓSTICO (mesmos avisos do `tags --report`)")
+    if not problemas:
+        ui.ok("Nada a corrigir: tags, IDs do Qobuz e capa estão completos.")
+        return
+    for problema in problemas:
+        ui.warn(problema["rotulo"])
+        ui.detail(problema["dica"], indent=6)
+    ui.detail(
+        "Para corrigir em lote: qobuz-dl tags --dry-run PASTA (simula) e depois sem --dry-run."
+    )
+
+
+def _mostrar_ffmpeg(detalhes):
+    ui.blank()
+    ui.section("🧪 INTEGRIDADE E VOLUME (ffmpeg)")
+    integ = detalhes.get("integridade") or {}
+    if integ.get("ok") is True:
+        ui.ok("Áudio íntegro: decodificado por inteiro, sem erros.")
+    elif integ.get("ok") is False:
+        ui.error("Problema ao decodificar o áudio:")
+        ui.detail(integ.get("mensagem") or "erro desconhecido", indent=6)
+    else:
+        ui.warn(f"Integridade não verificada: {integ.get('mensagem', 'sem ffmpeg')}.")
+    volume = detalhes.get("volume")
+    if not volume:
+        ui.warn("Não foi possível medir o volume (ffmpeg ausente ou sem resumo).")
+        return
+    if volume.get("integrado_lufs") is not None:
+        ui.kv("Volume integrado", f"{volume['integrado_lufs']:.1f} LUFS")
+    if volume.get("faixa_dinamica_lu") is not None:
+        ui.kv("Faixa dinâmica (LRA)", f"{volume['faixa_dinamica_lu']:.1f} LU")
+    pico = volume.get("pico_dbfs")
+    if pico is not None:
+        ui.kv("Pico (true peak)", f"{pico:.1f} dBFS")
+        if pico >= -0.05:
+            ui.warn("Pico em 0 dBFS: o áudio pode ter clipping (distorção por volume).")
+
+
+def _mostrar_detalhes(detalhes):
+    """Relatório completo organizado em seções (tags por assunto, capas, letras...)."""
+    ui.banner("🔍 INSPETOR DE ÁUDIO")
+    ui.section("📄 ARQUIVO")
+    for chave, valor in detalhes["tecnico"].items():
+        ui.kv(chave, valor)
+    ui.kv("Campos de tag", len(detalhes["tags"]))
+    for titulo, itens in detalhes["grupos"]:
+        ui.blank()
+        ui.section(titulo)
+        for rotulo, valor in itens:
+            ui.kv(str(rotulo), valor)
+    if not detalhes["tags"]:
+        ui.blank()
+        ui.section("🏷️  TAGS")
+        ui.detail("(nenhuma tag encontrada no arquivo)")
+    _mostrar_capas(detalhes["capas"])
+    _mostrar_letras(detalhes["letras"])
+    _mostrar_diagnostico(detalhes["problemas"])
+    if "integridade" in detalhes:
+        _mostrar_ffmpeg(detalhes)
+
+
+def _mostrar_relatorio(caminho, dados, genuinidade, detalhes=None):
+    """Display full tag report for audio file.
+
+    `detalhes` (de `inspect_data.ler_arquivo`) traz o relatório organizado; sem
+    ele, mostra o formato simples (todas as tags numa lista só).
+    """
+    if detalhes is not None:
+        _mostrar_detalhes(detalhes)
+        _mostrar_autenticidade(caminho, genuinidade)
+        return
+
     ui.banner("🔍 INSPETOR DE ÁUDIO")
     ui.section("📄 ARQUIVO")
     for chave, valor in dados["tecnico"].items():
@@ -1079,68 +1228,225 @@ def _mostrar_relatorio(caminho, dados, genuinidade):
         for capa in dados["capas"]:
             ui.detail(capa)
 
-    ui.blank()
-    ui.section("🔬 AUTENTICIDADE (heurística espectral)")
-    if not genuinidade["disponivel"]:
-        ui.warn(genuinidade["motivo"])
-    else:
-        # Aplica a cor correta baseada no dicionário de genuinidade (verde/amarelo/vermelho)
-        cor_fn = {"ok": ui.ok, "warn": ui.warn, "error": ui.error}[genuinidade["cor"]]
-        cor_fn(genuinidade["mensagem"])
-
-        ui.kv("Corte detectado", f"{genuinidade['corte_hz'] / 1000:.2f} kHz")
-        ui.kv("Nyquist esperado", f"{genuinidade['nyquist_hz'] / 1000:.2f} kHz")
-        ui.kv("Banda utilizada", f"{genuinidade['proporcao'] * 100:.0f}%")
-
-        ui.blank()
-        ui.detail("Gerando gráfico de resposta em frequência (HTML)...")
-
-        try:
-            destino = _gerar_grafico_html(caminho, genuinidade)
-            if destino:
-                # Confere que realmente caiu na mesma pasta do áudio,
-                # não em outro lugar -- garantia explícita, não só
-                # confiança no que a função devolveu.
-                assert os.path.dirname(destino) == os.path.dirname(caminho)
-                ui.ok(f"  Gráfico salvo em '{destino}' (abra no navegador)")
-            else:
-                ui.warn(
-                    "Não havia dados de espectro suficientes pra desenhar o gráfico."
-                )
-        except Exception as e:
-            ui.error(f"Erro ao gerar o gráfico: {e}")
+    _mostrar_autenticidade(caminho, genuinidade)
 
 
-async def run_inspector(diretorio_inicial=None):
+def _json_autenticidade(genuinidade):
+    if not genuinidade:
+        return None
+    chaves = ("disponivel", "motivo", "cor", "mensagem", "corte_hz", "nyquist_hz")
+    saida = {k: genuinidade[k] for k in chaves if k in genuinidade}
+    if "proporcao" in genuinidade:
+        saida["proporcao"] = float(genuinidade["proporcao"])
+    return saida
+
+
+def _imprimir_json(dados):
+    # print() direto: a saída tem de ser só o JSON, mesmo com --quiet
+    print(json.dumps(dados, ensure_ascii=False, indent=2, default=str))
+
+
+def _analisar_arquivo(caminho, completo, espectro, falar=True):
+    """(detalhes, genuinidade) de um arquivo; levanta a exceção se ele é ilegível.
+
+    falar=False: sem mensagens de andamento (para a saída `--json` ficar limpa).
     """
-    Ponto de entrada do `qobuz-dl inspect`: abre o navegador de arquivos,
-    extrai todas as tags do arquivo escolhido e roda a checagem de
-    autenticidade espectral, mostrando tudo via ui.py.
+    detalhes = inspect_data.ler_arquivo(caminho)
+    if completo:
+        if falar:
+            ui.step("Decodificando o áudio e medindo o volume (ffmpeg)...")
+        inspect_data.completar(detalhes)
+    genuinidade = None
+    if espectro:
+        if falar:
+            ui.step("Analisando o espectro de áudio (pode levar alguns segundos)...")
+        genuinidade = _checar_genuinidade(
+            caminho, detalhes.get("_sample_rate"), detalhes.get("_duracao_s")
+        )
+    return detalhes, genuinidade
+
+
+def _inspecionar_pasta(pasta, completo, json_saida):
+    """`inspect PASTA --resumo`: uma entrada por faixa e os totais da pasta."""
+    arquivos = inspect_data.listar_audios(pasta)
+    registros, ilegiveis = [], []
+    duracao_total, tamanho_total = 0.0, 0
+    for caminho in arquivos:
+        try:
+            detalhes = inspect_data.ler_arquivo(caminho)
+        except Exception as exc:  # noqa: BLE001 -- um arquivo ruim não derruba o resumo
+            ilegiveis.append((caminho, str(exc).replace(caminho, "arquivo")))
+            continue
+        if completo:
+            detalhes["integridade"] = inspect_data.verificar_integridade(caminho)
+        registro = inspect_data.resumo_curto(detalhes)
+        registro["caminho"] = os.path.relpath(caminho, pasta)
+        if completo:
+            registro["integridade"] = detalhes["integridade"]
+        registros.append(registro)
+        duracao_total += float(detalhes.get("_duracao_s") or 0)
+        tamanho_total += os.path.getsize(caminho)
+
+    problemas = Counter(c for r in registros for c in r["problemas"])
+    formatos = Counter(f"{r['codec']} {r['qualidade']}".strip() for r in registros)
+    corrompidos = [r for r in registros if r.get("integridade", {}).get("ok") is False]
+    totais = {
+        "arquivos": len(arquivos),
+        "legiveis": len(registros),
+        "ilegiveis": len(ilegiveis),
+        "duracao_s": round(duracao_total),
+        "tamanho_bytes": tamanho_total,
+        "formatos": dict(formatos),
+        "problemas": dict(problemas),
+    }
+    if completo:
+        totais["corrompidos"] = len(corrompidos)
+
+    if json_saida:
+        _imprimir_json(
+            {
+                "pasta": os.path.abspath(pasta),
+                "totais": totais,
+                "faixas": registros,
+                "ilegiveis": [{"arquivo": c, "erro": e} for c, e in ilegiveis],
+            }
+        )
+        return 0
+
+    ui.banner("📚 RESUMO DA PASTA")
+    ui.kv("Pasta", os.path.abspath(pasta))
+    ui.kv("Arquivos de áudio", len(arquivos))
+    if not arquivos:
+        ui.warn("Nenhum arquivo de áudio encontrado nesta pasta.")
+        return 0
+    ui.blank()
+    for registro in registros:
+        quem = " — ".join(x for x in (registro["artista"], registro["titulo"]) if x)
+        numero = f"{registro['faixa']}. " if registro["faixa"] else ""
+        ui.emit(f"  {numero}{quem or registro['arquivo']}")
+        qualidade = registro["qualidade"]
+        tecnico = " · ".join(
+            x
+            for x in (
+                registro["codec"],
+                qualidade if qualidade != registro["codec"] else "",
+                registro["duracao"],
+                f"capa {registro['capa']}" if registro["capa"] else "sem capa",
+            )
+            if x
+        )
+        ui.detail(tecnico)
+        corrompido = registro.get("integridade", {}).get("ok") is False
+        if corrompido or registro["problemas"]:
+            ui.detail(f"arquivo: {registro['caminho']}")
+        if corrompido:
+            ui.error(f"CORROMPIDO: {registro['integridade']['mensagem'][:120]}")
+        if registro["problemas"]:
+            rotulos = ", ".join(
+                inspect_data.ISSUES[c][0] for c in registro["problemas"]
+            )
+            ui.detail(f"atenção: {rotulos}")
+    for caminho, erro in ilegiveis:
+        ui.error(f"{os.path.relpath(caminho, pasta)}: não foi possível ler ({erro})")
+
+    ui.blank()
+    ui.section("📊 TOTAIS")
+    ui.kv("Faixas lidas", f"{len(registros)} de {len(arquivos)}")
+    ui.kv("Duração total", inspect_data.formatar_duracao(duracao_total))
+    ui.kv("Tamanho total", inspect_data.formatar_tamanho(tamanho_total))
+    for formato, qtd in formatos.most_common():
+        ui.kv(formato, f"{qtd} faixa(s)")
+    if completo:
+        ui.kv("Áudio corrompido", len(corrompidos))
+    if problemas:
+        ui.blank()
+        ui.section("🩺 O QUE FALTA CORRIGIR")
+        for codigo, qtd in problemas.most_common():
+            ui.kv(inspect_data.ISSUES[codigo][0], f"{qtd} faixa(s)")
+        ui.detail("Relatório completo: qobuz-dl tags --report PASTA")
+    else:
+        ui.ok("Nenhum problema encontrado nas tags desta pasta.")
+    return 0
+
+
+async def run_inspector(
+    diretorio_inicial=None,
+    json_saida=False,
+    resumo=False,
+    completo=False,
+    espectro=True,
+):
+    """
+    Ponto de entrada do `qobuz-dl inspect`.
+
+    * sem caminho ou com uma pasta: abre o navegador de arquivos para escolher
+      a faixa (com `--resumo` ou `--json`, resume a pasta inteira sem navegador);
+    * com um arquivo: inspeciona direto, sem navegador;
+    * `--json`: só o JSON na saída; `--completo`: também decodifica o áudio e
+      mede o volume com o ffmpeg; `--sem-espectro`: pula a análise espectral.
     """
     # Se nenhum diretório foi informado, detecta a pasta padrão de música
     # de acordo com o dispositivo/SO (ver _detectar_pasta_padrao acima).
     if not diretorio_inicial:
         diretorio_inicial = _detectar_pasta_padrao()
+    diretorio_inicial = os.path.expanduser(str(diretorio_inicial))
 
-    if not os.path.isdir(diretorio_inicial):
-        diretorio_inicial = os.getcwd()
+    if os.path.isfile(diretorio_inicial):
+        caminho = diretorio_inicial
+    else:
+        if not os.path.isdir(diretorio_inicial):
+            diretorio_inicial = os.getcwd()
+        if resumo or json_saida:
+            return _inspecionar_pasta(diretorio_inicial, completo, json_saida)
+        caminho = await _navegar_arquivos(diretorio_inicial)
+        if not caminho:
+            ui.skip("Nenhum arquivo escolhido.")
+            return 0
 
-    caminho = await _navegar_arquivos(diretorio_inicial)
-    if not caminho:
-        ui.skip("Nenhum arquivo escolhido.")
-        return 0
-
-    ui.step(f"Lendo tags de {os.path.basename(caminho)}...")
+    if not json_saida:
+        ui.step(f"Lendo tags de {os.path.basename(caminho)}...")
     try:
-        dados = _extrair_tudo(caminho)
+        detalhes, genuinidade = _analisar_arquivo(
+            caminho, completo, espectro, falar=not json_saida
+        )
     except Exception as e:
         ui.error(f"Não foi possível ler esse arquivo: {e}")
         return 1
 
-    ui.step("Analisando o espectro de áudio (pode levar alguns segundos)...")
-    genuinidade = _checar_genuinidade(
-        caminho, dados.pop("_sample_rate", None), dados.pop("_duracao_s", None)
-    )
+    if json_saida:
+        saida = inspect_data.para_json(detalhes)
+        if espectro:
+            saida["autenticidade"] = _json_autenticidade(genuinidade)
+        _imprimir_json(saida)
+        return 0
 
-    _mostrar_relatorio(caminho, dados, genuinidade)
+    dados = {"tecnico": detalhes["tecnico"], "tags": detalhes["tags"], "capas": []}
+    _mostrar_relatorio(caminho, dados, genuinidade, detalhes=detalhes)
+    return 0
+
+
+async def comparar_com_qobuz(client, settings, caminho):
+    """`inspect ARQUIVO --comparar`: o que o `tags` mudaria neste arquivo (só simula).
+
+    Roda o mesmo código do `tags --dry-run` numa cópia temporária do arquivo:
+    a biblioteca não é tocada. Precisa de login (o `client` já autenticado).
+    """
+    import shutil
+    import tempfile
+
+    from qobuz_dl.retro_tags import AUDIO_EXTENSIONS, retag_directory
+
+    if not os.path.isfile(caminho):
+        ui.error("--comparar precisa de um ARQUIVO de áudio (não de uma pasta).")
+        return 1
+    if not caminho.lower().endswith(AUDIO_EXTENSIONS):
+        ui.error(
+            "--comparar só funciona com arquivos FLAC e MP3 (os que o `tags` corrige)."
+        )
+        return 1
+    with tempfile.TemporaryDirectory(prefix="qdl_inspect_") as pasta:
+        copia = os.path.join(pasta, os.path.basename(caminho))
+        shutil.copy2(caminho, copia)
+        ui.step("Comparando com o Qobuz (simulação do `tags`, nada será gravado)...")
+        await retag_directory(pasta, client, settings, dry_run=True)
     return 0

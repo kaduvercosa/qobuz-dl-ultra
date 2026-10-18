@@ -39,3 +39,5 @@ htmlcov/
 /.git-old/**
 /.mypy_cache/**
 /.ruff_cache/**
+config/
+musicas/

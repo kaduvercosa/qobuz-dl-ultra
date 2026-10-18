@@ -1331,7 +1331,7 @@ _COMMAND_DESCRIPTIONS_PT = {
     "doctor": "Diagnostica ambiente, config, bancos e sentinelas (somente leitura).",
     "import-playlist": "Importa um arquivo de playlist (TXT, CSV, JSON) de qualquer plataforma para download.",
     "stats": "Mostra estatísticas detalhadas sobre sua biblioteca e downloads efetuados.",
-    "inspect": "Navega e mostra TODAS as tags de um arquivo de áudio local, mais uma checagem de autenticidade.",
+    "inspect": "Mostra tudo de uma faixa local: dados técnicos, tags por assunto, capas, letras, diagnóstico e autenticidade (ou resume uma pasta).",
     "auth": "Exibe status da conta/assinatura ou atualiza credenciais de login e token.",
     "user": "Exibe informações da conta, status da assinatura e dados do perfil.",
 }
@@ -1507,10 +1507,20 @@ async def async_main():
             )
         )
 
-    if offline_command == "inspect":
+    # `inspect --comparar` precisa de login (compara com o Qobuz): segue para
+    # `_handle_commands`. Sem ele, o inspect é todo local e não autentica.
+    if offline_command == "inspect" and not getattr(offline_args, "comparar", False):
         from qobuz_dl.inspector import run_inspector
 
-        sys.exit(await run_inspector(getattr(offline_args, "caminho", None)))
+        sys.exit(
+            await run_inspector(
+                getattr(offline_args, "caminho", None),
+                json_saida=bool(getattr(offline_args, "json", False)),
+                resumo=bool(getattr(offline_args, "resumo", False)),
+                completo=bool(getattr(offline_args, "completo", False)),
+                espectro=not getattr(offline_args, "sem_espectro", False),
+            )
+        )
 
     # Comandos que NÃO precisam de login: doctor, scan e library. Rodam mesmo
     # com token expirado ou config.ini quebrado (justamente quando se usa o doctor).
@@ -1859,6 +1869,39 @@ async def async_main():
             if lyrics_client:
                 await lyrics_client.close()
         sys.exit(0)
+
+    if arguments.command == "inspect":
+        # Só chega aqui com --comparar (o resto do inspect é local e roda antes).
+        from qobuz_dl.inspector import comparar_com_qobuz
+        from qobuz_dl.qopy import Client
+
+        alvo = os.path.expanduser(getattr(arguments, "caminho", None) or "")
+        if not os.path.isfile(alvo):
+            ui.error(
+                "--comparar precisa de um ARQUIVO: qobuz-dl inspect ARQUIVO --comparar"
+            )
+            sys.exit(1)
+        try:
+            inspect_client = await Client.create(
+                email,
+                password,
+                app_id,
+                secrets,
+                user_auth_token=token,
+                force_english=force_english,
+            )
+        except Exception as e:
+            ui.error(f"Não foi possível autenticar no Qobuz para comparar: {e}")
+            ui.detail(auth_failure_hint(e))
+            sys.exit(1)
+        inspect_settings = QobuzDLSettings.from_arguments_configparser(
+            arguments, config
+        )
+        try:
+            codigo = await comparar_com_qobuz(inspect_client, inspect_settings, alvo)
+        finally:
+            await inspect_client.close()
+        sys.exit(codigo)
 
     if arguments.command == "tags":
         # Desfazer não precisa do Qobuz nem da pasta: resolve antes de autenticar.

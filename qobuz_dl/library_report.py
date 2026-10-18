@@ -157,6 +157,47 @@ def _cover_size(covers: list):
     return best
 
 
+def diagnose(
+    fields: dict,
+    track_id: str,
+    album_id: str,
+    has_cover: bool,
+    cover_size: Optional[tuple],
+) -> list:
+    """Códigos de ISSUES para os campos de UMA faixa (compartilhado com `inspect`).
+
+    fields: artist, albumartist, album, title, date, tracknumber, isrc (textos,
+    vazio = ausente). cover_size: (largura, altura) da maior capa ou None.
+    """
+    issues = []
+    if not has_cover:
+        issues.append("no_cover")
+    elif cover_size:
+        if min(cover_size) < MIN_COVER_SIDE:
+            issues.append("small_cover")
+        if abs(cover_size[0] - cover_size[1]) > 0.03 * max(cover_size):
+            issues.append("bad_shape_cover")
+    if not track_id:
+        issues.append("no_track_id")
+    elif not _TRACK_ID.match(track_id):
+        issues.append("bad_track_id")
+    if not album_id:
+        issues.append("no_album_id")
+    elif not _ALBUM_ID.match(album_id):
+        issues.append("bad_album_id")
+    for key, code in (
+        ("isrc", "no_isrc"),
+        ("albumartist", "no_albumartist"),
+        ("date", "no_date"),
+        ("tracknumber", "no_track_number"),
+        ("title", "no_title"),
+        ("artist", "no_artist"),
+    ):
+        if not fields.get(key):
+            issues.append(code)
+    return issues
+
+
 def inspect_file(path: str) -> dict:
     """Lê um arquivo e devolve seus campos e a lista de problemas (códigos)."""
     folder = os.path.dirname(path)
@@ -190,35 +231,9 @@ def inspect_file(path: str) -> dict:
         album_id=album_id,
     )
 
-    issues = record["issues"]
-    if not covers:
-        issues.append("no_cover")
-    else:
-        size = _cover_size(covers)
-        record["cover"] = size
-        if size:
-            if min(size) < MIN_COVER_SIDE:
-                issues.append("small_cover")
-            if abs(size[0] - size[1]) > 0.03 * max(size):
-                issues.append("bad_shape_cover")
-    if not track_id:
-        issues.append("no_track_id")
-    elif not _TRACK_ID.match(track_id):
-        issues.append("bad_track_id")
-    if not album_id:
-        issues.append("no_album_id")
-    elif not _ALBUM_ID.match(album_id):
-        issues.append("bad_album_id")
-    for key, code in (
-        ("isrc", "no_isrc"),
-        ("albumartist", "no_albumartist"),
-        ("date", "no_date"),
-        ("tracknumber", "no_track_number"),
-        ("title", "no_title"),
-        ("artist", "no_artist"),
-    ):
-        if not fields[key]:
-            issues.append(code)
+    size = _cover_size(covers) if covers else None
+    record["cover"] = size
+    record["issues"] += diagnose(fields, track_id, album_id, bool(covers), size)
     return record
 
 

@@ -127,7 +127,8 @@ Tamanhos aproximados em linhas. **“Mexa aqui quando…”** é o atalho para a
 | `postprocess.py` | Relatório de downloads: **`.report.json` oculto** (fonte da verdade, sob lock por pasta), `collection_index.jsonl`, `Tracklist.txt` | relatório pós-download |
 | `report_viewer.py` | Gera página HTML autônoma (estética “Nothing”) a partir do `.report.json` | visual do relatório |
 | `watcher.py` | `—watch`: retro-tagging automático quando aparecem arquivos novos (lib `watchdog`) | modo vigia |
-| `inspector.py` (~1150) | `inspect`: navegador de arquivos em tela cheia + relatório de genuinidade/gráfico espectral | inspeção de áudio |
+| `inspector.py` (~1450) | `inspect`: navegador de arquivos em tela cheia, relatório em seções (técnico, tags por assunto, capas, letras, diagnóstico, ffmpeg, autenticidade/gráfico espectral), `--resumo` de pasta, `--json` e `--comparar` (simula o `tags` numa cópia) | inspeção de áudio |
+| `inspect_data.py` | Leitura de UM arquivo sem imprimir nada (FLAC/MP3/M4A/Ogg/Opus): `ler_arquivo`, `agrupar_tags` (nenhuma tag se perde), capas, letras, `diagnose` compartilhado com `library_report`, `verificar_integridade`/`medir_volume` (ffmpeg) | `inspector.py` |
 | `doctor.py` | `doctor`: checagem **somente leitura** do ambiente/config/bancos (herdado dos scripts do libsync) | diagnóstico |
 | `stats_view.py` | Renderização do `stats` | estatísticas |
 
@@ -156,7 +157,7 @@ Definidos em `commands.py`, roteados em `cli.py::_handle_commands`. `DOWNLOAD_CO
 | `library` | `lib` | Consulta/gerencia o catálogo local |
 | `lyrics` | — | Letras retroativas |
 | `tags` | — | Tags/capas retroativas (`—tags-only`, `—covers-only`, `—both`, `—multi-tags`/`—no-multi-tags`) |
-| `inspect` | — | Inspeciona arquivo de áudio |
+| `inspect` | — | Inspeciona arquivo/pasta de áudio (`--resumo`, `--json`, `--completo`, `--sem-espectro`, `--comparar`) |
 | `stats` | — | Estatísticas (`—artistas` etc.) |
 | `auth` | — | Atualiza as credenciais de login |
 | `user` | — | Mostra informações do usuário e status da assinatura |
@@ -302,6 +303,7 @@ Mais recente primeiro. Uma linha por alteração pedida.
 
 | Data | Alteração | Arquivos principais |
 | :--- |:--- |:--- |
+| 2026-10-17 | `inspect` mostra muito mais, com a organização que já tinha: dados técnicos (bitrate real, encoder, MD5 do FLAC, ALAC/Opus/Ogg), tags agrupadas por assunto (Identificação, Faixa e disco, Códigos, IDs do Qobuz, ReplayGain; o resto vai para "Outras tags": nada some), capas com dimensões/quadrada, letras (embutida, sincronizada, `.lrc` ao lado) e diagnóstico com os mesmos códigos do `tags --report` (`library_report.diagnose`, agora compartilhado). `inspect ARQUIVO` pula o navegador; `inspect PASTA --resumo` lista cada faixa e os totais; `--json` (só JSON); `--completo` decodifica o áudio e mede volume/pico via ffmpeg (ebur128); `--sem-espectro` pula a heurística; `--comparar` roda o `tags --dry-run` numa cópia do arquivo (login). `_extrair_tudo` e o relatório simples continuam como rede de segurança | `qobuz_dl/inspect_data.py`, `qobuz_dl/inspector.py`, `qobuz_dl/library_report.py`, `qobuz_dl/commands.py`, `qobuz_dl/cli.py`, `tests/unit/test_inspect_data.py`, `tests/unit/test_inspector_completo.py` |
 | 2026-10-16 | Ajuda de comando unificada: `qobuz-dl <comando> -h` agora chama o `print_help` do próprio subparser (`cli._print_command_help`), e `home_screen.render_ajuda_comando` é o único renderizador (o `render_command_help` paralelo foi removido). Nos comandos de download o grupo genérico "Opções" é repartido por assunto na ordem de uso (`GRUPOS_DOWNLOAD`/`agrupar_opcoes`: busca → qualidade → pastas → letras → tags → créditos → "Outras"); os grupos do próprio parser (tags, capa, discos, paralelo, saída) e o painel "Chaves de formato" mantêm o título e vão depois; `-h` fica por último e o exemplo (`EXEMPLOS`) entra no painel Uso. Teste da tela interativa (`test_core_tui_cartao_visivel`) é pulado no iOS (segfault no a-Shell) | `qobuz_dl/home_screen.py`, `qobuz_dl/cli.py`, `qobuz_dl/commands.py`, `tests/unit/test_ux_paineis.py`, `tests/unit/test_core_tui_cartao_visivel.py` |
 | 2026-10-15 | Larguras em células de terminal: `ui.banner` centralizava com `str.center` e `stats` preenchia o nome do artista com `f"{x:<n}"`, ambos contando caracteres — títulos com emoji (`🔍 INSPETOR DE ÁUDIO`) saíam 1 coluna acima da tela e artistas em japonês/emoji passavam do limite; novos `ui.pad_cells` e `ui.center_cells`, e `ui.section` agora corta títulos longos. README: bloco `usage:` antigo trocado pela descrição da ajuda em painéis, `[DIR]` → `[PASTA]` e 39 flags escritas com travessão (`—delay`, `-—multi-tags`…) corrigidas para `--` (não funcionavam ao copiar); testes novos | `qobuz_dl/ui.py`, `qobuz_dl/stats_view.py`, `README.md`, `tests/ui/test_ui_larguras.py` |
 | 2026-10-15 | Rótulos das opções na ajuda em português (`PASTA`, `DATA`, `PADRÃO`, `PREFIXO`, `FORMATO`, `GRAVADORA`, `BUSCA`, `URL_OU_ARQUIVO`, `N`, `QUALIDADE`…; só o `metavar`, os nomes internos como `args.SOURCE` não mudaram) e lista de chaves de `-ff`/`-fbff`/`-tf` movida para o painel "Chaves de formato" no fim da ajuda (`PAINEL_CHAVES` em `commands.py`; qualquer parser pode ter `paineis_extras`); corrigida vírgula que faltava entre `track_title_base` e `version`; testes novos | `qobuz_dl/commands.py`, `qobuz_dl/home_screen.py`, `tests/ui/test_ajuda_comando.py` |
