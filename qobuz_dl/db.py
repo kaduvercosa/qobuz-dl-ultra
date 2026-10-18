@@ -1,3 +1,4 @@
+import asyncio
 import contextlib
 import logging
 import os
@@ -249,7 +250,12 @@ async def handle_download_id(
                 (item_id, quality),
             )
             row = await cursor.fetchone()
-            if row and row[1] and not os.path.exists(row[1]):
+            caminho_existe = (
+                await asyncio.to_thread(os.path.exists, row[1])
+                if row and row[1]
+                else True
+            )
+            if row and row[1] and not caminho_existe:
                 logger.warning(
                     "%sRegistro obsoleto removido do banco: caminho não existe (%s)%s",
                     YELLOW,

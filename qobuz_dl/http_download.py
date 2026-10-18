@@ -106,6 +106,15 @@ class _Retry(Exception):
         self.retry_after = retry_after
 
 
+def _remove_partial_or_raise(part: str) -> None:
+    """Remove um parcial inválido; nunca continua usando-o se falhar."""
+    fileio.safe_remove(part)
+    if os.path.lexists(part):
+        raise DownloadError(
+            f"Não foi possível remover o arquivo parcial inválido: {part}"
+        )
+
+
 # ----------------------------------------------------------------------------
 # Resultado e estado
 # ----------------------------------------------------------------------------
@@ -437,7 +446,7 @@ async def download_file(
 
     # Nunca retoma um parcial de uma chamada anterior: o nome temporário pode
     # ter sido usado por outra faixa/qualidade e emendar conteúdos distintos.
-    fileio.safe_remove(part)
+    _remove_partial_or_raise(part)
 
     state = _State()
     last_reason = ""
@@ -542,7 +551,7 @@ async def _attempt(
                 already_complete = True  # o parcial já é o arquivo inteiro
                 target, written, verified = total, offset, True
             else:
-                fileio.safe_remove(part)
+                _remove_partial_or_raise(part)
                 state.reset()
                 raise _Retry("HTTP 416 com parcial incompatível; recomeçando do zero")
         else:
@@ -551,7 +560,7 @@ async def _attempt(
             if status == 206:
                 crange = _parse_content_range(response.headers.get("content-range"))
                 if crange is None or crange[0] != offset:
-                    fileio.safe_remove(part)
+                    _remove_partial_or_raise(part)
                     state.reset()
                     raise _Retry("Content-Range incompatível com o parcial local")
                 total = crange[2]
@@ -571,7 +580,7 @@ async def _attempt(
 
             if total is not None:
                 if state.total is not None and state.total != total:
-                    fileio.safe_remove(part)
+                    _remove_partial_or_raise(part)
                     state.reset()
                     raise _Retry("tamanho total mudou entre tentativas")
                 if expected_size is not None and expected_size != total:
@@ -607,7 +616,7 @@ async def _attempt(
                 await loop.run_in_executor(None, _flush_and_fsync, fh)
 
             if overrun:
-                fileio.safe_remove(part)
+                _remove_partial_or_raise(part)
                 state.reset()
                 raise _Retry("recebeu mais bytes do que o tamanho esperado")
             if written == 0:

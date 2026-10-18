@@ -1693,123 +1693,134 @@ class QobuzDL:
                     ],
                 )
 
-            for idx, item in enumerate(items, start=1):
-                if (
-                    getattr(self, "allowed_release_types", None)
-                    and url_type == "artist"
-                ):
-                    try:
-                        r_type = "unknown"
+            try:
+                for idx, item in enumerate(items, start=1):
+                    if (
+                        getattr(self, "allowed_release_types", None)
+                        and url_type == "artist"
+                    ):
+                        try:
+                            r_type = "unknown"
 
-                        full_meta = None
-                        if hasattr(self.client, "get_album_meta"):
-                            full_meta = await self.client.get_album_meta(item["id"])
-                        elif hasattr(self.client, "get_album"):
-                            full_meta = await self.client.get_album(item["id"])
+                            full_meta = None
+                            if hasattr(self.client, "get_album_meta"):
+                                full_meta = await self.client.get_album_meta(item["id"])
+                            elif hasattr(self.client, "get_album"):
+                                full_meta = await self.client.get_album(item["id"])
 
-                        if full_meta:
-                            r_type = (
-                                full_meta.get("release_type")
-                                or full_meta.get("product_type")
-                                or "unknown"
-                            ).lower()
+                            if full_meta:
+                                r_type = (
+                                    full_meta.get("release_type")
+                                    or full_meta.get("product_type")
+                                    or "unknown"
+                                ).lower()
 
-                        # Classificação unificada (ver _classify_release_type
-                        # no topo do arquivo) -- mesma regra usada na tela
-                        # de busca, pra não divergir entre os dois lugares.
-                        r_type = _classify_release_type(
-                            title=item.get("title", ""),
-                            version=item.get("version", ""),
-                            track_count=item.get("tracks_count"),
-                            duration_seconds=item.get("duration"),
-                            api_release_type=r_type,
-                            item_type="album",
+                            # Classificação unificada (ver _classify_release_type
+                            # no topo do arquivo) -- mesma regra usada na tela
+                            # de busca, pra não divergir entre os dois lugares.
+                            r_type = _classify_release_type(
+                                title=item.get("title", ""),
+                                version=item.get("version", ""),
+                                track_count=item.get("tracks_count"),
+                                duration_seconds=item.get("duration"),
+                                api_release_type=r_type,
+                                item_type="album",
+                            )
+
+                            if r_type not in self.allowed_release_types:
+                                continue
+
+                        except Exception as e:
+                            logger.debug(
+                                f"Falha ao classificar tipo de lançamento do item "
+                                f"{item.get('id')}: {e}"
+                            )
+
+                    if getattr(self, "blacklist_patterns", None):
+                        base_title = item.get("title") or item.get("name") or ""
+                        version_tag = item.get("version") or ""
+
+                        display_name = (
+                            f"{base_title} ({version_tag})" if version_tag else base_title
                         )
+                        display_lower = display_name.lower()
 
-                        if r_type not in self.allowed_release_types:
+                        is_blacklisted = False
+                        for pattern in self.blacklist_patterns:
+                            regex_pattern = rf"(?<!\w){re.escape(pattern)}(?!\w)"
+
+                            if re.search(regex_pattern, display_lower):
+                                is_blacklisted = True
+                                break
+
+                        if is_blacklisted:
+                            logger.info(
+                                f"{YELLOW}[!] Skipped (Blacklisted): {display_name}{OFF}"
+                            )
                             continue
 
-                    except Exception as e:
-                        logger.debug(
-                            f"Falha ao classificar tipo de lançamento do item "
-                            f"{item.get('id')}: {e}"
-                        )
+                    if can_parallelize:
+                        item_id_captured = item["id"]
+                        idx_captured = idx
+                        title_captured = item.get("title")
 
-                if getattr(self, "blacklist_patterns", None):
-                    base_title = item.get("title") or item.get("name") or ""
-                    version_tag = item.get("version") or ""
-
-                    display_name = (
-                        f"{base_title} ({version_tag})" if version_tag else base_title
-                    )
-                    display_lower = display_name.lower()
-
-                    is_blacklisted = False
-                    for pattern in self.blacklist_patterns:
-                        regex_pattern = rf"(?<!\w){re.escape(pattern)}(?!\w)"
-
-                        if re.search(regex_pattern, display_lower):
-                            is_blacklisted = True
-                            break
-
-                    if is_blacklisted:
-                        logger.info(
-                            f"{YELLOW}[!] Skipped (Blacklisted): {display_name}{OFF}"
-                        )
-                        continue
-
-                if can_parallelize:
-                    item_id_captured = item["id"]
-                    idx_captured = idx
-                    title_captured = item.get("title")
-
-                    async def _bounded_track_download(
-                        item_id=item_id_captured,
-                        idx=idx_captured,
-                        title_captured=title_captured,
-                    ):
-                        stagger_index = idx - 1
-                        # O semáforo é pego ANTES do stagger: assim as vagas
-                        # são ocupadas na ordem da playlist (01, 02, 03...).
-                        # Com o sleep antes do semáforo, as faixas depois da
-                        # 5ª não dormiam e tomavam as vagas das primeiras.
-                        async with semaphore:
-                            if stagger_index < batch_workers:
-                                await asyncio.sleep(
-                                    stagger_index * HEADER_STAGGER_DELAY
+                        async def _bounded_track_download(
+                            item_id=item_id_captured,
+                            idx=idx_captured,
+                            title_captured=title_captured,
+                        ):
+                            stagger_index = idx - 1
+                            # O semáforo é pego ANTES do stagger: assim as vagas
+                            # são ocupadas na ordem da playlist (01, 02, 03...).
+                            # Com o sleep antes do semáforo, as faixas depois da
+                            # 5ª não dormiam e tomavam as vagas das primeiras.
+                            async with semaphore:
+                                if stagger_index < batch_workers:
+                                    await asyncio.sleep(
+                                        stagger_index * HEADER_STAGGER_DELAY
+                                    )
+                                return await self.download_from_id(
+                                    item_id,
+                                    False,
+                                    new_path,
+                                    is_playlist=is_playlist,
+                                    playlist_index=idx,
+                                    is_parallel=True,
+                                    position_pool=position_pool,
+                                    suppress_header=is_playlist,
+                                    title=title_captured,
                                 )
-                            return await self.download_from_id(
-                                item_id,
-                                False,
+
+                        pending_tasks.append(
+                            asyncio.create_task(_bounded_track_download())
+                        )
+                    else:
+                        outcomes.append(
+                            await self.download_from_id(
+                                item["id"],
+                                True if type_dict["iterable_key"] == "albums" else False,
                                 new_path,
                                 is_playlist=is_playlist,
                                 playlist_index=idx,
-                                is_parallel=True,
-                                position_pool=position_pool,
                                 suppress_header=is_playlist,
-                                title=title_captured,
+                                title=item.get("title"),
                             )
-
-                    pending_tasks.append(_bounded_track_download())
-                else:
-                    outcomes.append(
-                        await self.download_from_id(
-                            item["id"],
-                            True if type_dict["iterable_key"] == "albums" else False,
-                            new_path,
-                            is_playlist=is_playlist,
-                            playlist_index=idx,
-                            suppress_header=is_playlist,
-                            title=item.get("title"),
                         )
-                    )
 
-            if pending_tasks:
-                outcomes.extend(await asyncio.gather(*pending_tasks))
+                if pending_tasks:
+                    outcomes.extend(await asyncio.gather(*pending_tasks))
 
-            if is_playlist and not getattr(self, "playlist_as_albums", False):
-                self.folder_format = original_folder_format
-                self.settings.multiple_disc_one_dir = original_multi_disc_setting
+            except BaseException:
+                for task in pending_tasks:
+                    if not task.done():
+                        task.cancel()
+                if pending_tasks:
+                    await asyncio.gather(*pending_tasks, return_exceptions=True)
+                raise
+            finally:
+                if is_playlist and not getattr(self, "playlist_as_albums", False):
+                    self.folder_format = original_folder_format
+                    self.settings.multiple_disc_one_dir = original_multi_disc_setting
 
             if url_type == "playlist" and not self.no_m3u_for_playlists:
                 # ✅ Removida a chamada duplicada que existia aqui (mesmo
@@ -2924,50 +2935,60 @@ class QobuzDL:
             ],
         )
 
-        for idx, track_id in enumerate(track_ids, start=1):
-            if can_parallelize:
-                track_id_captured = track_id
-                idx_captured = idx
+        try:
+            for idx, track_id in enumerate(track_ids, start=1):
+                if can_parallelize:
+                    track_id_captured = track_id
+                    idx_captured = idx
 
-                async def _bounded_track_download(
-                    t_id=track_id_captured, t_idx=idx_captured
-                ):
-                    stagger_index = t_idx - 1
-                    # Semáforo antes do stagger (ver nota no lote de playlist).
-                    async with semaphore:
-                        if stagger_index < batch_workers:
-                            await asyncio.sleep(stagger_index * HEADER_STAGGER_DELAY)
-                        return await self.download_from_id(
-                            t_id,
+                    async def _bounded_track_download(
+                        t_id=track_id_captured, t_idx=idx_captured
+                    ):
+                        stagger_index = t_idx - 1
+                        # Semáforo antes do stagger (ver nota no lote de playlist).
+                        async with semaphore:
+                            if stagger_index < batch_workers:
+                                await asyncio.sleep(stagger_index * HEADER_STAGGER_DELAY)
+                            return await self.download_from_id(
+                                t_id,
+                                album=False,
+                                alt_path=pl_directory,
+                                is_playlist=True,
+                                playlist_index=t_idx,
+                                is_parallel=True,
+                                position_pool=position_pool,
+                                suppress_header=True,
+                            )
+
+                    pending_tasks.append(
+                        asyncio.create_task(_bounded_track_download())
+                    )
+                else:
+                    outcomes.append(
+                        await self.download_from_id(
+                            track_id,
                             album=False,
                             alt_path=pl_directory,
                             is_playlist=True,
-                            playlist_index=t_idx,
-                            is_parallel=True,
-                            position_pool=position_pool,
+                            playlist_index=idx,
+                            is_parallel=False,
+                            position_pool=None,
                             suppress_header=True,
                         )
-
-                pending_tasks.append(_bounded_track_download())
-            else:
-                outcomes.append(
-                    await self.download_from_id(
-                        track_id,
-                        album=False,
-                        alt_path=pl_directory,
-                        is_playlist=True,
-                        playlist_index=idx,
-                        is_parallel=False,
-                        position_pool=None,
-                        suppress_header=True,
                     )
-                )
 
-        if pending_tasks:
-            outcomes.extend(await asyncio.gather(*pending_tasks))
-
-        self.folder_format = original_folder_format
-        self.settings.multiple_disc_one_dir = original_multi_disc_setting
+            if pending_tasks:
+                outcomes.extend(await asyncio.gather(*pending_tasks))
+        except BaseException:
+            for task in pending_tasks:
+                if not task.done():
+                    task.cancel()
+            if pending_tasks:
+                await asyncio.gather(*pending_tasks, return_exceptions=True)
+            raise
+        finally:
+            self.folder_format = original_folder_format
+            self.settings.multiple_disc_one_dir = original_multi_disc_setting
 
         succ = getattr(self.settings, "pl_success", 0)
         skip = getattr(self.settings, "pl_skipped", 0)

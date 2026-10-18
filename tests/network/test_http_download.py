@@ -479,3 +479,23 @@ async def test_make_client_cai_para_http11_se_h2_nao_estiver_instalado():
         assert isinstance(cliente, httpx.AsyncClient)
     finally:
         await cliente.aclose()
+
+
+async def test_falha_claramente_se_nao_consegue_remover_parcial_inicial(
+    tmp_path, monkeypatch
+):
+    destino = tmp_path / "faixa.bin"
+    parcial = hd.fileio.part_path(os.fspath(destino))
+    with open(parcial, "wb") as arquivo:
+        arquivo.write(b"parcial antigo")
+
+    # Simula um erro de limpeza (por exemplo, arquivo bloqueado/permissão).
+    monkeypatch.setattr(hd.fileio, "safe_remove", lambda _path: None)
+    cliente = servidor()
+
+    with pytest.raises(hd.DownloadError, match="Não foi possível remover"):
+        await hd.download_file(cliente, "http://x/faixa", destino)
+
+    # Não deve iniciar um download nem anexar conteúdo ao parcial antigo.
+    assert cliente.requests == []
+    assert open(parcial, "rb").read() == b"parcial antigo"

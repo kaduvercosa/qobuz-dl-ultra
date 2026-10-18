@@ -652,6 +652,7 @@ class Download:
 
         failed_tracks = 0
         aborted_by_user = False
+        cancelled_by_task = False
         results = []
         abort_event.clear()
 
@@ -815,12 +816,22 @@ class Download:
 
             try:
                 results = await asyncio.gather(*task_objs, return_exceptions=True)
-            except (KeyboardInterrupt, asyncio.CancelledError):
+            except (KeyboardInterrupt, asyncio.CancelledError) as exc:
                 abort_event.set()
                 aborted_by_user = True
+                cancelled_by_task = isinstance(exc, asyncio.CancelledError)
                 for t in task_objs:
                     if not t.done():
                         t.cancel()
+                # Não feche a sessão HTTP enquanto as tarefas ainda podem
+                # estar executando finally/limpeza ou tentando liberar recursos.
+                # Esperar por todas também evita tarefas órfãs após o cancelamento.
+                try:
+                    await asyncio.gather(*task_objs, return_exceptions=True)
+                except asyncio.CancelledError:
+                    # Um segundo cancelamento não deve impedir o fechamento
+                    # best-effort da sessão e a propagação do cancelamento inicial.
+                    pass
                 try:
                     await self.http_session.aclose()
                 except Exception as e:
@@ -837,7 +848,9 @@ class Download:
             if not abort_event.is_set():
                 await asyncio.to_thread(_clean_embed_art, dirn, self.settings)
                 if getattr(self, "fetch_lyrics", False) and not self.no_credits:
-                    self._append_lyrics_to_booklet(dirn, album_title)
+                    await asyncio.to_thread(
+                        self._append_lyrics_to_booklet, dirn, album_title
+                    )
 
         except (KeyboardInterrupt, SystemExit):
             abort_event.set()
@@ -882,11 +895,10 @@ class Download:
                         "Pasta marcada como [INCOMPLETE]."
                     )
 
-            if aborted_by_user:
-                # Não use os._exit(): ele pula finally de chamadores, fecha o
-                # processo sem liberar recursos e torna a classe impossível de
-                # reutilizar como biblioteca. A CLI converte a interrupção em
-                # código de saída no entrypoint, depois que suas limpezas rodam.
+            if aborted_by_user and not cancelled_by_task:
+                # Ctrl+C deve continuar sendo uma interrupção de usuário. Já um
+                # cancelamento programático (Task.cancel) deve propagar
+                # CancelledError, sem ser convertido em KeyboardInterrupt.
                 raise KeyboardInterrupt
 
             # [FIX] handle_download_id() agora vive DENTRO deste 'if', junto com db_artist/db_album -- antes havia risco (sinalizado em revisao) de essas variaveis nao existirem quando failed_tracks>0/aborted_by_user e o handle_download_id ainda assim tentar rodar.
@@ -3062,16 +3074,13 @@ async def tqdm_download_segments(
                             raise ConnectionError(
                                 f"Não foi possivel encontrar o UUID do segmento para {fname}"
                             )
-                        decrypted_data = _decrypt_qobuz_segment(
-                            seg_data, raw_key, segment_uuid
-                        )
 
-                    else:
-                        # O segmento 0 contém a inicialização do contêiner e
-                        # precisa preceder todos os segmentos de mídia.
-                        decrypted_data = _decrypt_qobuz_segment(
-                            seg_data, raw_key, segment_uuid
-                        )
+                    decrypted_data = await asyncio.to_thread(
+                        _decrypt_qobuz_segment,
+                        seg_data,
+                        raw_key,
+                        segment_uuid,
+                    )
                     await file.write(decrypted_data)
 
                 if n_segments >= 2:
@@ -3086,8 +3095,11 @@ async def tqdm_download_segments(
 
                         for seg_data in results:
                             if not abort_event.is_set():
-                                decrypted_data = _decrypt_qobuz_segment(
-                                    seg_data, raw_key, segment_uuid
+                                decrypted_data = await asyncio.to_thread(
+                                    _decrypt_qobuz_segment,
+                                    seg_data, 
+                                    raw_key, 
+                                    segment_uuid,
                                 )
                                 await file.write(decrypted_data)
 

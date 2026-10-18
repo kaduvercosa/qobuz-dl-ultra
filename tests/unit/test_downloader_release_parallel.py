@@ -66,3 +66,59 @@ async def test_download_release_paralelo(monkeypatch, tmp_path, no_http_session)
     assert len(calls) == 2
     assert all(call["is_parallel"] is True for call in calls)
     assert all(call["position_pool"] is not None for call in calls)
+
+
+async def test_cancelamento_aguarda_faixas_antes_de_fechar_sessao_http(
+    monkeypatch, tmp_path
+):
+    """A sessão HTTP só fecha depois que as tarefas canceladas terminam."""
+    import asyncio
+
+    started = asyncio.Event()
+    cleaned = asyncio.Event()
+    closed = asyncio.Event()
+
+    class FakeSession:
+        async def aclose(self):
+            # Se a sessão fechar antes do finally da faixa, há uma corrida.
+            assert cleaned.is_set(), "sessão fechada antes da limpeza da faixa"
+            closed.set()
+
+    monkeypatch.setattr(downloader, "make_client", lambda **kwargs: FakeSession())
+    tracks = [{"id": "t1", "title": "One", "track_number": 1, "media_number": 1}]
+    obj = downloader.Download(SimpleNamespace(), "album-1", str(tmp_path), 6)
+    obj.settings.max_workers = 1
+
+    async def get_album_meta(item_id):
+        return album_data(tracks)
+
+    obj.client.get_album_meta = get_album_meta
+
+    async def get_format(*args, **kwargs):
+        return ("flac", True, 16, 44100)
+
+    monkeypatch.setattr(obj, "_get_format", get_format)
+
+    async def blocked_process_track(*args, **kwargs):
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cleaned.set()
+        return True
+
+    monkeypatch.setattr(obj, "_process_track", blocked_process_track)
+    download_task = asyncio.create_task(obj.download_release())
+    try:
+        await asyncio.wait_for(started.wait(), timeout=3)
+        download_task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await download_task
+
+        assert cleaned.is_set()
+        assert closed.is_set()
+    finally:
+        if not download_task.done():
+            download_task.cancel()
+            await asyncio.gather(download_task, return_exceptions=True)
+        downloader.abort_event.clear()

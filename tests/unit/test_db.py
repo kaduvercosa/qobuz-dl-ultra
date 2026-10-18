@@ -17,6 +17,7 @@ As três frentes cobertas:
 """
 
 import contextlib
+import os
 import sqlite3
 
 import pytest
@@ -530,6 +531,35 @@ class TestHandleDownloadId:
         resultado = await handle_download_id(caminho, "id-x", add_id=True, quality=27)
 
         assert resultado is None
+
+
+    async def test_lookup_verifica_existencia_do_arquivo_fora_do_event_loop(
+        self, tmp_path, monkeypatch
+    ):
+        """A verificação do caminho é I/O de filesystem e não deve bloquear
+        o event loop durante um lookup assíncrono."""
+        from unittest.mock import AsyncMock
+
+        caminho = str(tmp_path / "downloads.db")
+        arquivo_ausente = str(tmp_path / "ausente.flac")
+        create_db(caminho)
+        await handle_download_id(
+            caminho,
+            "stale-thread",
+            add_id=True,
+            quality=27,
+            saved_path=arquivo_ausente,
+        )
+
+        verificar = AsyncMock(return_value=False)
+        monkeypatch.setattr(db_module.asyncio, "to_thread", verificar)
+
+        resultado = await handle_download_id(
+            caminho, "stale-thread", add_id=False, quality=27
+        )
+
+        assert resultado is None
+        verificar.assert_awaited_once_with(os.path.exists, arquivo_ausente)
 
 
 # ---------------------------------------------------------------------------

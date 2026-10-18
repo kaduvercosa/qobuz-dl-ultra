@@ -211,3 +211,48 @@ async def test_download_from_playlist_file_playlist_as_albums(monkeypatch):
     assert result is True
     assert calls[0]["is_playlist"] is True
     assert app.folder_format == "original"
+
+
+async def test_download_from_playlist_file_restores_settings_on_error(monkeypatch):
+    settings = SimpleNamespace(
+        multiple_disc_one_dir=False,
+        max_workers=2,
+        pl_success=0,
+        pl_skipped=0,
+        pl_failed=0,
+    )
+
+    async def get_track_ids_from_list(items):
+        return ["t1", "t2"]
+
+    async def download_from_id(track_id, **kwargs):
+        raise RuntimeError("falha simulada no download")
+
+    app = SimpleNamespace(
+        client=SimpleNamespace(get_track_ids_from_list=get_track_ids_from_list),
+        directory="/tmp",
+        folder_format="original",
+        settings=settings,
+        playlist_as_albums=False,
+        delay=0,
+        download_from_id=download_from_id,
+    )
+
+    monkeypatch.setattr(
+        "qobuz_dl.playlist_import.parse_playlist_file",
+        lambda path: ["track-1", "track-2"],
+    )
+    monkeypatch.setattr(
+        core.downloader,
+        "print_download_header",
+        lambda *args, **kwargs: None,
+    )
+
+    with pytest.raises(RuntimeError, match="falha simulada"):
+        await core.QobuzDL.download_from_playlist_file(
+            app,
+            file_path="playlist.txt",
+        )
+
+    assert app.folder_format == "original"
+    assert settings.multiple_disc_one_dir is False
