@@ -388,7 +388,6 @@ async def _decide_album_cover(
     try:
         items_for_check = (album.get("tracks") or {}).get("items") or []
         trace_kwargs: dict[str, Any] = {"trace": trace} if trace is not None else {}
-        trace_kwargs: dict[str, Any] = {"trace": trace} if trace is not None else {}
         result = await get_apple_hq_cover(
             session=http_session,
             upc=album.get("upc"),
@@ -401,7 +400,7 @@ async def _decide_album_cover(
             # segue por outras lojas se as principais não tiverem o lançamento.
             album_tracks=[_qobuz_track_title(i) for i in items_for_check] or None,
             fallback_countries=True,
-            **({"trace": trace} if trace is not None else {}),
+            **trace_kwargs,
         )
         if isinstance(result, tuple) and result and isinstance(result[0], str):
             if result[0].strip():
@@ -426,7 +425,7 @@ async def _decide_album_cover(
                     item,
                     album,
                     http_session,
-                    **trace_kwargs,
+                    **({"trace": trace} if trace is not None else {}),
                 )
             except Exception as exc:
                 found = (None, None, f"erro ({type(exc).__name__}: {exc})")
