@@ -33,7 +33,7 @@ import tempfile
 import time
 import zlib
 from dataclasses import dataclass
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -241,6 +241,7 @@ class Journal:
             pass
 
     def _commit(self, path: str, pre: Head, after_digest: str) -> None:
+        before: dict[str, Any]
         if pre.kind == "flac":
             blocks = []
             for kind, body in _split_flac_blocks(pre.data):

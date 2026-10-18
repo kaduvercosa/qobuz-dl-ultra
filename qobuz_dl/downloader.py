@@ -1352,7 +1352,9 @@ class Download:
         """
         claimed_paths: list[str] = []
         try:
-            return await self._download_and_tag_impl(
+            # *args pode, em tese, preencher `_claimed` por posição; na prática
+            # os chamadores só usam os parâmetros anteriores.
+            return await self._download_and_tag_impl(  # type: ignore[misc]
                 *args, _claimed=claimed_paths, **kwargs
             )
         finally:

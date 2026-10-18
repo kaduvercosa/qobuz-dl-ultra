@@ -281,10 +281,10 @@ def parse_ttml(data) -> TTMLDocument:
     xml_lang = f"{{{NS_XML}}}lang"
     xml_id = f"{{{NS_XML}}}id"
 
-    agents = {
-        el.get(xml_id): el.get("type", "")
+    agents: dict[str, str] = {
+        str(agent_id): el.get("type", "")
         for el in root.iter()
-        if _local(el) == "agent" and el.get(xml_id)
+        if _local(el) == "agent" and (agent_id := el.get(xml_id))
     }
 
     translations: dict[str, dict[str, str]] = {}
@@ -341,7 +341,7 @@ def parse_ttml(data) -> TTMLDocument:
 def _timed_lines(doc: TTMLDocument) -> list[TTMLLine]:
     """Linhas com tempo e texto, em ordem cronologica (sobreposicoes ficam)."""
     timed = [ln for ln in doc.lines if ln.begin is not None and ln.text]
-    return sorted(timed, key=lambda ln: ln.begin)
+    return sorted(timed, key=lambda ln: ln.begin or 0)
 
 
 def to_plain(doc: TTMLDocument) -> str:
@@ -350,7 +350,7 @@ def to_plain(doc: TTMLDocument) -> str:
 
 def to_line_lrc(doc: TTMLDocument) -> str:
     return "\n".join(
-        f"{format_timestamp(ln.begin)}{ln.text}" for ln in _timed_lines(doc)
+        f"{format_timestamp(ln.begin or 0)}{ln.text}" for ln in _timed_lines(doc)
     )
 
 
@@ -362,13 +362,13 @@ def to_word_lrc(doc: TTMLDocument) -> str:
     for ln in _timed_lines(doc):
         timed = [s for s in ln.spans if s.begin is not None]
         if not timed:
-            out.append(f"{format_timestamp(ln.begin)}{ln.text}")
+            out.append(f"{format_timestamp(ln.begin or 0)}{ln.text}")
             continue
         pieces = []
         for span in ln.spans:
             tag = _word_tag(span.begin) if span.begin is not None else ""
             pieces.append(f"{tag}{span.text}" + (" " if span.space_after else ""))
-        out.append(f"{format_timestamp(ln.begin)}{''.join(pieces).rstrip()}")
+        out.append(f"{format_timestamp(ln.begin or 0)}{''.join(pieces).rstrip()}")
     return "\n".join(out)
 
 
@@ -401,7 +401,7 @@ def translation_lrc(doc: TTMLDocument, lang: str) -> str:
     """Traducao no MESMO timestamp da linha original a que esta associada."""
     texts = doc.translations.get(lang, {})
     rows = [
-        f"{format_timestamp(ln.begin)}{texts[ln.id]}"
+        f"{format_timestamp(ln.begin or 0)}{texts[ln.id]}"
         for ln in _timed_lines(doc)
         if texts.get(ln.id)
     ]

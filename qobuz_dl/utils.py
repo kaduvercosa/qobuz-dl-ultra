@@ -614,7 +614,8 @@ def release_date_key(item) -> str:
     """Data de lançamento (AAAA-MM-DD) de um resultado da busca; '' se não tem."""
     if not isinstance(item, dict):
         return ""
-    album = item.get("album") if isinstance(item.get("album"), dict) else {}
+    album_raw = item.get("album")
+    album: dict = album_raw if isinstance(album_raw, dict) else {}
     for value in (
         item.get("release_date_original"),
         item.get("release_date"),
@@ -1029,7 +1030,7 @@ def apple_release_kind(collection_name: str) -> str:
 _APPLE_FALLBACK_COUNTRIES = ("gb", "ca", "au", "de", "fr", "es", "mx", "jp")
 
 
-def termo_de_busca(texto: str) -> str:
+def termo_de_busca(texto: Optional[str]) -> str:
     """Texto sem parênteses/colchetes e sem aspas, para usar como termo.
     ...
     """
@@ -1758,7 +1759,7 @@ async def get_apple_hq_cover(
             return
 
         picks.sort(key=lambda item: (item[0], item[1]))
-        wanted = len(album_tracks)
+        wanted = len(album_tracks or [])
         candidates = []
         for neg_similarity, order, collection_id, name, result in picks[:8]:
             data = await cached_get(

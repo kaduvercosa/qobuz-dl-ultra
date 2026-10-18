@@ -19,6 +19,7 @@ import logging
 import os
 import shutil
 import sys
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -109,7 +110,7 @@ def _build_application(kind: str):
     from qobuz_dl.interactive_ui import _hex_accent, prompt_style
 
     width = box_width(shutil.get_terminal_size((80, 24)).columns)
-    app_holder = {}
+    app_holder: dict[str, Any] = {}
 
     def _accept(buffer):
         app_holder["app"].exit(result=buffer.text)
@@ -162,9 +163,9 @@ def _build_application(kind: str):
             style="class:search.frame",
         )
     finally:
-        for name, char in original.items():
-            if char is not None:
-                setattr(Border, name, char)
+        for name, saved_char in original.items():
+            if saved_char is not None:
+                setattr(Border, name, saved_char)
 
     box = HSplit(
         [frame],
@@ -201,7 +202,7 @@ def _build_application(kind: str):
             "frame.label": f"bg:default fg:{_hex_accent} bold",
         }
     )
-    app = Application(
+    app: Application[Any] = Application(
         layout=Layout(root, focused_element=field),
         key_bindings=bindings,
         style=merge_styles([prompt_style, box_style]),

@@ -149,7 +149,7 @@ class _Estilo:
 
 def _com_separadores(blocos: list) -> list:
     """Junta blocos de linhas colocando uma linha horizontal entre eles."""
-    saida = []
+    saida: list = []
     for i, bloco in enumerate(blocos):
         if i:
             saida.append(SEP)
@@ -318,7 +318,7 @@ def _painel_dicas(largura: int, st: _Estilo) -> list:
 def render_home(
     comandos,
     flags=(),
-    largura: int = None,
+    largura: int | None = None,
     cor: bool = True,
     destaque: str = "\033[36m",
     mudo: str = "\033[2m",
@@ -364,7 +364,7 @@ def render_checks(
     itens,
     acoes=(),
     resumo: str = "",
-    largura: int = None,
+    largura: int | None = None,
     cor: bool = True,
     destaque: str = "\033[36m",
     mudo: str = "\033[2m",
@@ -524,7 +524,7 @@ def agrupar_opcoes(opcoes) -> list:
     Devolve [(titulo, [(flag, descricao), ...]), ...]. Opções que não estão na
     tabela (novas, ou -h) vão para "Outras opções", no fim: nada se perde.
     """
-    por_chave = {}
+    por_chave: dict[str, list] = {}
     for item in opcoes:
         por_chave.setdefault(_chave_opcao(item[0]), []).append(item)
     usadas = set()
@@ -559,7 +559,7 @@ def render_ajuda_comando(
     descricao: str,
     grupos,
     exemplo: str = "",
-    largura: int = None,
+    largura: int | None = None,
     cor: bool = True,
     destaque: str = "\033[36m",
     mudo: str = "\033[2m",

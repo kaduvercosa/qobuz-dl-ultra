@@ -19,7 +19,7 @@ import os
 import re
 import time
 from collections import Counter, defaultdict
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 from qobuz_dl.retro_tags import AUDIO_EXTENSIONS, extract_album_id, find_audio_files
 from qobuz_dl.retro_tagger import extract_track_id
@@ -201,7 +201,7 @@ def diagnose(
 def inspect_file(path: str) -> dict:
     """Lê um arquivo e devolve seus campos e a lista de problemas (códigos)."""
     folder = os.path.dirname(path)
-    record = {
+    record: dict[str, Any] = {
         "path": path,
         "folder": folder,
         "file": os.path.basename(path),
@@ -257,7 +257,7 @@ def scan_directory(
 # --------------------------------------------------------------------------
 def summarize(records: list) -> dict:
     """Totais por problema e por álbum (pasta), do pior para o melhor."""
-    per_issue = Counter()
+    per_issue: Counter[str] = Counter()
     albums = defaultdict(list)
     for record in records:
         per_issue.update(record["issues"])
@@ -265,7 +265,7 @@ def summarize(records: list) -> dict:
 
     rows = []
     for folder, items in albums.items():
-        counts = Counter()
+        counts: Counter[str] = Counter()
         for item in items:
             counts.update(item["issues"])
         first = items[0]

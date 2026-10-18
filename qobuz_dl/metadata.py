@@ -113,7 +113,7 @@ def _split_protegido(texto, sep: str, protegidos) -> list:
     """
     if not texto or not isinstance(texto, str):
         return []
-    restaurar = {}
+    restaurar: dict[str, str] = {}
     trabalho = texto
     for nome in protegidos or ():
         padrao = re.compile(r"(?<!\w)" + re.escape(nome) + r"(?!\w)", re.IGNORECASE)
@@ -491,7 +491,7 @@ def _get_cover_source(tags) -> str:
     return str(value or COVER_SOURCE_UNKNOWN).strip()
 
 
-def _set_cover_source(tags, source: Optional[str]) -> str:
+def _set_cover_source(tags, source: Optional[str]) -> None:
     """Grava ou remove a origem da capa"""
     if source:
         tags[COVER_SOURCE_TAG] = str(source).strip()
@@ -1218,18 +1218,18 @@ def replace_cover_only(
         audio.save(filename, v2_version=version if version in (3, 4) else 4)
         return True
 
-    audio = FLAC(filename)
-    previous_pictures = list(audio.pictures)
-    _embed_flac_img(root_dir, audio, cover_override=cover_path)
-    if not audio.pictures:
+    flac_audio = FLAC(filename)
+    previous_pictures = list(flac_audio.pictures)
+    _embed_flac_img(root_dir, flac_audio, cover_override=cover_path)
+    if not flac_audio.pictures:
         # _embed_flac_img limpa as imagens antes de embutir; se falhou, restaura.
         for picture in previous_pictures:
-            audio.add_picture(picture)
+            flac_audio.add_picture(picture)
         return False
 
     cover_kind = "Original" if req_size == "org" else "Redimensionada"
     lines = []
-    current_comment = audio.get("COMMENT") or []
+    current_comment = flac_audio.get("COMMENT") or []
     if isinstance(current_comment, str):
         current_comment = [current_comment]
     for value in current_comment:
@@ -1241,9 +1241,9 @@ def replace_cover_only(
     lines.append(f"Capa embutida: {size_text} | {cover_kind} | Solicitada: {req_size}")
     if cover_source:
         lines.append(_cover_comment_line(cover_source))
-        audio[COVER_SOURCE_TAG] = cover_source
-    audio["COMMENT"] = "\n".join(lines)
-    audio.save(padding=lambda info: 8192)
+        flac_audio[COVER_SOURCE_TAG] = cover_source
+    flac_audio["COMMENT"] = "\n".join(lines)
+    flac_audio.save(padding=lambda info: 8192)
     return True
 
 

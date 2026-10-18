@@ -16,7 +16,7 @@
 import logging
 import os
 from collections import Counter
-from typing import Callable, Iterable, Optional
+from typing import Any, Callable, Iterable, Optional
 
 from qobuz_dl.retro_tags import AUDIO_EXTENSIONS, find_audio_files
 
@@ -105,7 +105,7 @@ def suggest_from_lists(
             prv.add(b)
 
     protected_keys = {name.casefold() for name in protected}
-    suggestions = []
+    suggestions: list[dict[str, Any]] = []
     for start in nxt:
         if start in prv:
             continue  # só começa nas pontas das correntes (Crosby, Stills, ...)

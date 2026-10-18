@@ -25,7 +25,7 @@ import re
 import shutil
 import tempfile
 import textwrap
-from typing import Optional
+from typing import Any, Optional
 import functools
 
 import httpx
@@ -140,7 +140,8 @@ def snapshot_tags(file_path: str) -> dict:
         if extension == ".flac":
             audio = FLAC(file_path)
 
-            for key, values in (audio.tags or {}).items():
+            tags_map: Any = audio.tags or {}
+            for key, values in tags_map.items():
                 snapshot["text"][key.upper()] = [str(value) for value in values]
 
             snapshot["art"] = [
@@ -373,7 +374,7 @@ async def _decide_album_cover(
     """
     from qobuz_dl.utils import get_apple_hq_cover
 
-    decision = {
+    decision: dict[str, Any] = {
         "url": None,
         "source": None,
         "method": None,
@@ -386,6 +387,8 @@ async def _decide_album_cover(
 
     try:
         items_for_check = (album.get("tracks") or {}).get("items") or []
+        trace_kwargs: dict[str, Any] = {"trace": trace} if trace is not None else {}
+        trace_kwargs: dict[str, Any] = {"trace": trace} if trace is not None else {}
         result = await get_apple_hq_cover(
             session=http_session,
             upc=album.get("upc"),
@@ -423,7 +426,7 @@ async def _decide_album_cover(
                     item,
                     album,
                     http_session,
-                    **({"trace": trace} if trace is not None else {}),
+                    **trace_kwargs,
                 )
             except Exception as exc:
                 found = (None, None, f"erro ({type(exc).__name__}: {exc})")
@@ -477,6 +480,7 @@ async def _fetch_apple_cover_for_track(
 
     track_title = _qobuz_track_title(item)
 
+    trace_kwargs: dict[str, Any] = {"trace": trace} if trace is not None else {}
     result = await get_apple_hq_cover(
         session=http_session,
         upc=album_data.get("upc") or album.get("upc"),
@@ -487,7 +491,7 @@ async def _fetch_apple_cover_for_track(
         track_title=track_title,
         # Single so' casa com "X - Single"; album/EP nunca recebe capa de single.
         release_kind=_release_kind(album) or _release_kind(album_data),
-        **({"trace": trace} if trace is not None else {}),
+        **trace_kwargs,
     )
 
     if isinstance(result, tuple):

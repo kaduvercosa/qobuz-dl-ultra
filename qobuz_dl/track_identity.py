@@ -82,14 +82,14 @@ def read_track_id(path: str) -> Optional[str]:
         if lower.endswith(".mp3"):
             from mutagen.id3 import ID3
 
-            audio = ID3(path)
+            id3_tags = ID3(path)
             wanted = {k.upper() for k in _ID_TAG_KEYS}
-            for frame in audio.getall("TXXX"):
+            for frame in id3_tags.getall("TXXX"):
                 if str(frame.desc).upper() in wanted and frame.text:
                     text = str(frame.text[0]).strip()
                     if text:
                         return text
-            for frame in audio.getall("COMM"):
+            for frame in id3_tags.getall("COMM"):
                 for text in frame.text:
                     match = _COMMENT_ID_RE.search(str(text))
                     if match:
