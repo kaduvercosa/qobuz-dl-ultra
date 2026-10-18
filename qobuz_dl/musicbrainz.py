@@ -196,7 +196,11 @@ def _norm(texto) -> str:
 def _com_versao(titulo, versao) -> str:
     titulo = str(titulo or "").strip()
     versao = str(versao or "").strip()
-    return f"{titulo} ({versao})" if versao and _norm(versao) not in _norm(titulo) else titulo
+    return (
+        f"{titulo} ({versao})"
+        if versao and _norm(versao) not in _norm(titulo)
+        else titulo
+    )
 
 
 def _titulo_confere(titulo, versao, mb_titulo, mb_desambiguacao) -> bool:
@@ -208,10 +212,16 @@ def _titulo_confere(titulo, versao, mb_titulo, mb_desambiguacao) -> bool:
     alvo = _norm(_com_versao(titulo, versao))
     if not alvo or not mb_titulo:
         return False
-    if not versao and mb_desambiguacao and re.search(
-        r"\b(live|remaster\w*|remix|instrumental|acoustic|demo|edit|deluxe)\b",
-        str(mb_desambiguacao), re.IGNORECASE,
-    ) and _norm(mb_desambiguacao) not in _norm(titulo):
+    if (
+        not versao
+        and mb_desambiguacao
+        and re.search(
+            r"\b(live|remaster\w*|remix|instrumental|acoustic|demo|edit|deluxe)\b",
+            str(mb_desambiguacao),
+            re.IGNORECASE,
+        )
+        and _norm(mb_desambiguacao) not in _norm(titulo)
+    ):
         return False
     candidatos = {_norm(mb_titulo)}
     if mb_desambiguacao:
@@ -267,8 +277,16 @@ def _duracao_confere(seconds, milliseconds):
 
 
 def escolher_correspondencia(
-    gravacoes, *, title, version, album, album_version, artists,
-    artist_text="", upc="", duration=None,
+    gravacoes,
+    *,
+    title,
+    version,
+    album,
+    album_version,
+    artists,
+    artist_text="",
+    upc="",
+    duration=None,
 ) -> dict | None:
     """Só aceita gravação única; edição exige UPC e candidato único.
 
@@ -279,16 +297,24 @@ def escolher_correspondencia(
     for gravacao in gravacoes or []:
         if not isinstance(gravacao, dict) or not gravacao.get("id"):
             continue
-        if not _titulo_confere(title, version, gravacao.get("title"), gravacao.get("disambiguation")):
+        if not _titulo_confere(
+            title, version, gravacao.get("title"), gravacao.get("disambiguation")
+        ):
             continue
         if not _duracao_confere(duration, gravacao.get("length")):
             continue
         creditos = _creditos_mb(gravacao)
         if not _artista_confere(artists, artist_text, creditos):
             continue
-        releases = [r for r in gravacao.get("releases") or []
-                    if isinstance(r, dict) and r.get("id") and _titulo_confere(
-                        album, album_version, r.get("title"), r.get("disambiguation"))]
+        releases = [
+            r
+            for r in gravacao.get("releases") or []
+            if isinstance(r, dict)
+            and r.get("id")
+            and _titulo_confere(
+                album, album_version, r.get("title"), r.get("disambiguation")
+            )
+        ]
         if not releases:
             continue
         ids = [c["id"] for c in creditos]
@@ -305,8 +331,11 @@ def escolher_correspondencia(
         return None
     recording, entry = next(iter(candidatos.items()))
     releases = entry["releases"]
-    return {"track": recording, "album": next(iter(releases)) if len(releases) == 1 else None,
-            "artists": entry["artists"]}
+    return {
+        "track": recording,
+        "album": next(iter(releases)) if len(releases) == 1 else None,
+        "artists": entry["artists"],
+    }
 
 
 async def lookup_matching(
@@ -326,11 +355,25 @@ async def lookup_matching(
     conferirem. Nunca levanta excecao: qualquer falha vira None.
     """
     isrc = (isrc or "").strip().upper()
-    artists = (artists,) if isinstance(artists, str) else tuple(a for a in (artists or ()) if a)
+    artists = (
+        (artists,)
+        if isinstance(artists, str)
+        else tuple(a for a in (artists or ()) if a)
+    )
     if not isrc or not title or not album or not (artists or artist_text):
         return None
 
-    chave = (isrc, title, version, album, album_version, artists, artist_text, upc, duration)
+    chave = (
+        isrc,
+        title,
+        version,
+        album,
+        album_version,
+        artists,
+        artist_text,
+        upc,
+        duration,
+    )
     if chave in _MB_MATCH_CACHE:
         return _MB_MATCH_CACHE[chave]
 
@@ -377,4 +420,3 @@ async def lookup_matching(
         except Exception as exc:
             logger.debug("MusicBrainz (correspondencia estrita) falhou: %s", exc)
     return None
-

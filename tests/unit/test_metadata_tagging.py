@@ -839,8 +839,10 @@ class TestIdsMusicBrainzNosArquivos:
             musicbrainz_ids=self._IDS,
         )
 
-        frames = {(type(f).__name__, getattr(f, "desc", getattr(f, "owner", ""))): f
-                  for f in audios[0].added}
+        frames = {
+            (type(f).__name__, getattr(f, "desc", getattr(f, "owner", ""))): f
+            for f in audios[0].added
+        }
         ufid = frames[("UFID", "http://musicbrainz.org")]
         assert ufid.data == b"rec-1"
         assert frames[("TXXX", "MusicBrainz Album Id")].text == ["rel-1"]

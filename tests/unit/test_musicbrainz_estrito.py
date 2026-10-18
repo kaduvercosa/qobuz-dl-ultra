@@ -24,7 +24,11 @@ def _gravacao(**sobrescritas):
         "title": "Song",
         "disambiguation": "",
         "artist-credit": [
-            {"name": "Artist", "joinphrase": "", "artist": {"id": "art-1", "name": "Artist"}}
+            {
+                "name": "Artist",
+                "joinphrase": "",
+                "artist": {"id": "art-1", "name": "Artist"},
+            }
         ],
         "releases": [{"id": "rel-1", "title": "Album", "barcode": "123456789012"}],
     }
@@ -59,10 +63,14 @@ class TestEscolherCorrespondencia:
         assert r is not None
 
     def test_titulo_diferente_nao_confere(self):
-        assert mb.escolher_correspondencia([_gravacao()], **_args(title="Outra")) is None
+        assert (
+            mb.escolher_correspondencia([_gravacao()], **_args(title="Outra")) is None
+        )
 
     def test_versao_so_no_qobuz_nao_confere(self):
-        r = mb.escolher_correspondencia([_gravacao()], **_args(version="Remastered 2011"))
+        r = mb.escolher_correspondencia(
+            [_gravacao()], **_args(version="Remastered 2011")
+        )
 
         assert r is None
 
@@ -88,10 +96,18 @@ class TestEscolherCorrespondencia:
         assert mb.escolher_correspondencia([grav], **_args()) is None
 
     def test_versao_do_album_precisa_conferir(self):
-        grav = _gravacao(releases=[{"id": "rel-1", "title": "Album", "barcode": "123456789012"}])
-        deluxe = _gravacao(releases=[{"id": "rel-2", "title": "Album (Deluxe)", "barcode": "123456789012"}])
+        grav = _gravacao(
+            releases=[{"id": "rel-1", "title": "Album", "barcode": "123456789012"}]
+        )
+        deluxe = _gravacao(
+            releases=[
+                {"id": "rel-2", "title": "Album (Deluxe)", "barcode": "123456789012"}
+            ]
+        )
 
-        assert mb.escolher_correspondencia([grav], **_args(album_version="Deluxe")) is None
+        assert (
+            mb.escolher_correspondencia([grav], **_args(album_version="Deluxe")) is None
+        )
         r = mb.escolher_correspondencia([deluxe], **_args(album_version="Deluxe"))
         assert r["album"] == "rel-2"
 
@@ -138,9 +154,12 @@ class TestEscolherCorrespondencia:
             }
         )
 
-        assert mb.escolher_correspondencia(
-            [grav], **_args(artists=["Drake"], artist_text="Drake")
-        ) is None
+        assert (
+            mb.escolher_correspondencia(
+                [grav], **_args(artists=["Drake"], artist_text="Drake")
+            )
+            is None
+        )
 
     def test_pula_gravacao_ruim_e_usa_a_seguinte(self):
         r = mb.escolher_correspondencia(
@@ -151,7 +170,9 @@ class TestEscolherCorrespondencia:
 
     def test_entradas_invalidas_nao_quebram(self):
         assert mb.escolher_correspondencia(None, **_args()) is None
-        assert mb.escolher_correspondencia(["x", {}, {"id": "so-id"}], **_args()) is None
+        assert (
+            mb.escolher_correspondencia(["x", {}, {"id": "so-id"}], **_args()) is None
+        )
 
 
 class _Resposta:
@@ -206,7 +227,11 @@ class TestLookupMatching:
     def test_devolve_ids_quando_tudo_confere(self, sem_espera):
         sessao = _Sessao({"recordings": [_gravacao()]})
 
-        assert _chamar(sessao) == {"track": "rec-1", "album": "rel-1", "artists": ["art-1"]}
+        assert _chamar(sessao) == {
+            "track": "rec-1",
+            "album": "rel-1",
+            "artists": ["art-1"],
+        }
 
     def test_sem_correspondencia_devolve_none(self, sem_espera):
         sessao = _Sessao({"recordings": [_gravacao(title="Outra")]})
@@ -244,31 +269,40 @@ def test_edicao_sem_barcode_nao_inventada():
 
 
 def test_edicoes_ambiguas_omitem_album():
-    grav = _gravacao(releases=[
-        {"id": "r1", "title": "Album", "barcode": "123456789012"},
-        {"id": "r2", "title": "Album", "barcode": "123456789012"},
-    ])
+    grav = _gravacao(
+        releases=[
+            {"id": "r1", "title": "Album", "barcode": "123456789012"},
+            {"id": "r2", "title": "Album", "barcode": "123456789012"},
+        ]
+    )
     assert mb.escolher_correspondencia([grav], **_args())["album"] is None
 
 
 def test_gravacoes_ambiguas_rejeitadas():
-    assert mb.escolher_correspondencia(
-        [_gravacao(), _gravacao(id="rec-2")], **_args()) is None
+    assert (
+        mb.escolher_correspondencia([_gravacao(), _gravacao(id="rec-2")], **_args())
+        is None
+    )
 
 
 def test_duracao_divergente_rejeitada():
-    assert mb.escolher_correspondencia(
-        [_gravacao(length=200000)], **_args(duration=148)) is None
+    assert (
+        mb.escolher_correspondencia([_gravacao(length=200000)], **_args(duration=148))
+        is None
+    )
 
 
 def test_live_na_desambiguacao_rejeitado():
-    assert mb.escolher_correspondencia(
-        [_gravacao(disambiguation="live")], **_args()) is None
+    assert (
+        mb.escolher_correspondencia([_gravacao(disambiguation="live")], **_args())
+        is None
+    )
 
 
 def test_nome_estruturado_nao_dividido():
     assert mb._conjunto_artistas(["Earth, Wind & Fire"]) != mb._conjunto_artistas(
-        ["Earth", "Wind", "Fire"])
+        ["Earth", "Wind", "Fire"]
+    )
 
 
 def test_lista_estruturada_prevalece_sobre_texto():
