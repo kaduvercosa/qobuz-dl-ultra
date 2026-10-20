@@ -329,6 +329,12 @@ def auth_args(subparsers):
         help="atualiza credenciais de login",
         aliases=["login"],
     )
+    auth.add_argument(
+        "-l",
+        "--login",
+        action="store_true",
+        help="Atualizar e-mail e token de autenticação.",
+    )
     return auth
 
 

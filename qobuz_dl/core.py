@@ -50,10 +50,10 @@ from qobuz_dl.settings import QobuzDLSettings
 from qobuz_dl.utils import classify_release_type as _classify_release_type
 from qobuz_dl.utils import (
     create_and_return_dir,
+    filter_chunks_by_label,
     format_duration,
     get_url_info,
     make_m3u,
-    filter_chunks_by_label,
     smart_discography_filter,
     sort_by_release_date,
 )
@@ -1361,9 +1361,7 @@ class QobuzDL:
         )
         if old_client is not None and old_client is not self.client:
             await old_client.close()
-        logger.info(
-            f"{YELLOW}Qualidade Máxima definida: {QUALITIES[int(self.quality)]}"
-        )
+        ui.step(ui.tail("Qualidade máxima", QUALITIES[int(self.quality)]))
 
     async def get_tokens(self):
         """Busca App ID + secrets "na hora" via bundle.py (scraping do
@@ -1836,8 +1834,6 @@ class QobuzDL:
                 skip = getattr(self.settings, "pl_skipped", 0)
                 fail = getattr(self.settings, "pl_failed", 0)
 
-                from qobuz_dl.downloader import safe_print
-
                 # report.json da playlist ja foi sendo montado faixa a faixa
                 # (postprocess.update_track_status, chamado de dentro de
                 # downloader.download_track()). Aqui so falta fechar o
@@ -1848,16 +1844,14 @@ class QobuzDL:
                 if not getattr(self, "playlist_as_albums", False):
                     await postprocess.finalize_report(new_path, completo=(fail == 0))
 
-                safe_print(f"\n{CYAN}{'━' * 40}{RESET}")
-                safe_print(f"  📊 {GREEN}RESUMO DA PLAYLIST:{RESET} {content_name}")
-                safe_print(f"   • Sucesso : {GREEN}{succ}/{len(items)}{RESET}")
-                if skip > 0:
-                    safe_print(
-                        f"   • Puladas : {YELLOW}{skip}{RESET} (Já baixado/Demo)"
-                    )
-                if fail > 0:
-                    safe_print(f"   • Falhas  : {RED}{fail}{RESET}")
-                safe_print(f"{CYAN}{'━' * 40}{RESET}\n")
+                ui.summary_downloads(
+                    "DA PLAYLIST",
+                    content_name,
+                    succ,
+                    len(items),
+                    skipped=skip,
+                    failed=fail,
+                )
 
             return bool(outcomes) and all(outcome is True for outcome in outcomes)
 
@@ -1980,18 +1974,14 @@ class QobuzDL:
                 skip = getattr(self.settings, "pl_skipped", 0)
                 fail = getattr(self.settings, "pl_failed", 0)
 
-                from qobuz_dl.downloader import safe_print
-
-                safe_print(f"\n{CYAN}{'━' * 44}{RESET}")
-                safe_print(f"📊 {GREEN}RESUMO DO LOTE DE FAIXAS:{RESET}")
-                safe_print(f"   • Sucesso : {GREEN}{succ}/{total_track_urls}{RESET}")
-                if skip > 0:
-                    safe_print(
-                        f"   • Puladas : {YELLOW}{skip}{RESET} (Já baixado/Demo)"
-                    )
-                if fail > 0:
-                    safe_print(f"   • Falhas  : {RED}{fail}{RESET}")
-                safe_print(f"{CYAN}{'━' * 44}{RESET}\n")
+                ui.summary_downloads(
+                    "DO LOTE DE FAIXAS",
+                    "",
+                    succ,
+                    total_track_urls,
+                    skipped=skip,
+                    failed=fail,
+                )
 
         for _, url in other_urls:
             original_url = url
@@ -2449,7 +2439,7 @@ class QobuzDL:
 
                     async def _classic_prompt():
                         """Prompt simples de antes (usado se a caixa falhar)."""
-                        cols = min(shutil.get_terminal_size((80, 24)).columns, 80)
+                        cols = min(ui.raw_width(), 80)
                         bar = "━" * cols
                         ui.emit(f"\n{CYAN}{bar}{RESET}")
                         ui.emit(f"{CYAN}  🔎 {GREEN}NOVA PESQUISA{RESET}")
@@ -2734,7 +2724,6 @@ class QobuzDL:
           - platform_fetcher.fetch_playlist_from_url()  (se `source` é URL)
           - playlist_import.parse_playlist_file()       (se é arquivo local)
         """
-        import shutil as _shutil
 
         is_url = source.startswith("http://") or source.startswith("https://")
         platform_label = "arquivo"
@@ -2773,7 +2762,7 @@ class QobuzDL:
             logger.info(f"{YELLOW}[!] Nenhuma faixa encontrada.{OFF}")
             return
 
-        cols = min(_shutil.get_terminal_size((70, 24)).columns, 90)
+        cols = min(ui.raw_width(), 90)
         bar = "━" * cols
         ui.emit(f"\n{CYAN}{bar}{OFF}")
         ui.emit(f"\033[1m{CYAN}{'  O QUE DESEJA FAZER?':^{cols}}{OFF}")
@@ -2998,8 +2987,6 @@ class QobuzDL:
         skip = getattr(self.settings, "pl_skipped", 0)
         fail = getattr(self.settings, "pl_failed", 0)
 
-        from qobuz_dl.downloader import safe_print
-
         # Mesmo raciocinio do outro fluxo de playlist (handle_url): o
         # report.json ja foi montado faixa a faixa dentro de
         # downloader.download_track(); aqui so fecha o estado, e so quando
@@ -3007,12 +2994,12 @@ class QobuzDL:
         if not getattr(self, "playlist_as_albums", False):
             await postprocess.finalize_report(pl_directory, completo=(fail == 0))
 
-        safe_print(f"\n{CYAN}{'━' * 44}{RESET}")
-        safe_print(f"  📊 {GREEN}RESUMO DA PLAYLIST IMPORTADA:{RESET} {playlist_name}")
-        safe_print(f"   • Sucesso : {GREEN}{succ}/{len(track_ids)}{RESET}")
-        if skip > 0:
-            safe_print(f"   • Puladas : {YELLOW}{skip}{RESET} (Já baixado/Demo)")
-        if fail > 0:
-            safe_print(f"   • Falhas  : {RED}{fail}{RESET}")
-        safe_print(f"{CYAN}{'━' * 44}{RESET}\n")
+        ui.summary_downloads(
+            "DA PLAYLIST IMPORTADA",
+            playlist_name,
+            succ,
+            len(track_ids),
+            skipped=skip,
+            failed=fail,
+        )
         return bool(outcomes) and all(outcome is True for outcome in outcomes)

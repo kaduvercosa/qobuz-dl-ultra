@@ -13,7 +13,6 @@ from send2trash import send2trash
 from qobuz_dl.color import GREEN, OFF, RED
 from qobuz_dl.color import INFO as CYAN
 from qobuz_dl.color import WARNING as YELLOW
-
 from qobuz_dl.playlist_links import remove_link, valid_links
 
 logger = logging.getLogger(__name__)

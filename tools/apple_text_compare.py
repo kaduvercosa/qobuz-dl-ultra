@@ -44,8 +44,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from qobuz_dl.utils import (  # noqa: E402
     extrair_essencia,
-    extrair_titulo_completo,
     extrair_titulo_comparavel,
+    extrair_titulo_completo,
     marcadores_versao,
     score_artista,
 )

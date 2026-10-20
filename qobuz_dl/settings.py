@@ -4,12 +4,12 @@
 # # ============================================================================
 import os
 
-from qobuz_dl.utils import normalize_label_filter
 from qobuz_dl.constants import (
     DEFAULT_FOLDER,
     DEFAULT_MULTIPLE_DISC_TRACK,
     DEFAULT_TRACK,
 )
+from qobuz_dl.utils import normalize_label_filter
 
 _MISSING = object()
 MAX_DOWNLOAD_WORKERS = 16

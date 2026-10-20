@@ -5,58 +5,55 @@
 # e as funcoes de apoio (capa, booklet, letras, nomes de arquivo/pasta).
 # Ponto de entrada tipico: Download(...).download_id_by_type(...).
 # ============================================================================
-from qobuz_dl.settings import QobuzDLSettings
+import asyncio
+import logging
+import os
+import re
+import shutil
+import signal
+import sys
+import textwrap
+import threading
+import time
 from typing import Optional
+
+import aiofiles
+import httpx
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from pathvalidate import sanitize_filename
+from tenacity import (
+    AsyncRetrying,
+    retry_if_not_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
+from tqdm import tqdm
+
+import qobuz_dl.metadata as metadata
+import qobuz_dl.postprocess as postprocess
+from qobuz_dl import musicbrainz, ui
+from qobuz_dl.color import (
+    OFF,
+    RED,
+    RESET,
+)
+from qobuz_dl.color import (
+    WARNING as YELLOW,
+)
 from qobuz_dl.constants import (
     DEFAULT_FOLDER,
-    DEFAULT_TRACK,
     DEFAULT_MULTIPLE_DISC_TRACK,
+    DEFAULT_TRACK,
 )
 from qobuz_dl.db import handle_download_id
+from qobuz_dl.exceptions import NonStreamable
+from qobuz_dl.executors import heavy_executor
+from qobuz_dl.http_download import make_client
 from qobuz_dl.playlist_links import (
     absorb_playlist_copies,
     scan_dest_folder,
 )
-from qobuz_dl.utils import (
-    album_titulo_completo,
-    classify_release_type,
-    clean_filename,
-    verify_audio_integrity,
-    get_apple_hq_cover,
-)
-from .lyrics_engine import LyricsEngine
-import qobuz_dl.postprocess as postprocess
-import logging
-import os
-import shutil
-import sys
-import time
-import re
-import threading
-import signal
-import textwrap
-import asyncio
-
-import httpx
-from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-from pathvalidate import sanitize_filename
-from tqdm import tqdm
-
-import qobuz_dl.metadata as metadata
-from qobuz_dl.http_download import make_client
-from qobuz_dl.executors import heavy_executor
-from qobuz_dl import musicbrainz
-from qobuz_dl import ui
-from qobuz_dl.color import (
-    OFF,
-    GREEN,
-    RED,
-    WARNING as YELLOW,
-    INFO as CYAN,
-    RESET,
-    MUTED,
-)
-from qobuz_dl.exceptions import NonStreamable
+from qobuz_dl.settings import QobuzDLSettings
 from qobuz_dl.track_identity import (
     STATE_IN_PROGRESS,
     STATE_NEW,
@@ -64,14 +61,15 @@ from qobuz_dl.track_identity import (
     release_claims,
     resolve_output_path,
 )
-
-import aiofiles
-from tenacity import (
-    AsyncRetrying,
-    stop_after_attempt,
-    wait_exponential,
-    retry_if_not_exception_type,
+from qobuz_dl.utils import (
+    album_titulo_completo,
+    classify_release_type,
+    clean_filename,
+    get_apple_hq_cover,
+    verify_audio_integrity,
 )
+
+from .lyrics_engine import LyricsEngine
 
 # Ordem de fallback de qualidade quando o tier pedido falha por motivo de rede/servidor (NAO usado para faixas indisponiveis -- ver _PermanentDownloadError). 27=Hi-Res >96kHz | 7=Hi-Res 96kHz | 6=CD 16bit/44.1kHz | 5=MP3 320kbps
 FALLBACK_TIERS = [27, 7, 6, 5]
@@ -85,19 +83,19 @@ def _flatten_artists(artist_data):
 
 
 from qobuz_dl.download_utils import (
-    is_track_streamable,
-    create_missing_placeholder,
-    format_track_label,
-    _short_track_name,
-    _get_safe_ncols,
-    _desc_budget,  # noqa: F401 -- usado só em testes
-    _PositionPool,
-    format_release_type,
-    process_folder_format_with_subdirs,
-    _clean_format_str,
-    _safe_get,
     _artist_label,
+    _clean_format_str,
+    _desc_budget,  # noqa: F401 -- usado só em testes
+    _get_safe_ncols,
+    _PositionPool,
+    _safe_get,
+    _short_track_name,
+    create_missing_placeholder,
+    format_release_type,
+    format_track_label,
     get_album_artist,
+    is_track_streamable,
+    process_folder_format_with_subdirs,
 )
 
 # ANTES: as 10 funções/classe acima estavam definidas aqui direto. Movidas
@@ -264,6 +262,19 @@ COVER_SOURCE_QOBUZ_LABEL = metadata.COVER_SOURCE_QOBUZ
 # ou salva quando nao ha' embed). Faixas seguintes do mesmo album reaproveitam
 # o arquivo e precisam saber de onde ele veio.
 _COVER_SOURCES: dict = {}
+
+# Notas curtas (ex.: "capa Apple (HQ)") que a faixa de playlist/lote deixa para a
+# linha "Em Progresso" dela, indexadas pelo mesmo rótulo "[NN] título" que essa
+# linha usa. Em playlist/lote a capa não ganha linhas próprias: várias faixas
+# rodam ao mesmo tempo e as linhas de capa se misturariam com as das outras.
+_PROGRESS_NOTES: dict = {}
+
+
+def _progress_tail(track_name, size_mb=None):
+    """Métricas da linha "Em Progresso": tamanho (se conhecido) + nota da capa."""
+    tamanho = f"{size_mb:.1f} MB" if size_mb is not None else ""
+    return ui.join_meta(tamanho, _PROGRESS_NOTES.get(track_name, ""))
+
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -728,6 +739,9 @@ class Download:
                         )
                 return True
 
+            # Separa a preparação (booklet, capas) das faixas, nos dois modos.
+            ui.separator()
+
             semaphore = asyncio.Semaphore(active_workers)
 
             async def _report_track(i, t_num, status, motivo="", letras=None):
@@ -1022,19 +1036,19 @@ class Download:
             real_failed = sum(1 for r in results if r is False)
             downloaded_count = sum(1 for r in results if r is True)
 
-            ui.emit(f"\n{CYAN}{'-' * 44}{RESET}")
-            ui.emit(f"  📊 RESUMO DO ÁLBUM: {GREEN}{RESET} {album_title}")
-            ui.emit(
-                f" - Baixadas com sucesso : {GREEN}{downloaded_count}/{track_count}{RESET}"
+            ui.summary_downloads(
+                "DO ÁLBUM",
+                album_title,
+                downloaded_count,
+                track_count,
+                skipped=skipped_count,
+                failed=real_failed,
+                notes=(
+                    ["Faixas puladas marcadas em .missing.txt"]
+                    if skipped_count > 0
+                    else []
+                ),
             )
-            if skipped_count > 0:
-                ui.emit(
-                    f" - Faixas puladas (Demo/Indisponivel) : {YELLOW}{skipped_count}{RESET} "
-                    "(marcadas em .missing.txt)"
-                )
-            if real_failed > 0:
-                ui.emit(f" - Falhas de rede/download : {RED}{real_failed}{RESET}")
-            ui.emit(f"{CYAN}{'-' * 44}{RESET}\n")
 
         return bool(results) and failed_tracks == 0 and not aborted_by_user
 
@@ -1161,6 +1175,21 @@ class Download:
                 )
                 os.makedirs(dirn, exist_ok=True)
 
+                # Em playlist/lote várias faixas rodam juntas: a capa não ganha
+                # linhas próprias, vira uma nota na linha "Em Progresso" da faixa
+                # (o rótulo "[NN] título" é o mesmo que essa linha usa).
+                notas_capa = [] if getattr(self, "is_playlist", False) else None
+                rotulo_faixa = ""
+                if notas_capa is not None:
+                    _no = (
+                        f"{int(playlist_index):02d}"
+                        if playlist_index
+                        else format_track_label(
+                            track_meta, track_meta.get("media_count", 1)
+                        )
+                    )
+                    rotulo_faixa = f"[{_no}] {_get_title(track_meta)}"
+
                 skip_saved_cover = getattr(self, "is_playlist", False) and not getattr(
                     self, "playlist_as_albums", False
                 )
@@ -1171,13 +1200,14 @@ class Download:
                             "Pulando salvamento padrao de capa para manter a pasta da playlist limpa"
                         )
                 elif self.settings.no_cover:
-                    ui.skip("Pulando capa")
+                    if notas_capa is None:
+                        ui.skip("Pulando capa")
 
                 embed_cover_path = None
                 if self.settings.embed_art:
                     unique_embed_name = f".embed_{self.item_id}.jpg"
                     embed_cover_path = os.path.join(dirn, unique_embed_name)
-                else:
+                elif notas_capa is None:
                     ui.skip("Pulando arte incorporada")
 
                 save_cover_now = not skip_saved_cover and not self.settings.no_cover
@@ -1212,27 +1242,41 @@ class Download:
                                 track_meta.get("album", {})
                             ),
                             track_title=track_meta.get("title", ""),
+                            notas=notas_capa,
                         )
+                if notas_capa:
+                    _PROGRESS_NOTES[rotulo_faixa] = ui.join_meta(
+                        *dict.fromkeys(notas_capa)
+                    )
 
                 is_mp3 = True if int(self.quality) == 5 else False
 
+                # Faixa avulsa: separa as capas (preparação) da faixa, como no
+                # álbum. Em playlist/lote não há fase de preparação -- as
+                # faixas se intercalam --, então ali não entra linha em branco.
+                if not getattr(self, "is_playlist", False):
+                    ui.separator()
+
                 letras_info = {}
-                success = await self._download_and_tag(
-                    dirn,
-                    self.item_id,
-                    parse,
-                    track_meta,
-                    track_meta,
-                    True,
-                    is_mp3,
-                    False,
-                    is_parallel=is_parallel,
-                    position_pool=position_pool,
-                    embed_cover_path=embed_cover_path,
-                    letras_out=letras_info,
-                    cover_source=cover_source,
-                    display_index=playlist_index,
-                )
+                try:
+                    success = await self._download_and_tag(
+                        dirn,
+                        self.item_id,
+                        parse,
+                        track_meta,
+                        track_meta,
+                        True,
+                        is_mp3,
+                        False,
+                        is_parallel=is_parallel,
+                        position_pool=position_pool,
+                        embed_cover_path=embed_cover_path,
+                        letras_out=letras_info,
+                        cover_source=cover_source,
+                        display_index=playlist_index,
+                    )
+                finally:
+                    _PROGRESS_NOTES.pop(rotulo_faixa, None)
 
                 if embed_cover_path and os.path.isfile(embed_cover_path):
                     try:
@@ -1333,13 +1377,17 @@ class Download:
             if "dirn" in locals():
                 await postprocess.finalize_report(dirn, completo=bool(success))
             try:
-                ui.emit(f"\n{CYAN}{'-' * 44}{RESET}")
-                ui.emit(f"  📊 RESUMO DA FAIXA: {GREEN}{RESET} {track_title}")
-                if success:
-                    ui.emit(f" - Status : {GREEN}Concluída com Sucesso{RESET}")
-                else:
-                    ui.emit(f" - Status : {RED}Falhou ou foi pulada{RESET}")
-                ui.emit(f"{CYAN}{'-' * 44}{RESET}\n")
+                ui.summary(
+                    "RESUMO DA FAIXA",
+                    subtitle=track_title,
+                    rows=[
+                        (
+                            "Status",
+                            "Concluída com sucesso" if success else "Falhou ou foi pulada",
+                            "ok" if success else "err",
+                        )
+                    ],
+                )
             except Exception as e:
                 ui.error(f"Erro ao gerar painel de resumo da Faixa: {e}")
         else:
@@ -1798,13 +1846,11 @@ class Download:
                 if original_lang:
                     if original_lang.lower() == translation_lang.lower():
                         translation_note = (
-                            f"    ℹ️ Letras já em {GREEN}{translation_lang.upper()}{RESET} "
-                            f"-- sem necessidade de tradução."
+                            f"já em {translation_lang.upper()}, sem tradução"
                         )
                     else:
                         translation_note = (
-                            f"    ℹ️ Nenhuma tradução em {RED}{translation_lang.upper()}{RESET} "
-                            f"disponivel no Qobuz ainda para esta faixa."
+                            f"sem tradução em {translation_lang.upper()} no Qobuz"
                         )
 
             def _inject_lyrics_and_print():
@@ -1824,9 +1870,15 @@ class Download:
                         duration=track_metadata.get("duration"),
                     )
                     if translation_note:
-                        tqdm.write(
-                            f"{OFF}{MUTED}[{track_no}]{OFF} {translation_note}{OFF}"
-                        )
+                        # Dentro do print_lock (não reentrante): formata com o
+                        # ui e escreve por tqdm.write, como o motor de letras.
+                        for linha in ui.tagged_lines(
+                            "skip",
+                            ui.tail(
+                                f" {ui.tree_last()} Letras: {desc}", translation_note
+                            ),
+                        ):
+                            tqdm.write(linha)
                     return resultado_letras
 
             resultado_letras = await loop.run_in_executor(
@@ -2305,7 +2357,7 @@ class Download:
                         if p.strip():
                             f.write(textwrap.fill(p.strip(), width=70) + "\n\n")
 
-            ui.ok(" └─ Concluído: Digital Booklet.txt (Credits & Review)")
+            ui.ok(f" {ui.tree_last()} Concluído: Digital Booklet.txt (Credits & Review)")
         except Exception as e:
             ui.error(f"Erro criando booklet: {e}")
 
@@ -2394,6 +2446,7 @@ async def tqdm_download(
     if abort_event.is_set():
         return
     R = RESET
+    _t0 = time.monotonic()
 
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -2404,7 +2457,7 @@ async def tqdm_download(
     position = position_pool.acquire() if (is_parallel and position_pool) else 0
 
     if not is_parallel:
-        ui.step(f"Em Progresso: {track_name}")
+        ui.step(ui.tail(f"Em Progresso: {track_name}", _progress_tail(track_name)))
         tqdm_desc = f"  {R}⬇️{R}"
         b_format = "{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]"
         ncols = None
@@ -2514,7 +2567,12 @@ async def tqdm_download(
                             and attempt.retry_state.attempt_number == 1
                         ):
                             size_mb = total_size / (1024 * 1024) if total_size else 0
-                            ui.step(f"Em Progresso: {track_name} [{size_mb:.1f} MB]")
+                            ui.step(
+                                ui.tail(
+                                    f"Em Progresso: {track_name}",
+                                    _progress_tail(track_name, size_mb),
+                                )
+                            )
 
                         async with aiofiles.open(fname, mode) as file:
                             with tqdm(
@@ -2540,7 +2598,14 @@ async def tqdm_download(
                                         bar.update(size)
 
                         if downloaded_size >= total_size:
-                            ui.ok(f" └─ Concluído: {track_name}")
+                            ui.ok(
+                                ui.tail(
+                                    f" {ui.tree_last()} Concluído: {track_name}",
+                                    ui.stats_text(
+                                        downloaded_size, time.monotonic() - _t0
+                                    ),
+                                )
+                            )
                             return
 
         except _PermanentDownloadError as e:
@@ -2848,6 +2913,7 @@ async def _get_cover_and_embed(
     isrc=None,
     track_title=None,
     release_kind=None,
+    notas=None,
 ):
     """
     Baixa a capa salva (cover.jpg) e a capa de embed.
@@ -2869,6 +2935,11 @@ async def _get_cover_and_embed(
     saber (arquivo de uma execucao anterior) ou nada foi gravado,
     devolve None -- e nenhuma linha "Capa: ..." e' escrita, em vez de
     afirmar uma origem que pode estar errada.
+
+    ``notas`` (lista) liga o modo playlist/lote: em vez de escrever linhas de
+    capa, a função acrescenta notas curtas à lista (``"capa Apple (HQ)"``,
+    ``"capa já baixada"``, ``"sem capa"``) e o chamador as põe na linha
+    "Em Progresso" da faixa. Falhas ao gravar continuam saindo como aviso.
     """
     if abort_event.is_set():
         return None
@@ -2884,9 +2955,15 @@ async def _get_cover_and_embed(
     precisa_embed = embed_art and embed_file and not os.path.isfile(embed_file)
 
     if save_cover and not precisa_salva:
-        ui.skip(f"Pulando cover art: {saved_name} (Já baixado)")
+        if notas is not None:
+            notas.append("capa já baixada")
+        else:
+            ui.skip(f"Pulando cover art: {saved_name} (Já baixado)")
     if embed_art and embed_file and not precisa_embed:
-        ui.skip(f"Ignorando arte da capa incorporada: {embed_name} (Já baixado)")
+        if notas is not None:
+            notas.append("capa já baixada")
+        else:
+            ui.skip(f"Ignorando arte da capa incorporada: {embed_name} (Já baixado)")
 
     if not precisa_salva and not precisa_embed:
         return _COVER_SOURCES.get(chave_origem)
@@ -2896,7 +2973,15 @@ async def _get_cover_and_embed(
         try:
             async with aiofiles.open(caminho, "wb") as f:
                 await f.write(dados)
-            ui.ok(f"{rotulo} ({rotulo_origem}): {os.path.basename(caminho)}")
+            if notas is not None:
+                notas.append(f"capa {rotulo_origem}")
+            else:
+                ui.ok(
+                    ui.tail(
+                        rotulo,
+                        ui.join_meta(os.path.basename(caminho), rotulo_origem),
+                    )
+                )
             return True
         except OSError as e:
             ui.warn(f"Falha ao salvar {os.path.basename(caminho)}: {e}")
@@ -2941,7 +3026,10 @@ async def _get_cover_and_embed(
             await _gravar(saved_file, dados, "Capa salva", "Qobuz")
             gravou_qobuz = True
         else:
-            ui.skip("Pulando capa: nenhuma fonte disponível")
+            if notas is not None:
+                notas.append("sem capa")
+            else:
+                ui.skip("Pulando capa: nenhuma fonte disponível")
 
     if not precisa_embed:
         return _origem_qobuz()
@@ -2949,7 +3037,10 @@ async def _get_cover_and_embed(
     if precisa_salva and saved_url == embed_url and os.path.isfile(saved_file):
         try:
             await asyncio.to_thread(shutil.copyfile, saved_file, embed_file)
-            ui.detail("🌁 Reutilizando cover.jpg, para o embed..")
+            if notas is None:  # em playlist/lote a nota da capa salva já cobre
+                ui.ok(
+                    ui.tail("Capa de embed", f"reaproveitada de {saved_name}")
+                )
             gravou_qobuz = True
             return _origem_qobuz()
         except OSError as e:
@@ -2960,7 +3051,10 @@ async def _get_cover_and_embed(
         await _gravar(embed_file, dados, "Capa de embed", "Qobuz")
         gravou_qobuz = True
     else:
-        ui.skip("Pulando arte incorporada: nenhuma fonte disponível")
+        if notas is not None:
+            notas.append("sem capa")
+        else:
+            ui.skip("Pulando arte incorporada: nenhuma fonte disponível")
     return _origem_qobuz()
 
 
@@ -2977,6 +3071,7 @@ async def tqdm_download_segments(
     if abort_event.is_set():
         return
     R = RESET
+    _t0 = time.monotonic()
 
     tmp_fname = fname + ".mp4"
     n_segments = track_url_dict["n_segments"]
@@ -3020,7 +3115,11 @@ async def tqdm_download_segments(
 
     if is_parallel:
         size_mb = total_size / (1024 * 1024) if total_size else 0
-        ui.step(f"Em progresso: {track_name} [{size_mb:.1f} MB]")
+        ui.step(
+            ui.tail(
+                f"Em Progresso: {track_name}", _progress_tail(track_name, size_mb)
+            )
+        )
         desc_len = position_pool.desc_len if position_pool else 14
         short_name = _short_track_name(track_name, desc_len)
         tqdm_desc = f" {short_name}"
@@ -3028,7 +3127,7 @@ async def tqdm_download_segments(
         ncols = position_pool.ncols if position_pool else _get_safe_ncols()
         dynamic_ncols = False
     else:
-        ui.step(f"Em Progresso: {track_name}")
+        ui.step(ui.tail(f"Em Progresso: {track_name}", _progress_tail(track_name)))
         tqdm_desc = f"  {R}↪️{R}"
         b_format = "{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]"
         ncols = None
@@ -3127,7 +3226,7 @@ async def tqdm_download_segments(
         if abort_event.is_set():
             return
         if not is_parallel:
-            ui.step(" └─ Montando o arquivo FLAC final...")
+            ui.step(f" {ui.tree_last()} Montando o arquivo FLAC final...")
 
         remux = await asyncio.create_subprocess_exec(
             "ffmpeg",
@@ -3152,7 +3251,12 @@ async def tqdm_download_segments(
                 f"Falha no remux do FFmpeg para {fname}: {stderr.decode()}"
             )
 
-        ui.ok(f" └─ Concluído: {track_name}")
+        ui.ok(
+            ui.tail(
+                f" {ui.tree_last()} Concluído: {track_name}",
+                ui.stats_text(total_size, time.monotonic() - _t0),
+            )
+        )
 
     except (KeyboardInterrupt, SystemExit):
         abort_event.set()

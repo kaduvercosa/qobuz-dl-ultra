@@ -98,3 +98,124 @@ async def test_download_track_falha_no_download_and_tag(monkeypatch, tmp_path):
 
     result = await obj.download_track()
     assert result is False
+
+
+# ------------------------------------------------------------------ separador
+def _track_meta():
+    return {
+        "id": "track-1",
+        "title": "Track",
+        "track_number": 1,
+        "media_number": 1,
+        "release_date_original": "2024-01-01",
+        "album": {
+            "title": "Album",
+            "image": {"large": "https://example.test/cover.jpg"},
+            "artist": {"name": "Artist"},
+            "release_type": "album",
+            "track_count": 1,
+        },
+        "performer": {"name": "Artist"},
+    }
+
+
+def _preparar(monkeypatch, tmp_path, *, is_playlist):
+    """Roda download_track com tudo falso e devolve a ordem dos eventos."""
+    obj = make_obj(tmp_path, monkeypatch)
+    obj.is_playlist = is_playlist
+    meta = _track_meta()
+
+    async def get_track_url(*args, **kwargs):
+        return {"sampling_rate": 44100, "format_id": 6}
+
+    async def get_track_meta(*args, **kwargs):
+        return meta
+
+    obj.client.get_track_url = get_track_url
+    obj.client.get_track_meta = get_track_meta
+
+    eventos = []
+
+    async def fake_download_and_tag(*args, **kwargs):
+        eventos.append("download")
+        return False
+
+    async def fake_cover(*args, **kwargs):
+        eventos.append("capa")
+        return None
+
+    monkeypatch.setattr(obj, "_download_and_tag", fake_download_and_tag)
+    monkeypatch.setattr(downloader, "_get_cover_and_embed", fake_cover)
+    monkeypatch.setattr(downloader.ui, "separator", lambda: eventos.append("separador"))
+    monkeypatch.setattr(
+        downloader,
+        "process_folder_format_with_subdirs",
+        lambda *args, **kwargs: str(tmp_path / "Album"),
+    )
+    return obj, eventos
+
+
+async def test_faixa_avulsa_separa_a_preparacao_da_faixa(monkeypatch, tmp_path):
+    obj, eventos = _preparar(monkeypatch, tmp_path, is_playlist=False)
+    obj.settings.embed_art = True  # há fase de capa
+    obj.settings.no_cover = False
+
+    await obj.download_track()
+
+    assert eventos == ["capa", "separador", "download"]
+
+
+async def test_playlist_e_lote_nao_ganham_linha_em_branco_por_faixa(
+    monkeypatch, tmp_path
+):
+    obj, eventos = _preparar(monkeypatch, tmp_path, is_playlist=True)
+    obj.settings.embed_art = True
+    obj.settings.no_cover = False
+
+    await obj.download_track()
+
+    assert "separador" not in eventos
+    assert eventos == ["capa", "download"]
+
+
+async def test_playlist_pede_notas_de_capa_e_as_deixa_para_a_linha_de_progresso(
+    monkeypatch, tmp_path
+):
+    obj, _ = _preparar(monkeypatch, tmp_path, is_playlist=True)
+    obj.settings.embed_art = True
+    obj.settings.no_cover = False
+    visto = {}
+
+    async def fake_cover(*args, **kwargs):
+        kwargs["notas"].append("capa Apple (HQ)")
+        return None
+
+    async def fake_download_and_tag(*args, **kwargs):
+        # durante o download a nota está disponível para a linha "Em Progresso"
+        visto["nota"] = downloader._PROGRESS_NOTES.get("[01] Track")
+        return False
+
+    monkeypatch.setattr(downloader, "_get_cover_and_embed", fake_cover)
+    monkeypatch.setattr(obj, "_download_and_tag", fake_download_and_tag)
+
+    await obj.download_track()
+
+    assert visto["nota"] == "capa Apple (HQ)"
+    assert "[01] Track" not in downloader._PROGRESS_NOTES  # limpa ao terminar
+
+
+async def test_faixa_avulsa_nao_usa_notas_de_capa(monkeypatch, tmp_path):
+    obj, _ = _preparar(monkeypatch, tmp_path, is_playlist=False)
+    obj.settings.embed_art = True
+    obj.settings.no_cover = False
+    recebidos = []
+
+    async def fake_cover(*args, **kwargs):
+        recebidos.append(kwargs.get("notas", "ausente"))
+        return None
+
+    monkeypatch.setattr(downloader, "_get_cover_and_embed", fake_cover)
+
+    await obj.download_track()
+
+    assert recebidos == [None]

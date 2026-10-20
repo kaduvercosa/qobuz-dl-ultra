@@ -6,7 +6,6 @@ import asyncio
 import logging
 import os
 import re
-import shutil as _shutil
 import time
 
 import mutagen.id3 as id3
@@ -824,7 +823,7 @@ async def process_retroactive_lyrics_async(
         for file_path in files_to_check:
             report_items.extend(itens_por_arquivo.get(file_path, []))
 
-        _w = min(_shutil.get_terminal_size((80, 24)).columns, 100)
+        _w = min(ui.raw_width(), 100)
         _bar = "━" * _w
         ui.emit(f"\n{CYAN}{_bar}{RESET}")
         ui.emit(

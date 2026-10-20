@@ -32,7 +32,6 @@ except ImportError:
     _CRYPTO_AVAILABLE = False
 
 from qobuz_dl import ui
-from qobuz_dl.http_download import make_client
 from qobuz_dl.color import GREEN, OFF, RED, RESET
 from qobuz_dl.color import INFO as CYAN
 from qobuz_dl.color import WARNING as YELLOW
@@ -42,6 +41,7 @@ from qobuz_dl.exceptions import (
     InvalidQuality,
     NoActiveSubscriptionError,
 )
+from qobuz_dl.http_download import make_client
 
 Bundle: Any = None
 try:
@@ -388,13 +388,15 @@ class Client:
 
             sub = self.check_subscription()
             if sub["is_active"]:
-                logger.info(f"{GREEN}Logado: OK (Assinatura: {self.label}){OFF}")
+                ui.ok(ui.tail("Logado", f"Assinatura: {self.label}"))
             else:
-                logger.warning(
-                    f"{YELLOW}[!] Logado: OK, mas a assinatura esta {RED}INATIVA{RESET} ({sub['status']}){OFF}"
+                ui.warn(
+                    ui.tail(
+                        "Logado, mas a assinatura está INATIVA", f"{sub['status']}"
+                    )
                 )
         except Exception:
-            logger.info(f"{YELLOW}[!] Validacao do perfil ignorada.{OFF}")
+            ui.warn("Validação do perfil ignorada.")
             self.label = "Studio"
             self.user_id = None
 

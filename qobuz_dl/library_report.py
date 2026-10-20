@@ -21,8 +21,8 @@ import time
 from collections import Counter, defaultdict
 from typing import Any, Callable, Optional
 
-from qobuz_dl.retro_tags import AUDIO_EXTENSIONS, extract_album_id, find_audio_files
 from qobuz_dl.retro_tagger import extract_track_id
+from qobuz_dl.retro_tags import AUDIO_EXTENSIONS, extract_album_id, find_audio_files
 
 logger = logging.getLogger(__name__)
 

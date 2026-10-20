@@ -19,17 +19,12 @@ import os
 import re
 from dataclasses import dataclass
 
-
-from qobuz_dl.http_download import make_sync_client
 from mutagen.flac import FLAC
 from mutagen.id3 import ID3, TXXX, USLT, ID3NoHeaderError
 from tqdm import tqdm
 
-from qobuz_dl import __version__, binilyrics
-from qobuz_dl.color import ERROR as RED
-from qobuz_dl.color import MUTED, RESET
-from qobuz_dl.color import SUCCESS as GREEN
-from qobuz_dl.color import WARNING as YELLOW
+from qobuz_dl import __version__, binilyrics, ui
+from qobuz_dl.http_download import make_sync_client
 from qobuz_dl.settings import QobuzDLSettings
 
 logger = logging.getLogger(__name__)
@@ -705,19 +700,36 @@ class LyricsEngine:
     # Gravacao e mensagens (compartilhadas por todas as fontes)
     # ------------------------------------------------------------------
     @staticmethod
-    def _delivery_message(candidate, embed_lyrics, save_lrc, ok):
-        kind = "sincronizadas"
-        ext = ".lrc"
+    def _delivery_message(candidate, embed_lyrics, save_lrc, ok, ident=""):
+        """(tipo, mensagem) do resultado da gravação, no estilo da árvore.
+
+        ``ident`` é o "[NN] título" da faixa: em modo paralelo a linha pode
+        aparecer longe da que anunciou a busca, então ela se identifica.
+        """
+        nome = f" {ident}" if ident else ""
+        ramo = f" {ui.tree_last()} "
         if not ok:
-            return f" {RED}❌ Falha ao gravar letras {kind} ({candidate.source}){RESET}"
+            return "error", ui.tail(
+                f"{ramo}Falha ao gravar letras:{nome}",
+                ui.join_meta("sincronizadas", f"via {candidate.source}"),
+            )
+        # O padrão (metadata + .lrc) não precisa ser repetido em toda linha:
+        # só avisa quando a gravação foi parcial.
         if embed_lyrics and save_lrc:
-            action = f"injetadas e salvas em {ext}"
+            destino = ""
         elif save_lrc:
-            action = f"salvas em {ext}"
+            destino = "só em .lrc"
         else:
-            action = "injetadas no metadata"
-        bilingual = f"{GREEN}BILINGUAL{RESET} " if candidate.bilingual else ""
-        return f" ✅ Letras {bilingual}{kind} {action} (via {candidate.source})!"
+            destino = "só no metadata"
+        return "ok", ui.tail(
+            f"{ramo}Letras prontas:{nome}",
+            ui.join_meta(
+                "BILINGUAL" if candidate.bilingual else "",
+                "sincronizadas",
+                destino,
+                f"via {candidate.source}",
+            ),
+        )
 
     def _deliver(self, file_path, candidate, result, embed_lyrics, save_lrc):
         """Grava a letra (metadata e/ou arquivo) e preenche `result`."""
@@ -778,11 +790,18 @@ class LyricsEngine:
         `isrc` e `duration` (segundos) sao opcionais; sem a duracao a fonte
         BiniLyrics e' ignorada.
         """
-        _label = f"{MUTED}[{track_number}]{RESET} " if track_number else ""
+        # "[NN] título": identifica a faixa em cada linha (modo paralelo).
+        _ident = f"[{track_number}] {track}" if track_number else f"{track}"
 
-        def _tw(msg):
-            """Text wrapping helper for lyrics display."""
-            tqdm.write(f"{_label}{msg}")
+        def _tw(kind, msg):
+            """Escreve a mensagem no estilo unificado (tag + árvore + cinza).
+
+            Formata com `ui.tagged_lines` e escreve por `tqdm.write`: esta
+            função roda dentro do `print_lock` (não reentrante), então não
+            pode chamar `ui.ok()`/`ui.step()`, que o pegariam de novo.
+            """
+            for linha in ui.tagged_lines(kind, msg):
+                tqdm.write(linha)
 
         result = {
             "success": False,
@@ -808,7 +827,7 @@ class LyricsEngine:
             duration=duration,
         )
 
-        _tw(f" 🔍 Procurando letras para: {track}...")
+        _tw("step", f"Procurando letras: {_ident}")
         last_error = None
 
         for provider_name in self.PROVIDERS:
@@ -836,18 +855,34 @@ class LyricsEngine:
             # Achou: grava e encerra (nao tenta as fontes seguintes).
             try:
                 ok = self._deliver(file_path, candidate, result, embed_lyrics, save_lrc)
-                _tw(self._delivery_message(candidate, embed_lyrics, save_lrc, ok))
+                _tw(
+                    *self._delivery_message(
+                        candidate, embed_lyrics, save_lrc, ok, _ident
+                    )
+                )
             except Exception as e:
-                _tw(f" {RED}❌ Erro durante a pesquisa de letras: {e}{RESET}")
+                _tw(
+                    "error",
+                    ui.tail(
+                        f" {ui.tree_last()} Erro na pesquisa de letras: {_ident}",
+                        str(e),
+                    ),
+                )
                 logger.debug(f"gravacao falhou para {track}: {e}", exc_info=True)
                 result["error"] = str(e)
             return result
 
         if last_error is not None:
-            _tw(f" {RED}❌ Erro durante a pesquisa de letras: {last_error}{RESET}")
+            _tw(
+                "error",
+                ui.tail(
+                    f" {ui.tree_last()} Erro na pesquisa de letras: {_ident}",
+                    str(last_error),
+                ),
+            )
             result["error"] = str(last_error)
         else:
-            _tw(f" {YELLOW}⚠️ Nenhuma letra encontrada para esta faixa.{RESET}")
+            _tw("warn", f" {ui.tree_last()} Nenhuma letra encontrada: {_ident}")
         return result
 
     def _save_lrc_file(
@@ -933,10 +968,15 @@ class LyricsEngine:
                 return False
             return True
         except Exception as e:
-            tqdm.write(
-                f" {RED}❌ Falha ao gravar a letra no metadata de "
-                f"{os.path.basename(file_path)}: {e}{RESET}"
-            )
+            for linha in ui.tagged_lines(
+                "error",
+                ui.tail(
+                    f" {ui.tree_last()} Falha ao gravar a letra no metadata de "
+                    f"{os.path.basename(file_path)}",
+                    str(e),
+                ),
+            ):
+                tqdm.write(linha)
 
             logger.debug(f"_inject_metadata falhou em {file_path}: {e}", exc_info=True)
             return False

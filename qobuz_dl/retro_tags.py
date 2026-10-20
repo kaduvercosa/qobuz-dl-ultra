@@ -19,6 +19,7 @@
 import asyncio
 import collections
 import difflib
+import functools
 import logging
 import os
 import re
@@ -26,17 +27,16 @@ import shutil
 import tempfile
 import textwrap
 from typing import Any, Optional
-import functools
 
 import httpx
 import mutagen.id3 as id3
 from mutagen.flac import FLAC
 
 from qobuz_dl import metadata, ui
-from qobuz_dl.http_download import make_client
 from qobuz_dl.color import GRAY, GREEN, OFF, RED, RESET
 from qobuz_dl.color import INFO as CYAN
 from qobuz_dl.color import WARNING as YELLOW
+from qobuz_dl.http_download import make_client
 
 # Significado fixo das cores no log do `tags`:
 #   verde    = alteração aplicada
@@ -637,11 +637,7 @@ def _compare_covers(file_path, cover_path):
 
 
 def _term_width() -> int:
-    try:
-        columns = shutil.get_terminal_size((100, 24)).columns
-    except Exception:
-        columns = 100
-    return max(60, min(columns, 120))
+    return max(60, min(ui.raw_width(), 120))
 
 
 def _wrap_lines(text: str, indent: int, width: Optional[int] = None) -> list:

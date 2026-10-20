@@ -22,8 +22,7 @@ import time
 from datetime import datetime
 from typing import Optional
 
-
-from qobuz_dl.http_download import make_sync_client
+import httpx
 import keyring
 import send2trash
 from packaging.version import Version
@@ -48,6 +47,7 @@ from qobuz_dl.color import WARNING as YELLOW
 from qobuz_dl.commands import qobuz_dl_args
 from qobuz_dl.core import QobuzDL
 from qobuz_dl.downloader import DEFAULT_FOLDER, DEFAULT_TRACK
+from qobuz_dl.http_download import make_sync_client
 from qobuz_dl.paths import DirectoryNotUsable, ensure_directory_ready
 from qobuz_dl.settings import QobuzDLSettings
 from qobuz_dl.utils import checar_binarios_externos, get_config_paths
@@ -429,8 +429,8 @@ def auth_failure_hint(exc: BaseException) -> str:
         word in text for word in ("401", "unauthorized", "invalid token", "token")
     ):
         return (
-            "O token pode ter expirado ou sido revogado. Rode: qobuz-dl -r e "
-            "informe o token novamente."
+            "O token pode ter expirado ou sido revogado. Informe um novo token: "
+            "python3 -m qobuz_dl auth -l"
         )
     if "keyring" in name or "keyring" in text:
         return (
@@ -928,12 +928,10 @@ async def _auth_command(
 
         if not new_token:
             ui.warn("Token vazio. Operação cancelada.")
-            if not token:
-                return False
-            else:
-                token = new_token
-        else:
-            token = new_token
+            return False
+
+        token = new_token
+        update_credentials = True
     else:
         ui.emit(
             f"\n\r{CYAN}[*] Consultando dados da conta e assinatura no Qobuz...{OFF}\033[K"
@@ -949,27 +947,66 @@ async def _auth_command(
             force_english=force_english,
         )
     except Exception as e:
-        ui.error(f"Falha ao autenticar com a API: {e}")
+        ui.error(f"Falha ao autenticar com a API ({type(e).__name__}).")
         ui.detail(auth_failure_hint(e))
         if update_credentials:
             ui.error("As alterações NÃO foram salvas.")
         return False
 
     try:
-        user_info = await client.get_user_profile()
-        sub_info = client.check_subscription()
+        try:
+            user_info = await client.get_user_profile()
+            sub_info = client.check_subscription()
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 401:
+                ui.error("Token de autenticação inválido, expirado ou revogado.")
+                ui.detail("Informe um novo token: python3 -m qobuz_dl auth -l")
+            else:
+                ui.error(
+                    "Falha ao consultar o perfil no Qobuz "
+                    f"(HTTP {exc.response.status_code})."
+                )
+                ui.detail(auth_failure_hint(exc))
+            if update_credentials:
+                ui.error("As alterações NÃO foram salvas.")
+            return False
+        except Exception as exc:
+            ui.error(
+                "Falha ao consultar o perfil no Qobuz "
+                f"({type(exc).__name__})."
+            )
+            ui.detail(auth_failure_hint(exc))
+            if update_credentials:
+                ui.error("As alterações NÃO foram salvas.")
+            return False
 
         if update_credentials and token:
-            # CORREÇÃO: Salva em user_token E user_auth_token
             _save_token_in_both_config_keys(config, token)
+            config.set(section, "email", email)
             config.set(section, "password", "")
-            if not disable_keyring and _keyring_save("auth_token", token):
+            saved_in_keyring = (
+                not disable_keyring and _keyring_save("auth_token", token)
+            )
+            if saved_in_keyring:
                 config.set(section, "auth_token", "")
-                ui.ok("Token salvo com segurança no Keyring do sistema!")
             else:
                 config.set(section, "auth_token", token)
-                ui.ok("Token salvo no config.ini!")
-            _write_config_secure(config, config_file)
+                if not disable_keyring:
+                    config.set(section, "disable_keyring", "true")
+                    ui.warn(
+                        "Keyring indisponível: será desativado nesta configuração. "
+                        "O token será salvo em texto puro no config.ini."
+                    )
+            try:
+                _write_config_secure(config, config_file)
+            except OSError:
+                ui.error("Não foi possível gravar o arquivo de configuração.")
+                if saved_in_keyring:
+                    ui.warn(
+                        "O Keyring foi atualizado, mas o config.ini não foi salvo."
+                    )
+                return False
+            ui.ok("Credenciais atualizadas e configuração salva!")
 
         if show_json:
             ui.emit_always(json.dumps(user_info, indent=2, ensure_ascii=False))
@@ -1198,9 +1235,8 @@ async def _handle_commands(qobuz: QobuzDL, arguments):
         if arguments.command == "dl":
             await qobuz.download_list_of_urls(arguments.SOURCE)
         elif arguments.command in ("sync-playlist", "sp"):
-            from qobuz_dl.sync_playlist import sync_playlist
-
             from qobuz_dl.playlist_links import playlist_root
+            from qobuz_dl.sync_playlist import sync_playlist
 
             await sync_playlist(
                 qobuz,

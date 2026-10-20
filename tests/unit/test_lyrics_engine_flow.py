@@ -543,3 +543,61 @@ def test_musixmatch_rejeita_letra_que_passa_do_fim_da_faixa():
     eng._fetch_musixmatch_lyrics.return_value = "[09:00.00]x"
     eng.session.get.return_value = _resp(status=404)
     assert _run(eng, duration=100)["success"] is False
+
+
+# ------------------------------------------------ mensagens no estilo unificado
+class _Cand:
+    def __init__(self, bilingual=False, source="Qobuz"):
+        self.bilingual = bilingual
+        self.source = source
+
+
+def _largura(monkeypatch, colunas="100"):
+    """Fixa a largura (o `ui` prefere o TTY real ao COLUMNS; sem isto,
+    `pytest -s` num terminal dependeria da janela de quem roda)."""
+    from qobuz_dl import ui
+
+    def _sem_terminal(fd=None):
+        raise OSError("sem terminal")
+
+    monkeypatch.setattr(ui.os, "get_terminal_size", _sem_terminal)
+    monkeypatch.setenv("COLUMNS", colunas)
+
+
+def _linhas(kind_msg):
+    from qobuz_dl import ui
+
+    kind, msg = kind_msg
+    return kind, ui.tagged_lines(kind, msg)
+
+
+def test_mensagem_de_sucesso_padrao_nao_repete_o_destino(monkeypatch):
+    _largura(monkeypatch)
+    kind, linhas = _linhas(
+        le.LyricsEngine._delivery_message(_Cand(), True, True, True, "[01] Tempo")
+    )
+    assert kind == "ok"
+    assert "Letras prontas: [01] Tempo" in linhas[0]
+    assert "sincronizadas" in linhas[0] and "via Qobuz" in linhas[0]
+    assert "metadata" not in linhas[0] and ".lrc" not in linhas[0]
+
+
+def test_mensagem_de_sucesso_parcial_avisa_o_destino(monkeypatch):
+    _largura(monkeypatch)
+    _, so_meta = _linhas(
+        le.LyricsEngine._delivery_message(_Cand(True), True, False, True, "[01] T")
+    )
+    _, so_lrc = _linhas(
+        le.LyricsEngine._delivery_message(_Cand(), False, True, True, "[01] T")
+    )
+    assert "BILINGUAL" in so_meta[0] and "só no metadata" in so_meta[0]
+    assert "só em .lrc" in so_lrc[0]
+
+
+def test_mensagem_de_falha_e_erro_e_identifica_a_faixa(monkeypatch):
+    _largura(monkeypatch)
+    kind, linhas = _linhas(
+        le.LyricsEngine._delivery_message(_Cand(), True, True, False, "[07] Faixa")
+    )
+    assert kind == "error"
+    assert "Falha ao gravar letras: [07] Faixa" in linhas[0]

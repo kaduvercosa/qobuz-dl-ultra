@@ -517,15 +517,18 @@ class TestKvEHeader:
         ui.configure(color=False, unicode=False)
         ui.header("ALBUM", [("titulo", "Disco"), ("artista", "Banda")])
         texto = "\n".join(saida)
-        assert "[ALBUM]" in texto
+        linhas = [ln for ln in texto.splitlines() if ln.strip()]
+        # Caixa fechada em ASCII: tipo embutido na borda de cima.
+        assert linhas[0].startswith("+- ALBUM -")
+        assert linhas[-1].startswith("+--") and linhas[-1].endswith("--+")
         assert "TITULO" in texto and "Disco" in texto
         assert "ARTISTA" in texto and "Banda" in texto
-        assert "=" * 20 in texto
+        assert all(ln.startswith(("+", "|")) for ln in linhas)
 
     def test_header_sem_linhas(self, estado_limpo, saida):
         ui.configure(color=False)
         ui.header("VAZIO", [])
-        assert "[VAZIO]" in "\n".join(saida)
+        assert "VAZIO" in "\n".join(saida)
 
 
 class TestRuleBannerSection:
@@ -691,3 +694,354 @@ class TestInstallLogging:
         ui.install_logging()
         for nome in ("httpx", "httpcore", "urllib3", "asyncio", "PIL"):
             assert logging.getLogger(nome).level >= logging.WARNING
+
+
+# ---------------------------------------------------------------------------
+# Caixas (cabeçalho e resumos), árvore
+# ---------------------------------------------------------------------------
+def _linhas_da_caixa(saida):
+    return [ln for ln in "\n".join(saida).splitlines() if ln.strip()]
+
+
+class TestBox:
+    @pytest.mark.parametrize("cols", [32, 40, 80, 120])
+    @pytest.mark.parametrize("unicode_on", [True, False])
+    def test_todas_as_linhas_tem_a_mesma_largura(
+        self, estado_limpo, saida, colunas, cols, unicode_on
+    ):
+        colunas(cols)
+        ui.configure(color=False, unicode=unicode_on)
+        ui.header(
+            "ÁLBUM",
+            [
+                ("Álbum", "Random Access Memories " * 4),
+                ("Artista", "Daft Punk"),
+                ("Qualidade", "FLAC (24bit/88.2kHz)"),
+            ],
+        )
+        larguras = {ui._cell_width(ln) for ln in _linhas_da_caixa(saida)}
+        assert len(larguras) == 1
+        assert larguras.pop() <= max(cols, ui.BOX_MIN)
+
+    def test_cjk_e_emoji_nao_desalinham_a_borda(self, estado_limpo, saida, colunas):
+        colunas(60)
+        ui.configure(color=False, unicode=True)
+        ui.header("ÁLBUM", [("Álbum", "宇多田ヒカル -- 初恋 🌁"), ("Ano", "1999")])
+        larguras = {ui._cell_width(ln) for ln in _linhas_da_caixa(saida)}
+        assert len(larguras) == 1
+
+    def test_ansi_nao_conta_na_largura(self, estado_limpo, saida, colunas):
+        colunas(50)
+        ui.configure(color=False, unicode=False)
+        ui.emit_box("T", ["\x1b[32mverde\x1b[0m", "plano"])
+        larguras = {ui._cell_width(ln) for ln in _linhas_da_caixa(saida)}
+        assert len(larguras) == 1
+
+    def test_valor_longo_quebra_sem_cortar(self, estado_limpo, saida, colunas):
+        colunas(40)
+        ui.configure(color=False, unicode=False)
+        valor = "alpha bravo charlie delta echo foxtrot golf hotel india"
+        ui.header("FAIXA", [("Faixa", valor)])
+        corpo = " ".join(
+            ln.strip("|").strip() for ln in _linhas_da_caixa(saida)[1:-1]
+        )
+        assert corpo.replace("FAIXA", "", 1).split() == valor.split()
+        assert "…" not in "\n".join(saida)
+
+    def test_largura_respeita_teto_e_piso(self, estado_limpo, colunas):
+        colunas(300)
+        assert ui.box_width() == ui.BOX_MAX
+        colunas(10)
+        assert ui.box_width() >= ui.BOX_MIN
+
+    def test_rule_vira_divisoria(self, estado_limpo, colunas):
+        colunas(50)
+        ui.configure(color=False, unicode=False)
+        linhas = ui.box("T", ["a", ui.BOX_RULE, "b"])
+        assert linhas[2].startswith("+-") and linhas[2].endswith("-+")
+        assert linhas[1].startswith("|") and linhas[3].startswith("|")
+
+    def test_estilo_por_variavel_de_ambiente(self, estado_limpo, monkeypatch, colunas):
+        colunas(50)
+        ui.configure(color=False, unicode=True)
+        monkeypatch.setenv("QOBUZ_DL_BOX", "double")
+        assert ui.box("T", ["x"])[0].startswith("\u2554")
+        monkeypatch.setenv("QOBUZ_DL_BOX", "inexistente")
+        assert ui.box("T", ["x"])[0].startswith("\u256d")
+        monkeypatch.setenv("QOBUZ_DL_BOX", "ascii")
+        assert ui.box("T", ["x"])[0].startswith("+")
+
+    def test_sem_unicode_ignora_o_estilo_pedido(self, estado_limpo, monkeypatch):
+        ui.configure(color=False, unicode=False)
+        monkeypatch.setenv("QOBUZ_DL_BOX", "double")
+        assert ui.box_style_name() == "ascii"
+
+
+class TestSummary:
+    def test_valor_alinhado_a_direita(self, estado_limpo, saida, colunas):
+        colunas(60)
+        ui.configure(color=False, unicode=False)
+        ui.summary("RESUMO", [("Baixadas", "11/12", "ok")])
+        linha = [ln for ln in _linhas_da_caixa(saida) if "Baixadas" in ln][0]
+        assert linha.startswith("| + Baixadas")
+        assert linha.endswith("11/12 |")
+
+    def test_notas_ficam_abaixo_de_uma_divisoria(self, estado_limpo, saida, colunas):
+        colunas(60)
+        ui.configure(color=False, unicode=False)
+        ui.summary("RESUMO", [("Baixadas", "1/1", "ok")], notes=["veja .missing.txt"])
+        linhas = _linhas_da_caixa(saida)
+        assert any(ln.startswith("+-") for ln in linhas[1:-1])
+        assert "veja .missing.txt" in linhas[-2]
+
+    def test_downloads_omite_linhas_zeradas(self, estado_limpo, saida, colunas):
+        colunas(60)
+        ui.configure(color=False, unicode=False)
+        ui.summary_downloads("DO ÁLBUM", "Disco", 12, 12)
+        texto = "\n".join(saida)
+        assert "12/12" in texto and "Disco" in texto
+        assert "Puladas" not in texto and "Falhas" not in texto
+
+    def test_downloads_mostra_puladas_e_falhas(self, estado_limpo, saida, colunas):
+        colunas(60)
+        ui.configure(color=False, unicode=False)
+        ui.summary_downloads("DA PLAYLIST", "Mix", 8, 12, skipped=3, failed=1)
+        texto = "\n".join(saida)
+        assert "8/12" in texto and "Puladas" in texto and "Falhas" in texto
+
+    def test_nome_longo_quebra_dentro_da_caixa_sem_cortar(
+        self, estado_limpo, saida, colunas
+    ):
+        colunas(44)
+        ui.configure(color=False, unicode=True)
+        nome = "Uma playlist com um nome realmente muito comprido de propósito"
+        ui.summary_downloads("DA PLAYLIST", nome, 3, 4, skipped=1)
+        linhas = _linhas_da_caixa(saida)
+        assert len({ui._cell_width(ln) for ln in linhas}) == 1
+        corpo = " ".join(ln.strip("│").strip() for ln in linhas[1:3])
+        assert "…" not in corpo and "..." not in "\n".join(saida)
+        assert nome.split()[0] in linhas[1] and nome.split()[-1] in "\n".join(linhas[1:4])
+
+    def test_cores_fixas_por_significado(self, estado_limpo, saida, colunas):
+        colunas(60)
+        ui.configure(color=True, unicode=True)
+        ui.summary(
+            "R", [("a", "1", "ok"), ("b", "2", "warn"), ("c", "3", "err")]
+        )
+        texto = "\n".join(saida)
+        assert ui.SUCCESS in texto and ui.WARNING in texto and ui.ERROR in texto
+
+
+class TestTree:
+    def test_ramos_unicode(self, estado_limpo):
+        ui.configure(unicode=True)
+        assert ui.tree_last() == "\u2514\u2500"
+        assert ui.tree_mid() == "\u251c\u2500"
+
+    def test_ramos_ascii(self, estado_limpo):
+        ui.configure(unicode=False)
+        assert ui.tree_last() == "`-"
+        assert ui.tree_mid() == "|-"
+
+
+class TestStatsTextETail:
+    def test_tamanho_e_tempo(self, estado_limpo):
+        ui.configure(unicode=True)
+        assert ui.stats_text(int(78.3 * 1024 * 1024), 6.24) == "78.3 MB \u00b7 6.2 s"
+
+    def test_ascii_usa_virgula(self, estado_limpo):
+        ui.configure(unicode=False)
+        assert ui.stats_text(5 * 1024 * 1024, 1.0) == "5.0 MB, 1.0 s"
+
+    def test_gigabytes(self, estado_limpo):
+        ui.configure(unicode=True)
+        assert ui.stats_text(2 * 1024**3, 90) == "2.00 GB \u00b7 90.0 s"
+
+    def test_sem_dados_nao_gera_texto(self, estado_limpo):
+        assert ui.stats_text(0, None) == ""
+
+    def test_so_tempo_quando_tamanho_desconhecido(self, estado_limpo):
+        ui.configure(unicode=True)
+        assert ui.stats_text(0, 2.5) == "2.5 s"
+
+    def test_tail_separa_com_respiro(self, estado_limpo, saida, colunas):
+        colunas(100)
+        ui.configure(color=False)
+        ui.ok(ui.tail("Concluído: [01] Tempo", "20.8 MB"))
+        assert saida == ["[+] Concluído: [01] Tempo   20.8 MB"]
+
+    def test_tail_vazio_devolve_a_mensagem(self, estado_limpo):
+        assert ui.tail("Concluído: [01] Tempo", "") == "Concluído: [01] Tempo"
+
+    def test_dim_usa_cinza_fixo_e_nao_o_esmaecido(
+        self, estado_limpo, monkeypatch
+    ):
+        ui.configure(color=True)
+        monkeypatch.setattr(ui, "GRAY", "<GRAY>")
+        monkeypatch.setattr(ui, "MUTED", "<DIM>")
+        monkeypatch.setattr(ui, "RESET", "<R>")
+        assert ui.dim("20.8 MB") == "<GRAY>20.8 MB<R>"
+
+    def test_dim_sem_cor_devolve_o_texto(self, estado_limpo):
+        ui.configure(color=False)
+        assert ui.dim("20.8 MB") == "20.8 MB"
+
+
+class TestTaggedEspacamento:
+    def test_preserva_espacos_quando_cabe(self, estado_limpo, saida, colunas):
+        colunas(100)
+        ui.configure(color=False, unicode=False)
+        ui.ok(ui.tail(f" {ui.tree_last()} Concluído: [01] Tempo", "20.8 MB · 5.9 s"))
+        assert saida == ["[+] `- Concluído: [01] Tempo   20.8 MB · 5.9 s"]
+
+    def test_metricas_descem_inteiras_quando_nao_cabem(
+        self, estado_limpo, saida, colunas
+    ):
+        colunas(44)
+        ui.configure(color=False, unicode=False)
+        ui.ok(ui.tail(" `- Concluído: [04] Como Yo :(", "27.1 MB, 7.4 s"))
+        assert saida == [
+            "[+] `- Concluído: [04] Como Yo :(",
+            "    27.1 MB, 7.4 s",
+        ]
+
+    def test_metricas_ficam_na_ultima_linha_do_nome_quando_cabem(
+        self, estado_limpo, saida, colunas
+    ):
+        colunas(40)
+        ui.configure(color=False)
+        ui.ok(ui.tail("Concluído: [09] Dónde Están Que No Los Veo", "43.1 MB"))
+        assert saida[-1].endswith("Los Veo   43.1 MB")
+        assert all(ui._cell_width(ln) <= 40 for ln in saida)
+        assert "\x1f" not in "".join(saida)
+
+    def test_ainda_quebra_quando_nao_cabe(self, estado_limpo, saida, colunas):
+        colunas(40)
+        ui.configure(color=False)
+        ui.ok("palavra " * 12)
+        assert len(saida) > 1
+        assert all(ui._cell_width(ln) <= 40 for ln in saida)
+
+    def test_cor_da_linha_volta_depois_do_trecho_apagado(
+        self, estado_limpo, saida, colunas, monkeypatch
+    ):
+        colunas(100)
+        ui.configure(color=True)
+        monkeypatch.setattr(ui, "RESET", "<R>")
+        monkeypatch.setattr(ui, "SUCCESS", "<G>")
+        monkeypatch.setattr(ui, "GRAY", "<D>")
+        ui.ok(ui.tail("Concluído: [01] Tempo", "20.8 MB"))
+        assert saida == ["<G>[+] Concluído: [01] Tempo   <D>20.8 MB<R><G><R>"]
+
+
+class TestLarguraDaCaixa:
+    def test_tela_larga_usa_o_teto_compacto(self, estado_limpo, colunas):
+        colunas(145)
+        assert ui.box_width() == 48
+
+    def test_celular_usa_a_linha_inteira_menos_um(self, estado_limpo, colunas):
+        colunas(44)
+        assert ui.box_width() == 43
+
+    def test_teto_pode_ser_trocado_por_variavel(
+        self, estado_limpo, monkeypatch, colunas
+    ):
+        colunas(145)
+        monkeypatch.setenv("QOBUZ_DL_BOX_WIDTH", "60")
+        assert ui.box_width() == 60
+
+    def test_variavel_invalida_e_ignorada(self, estado_limpo, monkeypatch, colunas):
+        colunas(145)
+        monkeypatch.setenv("QOBUZ_DL_BOX_WIDTH", "abc")
+        assert ui.box_width() == 48
+
+    def test_nunca_passa_da_largura_do_terminal(
+        self, estado_limpo, monkeypatch, colunas
+    ):
+        colunas(50)
+        monkeypatch.setenv("QOBUZ_DL_BOX_WIDTH", "200")
+        assert ui.box_width() == 49
+
+
+class TestTaggedLinesEJoinMeta:
+    def test_devolve_as_linhas_sem_escrever(self, estado_limpo, saida, colunas):
+        colunas(100)
+        ui.configure(color=False, unicode=True)
+        linhas = ui.tagged_lines("ok", ui.tail("Capa salva", "cover.jpg"))
+        assert linhas == ["[+] Capa salva   cover.jpg"]
+        assert saida == []  # nada foi escrito
+
+    @pytest.mark.parametrize(
+        "kind,tag",
+        [("step", "[*]"), ("ok", "[+]"), ("skip", "[-]"), ("warn", "[!]"), ("error", "[!]")],
+    )
+    def test_cada_tipo_tem_a_sua_tag(self, estado_limpo, colunas, kind, tag):
+        colunas(100)
+        ui.configure(color=False)
+        assert ui.tagged_lines(kind, "x")[0].startswith(tag + " ")
+
+    def test_join_meta_ignora_vazios(self, estado_limpo):
+        ui.configure(unicode=True)
+        assert ui.join_meta("a", "", None, "b") == "a \u00b7 b"
+        ui.configure(unicode=False)
+        assert ui.join_meta("a", "b") == "a, b"
+
+    def test_metricas_longas_quebram_e_cada_linha_fica_cinza(
+        self, estado_limpo, colunas, monkeypatch
+    ):
+        colunas(44)
+        ui.configure(color=True)
+        monkeypatch.setattr(ui, "GRAY", "<D>")
+        monkeypatch.setattr(ui, "RESET", "<R>")
+        monkeypatch.setattr(ui, "SUCCESS", "<G>")
+        linhas = ui.tagged_lines(
+            "ok", ui.tail("Letras prontas: [04] Une seule vie", "BILINGUAL · sincronizadas · só no metadata · via Qobuz")
+        )
+        assert len(linhas) >= 3
+        for linha in linhas[1:]:
+            assert "<D>" in linha  # nenhuma linha de métrica perde o cinza
+
+
+class TestSeparator:
+    def test_escreve_uma_linha_em_branco_depois_de_uma_mensagem(
+        self, estado_limpo, saida, colunas
+    ):
+        colunas(100)
+        ui.configure(color=False)
+        ui.ok("Capa salva")
+        ui.separator()
+        assert saida == ["[+] Capa salva", ""]
+
+    def test_nao_empilha_duas_linhas_em_branco(self, estado_limpo, saida, colunas):
+        colunas(100)
+        ui.configure(color=False)
+        ui.ok("Capa salva")
+        ui.separator()
+        ui.separator()
+        assert saida == ["[+] Capa salva", ""]
+
+    def test_nao_escreve_depois_da_caixa_que_ja_termina_em_branco(
+        self, estado_limpo, saida, colunas
+    ):
+        colunas(60)
+        ui.configure(color=False, unicode=False)
+        ui.header("ÁLBUM", [("Álbum", "Disco")])
+        antes = len(saida)
+        ui.separator()
+        assert len(saida) == antes  # o cabeçalho já deixou a linha em branco
+
+    def test_escreve_de_novo_depois_de_nova_mensagem(
+        self, estado_limpo, saida, colunas
+    ):
+        colunas(100)
+        ui.configure(color=False)
+        ui.ok("a")
+        ui.separator()
+        ui.ok("b")
+        ui.separator()
+        assert saida == ["[+] a", "", "[+] b", ""]
+
+    def test_quiet_nao_escreve(self, estado_limpo, saida):
+        ui.configure(color=False, quiet=True)
+        ui.separator()
+        assert saida == []

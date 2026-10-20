@@ -3,7 +3,6 @@
 import os
 import sqlite3
 
-
 from qobuz_dl import playlist_links as pl
 
 SCHEMA = """CREATE TABLE downloads (

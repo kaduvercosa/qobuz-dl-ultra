@@ -37,6 +37,7 @@ from qobuz_dl.color import (
     ACCENT_DARK,
     BG,
     ERROR,
+    GRAY,
     HIGHLIGHT,
     MUTED,
     RESET,
@@ -290,6 +291,27 @@ def emit(text="", end="\n"):
     with print_lock:
         _clear_pending_locked()
         _write_locked(text, end)
+        _registrar_saida(text, end)
+
+
+# True quando a última escrita por emit()/emit_always() terminou numa linha em
+# branco. Serve só a `separator()`, para não empilhar duas linhas em branco.
+_ultima_linha_vazia = False
+
+
+def _registrar_saida(text, end):
+    global _ultima_linha_vazia
+    _ultima_linha_vazia = end == "\n" and (str(text) == "" or str(text).endswith("\n"))
+
+
+def separator():
+    # Linha em branco entre seções (ex.: preparação -> faixas). Não empilha:
+    # se a última saída já terminou em linha em branco (como a caixa do
+    # cabeçalho), não escreve outra. Sem lock aqui: emit() já o pega e o
+    # print_lock não é reentrante.
+    """Print a blank line between sections, never two in a row."""
+    if not _ultima_linha_vazia:
+        emit("")
 
 
 def _write_locked(text, end):
@@ -323,6 +345,7 @@ def emit_always(text="", end="\n"):
     with print_lock:
         _clear_pending_locked()
         _write_locked(text, end)
+        _registrar_saida(text, end)
 
 
 # --------------------------------------------------------------------------
@@ -348,12 +371,60 @@ def _tagged(color, tag, message):
     # texto seguinte.
     """Wrap text with a color tag and optional icon."""
     limite = max(width() - _LARGURA_TAG, 12)
-    partes = _wrap_lines(message, limite)
+    texto = str(message).strip()
+    cabeca, marca, cauda = texto.partition(_TAIL_MARK)
+    cabeca = cabeca.strip()
+    if marca:
+        # Mensagem com métricas (`tail`): tenta tudo numa linha só, mantendo
+        # o respiro; se não couber, quebra só o nome e as métricas descem
+        # (em cinza, linha a linha) sem serem partidas ao meio nem coladas.
+        cauda = cauda.strip()
+        if _cell_width(cabeca) + len(_TAIL_GAP) + _cell_width(cauda) <= limite:
+            partes = [f"{cabeca}{_TAIL_GAP}{dim(cauda)}"]
+        else:
+            partes = _wrap_lines(cabeca, limite)
+            if (
+                _cell_width(partes[-1]) + len(_TAIL_GAP) + _cell_width(cauda)
+                <= limite
+            ):
+                partes[-1] = f"{partes[-1]}{_TAIL_GAP}{dim(cauda)}"
+            else:
+                partes.extend(dim(p) for p in _wrap_lines(cauda, limite))
+    elif "\n" not in texto and _cell_width(texto) <= limite:
+        # Cabe numa linha só: mantém o espaçamento do texto (a quebra por
+        # palavras junta espaços repetidos).
+        partes = [texto]
+    else:
+        partes = _wrap_lines(message, limite)
     pad = " " * _LARGURA_TAG
+    reset = c(RESET)
+    cor = c(color)
+    if reset and cor:
+        # Um trecho apagado (`dim`) termina em RESET; reaplica a cor da
+        # linha depois dele para o resto do texto não perder a cor.
+        partes = [p.replace(reset, reset + cor) for p in partes]
 
-    linhas = [f"{c(color)}[{tag}] {partes[0]}{c(RESET)}"]
-    linhas += [f"{c(color)}{pad}{parte}{c(RESET)}" for parte in partes[1:]]
+    linhas = [f"{cor}[{tag}] {partes[0]}{reset}"]
+    linhas += [f"{cor}{pad}{parte}{reset}" for parte in partes[1:]]
     return linhas
+
+
+_KINDS = {
+    "step": (HIGHLIGHT, "*"),
+    "ok": (SUCCESS, "+"),
+    "skip": (MUTED, "-"),
+    "warn": (WARNING, "!"),
+    "error": (ERROR, "!"),
+}
+
+
+def tagged_lines(kind, message):
+    # Devolve as linhas já formatadas (tag colorida, quebra, métricas em cinza)
+    # SEM escrevê-las. Para código que roda dentro do `print_lock` (que não é
+    # reentrante) e por isso não pode chamar ok()/step()/... sem travar.
+    """Return formatted lines for kind in step/ok/skip/warn/error (no output)."""
+    color, tag = _KINDS[kind]
+    return _tagged(color, tag, message)
 
 
 def _emit_tagged(color, tag, message, sempre=False):
@@ -413,7 +484,7 @@ def detail(message, indent=4):
     """Print a detail message with indentation (dim arrow)."""
     message = str(message)
     pad = " " * indent
-    if len(message) + indent <= width():
+    if _cell_width(message) + indent <= width():
         emit(f"{c(RESET)}{pad}{message}")
         return
     for line in _wrap_lines(message, width() - indent):
@@ -491,33 +562,229 @@ def kv(label, value, label_width=30, narrow_stack=False):
         wrapped(value, indent=4)
 
 
-def header(kind, rows):
-    # Cabeçalho de operação (álbum, faixa, playlist, lote de urls): uma
-    # barra grossa, o tipo entre colchetes, e uma lista de pares
-    # rótulo/valor alinhados. A largura da barra acompanha o conteúdo real
-    # (piso 20, teto = largura utilizável), então em telas estreitas ela
-    # não vaza para a linha seguinte.
-    """Print a header box with title and key-value pairs."""
-    rows = list(rows)
-    label_width = max((len(label) for label, _ in rows), default=8)
+# --------------------------------------------------------------------------
+# Caixas (cabeçalhos e resumos) -- UM só desenhista para o programa inteiro
+# --------------------------------------------------------------------------
+# Estilo escolhido por `QOBUZ_DL_BOX` (round, square, double, heavy, ascii).
+# Sem Unicode no terminal, o estilo cai sozinho para ASCII ("+--+" / "|").
+# Dica a-Shell: a fonte da janela (`config`) decide quais cantos aparecem
+# bem; se algum glifo sair torto, ponha `export QOBUZ_DL_BOX=ascii` (ou
+# `square`) no `.profile`, que o a-Shell executa a cada janela nova.
+BOX_MAX = 48  # teto: em tela larga (iPad/PC) a caixa fica compacta
+BOX_MIN = 31  # piso: abaixo disso nem o rótulo + valor cabem (MIN_WIDTH - 1)
+# Largura da caixa = min(teto, largura do terminal - 1). A coluna a menos
+# evita que uma linha cheia quebre para a linha de baixo em terminais que
+# avançam o cursor ao escrever na última coluna (caso do celular, onde a
+# caixa ocupa a linha toda). `QOBUZ_DL_BOX_WIDTH` troca o teto (ex.: 60).
 
-    header_line = f" [{kind}]"
-    row_lines = [f" {label.upper():<{label_width}}  {value}" for label, value in rows]
-    content_width = max([len(header_line)] + [len(r) for r in row_lines], default=20)
-    bar_width = max(20, min(content_width, width()))
-    bar = heavy_bar_char() * bar_width
+# (canto sup. esq., sup. dir., inf. esq., inf. dir., horizontal, vertical,
+#  junção esq., junção dir.)
+_BOX_STYLES = {
+    "round": ("\u256d", "\u256e", "\u2570", "\u256f", "\u2500", "\u2502", "\u251c", "\u2524"),
+    "square": ("\u250c", "\u2510", "\u2514", "\u2518", "\u2500", "\u2502", "\u251c", "\u2524"),
+    "double": ("\u2554", "\u2557", "\u255a", "\u255d", "\u2550", "\u2551", "\u2560", "\u2563"),
+    "heavy": ("\u250f", "\u2513", "\u2517", "\u251b", "\u2501", "\u2503", "\u2523", "\u252b"),
+    "ascii": ("+", "+", "+", "+", "-", "|", "+", "+"),
+}
 
-    lines = [
-        f"\n{c(HIGHLIGHT)}{bar}{c(RESET)}",
-        f"{c(BG)} [{kind}]{c(RESET)}",
-        "",
-    ]
-    for label, value in rows:
-        lines.append(
-            f" {c(HIGHLIGHT)}{label.upper():<{label_width}}{c(RESET)}  {value}"
+# Item de `linhas` que vira uma divisória horizontal dentro da caixa.
+BOX_RULE = None
+
+
+def box_style_name():
+    """Nome do estilo de caixa em uso (respeita Unicode e QOBUZ_DL_BOX)."""
+    if not unicode_enabled():
+        return "ascii"
+    name = os.environ.get("QOBUZ_DL_BOX", "").strip().lower()
+    return name if name in _BOX_STYLES else "round"
+
+
+def box_width(cols=None):
+    """Largura total da caixa: teto compacto, nunca a linha inteira do terminal."""
+    if cols is not None:
+        n = int(cols)
+    else:
+        env = os.environ.get("QOBUZ_DL_BOX_WIDTH", "").strip()
+        n = int(env) if env.isdigit() else BOX_MAX
+    return max(BOX_MIN, min(n, width() - 1))
+
+
+def box(title, lines, cols=None, color=HIGHLIGHT):
+    """Monta uma caixa fechada e devolve a lista de linhas prontas.
+
+    ``title`` vai embutido na borda de cima. ``lines`` aceita texto com ANSI
+    (a medida ignora as sequências) e ``BOX_RULE`` para uma divisória. Cada
+    linha é preenchida por CÉLULAS de terminal, então emoji e CJK não
+    empurram a borda direita para fora.
+    """
+    tl, tr, bl, br, h, v, ml, mr = _BOX_STYLES[box_style_name()]
+    total = box_width(cols)
+    inner = total - 4  # "│ " + conteúdo + " │"
+    edge = c(color)
+    rst = c(RESET)
+
+    if title:
+        title_txt = f" {truncate(title, max(1, total - 6))} "
+        fill = max(0, total - 3 - _cell_width(title_txt))
+        top = (
+            f"{edge}{tl}{h}{rst}{edge}{c(BG)}{title_txt}{rst}"
+            f"{edge}{h * fill}{tr}{rst}"
         )
-    lines.append(f"{c(HIGHLIGHT)}{bar}{c(RESET)}\n")
-    emit("\n".join(lines))
+    else:
+        top = f"{edge}{tl}{h * (total - 2)}{tr}{rst}"
+
+    out = [top]
+    for line in lines:
+        if line is BOX_RULE:
+            out.append(f"{edge}{ml}{h * (total - 2)}{mr}{rst}")
+            continue
+        text = str(line)
+        pad = " " * max(0, inner - _cell_width(text))
+        out.append(f"{edge}{v}{rst} {text}{rst}{pad} {edge}{v}{rst}")
+    out.append(f"{edge}{bl}{h * (total - 2)}{br}{rst}")
+    return out
+
+
+def emit_box(title, lines, cols=None, color=HIGHLIGHT, always=False):
+    """Imprime a caixa numa única escrita (as linhas nunca se intercalam)."""
+    escrever = emit_always if always else emit
+    escrever("\n" + "\n".join(box(title, lines, cols=cols, color=color)) + "\n")
+
+
+def header(kind, rows):
+    # Cabeçalho de operação (álbum, faixa, playlist, lote de urls): caixa
+    # fechada com o tipo embutido na borda de cima e os pares rótulo/valor
+    # alinhados dentro. Valores longos quebram com recuo (nunca cortam) e a
+    # medida é por células de terminal, então títulos em japonês/coreano ou
+    # com emoji não desalinham a borda.
+    """Print a closed header box with the kind in the top border."""
+    rows = list(rows)
+    inner = box_width() - 4
+    label_width = max((_cell_width(str(label)) for label, _ in rows), default=0)
+    # Rótulos enormes não podem roubar a coluna de valor inteira.
+    label_width = min(label_width, max(4, inner // 2))
+    value_room = max(12, inner - label_width - 2)
+
+    lines = []
+    for label, value in rows:
+        parts = _wrap_lines(value, value_room)
+        tag = pad_cells(truncate(str(label).upper(), label_width), label_width)
+        lines.append(f"{c(HIGHLIGHT)}{tag}{c(RESET)}  {parts[0]}")
+        lines.extend(" " * (label_width + 2) + part for part in parts[1:])
+    emit_box(str(kind), lines)
+
+
+# Tons dos resumos: (glifo bonito, glifo ASCII, cor). Mesmo significado de cor
+# em todo o programa: verde = ok, amarelo = pulou, vermelho = falhou.
+_TONES = {
+    "ok": ("\u2714", "+", SUCCESS),
+    "warn": ("\u21b7", "-", WARNING),
+    "err": ("\u2716", "!", ERROR),
+    "info": ("\u2022", "*", HIGHLIGHT),
+}
+
+
+def summary(title, rows, notes=(), cols=None, subtitle=""):
+    # Painel de resumo (fim de álbum/faixa/playlist/lote). `rows` são tuplas
+    # (rótulo, valor, tom) com tom em ok/warn/err/info; o valor sai alinhado
+    # à direita. `notes` são observações em cinza abaixo de uma divisória.
+    """Print a closed summary box with status glyphs and right-aligned values."""
+    inner = box_width(cols) - 4
+    rst = c(RESET)
+    lines = []
+    if subtitle:  # nome do álbum/playlist: quebra em vez de cortar o título
+        lines.extend(f"{c(BG)}{part}{rst}" for part in _wrap_lines(subtitle, inner))
+        lines.append(BOX_RULE)
+    for label, value, tone in rows:
+        fancy, plain, color = _TONES.get(tone, _TONES["info"])
+        glyph = _glyph(fancy, plain)
+        left = f"{c(color)}{glyph}{rst} {label}"
+        right = f"{c(color)}{value}{rst}"
+        gap = inner - _cell_width(left) - _cell_width(right)
+        if gap >= 2:
+            lines.append(left + " " * gap + right)
+        else:  # não cabe lado a lado: valor desce, recuado
+            lines.append(left)
+            lines.append("  " + right)
+    notes = [n for n in notes if n]
+    if notes:
+        lines.append(BOX_RULE)
+        for note in notes:
+            for part in _wrap_lines(note, inner):
+                lines.append(f"{c(GRAY)}{part}{rst}")
+    emit_box(title, lines, cols=cols)
+
+
+def summary_downloads(kind, name, success, total, skipped=0, failed=0, notes=()):
+    """Resumo padrão de downloads (álbum, playlist, lote, playlist importada).
+
+    Linhas sem ocorrência (0 puladas, 0 falhas) não aparecem, como antes.
+    """
+    ok_tone = "ok" if success else ("err" if failed else "info")
+    rows = [("Baixadas", f"{success}/{total}", ok_tone)]
+    if skipped:
+        rows.append(("Puladas (já baixadas/demo)", str(skipped), "warn"))
+    if failed:
+        rows.append(("Falhas", str(failed), "err"))
+    summary(f"RESUMO {kind}", rows, notes=notes, subtitle=name)
+
+
+# --------------------------------------------------------------------------
+# Árvore de progresso (glifos com fallback ASCII)
+# --------------------------------------------------------------------------
+def tree_last():
+    """Ramo final da árvore (``└─``); no fallback ASCII, crase + hífen."""
+    return _glyph("\u2514\u2500", "`-")
+
+
+def dim(text):
+    """Texto em cinza dentro de uma mensagem; sem cor, devolve o texto.
+
+    Usa ``GRAY`` (cinza fixo) e não ``MUTED``: o esmaecido (SGR 2) só reduz a
+    intensidade da cor atual, então sobre uma linha verde ou roxa sai um
+    verde/roxo desbotado em vez de cinza (visto no a-Shell).
+    """
+    return f"{c(GRAY)}{text}{c(RESET)}"
+
+
+_TAIL_GAP = "   "  # respiro entre o nome da faixa e as métricas
+_TAIL_MARK = "\x1f"  # separa o nome das métricas até `_tagged` montar a linha
+
+
+def tail(message, text):
+    """Anexa ``text`` ao fim de ``message``; ``_tagged`` põe o respiro e o cinza.
+
+    Só para mensagens de ``ok``/``step``/``warn``/``skip``/``error`` (passam por
+    ``_tagged``, que monta a linha e quebra sem partir as métricas).
+    """
+    if not text:
+        return message
+    return f"{message}{_TAIL_MARK}{text}"
+
+
+def join_meta(*parts):
+    """Junta métricas com ``·`` (ou vírgula sem Unicode), ignorando as vazias."""
+    return _glyph(" \u00b7 ", ", ").join(str(p) for p in parts if p)
+
+
+def stats_text(size_bytes, seconds):
+    """Métricas de uma conclusão (``78.3 MB · 6.2 s``); vazio sem dados.
+
+    Só tamanho e tempo (sem velocidade): num download retomado a velocidade
+    calculada com o tamanho total sairia irreal.
+    """
+    parts = []
+    if size_bytes and size_bytes > 0:
+        mb = size_bytes / (1024 * 1024)
+        parts.append(f"{mb / 1024:.2f} GB" if mb >= 1024 else f"{mb:.1f} MB")
+    if seconds is not None and seconds >= 0:
+        parts.append(f"{seconds:.1f} s")
+    return join_meta(*parts)
+
+
+def tree_mid():
+    """Ramo intermediário da árvore (``├─``); ASCII: ``|-``."""
+    return _glyph("\u251c\u2500", "|-")
 
 
 def bar_gauge(value, peak, max_blocks=None):
