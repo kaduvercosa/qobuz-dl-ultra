@@ -25,6 +25,7 @@
 #   ui.configure(quiet=args.quiet, verbose=args.verbose, color=not args.no_color)
 #   ui.install_logging()
 
+import contextvars
 import logging
 import os
 import re
@@ -348,6 +349,65 @@ def emit_always(text="", end="\n"):
         _registrar_saida(text, end)
 
 
+_track_index = contextvars.ContextVar("ui_track_index", default="")
+_INDEX_AFTER_LABEL = re.compile(r"(: )\[\d+(?:[./]\d+)?\]\s+")
+
+
+def format_index(track, total=None, disc=None, disc_total=1, playlist=False):
+    """01/18 (disco único) | 02.05 (vários CDs: disco.faixa) | 05 (playlist)."""
+    try:
+        t = int(track)
+    except (TypeError, ValueError):
+        return ""
+    try:
+        multi = int(disc_total or 1) > 1 and disc is not None
+    except (TypeError, ValueError):
+        multi = False
+    if multi:
+        return f"{int(disc):02d}.{t:02d}"
+    if playlist or not total:
+        return f"{t:02d}"
+    try:
+        return f"{t:02d}/{int(total):02d}"
+    except (TypeError, ValueError):
+        return f"{t:02d}"
+
+
+def index_from_meta(track_meta, album_meta=None, display_index=None):
+    track_meta = track_meta or {}
+    album_meta = album_meta or {}
+    nested = track_meta.get("album") or {}
+    total = album_meta.get("tracks_count") or nested.get("tracks_count")
+    discs = album_meta.get("media_count") or nested.get("media_count") or 1
+    if display_index:
+        return format_index(display_index, playlist=True)
+    return format_index(
+        track_meta.get("track_number"), total, track_meta.get("media_number"), discs
+    )
+
+
+def set_track_index(value):
+    return _track_index.set(value or "")
+
+
+def reset_track_index(token):
+    try:
+        _track_index.reset(token)
+    except ValueError:
+        pass
+
+
+def run_in_executor(loop, executor, fn, *args):
+    """run_in_executor que PRESERVA o contexto (o do asyncio puro não preserva)."""
+    ctx = contextvars.copy_context()
+    return loop.run_in_executor(executor, ctx.run, fn, *args)
+
+
+def faint(text):
+    """Cinza apagado (métricas), mais escuro que o dim()."""
+    return f"{c(GRAY)}{text}{c(RESET)}"
+
+
 # --------------------------------------------------------------------------
 # Mensagens semânticas (linhas com tag colorida: [+], [!], [*], [-])
 # --------------------------------------------------------------------------
@@ -356,56 +416,94 @@ def emit_always(text="", end="\n"):
 _LARGURA_TAG = 4
 
 
+# Presentation state is task-local; the same dict is shared with its lyric worker.
+_track_view = contextvars.ContextVar("ui_track_view", default=None)
+
+
+def begin_track_view(parallel=False):
+    return _track_view.set(
+        {"parallel": bool(parallel), "audio": "", "lyrics": [], "existing": False}
+    )
+
+
+def end_track_view(token):
+    _track_view.reset(token)
+
+
+def finish_track_view(title, success):
+    state = _track_view.get()
+    if not state or not success or state["existing"]:
+        return
+    details = join_meta(state["audio"], *state["lyrics"]) if state["parallel"] else ""
+    label = "Concluído:" if state["parallel"] else f"{tree_last()} Concluído:"
+    _emit_kind("done", tail(f"{label} {title}", details))
+
+
 def _tagged(color, tag, message):
-    # Monta uma mensagem com tag colorida, já quebrada na largura do
-    # terminal, e devolve a lista de linhas prontas para emit().
-    # A quebra é necessária porque mensagens longas (ex.: avisos com
-    # instruções de instalação) estourariam a largura do terminal sem isso.
-    # A linha inteira (tag + texto) fica na cor semantica, nao so' a tag --
-    # antes so' o "[!]"/"[+]" saia colorido e o resto ficava na cor padrao
-    # do terminal, o que era uma regressao visual em relacao aos prints
-    # antigos (ex.: `f"{YELLOW}[!] mensagem inteira{OFF}"`) que a migracao
-    # pra ui.warn()/ui.error()/etc. tinha introduzido sem querer.
-    # RESET é emitido em CADA linha de propósito, já que emit() escreve uma
-    # linha por chamada e sem fechar a cor em cada uma ela vazaria para o
-    # texto seguinte.
-    """Wrap text with a color tag and optional icon."""
-    limite = max(width() - _LARGURA_TAG, 12)
+    idx = _track_index.get()
+    marca = f"[{idx}]" if idx else f"[{tag}]"
+    largura_marca = _cell_width(marca) + 1
+    limite = max(width() - largura_marca, 12)
     texto = str(message).strip()
-    cabeca, marca, cauda = texto.partition(_TAIL_MARK)
+    # RESULT_TREE_AND_GRAY_INDEX
+    # Results are children of the operation that produced them.
+    ramo = tree_last()
+    label = texto.partition(_TAIL_MARK)[0]
+    result_labels = (
+        "Concluído:",
+        "Concluída:",
+        "Áudio transferido",
+        "Letras prontas:",
+        "Nenhuma letra encontrada:",
+        "Falha ao gravar letras",
+        "Erro na pesquisa de letras",
+        "Letras:",
+    )
+    if label.startswith(result_labels):
+        texto = f"{ramo} {texto}"
+    # Keep both lyric stages and their notes in the same neutral gray.
+    plain_label = label
+    for branch in (tree_last(), tree_mid()):
+        if plain_label.startswith(branch):
+            plain_label = plain_label[len(branch) :].lstrip()
+    if plain_label.startswith(
+        (
+            "Procurando letras:",
+            "Letras prontas:",
+            "Letras:",
+            "Nenhuma letra encontrada:",
+        )
+    ):
+        color = GRAY
+    if idx:
+        texto = _INDEX_AFTER_LABEL.sub(r"\1", texto, count=1)
+    cabeca, sep, cauda = texto.partition(_TAIL_MARK)
     cabeca = cabeca.strip()
-    if marca:
-        # Mensagem com métricas (`tail`): tenta tudo numa linha só, mantendo
-        # o respiro; se não couber, quebra só o nome e as métricas descem
-        # (em cinza, linha a linha) sem serem partidas ao meio nem coladas.
+    if sep:
         cauda = cauda.strip()
         if _cell_width(cabeca) + len(_TAIL_GAP) + _cell_width(cauda) <= limite:
-            partes = [f"{cabeca}{_TAIL_GAP}{dim(cauda)}"]
+            partes = [f"{cabeca}{_TAIL_GAP}{faint(cauda)}"]
         else:
             partes = _wrap_lines(cabeca, limite)
-            if (
-                _cell_width(partes[-1]) + len(_TAIL_GAP) + _cell_width(cauda)
-                <= limite
-            ):
-                partes[-1] = f"{partes[-1]}{_TAIL_GAP}{dim(cauda)}"
+            if _cell_width(partes[-1]) + len(_TAIL_GAP) + _cell_width(cauda) <= limite:
+                partes[-1] = f"{partes[-1]}{_TAIL_GAP}{faint(cauda)}"
             else:
-                partes.extend(dim(p) for p in _wrap_lines(cauda, limite))
+                partes.extend(faint(p) for p in _wrap_lines(cauda, limite))
     elif "\n" not in texto and _cell_width(texto) <= limite:
-        # Cabe numa linha só: mantém o espaçamento do texto (a quebra por
-        # palavras junta espaços repetidos).
         partes = [texto]
     else:
-        partes = _wrap_lines(message, limite)
-    pad = " " * _LARGURA_TAG
+        partes = _wrap_lines(texto, limite)
+    pad = " " * largura_marca
     reset = c(RESET)
     cor = c(color)
     if reset and cor:
-        # Um trecho apagado (`dim`) termina em RESET; reaplica a cor da
-        # linha depois dele para o resto do texto não perder a cor.
         partes = [p.replace(reset, reset + cor) for p in partes]
-
-    linhas = [f"{cor}[{tag}] {partes[0]}{reset}"]
-    linhas += [f"{cor}{pad}{parte}{reset}" for parte in partes[1:]]
+    if idx:
+        primeira = f"{c(GRAY)}{marca}{reset} {cor}{partes[0]}{reset}"
+    else:
+        primeira = f"{cor}{marca} {partes[0]}{reset}"
+    linhas = [primeira]
+    linhas += [f"{pad}{cor}{parte}{reset}" for parte in partes[1:]]
     return linhas
 
 
@@ -415,6 +513,11 @@ _KINDS = {
     "skip": (MUTED, "-"),
     "warn": (WARNING, "!"),
     "error": (ERROR, "!"),
+    "progress": (HIGHLIGHT, "*"),  # Em Progresso
+    "search": (GRAY, "*"),  # Procurando letras
+    "done": (SUCCESS, "+"),  # Concluído
+    "lyrics": (GRAY, "+"),
+    "lyrics_note": (GRAY, "-"),  # └─ Letras prontas
 }
 
 
@@ -423,6 +526,18 @@ def tagged_lines(kind, message):
     # SEM escrevê-las. Para código que roda dentro do `print_lock` (que não é
     # reentrante) e por isso não pode chamar ok()/step()/... sem travar.
     """Return formatted lines for kind in step/ok/skip/warn/error (no output)."""
+    state = _track_view.get()
+    if state and state["parallel"]:
+        if kind == "search":
+            return []
+        if kind in {"lyrics", "lyrics_note"}:
+            head, sep, detail = str(message).partition(_TAIL_MARK)
+            if detail:
+                prefix = "letras: " if kind == "lyrics" else ""
+                state["lyrics"].append(prefix + detail.strip())
+            return []
+    if state and not state["parallel"] and kind in {"lyrics", "lyrics_note"}:
+        message = str(message).replace(tree_last(), tree_mid(), 1)
     color, tag = _KINDS[kind]
     return _tagged(color, tag, message)
 
@@ -440,6 +555,36 @@ def ok(message):
     # Mensagem de sucesso -- prefixo "[+]" verde.
     """Print a success message (green checkmark)."""
     _emit_tagged(SUCCESS, "+", message)
+
+
+def _emit_kind(kind, message):
+    color, tag = _KINDS[kind]
+    _emit_tagged(color, tag, message)
+
+
+def progress(message):
+    if _track_view.get():
+        message = str(message).replace("Em Progresso:", "Baixando:", 1)
+    _emit_kind("progress", message)
+
+
+def search(message):
+    _emit_kind("search", message)
+
+
+def done(message):
+    state = _track_view.get()
+    if state is None:
+        _emit_kind("done", message)
+        return
+    head, sep, detail = str(message).partition(_TAIL_MARK)
+    state["audio"] = detail.strip() if sep else ""
+    if not state["parallel"]:
+        _emit_kind("lyrics", tail(f"{tree_mid()} Áudio transferido", state["audio"]))
+
+
+def lyrics(message):
+    _emit_kind("lyrics", message)
 
 
 def step(message):
@@ -474,7 +619,14 @@ def error(message):
 def skip(message):
     # Item ignorado/pulado -- prefixo "[-]" na cor apagada.
     """Print a skip/omit message (yellow circle icon)."""
-    _emit_tagged(MUTED, "-", message)
+    state = _track_view.get()
+    if state and (
+        "Ja existe" in str(message)
+        or "Já existe" in str(message)
+        or "mesma faixa repetida" in str(message)
+    ):
+        state["existing"] = True
+    _emit_tagged(GRAY, "-", message)
 
 
 def detail(message, indent=4):
@@ -580,10 +732,46 @@ BOX_MIN = 31  # piso: abaixo disso nem o rótulo + valor cabem (MIN_WIDTH - 1)
 # (canto sup. esq., sup. dir., inf. esq., inf. dir., horizontal, vertical,
 #  junção esq., junção dir.)
 _BOX_STYLES = {
-    "round": ("\u256d", "\u256e", "\u2570", "\u256f", "\u2500", "\u2502", "\u251c", "\u2524"),
-    "square": ("\u250c", "\u2510", "\u2514", "\u2518", "\u2500", "\u2502", "\u251c", "\u2524"),
-    "double": ("\u2554", "\u2557", "\u255a", "\u255d", "\u2550", "\u2551", "\u2560", "\u2563"),
-    "heavy": ("\u250f", "\u2513", "\u2517", "\u251b", "\u2501", "\u2503", "\u2523", "\u252b"),
+    "round": (
+        "\u256d",
+        "\u256e",
+        "\u2570",
+        "\u256f",
+        "\u2500",
+        "\u2502",
+        "\u251c",
+        "\u2524",
+    ),
+    "square": (
+        "\u250c",
+        "\u2510",
+        "\u2514",
+        "\u2518",
+        "\u2500",
+        "\u2502",
+        "\u251c",
+        "\u2524",
+    ),
+    "double": (
+        "\u2554",
+        "\u2557",
+        "\u255a",
+        "\u255d",
+        "\u2550",
+        "\u2551",
+        "\u2560",
+        "\u2563",
+    ),
+    "heavy": (
+        "\u250f",
+        "\u2513",
+        "\u2517",
+        "\u251b",
+        "\u2501",
+        "\u2503",
+        "\u2523",
+        "\u252b",
+    ),
     "ascii": ("+", "+", "+", "+", "-", "|", "+", "+"),
 }
 
@@ -627,8 +815,7 @@ def box(title, lines, cols=None, color=HIGHLIGHT):
         title_txt = f" {truncate(title, max(1, total - 6))} "
         fill = max(0, total - 3 - _cell_width(title_txt))
         top = (
-            f"{edge}{tl}{h}{rst}{edge}{c(BG)}{title_txt}{rst}"
-            f"{edge}{h * fill}{tr}{rst}"
+            f"{edge}{tl}{h}{rst}{edge}{c(BG)}{title_txt}{rst}{edge}{h * fill}{tr}{rst}"
         )
     else:
         top = f"{edge}{tl}{h * (total - 2)}{tr}{rst}"
@@ -723,7 +910,7 @@ def summary_downloads(kind, name, success, total, skipped=0, failed=0, notes=())
     ok_tone = "ok" if success else ("err" if failed else "info")
     rows = [("Baixadas", f"{success}/{total}", ok_tone)]
     if skipped:
-        rows.append(("Puladas (já baixadas/demo)", str(skipped), "warn"))
+        rows.append(("Puladas / indisponíveis", str(skipped), "warn"))
     if failed:
         rows.append(("Falhas", str(failed), "err"))
     summary(f"RESUMO {kind}", rows, notes=notes, subtitle=name)
@@ -986,6 +1173,9 @@ def install_logging(level=None):
 
 # Define explicitamente o que é exportado por `from qobuz_dl.ui import *`.
 __all__ = [
+    "begin_track_view",
+    "end_track_view",
+    "finish_track_view",
     "ACCENT_DARK",
     "LAYOUT_MEDIUM",
     "LAYOUT_NARROW",
@@ -1029,4 +1219,15 @@ __all__ = [
     "warn",
     "width",
     "wrapped",
+    "progress",
+    "search",
+    "done",
+    "lyrics",
+    "faint",
+    "format_index",
+    "index_from_meta",
+    "set_track_index",
+    "reset_track_index",
+    "run_in_executor",
+    "tagged_lines",
 ]

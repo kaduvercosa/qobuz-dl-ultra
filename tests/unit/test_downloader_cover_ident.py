@@ -24,7 +24,9 @@ def saida(monkeypatch):
     monkeypatch.setattr(ui.os, "get_terminal_size", _sem_terminal)
     monkeypatch.setenv("COLUMNS", "100")
     ui.configure(color=False, unicode=True)
-    monkeypatch.setattr(ui, "_write_locked", lambda texto, end: linhas.append(str(texto)))
+    monkeypatch.setattr(
+        ui, "_write_locked", lambda texto, end: linhas.append(str(texto))
+    )
     return linhas
 
 

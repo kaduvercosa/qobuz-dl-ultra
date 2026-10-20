@@ -95,15 +95,9 @@ async def test_failed_direct_download_without_segment_template(monkeypatch, tmp_
 
     obj.client.get_track_url = fresh_url
     monkeypatch.setattr(downloader, "tqdm_download", direct)
-    monkeypatch.setattr(
-        downloader,
-        "ui",
-        SimpleNamespace(
-            warn=lambda *a: None,
-            error=lambda *a: None,
-            skip=lambda *a: None,
-        ),
-    )
+    # Preserve the real UI context API; mute only the messages under test.
+    for name in ("warn", "error", "skip"):
+        monkeypatch.setattr(downloader.ui, name, lambda *a, **k: None)
 
     result = await obj._download_and_tag(
         str(tmp_path), 1, {"url": "initial"}, metadata(), metadata(), True, False

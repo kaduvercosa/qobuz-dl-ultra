@@ -49,7 +49,7 @@ def test_expande_til(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setattr(os.path, "expanduser", lambda p: p.replace("~", str(tmp_path)))
     destino = tmp_path / "musicas"
-    resultado = ensure_directory_ready(f"~/musicas")
+    resultado = ensure_directory_ready("~/musicas")
     assert resultado == destino.resolve()
 
 

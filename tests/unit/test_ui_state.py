@@ -32,6 +32,12 @@ def saida(monkeypatch):
 @pytest.fixture
 def estado_limpo(monkeypatch):
     """Zera o estado global da UI para o teste e restaura ao final."""
+    monkeypatch.setattr(
+        ui, "_track_index", type(ui._track_index)("test_index", default="")
+    )
+    monkeypatch.setattr(
+        ui, "_track_view", type(ui._track_view)("test_view", default=None)
+    )
     for nome, valor in (
         ("_color_enabled", None),
         ("_unicode_enabled", None),
@@ -742,9 +748,7 @@ class TestBox:
         ui.configure(color=False, unicode=False)
         valor = "alpha bravo charlie delta echo foxtrot golf hotel india"
         ui.header("FAIXA", [("Faixa", valor)])
-        corpo = " ".join(
-            ln.strip("|").strip() for ln in _linhas_da_caixa(saida)[1:-1]
-        )
+        corpo = " ".join(ln.strip("|").strip() for ln in _linhas_da_caixa(saida)[1:-1])
         assert corpo.replace("FAIXA", "", 1).split() == valor.split()
         assert "…" not in "\n".join(saida)
 
@@ -820,14 +824,14 @@ class TestSummary:
         assert len({ui._cell_width(ln) for ln in linhas}) == 1
         corpo = " ".join(ln.strip("│").strip() for ln in linhas[1:3])
         assert "…" not in corpo and "..." not in "\n".join(saida)
-        assert nome.split()[0] in linhas[1] and nome.split()[-1] in "\n".join(linhas[1:4])
+        assert nome.split()[0] in linhas[1] and nome.split()[-1] in "\n".join(
+            linhas[1:4]
+        )
 
     def test_cores_fixas_por_significado(self, estado_limpo, saida, colunas):
         colunas(60)
         ui.configure(color=True, unicode=True)
-        ui.summary(
-            "R", [("a", "1", "ok"), ("b", "2", "warn"), ("c", "3", "err")]
-        )
+        ui.summary("R", [("a", "1", "ok"), ("b", "2", "warn"), ("c", "3", "err")])
         texto = "\n".join(saida)
         assert ui.SUCCESS in texto and ui.WARNING in texto and ui.ERROR in texto
 
@@ -868,14 +872,12 @@ class TestStatsTextETail:
         colunas(100)
         ui.configure(color=False)
         ui.ok(ui.tail("Concluído: [01] Tempo", "20.8 MB"))
-        assert saida == ["[+] Concluído: [01] Tempo   20.8 MB"]
+        assert saida == ["[+] └─ Concluído: [01] Tempo   20.8 MB"]
 
     def test_tail_vazio_devolve_a_mensagem(self, estado_limpo):
         assert ui.tail("Concluído: [01] Tempo", "") == "Concluído: [01] Tempo"
 
-    def test_dim_usa_cinza_fixo_e_nao_o_esmaecido(
-        self, estado_limpo, monkeypatch
-    ):
+    def test_dim_usa_cinza_fixo_e_nao_o_esmaecido(self, estado_limpo, monkeypatch):
         ui.configure(color=True)
         monkeypatch.setattr(ui, "GRAY", "<GRAY>")
         monkeypatch.setattr(ui, "MUTED", "<DIM>")
@@ -931,7 +933,7 @@ class TestTaggedEspacamento:
         monkeypatch.setattr(ui, "SUCCESS", "<G>")
         monkeypatch.setattr(ui, "GRAY", "<D>")
         ui.ok(ui.tail("Concluído: [01] Tempo", "20.8 MB"))
-        assert saida == ["<G>[+] Concluído: [01] Tempo   <D>20.8 MB<R><G><R>"]
+        assert saida == ["<G>[+] └─ Concluído: [01] Tempo   <D>20.8 MB<R><G><R>"]
 
 
 class TestLarguraDaCaixa:
@@ -973,7 +975,13 @@ class TestTaggedLinesEJoinMeta:
 
     @pytest.mark.parametrize(
         "kind,tag",
-        [("step", "[*]"), ("ok", "[+]"), ("skip", "[-]"), ("warn", "[!]"), ("error", "[!]")],
+        [
+            ("step", "[*]"),
+            ("ok", "[+]"),
+            ("skip", "[-]"),
+            ("warn", "[!]"),
+            ("error", "[!]"),
+        ],
     )
     def test_cada_tipo_tem_a_sua_tag(self, estado_limpo, colunas, kind, tag):
         colunas(100)
@@ -995,7 +1003,11 @@ class TestTaggedLinesEJoinMeta:
         monkeypatch.setattr(ui, "RESET", "<R>")
         monkeypatch.setattr(ui, "SUCCESS", "<G>")
         linhas = ui.tagged_lines(
-            "ok", ui.tail("Letras prontas: [04] Une seule vie", "BILINGUAL · sincronizadas · só no metadata · via Qobuz")
+            "ok",
+            ui.tail(
+                "Letras prontas: [04] Une seule vie",
+                "BILINGUAL · sincronizadas · só no metadata · via Qobuz",
+            ),
         )
         assert len(linhas) >= 3
         for linha in linhas[1:]:
@@ -1045,3 +1057,45 @@ class TestSeparator:
         ui.configure(color=False, quiet=True)
         ui.separator()
         assert saida == []
+
+
+class TestResultadoEIndiceCinza:
+    def test_indice_numerico_cinza_e_corpo_verde(
+        self, estado_limpo, saida, colunas, monkeypatch
+    ):
+        colunas(100)
+        ui.configure(color=True, unicode=True)
+        monkeypatch.setattr(ui, "GRAY", "<D>")
+        monkeypatch.setattr(ui, "SUCCESS", "<G>")
+        monkeypatch.setattr(ui, "RESET", "<R>")
+        token = ui.set_track_index("03/09")
+        try:
+            ui.ok("Concluído: [03] Song")
+        finally:
+            ui.reset_track_index(token)
+        assert saida == ["<D>[03/09]<R> <G>└─ Concluído: Song<R>"]
+
+    @pytest.mark.parametrize("unicode,branch", [(True, "└─"), (False, "`-")])
+    def test_resultado_tem_um_unico_ramo(
+        self, estado_limpo, saida, colunas, unicode, branch
+    ):
+        colunas(100)
+        ui.configure(color=False, unicode=unicode)
+        ui.ok(f"{branch} Concluído: Song")
+        assert saida == [f"[+] {branch} Concluído: Song"]
+
+    def test_baixando_sem_ramo(self, estado_limpo, saida, colunas):
+        colunas(100)
+        ui.configure(color=False, unicode=True)
+        token = ui.set_track_index("03/09")
+        try:
+            ui.progress("Baixando: Song")
+        finally:
+            ui.reset_track_index(token)
+        assert saida == ["[03/09] Baixando: Song"]
+
+    def test_pdf_concluido_com_ramo(self, estado_limpo, saida, colunas):
+        colunas(100)
+        ui.configure(color=False, unicode=True)
+        ui.done(ui.tail("Concluído: Booklet.pdf", "26.7 MB · 1.1 s"))
+        assert saida == ["[+] └─ Concluído: Booklet.pdf   26.7 MB · 1.1 s"]

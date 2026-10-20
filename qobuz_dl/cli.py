@@ -971,10 +971,7 @@ async def _auth_command(
                 ui.error("As alterações NÃO foram salvas.")
             return False
         except Exception as exc:
-            ui.error(
-                "Falha ao consultar o perfil no Qobuz "
-                f"({type(exc).__name__})."
-            )
+            ui.error(f"Falha ao consultar o perfil no Qobuz ({type(exc).__name__}).")
             ui.detail(auth_failure_hint(exc))
             if update_credentials:
                 ui.error("As alterações NÃO foram salvas.")
@@ -984,8 +981,8 @@ async def _auth_command(
             _save_token_in_both_config_keys(config, token)
             config.set(section, "email", email)
             config.set(section, "password", "")
-            saved_in_keyring = (
-                not disable_keyring and _keyring_save("auth_token", token)
+            saved_in_keyring = not disable_keyring and _keyring_save(
+                "auth_token", token
             )
             if saved_in_keyring:
                 config.set(section, "auth_token", "")
@@ -1002,9 +999,7 @@ async def _auth_command(
             except OSError:
                 ui.error("Não foi possível gravar o arquivo de configuração.")
                 if saved_in_keyring:
-                    ui.warn(
-                        "O Keyring foi atualizado, mas o config.ini não foi salvo."
-                    )
+                    ui.warn("O Keyring foi atualizado, mas o config.ini não foi salvo.")
                 return False
             ui.ok("Credenciais atualizadas e configuração salva!")
 

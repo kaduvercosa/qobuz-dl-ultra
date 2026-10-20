@@ -137,7 +137,7 @@ async def main():
     client = await Client.create(email, pwd, app_id, secrets, user_auth_token=token)
 
     try:
-        print(f"\n[1/3] Obtendo informações originais da faixa...")
+        print("\n[1/3] Obtendo informações originais da faixa...")
 
         # Requisição ORIGINAL com assinatura manual forte
         params_orig = {"track_id": item_id}

@@ -433,6 +433,8 @@ class Download:
         if abort_event.is_set():
             return False
         async with semaphore:
+            ui.set_track_index(ui.index_from_meta(i, album_meta))
+
             t_num = str(i.get("track_number", idx + 1)).zfill(2)
             _media_count = album_meta.get("media_count", 1)
             t_label = format_track_label(i, _media_count, default=idx + 1)
@@ -440,7 +442,7 @@ class Download:
 
             streamable, reason = is_track_streamable(i)
             if not streamable:
-                ui.skip(f"Faixa [{t_label}] - {t_title} ({reason})")
+                ui.skip(f"Indisponível: {t_title} ({reason})")
                 create_missing_placeholder(i, dirn, reason, _media_count)
                 await report_track(i, t_num, "pulada", reason)
                 return "skipped"
@@ -479,7 +481,7 @@ class Download:
                 await report_track(i, t_num, status, motivo, letras=letras_info)
                 return res
             else:
-                ui.skip(f"Faixa [{t_label}] - {t_title} (Apenas amostra/demo)")
+                ui.skip(f"Pulada: {t_title} (Apenas amostra/demo)")
                 create_missing_placeholder(
                     i, dirn, "Apenas amostra/demo (30s)", _media_count
                 )
@@ -645,7 +647,7 @@ class Download:
             print_download_header(
                 "ÁLBUM",
                 [
-                    ("Álbum", album_title),
+                    ("Título", album_title),
                     ("Artista", artist_name),
                     ("Ano", release_year or "--"),
                     ("Faixas", str(track_count)),
@@ -859,6 +861,18 @@ class Download:
                     )
                 raise
 
+            for track_meta, result in zip(album_meta["tracks"]["items"], results):
+                if isinstance(result, BaseException):
+                    ui.error(
+                        f"Faixa {track_meta.get('track_number', '?')} — "
+                        f"{track_meta.get('title', 'Faixa Desconhecida')}: "
+                        f"{type(result).__name__}: {result}"
+                    )
+                    logger.error(
+                        "Exceção na faixa %s",
+                        track_meta.get("id"),
+                        exc_info=(type(result), result, result.__traceback__),
+                    )
             failed_tracks = sum(res is not True for res in results)
 
             if not abort_event.is_set():
@@ -1033,7 +1047,9 @@ class Download:
                     )
 
             skipped_count = sum(1 for r in results if r == "skipped")
-            real_failed = sum(1 for r in results if r is False)
+            real_failed = sum(
+                1 for r in results if r is False or isinstance(r, BaseException)
+            )
             downloaded_count = sum(1 for r in results if r is True)
 
             ui.summary_downloads(
@@ -1114,7 +1130,7 @@ class Download:
                 print_download_header(
                     "FAIXA",
                     [
-                        ("Faixa", track_title),
+                        ("Título", track_title),
                         ("Artista", artist),
                         ("Álbum", album_name),
                         (
@@ -1383,7 +1399,9 @@ class Download:
                     rows=[
                         (
                             "Status",
-                            "Concluída com sucesso" if success else "Falhou ou foi pulada",
+                            "Concluída com sucesso"
+                            if success
+                            else "Falhou ou foi pulada",
                             "ok" if success else "err",
                         )
                     ],
@@ -1406,21 +1424,32 @@ class Download:
         return bool(success)
 
     async def _download_and_tag(self, *args, **kwargs) -> bool:
-        """Download audio file and apply ID3/FLAC tags.
-
-        Fina camada sobre `_download_and_tag_impl`: garante que qualquer nome
-        de arquivo reservado para esta faixa (ver `track_identity`) seja
-        liberado ao terminar, seja por sucesso, falha ou cancelamento.
-        """
+        """Apply tags and present a final status only after all processing."""
         claimed_paths: list[str] = []
+        track_meta = args[3] if len(args) > 3 else kwargs.get("track_metadata", {})
+        album_meta = (
+            args[4] if len(args) > 4 else kwargs.get("album_or_track_metadata", {})
+        )
+        display_index = kwargs.get(
+            "display_index", args[13] if len(args) > 13 else None
+        )
+        parallel = kwargs.get("is_parallel", args[8] if len(args) > 8 else False)
+        token = ui.set_track_index(
+            ui.index_from_meta(track_meta, album_meta, display_index)
+        )
+        view_token = ui.begin_track_view(parallel)
         try:
-            # *args pode, em tese, preencher `_claimed` por posição; na prática
-            # os chamadores só usam os parâmetros anteriores.
-            return await self._download_and_tag_impl(  # type: ignore[misc]
+            success = await self._download_and_tag_impl(
                 *args, _claimed=claimed_paths, **kwargs
             )
+            ui.finish_track_view(_get_title(track_meta), success is True)
+            return success
         finally:
-            release_claims(claimed_paths)
+            try:
+                release_claims(claimed_paths)
+            finally:
+                ui.end_track_view(view_token)
+                ui.reset_track_index(token)
 
     async def _download_and_tag_impl(
         self,
@@ -1873,7 +1902,7 @@ class Download:
                         # Dentro do print_lock (não reentrante): formata com o
                         # ui e escreve por tqdm.write, como o motor de letras.
                         for linha in ui.tagged_lines(
-                            "skip",
+                            "lyrics_note",
                             ui.tail(
                                 f" {ui.tree_last()} Letras: {desc}", translation_note
                             ),
@@ -1881,8 +1910,8 @@ class Download:
                             tqdm.write(linha)
                     return resultado_letras
 
-            resultado_letras = await loop.run_in_executor(
-                heavy_executor(), _inject_lyrics_and_print
+            resultado_letras = await ui.run_in_executor(
+                loop, heavy_executor(), _inject_lyrics_and_print
             )
             if letras_out is not None:
                 letras_out.update(
@@ -2357,7 +2386,9 @@ class Download:
                         if p.strip():
                             f.write(textwrap.fill(p.strip(), width=70) + "\n\n")
 
-            ui.ok(f" {ui.tree_last()} Concluído: Digital Booklet.txt (Credits & Review)")
+            ui.ok(
+                f" {ui.tree_last()} Concluído: Digital Booklet.txt (Credits & Review)"
+            )
         except Exception as e:
             ui.error(f"Erro criando booklet: {e}")
 
@@ -2457,7 +2488,7 @@ async def tqdm_download(
     position = position_pool.acquire() if (is_parallel and position_pool) else 0
 
     if not is_parallel:
-        ui.step(ui.tail(f"Em Progresso: {track_name}", _progress_tail(track_name)))
+        ui.progress(ui.tail(f"Em Progresso: {track_name}", _progress_tail(track_name)))
         tqdm_desc = f"  {R}⬇️{R}"
         b_format = "{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]"
         ncols = None
@@ -2567,7 +2598,7 @@ async def tqdm_download(
                             and attempt.retry_state.attempt_number == 1
                         ):
                             size_mb = total_size / (1024 * 1024) if total_size else 0
-                            ui.step(
+                            ui.progress(
                                 ui.tail(
                                     f"Em Progresso: {track_name}",
                                     _progress_tail(track_name, size_mb),
@@ -2598,9 +2629,9 @@ async def tqdm_download(
                                         bar.update(size)
 
                         if downloaded_size >= total_size:
-                            ui.ok(
+                            ui.done(
                                 ui.tail(
-                                    f" {ui.tree_last()} Concluído: {track_name}",
+                                    f" Concluído: {track_name}",
                                     ui.stats_text(
                                         downloaded_size, time.monotonic() - _t0
                                     ),
@@ -3038,9 +3069,7 @@ async def _get_cover_and_embed(
         try:
             await asyncio.to_thread(shutil.copyfile, saved_file, embed_file)
             if notas is None:  # em playlist/lote a nota da capa salva já cobre
-                ui.ok(
-                    ui.tail("Capa de embed", f"reaproveitada de {saved_name}")
-                )
+                ui.ok(ui.tail("Capa de embed", f"reaproveitada de {saved_name}"))
             gravou_qobuz = True
             return _origem_qobuz()
         except OSError as e:
@@ -3115,10 +3144,8 @@ async def tqdm_download_segments(
 
     if is_parallel:
         size_mb = total_size / (1024 * 1024) if total_size else 0
-        ui.step(
-            ui.tail(
-                f"Em Progresso: {track_name}", _progress_tail(track_name, size_mb)
-            )
+        ui.progress(
+            ui.tail(f"Em Progresso: {track_name}", _progress_tail(track_name, size_mb))
         )
         desc_len = position_pool.desc_len if position_pool else 14
         short_name = _short_track_name(track_name, desc_len)
@@ -3127,7 +3154,7 @@ async def tqdm_download_segments(
         ncols = position_pool.ncols if position_pool else _get_safe_ncols()
         dynamic_ncols = False
     else:
-        ui.step(ui.tail(f"Em Progresso: {track_name}", _progress_tail(track_name)))
+        ui.progress(ui.tail(f"Em Progresso: {track_name}", _progress_tail(track_name)))
         tqdm_desc = f"  {R}↪️{R}"
         b_format = "{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]"
         ncols = None
@@ -3251,9 +3278,9 @@ async def tqdm_download_segments(
                 f"Falha no remux do FFmpeg para {fname}: {stderr.decode()}"
             )
 
-        ui.ok(
+        ui.done(
             ui.tail(
-                f" {ui.tree_last()} Concluído: {track_name}",
+                f"Concluído: {track_name}",
                 ui.stats_text(total_size, time.monotonic() - _t0),
             )
         )

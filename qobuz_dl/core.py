@@ -1012,7 +1012,7 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
                                 border_style=border_st,
                             )
                             add_card_line(
-                                [(row_st, f"   [Enter] para abrir opções")],
+                                [(row_st, "   [Enter] para abrir opções")],
                                 hovered=hovered,
                                 is_checked=checked,
                                 border_style=border_st,

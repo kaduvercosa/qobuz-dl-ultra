@@ -721,7 +721,7 @@ class LyricsEngine:
             destino = "só em .lrc"
         else:
             destino = "só no metadata"
-        return "ok", ui.tail(
+        return ("ok" if embed_lyrics and save_lrc else "lyrics"), ui.tail(
             f"{ramo}Letras prontas:{nome}",
             ui.join_meta(
                 "BILINGUAL" if candidate.bilingual else "",
@@ -827,7 +827,7 @@ class LyricsEngine:
             duration=duration,
         )
 
-        _tw("step", f"Procurando letras: {_ident}")
+        _tw("search", f"Procurando letras: {_ident}")
         last_error = None
 
         for provider_name in self.PROVIDERS:

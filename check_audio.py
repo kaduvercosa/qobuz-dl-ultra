@@ -151,7 +151,7 @@ def main():
     audio_list = find_audio_files(target_dir)
 
     if not audio_list:
-        print(f"\n[!] Nenhum arquivo de áudio encontrado nas subpastas")
+        print("\n[!] Nenhum arquivo de áudio encontrado nas subpastas")
         sys.exit(0)
 
     print(f"✨ Encontrados {len(audio_list)} arquivos de áudio.\n")
@@ -194,7 +194,7 @@ def main():
         result = subprocess.run(cmd, capture_output=True, text=True)
 
         if result.returncode != 0:
-            print(f"\n[!] Erro ao executar o ffprobe.")
+            print("\n[!] Erro ao executar o ffprobe.")
             print(result.stderr)
         else:
             for line in result.stdout.splitlines():
