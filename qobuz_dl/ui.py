@@ -383,10 +383,7 @@ def _tagged(color, tag, message):
             partes = [f"{cabeca}{_TAIL_GAP}{dim(cauda)}"]
         else:
             partes = _wrap_lines(cabeca, limite)
-            if (
-                _cell_width(partes[-1]) + len(_TAIL_GAP) + _cell_width(cauda)
-                <= limite
-            ):
+            if _cell_width(partes[-1]) + len(_TAIL_GAP) + _cell_width(cauda) <= limite:
                 partes[-1] = f"{partes[-1]}{_TAIL_GAP}{dim(cauda)}"
             else:
                 partes.extend(dim(p) for p in _wrap_lines(cauda, limite))
@@ -580,10 +577,46 @@ BOX_MIN = 31  # piso: abaixo disso nem o rótulo + valor cabem (MIN_WIDTH - 1)
 # (canto sup. esq., sup. dir., inf. esq., inf. dir., horizontal, vertical,
 #  junção esq., junção dir.)
 _BOX_STYLES = {
-    "round": ("\u256d", "\u256e", "\u2570", "\u256f", "\u2500", "\u2502", "\u251c", "\u2524"),
-    "square": ("\u250c", "\u2510", "\u2514", "\u2518", "\u2500", "\u2502", "\u251c", "\u2524"),
-    "double": ("\u2554", "\u2557", "\u255a", "\u255d", "\u2550", "\u2551", "\u2560", "\u2563"),
-    "heavy": ("\u250f", "\u2513", "\u2517", "\u251b", "\u2501", "\u2503", "\u2523", "\u252b"),
+    "round": (
+        "\u256d",
+        "\u256e",
+        "\u2570",
+        "\u256f",
+        "\u2500",
+        "\u2502",
+        "\u251c",
+        "\u2524",
+    ),
+    "square": (
+        "\u250c",
+        "\u2510",
+        "\u2514",
+        "\u2518",
+        "\u2500",
+        "\u2502",
+        "\u251c",
+        "\u2524",
+    ),
+    "double": (
+        "\u2554",
+        "\u2557",
+        "\u255a",
+        "\u255d",
+        "\u2550",
+        "\u2551",
+        "\u2560",
+        "\u2563",
+    ),
+    "heavy": (
+        "\u250f",
+        "\u2513",
+        "\u2517",
+        "\u251b",
+        "\u2501",
+        "\u2503",
+        "\u2523",
+        "\u252b",
+    ),
     "ascii": ("+", "+", "+", "+", "-", "|", "+", "+"),
 }
 
@@ -627,8 +660,7 @@ def box(title, lines, cols=None, color=HIGHLIGHT):
         title_txt = f" {truncate(title, max(1, total - 6))} "
         fill = max(0, total - 3 - _cell_width(title_txt))
         top = (
-            f"{edge}{tl}{h}{rst}{edge}{c(BG)}{title_txt}{rst}"
-            f"{edge}{h * fill}{tr}{rst}"
+            f"{edge}{tl}{h}{rst}{edge}{c(BG)}{title_txt}{rst}{edge}{h * fill}{tr}{rst}"
         )
     else:
         top = f"{edge}{tl}{h * (total - 2)}{tr}{rst}"

@@ -391,9 +391,7 @@ class Client:
                 ui.ok(ui.tail("Logado", f"Assinatura: {self.label}"))
             else:
                 ui.warn(
-                    ui.tail(
-                        "Logado, mas a assinatura está INATIVA", f"{sub['status']}"
-                    )
+                    ui.tail("Logado, mas a assinatura está INATIVA", f"{sub['status']}")
                 )
         except Exception:
             ui.warn("Validação do perfil ignorada.")

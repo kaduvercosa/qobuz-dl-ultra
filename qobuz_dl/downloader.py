@@ -1383,7 +1383,9 @@ class Download:
                     rows=[
                         (
                             "Status",
-                            "Concluída com sucesso" if success else "Falhou ou foi pulada",
+                            "Concluída com sucesso"
+                            if success
+                            else "Falhou ou foi pulada",
                             "ok" if success else "err",
                         )
                     ],
@@ -2357,7 +2359,9 @@ class Download:
                         if p.strip():
                             f.write(textwrap.fill(p.strip(), width=70) + "\n\n")
 
-            ui.ok(f" {ui.tree_last()} Concluído: Digital Booklet.txt (Credits & Review)")
+            ui.ok(
+                f" {ui.tree_last()} Concluído: Digital Booklet.txt (Credits & Review)"
+            )
         except Exception as e:
             ui.error(f"Erro criando booklet: {e}")
 
@@ -3038,9 +3042,7 @@ async def _get_cover_and_embed(
         try:
             await asyncio.to_thread(shutil.copyfile, saved_file, embed_file)
             if notas is None:  # em playlist/lote a nota da capa salva já cobre
-                ui.ok(
-                    ui.tail("Capa de embed", f"reaproveitada de {saved_name}")
-                )
+                ui.ok(ui.tail("Capa de embed", f"reaproveitada de {saved_name}"))
             gravou_qobuz = True
             return _origem_qobuz()
         except OSError as e:
@@ -3116,9 +3118,7 @@ async def tqdm_download_segments(
     if is_parallel:
         size_mb = total_size / (1024 * 1024) if total_size else 0
         ui.step(
-            ui.tail(
-                f"Em Progresso: {track_name}", _progress_tail(track_name, size_mb)
-            )
+            ui.tail(f"Em Progresso: {track_name}", _progress_tail(track_name, size_mb))
         )
         desc_len = position_pool.desc_len if position_pool else 14
         short_name = _short_track_name(track_name, desc_len)
