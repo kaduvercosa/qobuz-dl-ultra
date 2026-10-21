@@ -184,6 +184,25 @@ async def test_tui_key_bindings_existem(monkeypatch):
     assert len(bindings.bindings) >= 15
 
 
+async def test_tui_filtro_nao_registra_atalhos_de_navegacao(monkeypatch):
+    FakeApplication.result = None
+    monkeypatch.setattr(core, "Application", FakeApplication)
+
+    await core._tui_select("Confirmação", ["Sim", "Não"], item_category="filter")
+
+    bindings = FakeApplication.last.key_bindings
+    keys = {str(key) for binding in bindings.bindings for key in binding.keys}
+    assert not {"n", "m", "b"} & keys
+
+    await core._tui_select(
+        "Faixas", [{"meta": {"title": "Faixa"}}], item_category="track"
+    )
+
+    bindings = FakeApplication.last.key_bindings
+    keys = {str(key) for binding in bindings.bindings for key in binding.keys}
+    assert {"n", "m", "b"} <= keys
+
+
 async def test_tui_header_fallback_terminal(monkeypatch):
     FakeApplication.result = None
     monkeypatch.setattr(core, "Application", FakeApplication)

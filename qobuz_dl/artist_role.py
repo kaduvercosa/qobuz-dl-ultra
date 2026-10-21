@@ -162,6 +162,21 @@ def _pessoas(item):
     if isinstance(composer, dict) and composer.get("name"):
         pessoas.append((composer["name"], ["Compositor"]))
 
+    # Resultados de álbum (inclusive Singles) normalmente não trazem
+    # `performer`; a API usa `artist`. Mantemos a mesma semântica: quando o
+    # artista pesquisado é o artista do lançamento, ele é o Principal.
+    artista = item.get("artist")
+    if isinstance(artista, dict) and artista.get("name"):
+        pessoas.append((artista["name"], ["Principal"]))
+    elif isinstance(artista, str) and artista.strip():
+        pessoas.append((artista, ["Principal"]))
+
+    album = item.get("album")
+    if isinstance(album, dict):
+        album_artista = album.get("artist")
+        if isinstance(album_artista, dict) and album_artista.get("name"):
+            pessoas.append((album_artista["name"], ["Principal"]))
+
     titulo = f"{item.get('title') or ''} {item.get('version') or ''}"
     for m in _RE_FEAT.finditer(titulo):
         for nome in _RE_SEP_NOMES.split(m.group(1)):

@@ -5,7 +5,7 @@ description: Guia completo do projeto qobuz-dl-ultra (fork em Python do qobuz-dl
 
 # QOBUZ-DL-ULTRA — guia do projeto (SKILL.md)
 
-> **Última revisão:** versão do pacote `2.6.5.1` · atualizado em 2026-10-18.
+> **Última revisão:** versão do pacote `2.6.5.3` · atualizado em 2026-10-21.
 > Idioma do projeto: **português do Brasil** (código-fonte, comentários, mensagens, README, commits e testes).
 
 ---
@@ -266,7 +266,7 @@ Definidos em `commands.py`, roteados em `cli.py::_handle_commands`. `DOWNLOAD_CO
 | **Sentinela `.streamrip.json`** | Nome mantido por compatibilidade com libsync/streamrip |
 | **Portabilidade a-Shell** | Sem dependência compilada no núcleo; `fuzzy.py` cai para `difflib`; Pillow sem piso de versão |
 | **UI entre dispositivos** | `--ui auto` é o padrão; `--ui compact` força cartões e rodapé curto; `--ui comfortable` privilegia detalhes. A decisão passa por `ui.compact_mode()` para TUI e renderizadores não divergirem |
-| **Fila interativa** | URLs repetidas são deduplicadas; antes do download há resumo por tipo, remoção seletiva e cancelamento; discografias acima de 20 álbuns pedem confirmação; submenus de favoritos/artistas têm `↩ Voltar` |
+| **Fila interativa** | URLs repetidas são deduplicadas; o fluxo é rotativo e preserva a fila ao voltar ao menu inicial ou iniciar nova pesquisa; antes do download há resumo por tipo, revisão com rótulo artista/título, remoção seletiva e cancelamento; discografias acima de 20 álbuns pedem confirmação; submenus de favoritos/artistas distinguem `b` (voltar aos resultados/contexto do artista), `n` (nova pesquisa) e `m` (menu inicial); esses atalhos só são registrados em listas de resultados, nunca em menus de confirmação/filtro; listas ordenam com `a` (A-Z), `y` (ano novo→antigo) e `Y` (ano antigo→novo); faixas exibem ANO no lugar de DURAÇÃO em tabela/cartão; a lista de Singles pode exibir FUNÇÃO no lugar de TIPO |
 | **Espaço em disco** | A checagem é automática e usa duração/qualidade com margem conservadora; `--no-check-storage` desliga. Quando a API não fornece duração, não inventa uma estimativa nem bloqueia o download |
 | **Cache de metadados** | Ativo por padrão por 12 h e 512 entradas; somente endpoints de leitura, com fallback silencioso e exclusão de tokens/assinaturas. Desligar com `QOBUZ_DL_DISABLE_METADATA_CACHE=1` |
 | **Relatório HTML** | `.report.json` é incremental; `report.html` só é gerado ao finalizar o álbum, reduzindo I/O no iPad |
@@ -312,6 +312,9 @@ Mais recente primeiro. Uma linha por alteração pedida.
 
 | Data | Alteração | Arquivos principais |
 | :--- |:--- |:--- |
+| 2026-10-21 | TUI passou a exibir ANO no lugar de DURAÇÃO nas faixas; atalhos `n`/`m` de nova pesquisa/menu inicial foram movidos para fora da tabela e `b` retorna ao contexto/resultados do artista | `qobuz_dl/core.py`, `qobuz_dl/interactive_ui.py`, `tests/unit/test_get_table_layout.py`, `tests/unit/test_core_interactive_static.py`, `README.md`, `SKILL.md` |
+| 2026-10-21 | Atalhos `n`/`m`/`b` da TUI deixaram de ser registrados em menus de confirmação/filtro, onde não havia contexto para tratá-los; adicionado teste de regressão dos bindings | `qobuz_dl/core.py`, `tests/unit/test_core_tui.py`, `SKILL.md` |
+| 2026-10-21 | Modo interativo passou a ser rotativo, preservando a fila ao retornar ao menu inicial; revisão mostra artista/título; listas ganharam ordenação A-Z/ano por atalhos; Singles exibem FUNÇÃO quando há referência do artista pesquisado | `qobuz_dl/core.py`, `qobuz_dl/interactive_ui.py`, `qobuz_dl/artist_role.py`, `tests/unit/test_core_interactive_paths.py`, `tests/unit/test_core_metadata.py`, `tests/unit/test_get_table_layout.py`, `README.md`, `SKILL.md` |
 | 2026-10-20 | Extra opcional `enhanced` adicionado com aiolimiter para limitar chamadas assíncronas da API por event loop, configurável por `QOBUZ_API_RATE_LIMIT` e `QOBUZ_API_RATE_PERIOD`; renderer próprio da UI foi preservado para manter o layout responsivo do a-Shell | `pyproject.toml`, `qobuz_dl/qopy.py`, `tests/unit/test_qopy_api_call.py`, `README.md`, `SKILL.md` |
 | 2026-10-21 | Relatório HTML passou a ser gerado somente na finalização; cache SQLite assíncrono e limitado foi adicionado apenas para metadados de leitura; bancos receberam busy timeout, WAL oportunista, índices e backup pré-migração; RESPX entrou somente no extra de desenvolvimento | `qobuz_dl/postprocess.py`, `qobuz_dl/metadata_cache.py`, `qobuz_dl/qopy.py`, `qobuz_dl/db.py`, `qobuz_dl/library_db.py`, `pyproject.toml`, `tests/`, `README.md`, `SKILL.md` |
 | 2026-10-21 | Fluxo interativo refinado: fila sem duplicatas, resumo e revisão antes do download, confirmação para discografias grandes, opções de retorno nos submenus e rótulo de qualidade corrigido | `qobuz_dl/core.py`, `tests/unit/test_core_interactive_paths.py`, `README.md`, `SKILL.md` |

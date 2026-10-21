@@ -79,6 +79,10 @@ from qobuz_dl.interactive_ui import (
     pt_style,
 )
 
+_NAV_NEW_SEARCH = "__qobuz_nav_new_search__"
+_NAV_HOME = "__qobuz_nav_home__"
+_NAV_ARTIST = "__qobuz_nav_artist__"
+
 # ANTES: o tema visual (pt_style/prompt_style) e os helpers _shade/
 # _align_text/_get_table_layout estavam definidos aqui direto. Movidos pra
 # qobuz_dl/interactive_ui.py (passo 2 de quebrar este arquivo em módulos
@@ -126,6 +130,8 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
         1-9            -- pula direto pro item daquela posição
         r              -- força redesenho da tela (útil após girar
                           iPad/iPhone, se o terminal não reagir sozinho)
+        n / m          -- nova pesquisa / menu inicial nas listas de resultados
+        b              -- volta ao contexto/resultados do artista em álbuns/faixas
         espaço (multi) -- marca/desmarca o item sob o cursor
         t (multi)      -- marca/desmarca todos
         Enter          -- confirma
@@ -139,6 +145,56 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
     bindings = KeyBindings()
     selected_indices = set()
     cursor_pos = 0
+    album_role_mode = item_category == "album" and any(
+        isinstance(option, dict) and option.get("meta", {}).get("show_role")
+        for option in options_dicts
+    )
+    sortable = item_category in {"album", "track", "playlist", "artist"}
+
+    def _sort_text(option):
+        if not isinstance(option, dict):
+            return ""
+        meta = option.get("meta", {})
+        return str(meta.get("title") or meta.get("name") or "").casefold()
+
+    def _sort_year(option, reverse=False):
+        if not isinstance(option, dict):
+            return (1, 0)
+        meta = option.get("meta", {})
+        match = re.search(r"\d{4}", str(meta.get("year") or ""))
+        year = int(match.group()) if match else 0
+        # Lançamentos sem ano ficam sempre no fim, independentemente da
+        # direção escolhida.
+        if reverse:
+            return (year == 0, year if year else 9999)
+        return (year == 0, -year if year else 0)
+
+    def _sort_options(mode, event):
+        nonlocal cursor_pos
+        if not sortable or not options_dicts:
+            return
+
+        selected_objects = {
+            id(options_dicts[index])
+            for index in selected_indices
+            if index < len(options_dicts)
+        }
+        if mode == "alpha":
+            options_dicts.sort(key=_sort_text)
+        else:
+            options_dicts.sort(
+                key=lambda option: _sort_year(option, reverse=mode == "year_old")
+            )
+
+        selected_indices.clear()
+        selected_indices.update(
+            index
+            for index, option in enumerate(options_dicts)
+            if id(option) in selected_objects
+        )
+        cursor_pos = 0
+        view["top"] = 0
+        event.app.invalidate()
 
     # --- Navegação vertical: setas ↑/↓ + alternativas "vim-style" j/k ---
     # As teclas j/k existem em QUALQUER teclado (não exigem trocar de layout
@@ -208,6 +264,37 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
     def _(event):
         event.app.invalidate()
 
+    if item_category != "filter":
+
+        @bindings.add("n")
+        def _(event):
+            event.app.exit(result=(_NAV_NEW_SEARCH, -1))
+
+        @bindings.add("m")
+        def _(event):
+            event.app.exit(result=(_NAV_HOME, -1))
+
+    if item_category in {"album", "track"}:
+
+        @bindings.add("b")
+        def _(event):
+            event.app.exit(result=(_NAV_ARTIST, -1))
+
+    # Ordenação instantânea: funciona na mesma tela, sem obrigar o usuário a
+    # sair e refazer a pesquisa. É especialmente útil para Singles, cuja API
+    # costuma retornar muitos lançamentos em uma ordem pouco previsível.
+    @bindings.add("a")
+    def _(event):
+        _sort_options("alpha", event)
+
+    @bindings.add("y")
+    def _(event):
+        _sort_options("year_new", event)
+
+    @bindings.add("Y")
+    def _(event):
+        _sort_options("year_old", event)
+
     if is_multi:
 
         @bindings.add("space")
@@ -225,10 +312,19 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
             # "Selecionar/desmarcar todos" -- alterna com base no estado atual
             if not options_dicts:
                 return
-            if len(selected_indices) == len(options_dicts):
+            nav_indices = {
+                index
+                for index, option in enumerate(options_dicts)
+                if isinstance(option, str)
+                and ("Menu inicial" in option or "Nova pesquisa" in option)
+            }
+            selectable_indices = set(range(len(options_dicts))) - nav_indices
+            if selected_indices & nav_indices:
+                selected_indices.difference_update(nav_indices)
+            if selected_indices == selectable_indices:
                 selected_indices.clear()
             else:
-                selected_indices.update(range(len(options_dicts)))
+                selected_indices.update(selectable_indices)
 
     @bindings.add("enter")
     def _(event):
@@ -284,7 +380,10 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
         table_columns = max(32, columns - 2)
 
         is_table, widths, headers, borders = _get_table_layout(
-            table_columns, is_multi, item_category
+            table_columns,
+            is_multi,
+            item_category,
+            album_role=album_role_mode,
         )
 
         prefix_len = 5 if is_multi else 3
@@ -304,7 +403,7 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
             res.append(("class:meta", hdr_pref + "│ "))
 
             for idx, (h, w) in enumerate(zip(headers, widths)):
-                # Faixas: FUNÇÃO, DURAÇÃO e QUALIDADE (3 últimas) centralizadas.
+                # Faixas: FUNÇÃO, ANO e QUALIDADE (3 últimas) centralizadas.
                 centro = item_category == "track" and idx >= 3
                 res.append(
                     (
@@ -379,7 +478,10 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
         compact_mobile = ui.compact_mode(columns)
 
         is_table, widths, headers, borders = _get_table_layout(
-            table_columns, is_multi, item_category
+            table_columns,
+            is_multi,
+            item_category,
+            album_role=album_role_mode,
         )
         res = []
 
@@ -612,6 +714,20 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
                 elif checked:
                     typ_st = "class:highlight"
 
+                display_typ = typ
+                display_typ_st = typ_st
+                if album_role_mode and meta.get("show_role"):
+                    display_typ = meta.get("role", "--")
+                    if not hovered and not checked:
+                        if display_typ.startswith("Principal"):
+                            display_typ_st = "class:type_album"
+                        elif display_typ.startswith("Feat."):
+                            display_typ_st = "class:type_ep"
+                        elif display_typ == "--":
+                            display_typ_st = ""
+                        else:
+                            display_typ_st = "class:type_track"
+
                 if item_category == "album":
                     tit_str = meta.get("title", "")
                     art = meta.get("artist", "")
@@ -621,7 +737,7 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
                     if is_table:
                         tit_align = _align_text(tit_str, widths[0])
                         art_align = _align_text(art, widths[1])
-                        typ_align = _align_text(typ, widths[2])
+                        typ_align = _align_text(display_typ, widths[2])
                         yr_align = _align_text(yr, widths[3])
                         fx_align = _align_text(fx, widths[4])
                         ql_align = _align_text(ql, widths[5])
@@ -646,7 +762,7 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
                                     (style, " │ "),
                                     (style, art_align),
                                     (style, " │ "),
-                                    (typ_st, typ_align),
+                                    (display_typ_st, typ_align),
                                     (style, " │ "),
                                     (style, yr_align),
                                     (style, " │ "),
@@ -679,7 +795,7 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
                                 border_style=border_st,
                             )
                             add_card_line(
-                                [(row_st, f"   💿 {typ} · {yr}")],
+                                [(row_st, f"   💿 {display_typ} · {yr}")],
                                 hovered=hovered,
                                 is_checked=checked,
                                 border_style=border_st,
@@ -700,7 +816,7 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
                             add_card_line(
                                 [
                                     (style, f"   👤 {art} · "),
-                                    (typ_st, typ),
+                                    (display_typ_st, display_typ),
                                     (style, f" · {yr}"),
                                 ],
                                 hovered=hovered,
@@ -712,7 +828,7 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
                     tit_str = meta.get("title", "")
                     art = meta.get("artist", "")
                     alb = meta.get("album", "")
-                    dur = _short_duration(meta.get("duration", ""))
+                    year = meta.get("year", "")
 
                     # Função do artista pesquisado (ver artist_role.py).
                     # Meta antigo, sem "role", cai no tipo como antes.
@@ -738,11 +854,11 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
                         art_align = _align_text(art, widths[1])
                         alb_align = _align_text(alb, widths[2])
                         typ_align = _center_text(role_tab, widths[3])
-                        dur_align = _center_text(dur, widths[4])
+                        year_align = _center_text(year, widths[4])
                         ql_align = _center_text(_short_quality(ql), widths[5])
 
                         if hovered:
-                            p1 = f"│ {tit_align} │ {art_align} │ {alb_align} │ {typ_align} │ {dur_align} │ "
+                            p1 = f"│ {tit_align} │ {art_align} │ {alb_align} │ {typ_align} │ {year_align} │ "
                             add_line(
                                 [
                                     (style, prefix),
@@ -765,7 +881,7 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
                                     (style, " │ "),
                                     (role_st, typ_align),
                                     (style, " │ "),
-                                    (style, dur_align),
+                                    (style, year_align),
                                     (style, " │ "),
                                     (ql_st, ql_align),
                                     (style, " │"),
@@ -867,7 +983,7 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
                                     border_style=border_st,
                                 )
                                 add_card_line(
-                                    [(row_st, f"   🎭 {role_full} · ⏱ {dur}")],
+                                    [(row_st, f"   🎭 {role_full} · 📅 {year}")],
                                     hovered=hovered,
                                     is_checked=checked,
                                     border_style=border_st,
@@ -886,7 +1002,7 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
                                     border_style=border_st,
                                 )
                                 add_card_line(
-                                    [(row_st, f"   🎭 {role_full} · ⏱ {dur}")],
+                                    [(row_st, f"   🎭 {role_full} · 📅 {year}")],
                                     hovered=hovered,
                                     is_checked=checked,
                                     border_style=border_st,
@@ -902,7 +1018,7 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
                                 [
                                     (style, f"   👤 {art} · "),
                                     (role_st, role_tab),
-                                    (style, f" · ⏱ {dur}"),
+                                    (style, f" · 📅 {year}"),
                                 ],
                                 hovered=hovered,
                                 is_checked=checked,
@@ -1058,7 +1174,10 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
             columns, _ = shutil.get_terminal_size((80, 24))
 
         is_table, widths, headers, borders = _get_table_layout(
-            max(32, columns - 2), is_multi, item_category
+            max(32, columns - 2),
+            is_multi,
+            item_category,
+            album_role=album_role_mode,
         )
         res = []
 
@@ -1079,27 +1198,50 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
 
         # Atalhos: escolhe a MAIOR versão que cabe na largura (do mais completo ao
         # mais curto), em vez de limiares fixos que cortavam o texto em ~50 colunas.
+        if item_category == "filter":
+            navigation_hint = ""
+        elif item_category in {"album", "track"}:
+            navigation_hint = " [n] Nova [b] Artista [m] Menu"
+        else:
+            navigation_hint = " [n] Nova [m] Menu"
+
         if is_multi:
             if not compact_mobile:
                 res.append(
                     ("class:checkbox", f" * Selecionados: {len(selected_indices)}\n")
                 )
             variants = (
-                " [↑↓/jk] Mover   [Espaço] Selecionar   [t] Todos   [1-9] Ir para   [Enter] Confirmar",
-                " [↑↓/jk] Mover [Espaço] Marcar [t] Todos [Enter] OK",
-                " [↑↓]Mover [Esp]Marcar [t]Todos [↵]OK",
-                " ↑↓ Esp t ↵",
+                (
+                    f" [↑↓/jk] Mover [Espaço] Selecionar [t] Todos [a] A-Z [y/Y] Ano{navigation_hint} [Enter] Confirmar",
+                    f" [↑↓/jk] Mover [Espaço] Marcar [t] Todos [a] A-Z [y/Y] Ano{navigation_hint} [Enter] OK",
+                    f" [↑↓]Mover [Esp]Marcar [t]Todos [a]A-Z [y]Ano{navigation_hint} [↵]OK",
+                    " ↑↓ Esp t a y n b m ↵" if navigation_hint else " ↑↓ Esp t a y ↵",
+                )
+                if sortable
+                else (
+                    f" [↑↓/jk] Mover [Espaço] Selecionar [t] Todos [1-9] Ir para{navigation_hint} [Enter] Confirmar",
+                    f" [↑↓/jk] Mover [Espaço] Marcar [t] Todos [1-9] Ir para{navigation_hint} [Enter] OK",
+                    f" [↑↓]Mover [Esp]Marcar [t]Todos [1-9]Ir{navigation_hint} [↵]OK",
+                    " ↑↓ Esp t ↵" if not navigation_hint else " ↑↓ Esp t n b m ↵",
+                )
             )
         elif item_category == "artist":
             variants = (
-                " [↑↓/jk] Mover   [1-9] Ir para   [Enter] Abrir artista",
-                " [↑↓/jk] Mover [Enter] Abrir",
-                " [↑↓]Mover [↵]Abrir",
-                " ↑↓ ↵",
+                f" [↑↓/jk] Mover [1-9] Ir para [a] A-Z [y/Y] Ano{navigation_hint} [Enter] Abrir artista",
+                f" [↑↓/jk] Mover [a] A-Z [y/Y] Ano{navigation_hint} [Enter] Abrir",
+                f" [↑↓]Mover [a]A-Z [y]Ano{navigation_hint} [↵]Abrir",
+                " ↑↓ a y n m ↵",
+            )
+        elif sortable:
+            variants = (
+                f" [↑↓/jk] Mover [1-9] Ir para [a] A-Z [y/Y] Ano{navigation_hint} [Enter] Confirmar",
+                f" [↑↓/jk] Mover [a] A-Z [y/Y] Ano{navigation_hint} [Enter] OK",
+                f" [↑↓]Mover [a]A-Z [y]Ano{navigation_hint} [↵]OK",
+                " ↑↓ a y n b m ↵" if navigation_hint else " ↑↓ a y ↵",
             )
         else:
             variants = (
-                " [↑↓/jk] Mover   [1-9] Ir para   [Enter] Confirmar",
+                " [↑↓/jk] Mover [1-9] Ir para [Enter] Confirmar",
                 " [↑↓/jk] Mover [Enter] OK",
                 " [↑↓]Mover [↵]OK",
                 " ↑↓ ↵",
@@ -1158,7 +1300,10 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
         table_columns = max(32, columns - 2)
 
         is_table, widths, headers, borders = _get_table_layout(
-            table_columns, is_multi, item_category
+            table_columns,
+            is_multi,
+            item_category,
+            album_role=album_role_mode,
         )
 
         if not is_table:
@@ -1211,7 +1356,10 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
         table_columns = max(32, columns - 2)
 
         table_enabled, _, _, _ = _get_table_layout(
-            table_columns, is_multi, item_category
+            table_columns,
+            is_multi,
+            item_category,
+            album_role=album_role_mode,
         )
 
         return bool(table_enabled)
@@ -2050,7 +2198,13 @@ class QobuzDL:
         return results
 
     def _extract_rich_metadata(
-        self, i, item_type, mode_dict, fav_subtype=None, ref_artist=None
+        self,
+        i,
+        item_type,
+        mode_dict,
+        fav_subtype=None,
+        ref_artist=None,
+        show_role=False,
     ):
         """Converte o JSON bruto da API do Qobuz (item `i`) num dict
         "meta" enxuto e pronto pra exibir na TUI (ver get_list_text em
@@ -2149,10 +2303,11 @@ class QobuzDL:
             # a FUNÇÃO do artista pesquisado na faixa (Principal, Feat.,
             # Compositor...). `type` continua no meta (filtros/estilos).
             # Sem artista de referência (favoritos) fica "—".
-            if item_type == "track" or fav_subtype == "tracks":
+            if item_type == "track" or fav_subtype == "tracks" or show_role:
                 role, role_full = funcao_do_artista(i, ref_artist)
                 meta_data["role"] = role
                 meta_data["role_full"] = role_full
+                meta_data["show_role"] = bool(show_role and ref_artist)
         else:
             name = i.get("name", "Unknown")
             count = (
@@ -2276,13 +2431,41 @@ class QobuzDL:
             for i in iterable:
                 if not isinstance(i, dict):
                     continue
-                meta_data = self._extract_rich_metadata(
-                    i,
-                    item_type,
-                    mode_dict,
-                    fav_subtype,
-                    ref_artist=query if item_type == "track" else None,
+                ref_artist = (
+                    query
+                    if item_type == "track"
+                    or (item_type == "album" and sub_filter == ["single"])
+                    else None
                 )
+                extract_kwargs = {}
+                if ref_artist is not None:
+                    extract_kwargs["ref_artist"] = ref_artist
+                if item_type == "album" and sub_filter == ["single"]:
+                    extract_kwargs["show_role"] = True
+                try:
+                    meta_data = self._extract_rich_metadata(
+                        i,
+                        item_type,
+                        mode_dict,
+                        fav_subtype,
+                        **extract_kwargs,
+                    )
+                except TypeError as exc:
+                    if (
+                        "unexpected keyword argument" not in str(exc)
+                        or "show_role" not in extract_kwargs
+                    ):
+                        raise
+                    # O parâmetro novo é opcional; não deve quebrar quem
+                    # fornece um extrator compatível com a versão anterior.
+                    extract_kwargs.pop("show_role")
+                    meta_data = self._extract_rich_metadata(
+                        i,
+                        item_type,
+                        mode_dict,
+                        fav_subtype,
+                        **extract_kwargs,
+                    )
 
                 if sub_filter:
                     typ_lower = meta_data.get("type", "").lower()
@@ -2342,43 +2525,83 @@ class QobuzDL:
                 "⭐ Favorites",
             ]
 
-            scelta_res = await _tui_select(
-                "O que você deseja buscar?",
-                item_types,
-                is_multi=False,
-                item_category="filter",
-            )
-            if not scelta_res:
+            async def _select_main_type():
+                """Abre o menu inicial e traduz a opção para a API."""
+                while True:
+                    scelta_res = await _tui_select(
+                        "O que você deseja buscar?",
+                        item_types,
+                        is_multi=False,
+                        item_category="filter",
+                    )
+                    if not scelta_res:
+                        return None
+
+                    scelta_raw_visual, _ = scelta_res
+                    if scelta_raw_visual == _NAV_HOME:
+                        return None
+                    if scelta_raw_visual == _NAV_NEW_SEARCH:
+                        continue
+                    break
+
+                raw = scelta_raw_visual.split(" ", 1)[1]
+                if raw == "Favorites":
+                    return "favorites", None
+                if raw == "Singles":
+                    return "album", ["single"]
+                if raw == "Albums":
+                    return "album", ["album", "ep", "compilation", "live"]
+                return raw[:-1].lower(), None
+
+            selected = await _select_main_type()
+            if selected is None:
                 return
-
-            scelta_raw_visual, _ = scelta_res
-            scelta_raw = scelta_raw_visual.split(" ", 1)[1]
-
-            sub_filter = None
-            if scelta_raw == "Favorites":
-                selected_type = "favorites"
-            elif scelta_raw == "Singles":
-                selected_type = "album"
-                sub_filter = ["single"]
-            elif scelta_raw == "Albums":
-                selected_type = "album"
-                sub_filter = ["album", "ep", "compilation", "live"]
-            else:
-                selected_type = scelta_raw[:-1].lower()
+            selected_type, sub_filter = selected
+            scelta_raw = selected_type
 
             final_url_list = []
+            queue_labels = {}
 
-            def _add_url(url):
+            def _item_label(item, fallback=""):
+                meta = item.get("meta", {}) if isinstance(item, dict) else {}
+                title = meta.get("title") or meta.get("name") or fallback
+                artist = meta.get("artist") or meta.get("owner")
+                return f"{artist} — {title}" if artist and title else str(title)
+
+            def _selection_navigation(selection):
+                """Separa uma ação de navegação dos itens realmente escolhidos."""
+                entries = selection if isinstance(selection, list) else [selection]
+                cleaned = []
+                action = None
+                for entry in entries:
+                    value = entry[0] if isinstance(entry, tuple) else entry
+                    if value == _NAV_HOME or (
+                        isinstance(value, str) and "Menu inicial" in value
+                    ):
+                        action = "home"
+                    elif value == _NAV_ARTIST:
+                        action = action or "artist"
+                    elif value == _NAV_NEW_SEARCH or (
+                        isinstance(value, str) and "Nova pesquisa" in value
+                    ):
+                        action = action or "new"
+                    else:
+                        cleaned.append(entry)
+                return action, cleaned
+
+            def _add_url(url, label=""):
                 """Adiciona uma URL uma única vez à fila interativa."""
                 if url and url not in final_url_list:
                     final_url_list.append(url)
+                if url and label:
+                    queue_labels.setdefault(url, label)
 
             async def _review_queue():
                 """Permite remover itens selecionados antes do download."""
                 if not final_url_list:
                     return
                 labels = [
-                    f"{index + 1:02d}. {url.rsplit('/', 1)[-1]}"
+                    f"{index + 1:02d}. {queue_labels.get(url) or url.rsplit('/', 1)[-1]}"
                     for index, url in enumerate(final_url_list)
                 ]
                 selected = await _tui_select(
@@ -2389,6 +2612,9 @@ class QobuzDL:
                 )
                 if not selected:
                     return
+                navigation_action, selected = _selection_navigation(selected)
+                if navigation_action:
+                    return navigation_action
                 remove_indices = {index for _, index in selected}
                 final_url_list[:] = [
                     url
@@ -2415,6 +2641,13 @@ class QobuzDL:
             session = PromptSession()
 
             while True:
+                if selected_type is None:
+                    selected = await _select_main_type()
+                    if selected is None:
+                        break
+                    selected_type, sub_filter = selected
+                    scelta_raw = selected_type
+
                 selected_fav = None
                 if selected_type == "favorites":
                     fav_types = [
@@ -2424,6 +2657,7 @@ class QobuzDL:
                         "🎤 Artists",
                         "📋 Playlists",
                         "↩ Voltar",
+                        "🏠 Menu inicial",
                     ]
                     fav_res = await _tui_select(
                         "Quais favoritos deseja explorar?",
@@ -2432,13 +2666,23 @@ class QobuzDL:
                         item_category="filter",
                     )
                     if not fav_res:
-                        break
+                        selected_type = None
+                        sub_filter = None
+                        continue
 
                     selected_fav_visual, _ = fav_res
+                    if selected_fav_visual == _NAV_HOME:
+                        selected_type = None
+                        sub_filter = None
+                        continue
+                    if selected_fav_visual == _NAV_NEW_SEARCH:
+                        continue
                     selected_fav_raw = selected_fav_visual.split(" ", 1)[1]
 
-                    if selected_fav_raw == "Voltar":
-                        break
+                    if selected_fav_raw in ("Voltar", "Menu inicial"):
+                        selected_type = None
+                        sub_filter = None
+                        continue
 
                     if selected_fav_raw == "Singles":
                         selected_fav = "albums"
@@ -2495,6 +2739,16 @@ class QobuzDL:
                     if not query.strip():
                         continue
 
+                    # Atalhos textuais são úteis quando o teclado móvel não
+                    # oferece uma tecla Esc acessível durante a pesquisa.
+                    comando_busca = query.strip().casefold()
+                    if comando_busca in {"/menu", ":menu", "menu inicial"}:
+                        selected_type = None
+                        sub_filter = None
+                        continue
+                    if comando_busca in {"/novo", ":novo", "nova pesquisa"}:
+                        continue
+
                     ui.emit(f"\n{YELLOW}Pesquisando por '{query}'...{RESET}")
                     options = await self.search_by_type(
                         query,
@@ -2520,7 +2774,9 @@ class QobuzDL:
                                 ]
                             )
                         )
-                        break
+                        selected_type = None
+                        sub_filter = None
+                        continue
                     await session.prompt_async(
                         FormattedText(
                             [
@@ -2543,8 +2799,19 @@ class QobuzDL:
                 )
 
                 if selected_items:
+                    navigation_action, selected_items = _selection_navigation(
+                        selected_items
+                    )
+                    if navigation_action == "home":
+                        selected_type = None
+                        sub_filter = None
+                        continue
+                    if navigation_action == "new":
+                        continue
+                    if not selected_items:
+                        continue
                     if display_cat == "artist":
-                        selected_items = [selected_items]
+                        selected_items = [selected_items[0]]
 
                     if len(selected_items) > 0:
                         if display_cat == "artist":
@@ -2555,7 +2822,8 @@ class QobuzDL:
                                     "📀 Explorar Singles",
                                     "🔥 Explorar Top Tracks",
                                     "📥 Baixar Toda a Discografia",
-                                    "↩ Voltar",
+                                    "↩ Voltar aos resultados de artistas",
+                                    "🏠 Menu inicial",
                                 ],
                                 is_multi=False,
                                 item_category="filter",
@@ -2565,9 +2833,22 @@ class QobuzDL:
                                 continue
                             action, _ = action_res
 
-                            if "Voltar" in action:
+                            if action == _NAV_HOME:
+                                selected_type = None
+                                sub_filter = None
+                                continue
+                            if action == _NAV_NEW_SEARCH:
+                                continue
+                            if action == _NAV_ARTIST:
+                                continue
+                            if "Voltar aos resultados" in action:
+                                continue
+                            if "Menu inicial" in action:
+                                selected_type = None
+                                sub_filter = None
                                 continue
 
+                            navigation_action = None
                             for item in selected_items:
                                 art_id = item[0]["meta"]["id"]
                                 art_name = item[0]["meta"]["name"]
@@ -2619,8 +2900,15 @@ class QobuzDL:
                                         item_category="track",
                                     )
                                     if track_selected:
+                                        track_nav, track_selected = (
+                                            _selection_navigation(track_selected)
+                                        )
+                                        navigation_action = track_nav
                                         for track_item, _ in track_selected:
-                                            _add_url(track_item["url"])
+                                            _add_url(
+                                                track_item["url"],
+                                                _item_label(track_item),
+                                            )
 
                                 elif "Discografia" in action:
                                     logger.info(
@@ -2633,7 +2921,13 @@ class QobuzDL:
                                         for a in chunk.get("albums", {}).get(
                                             "items", []
                                         ):
-                                            _add_url(f"{WEB_URL}album/{a.get('id')}")
+                                            album_title = a.get("title") or a.get(
+                                                "name", "Álbum"
+                                            )
+                                            _add_url(
+                                                f"{WEB_URL}album/{a.get('id')}",
+                                                f"{art_name} — {album_title}",
+                                            )
                                     added_count = len(final_url_list) - before_count
                                     if not await _confirm_large_discography(
                                         art_name, added_count
@@ -2666,9 +2960,26 @@ class QobuzDL:
 
                                     art_options = []
                                     for a in content:
-                                        meta_data = self._extract_rich_metadata(
-                                            a, "album", {"requires_extra": True}
-                                        )
+                                        try:
+                                            meta_data = self._extract_rich_metadata(
+                                                a,
+                                                "album",
+                                                {"requires_extra": True},
+                                                ref_artist=art_name,
+                                                show_role="Singles" in action,
+                                            )
+                                        except TypeError as exc:
+                                            if "unexpected keyword argument" not in str(
+                                                exc
+                                            ):
+                                                raise
+                                            # Compatibilidade com integrações que
+                                            # sobrescrevem o extrator antigo.
+                                            meta_data = self._extract_rich_metadata(
+                                                a,
+                                                "album",
+                                                {"requires_extra": True},
+                                            )
                                         if (
                                             meta_data["type"].lower()
                                             not in allowed_filter
@@ -2676,6 +2987,11 @@ class QobuzDL:
                                             continue
                                         if meta_data["artist"] == "Unknown":
                                             meta_data["artist"] = art_name
+                                            if "Singles" in action and meta_data.get(
+                                                "show_role"
+                                            ):
+                                                meta_data["role"] = "Principal"
+                                                meta_data["role_full"] = "Principal"
                                         url = f"{WEB_URL}album/{a.get('id')}"
                                         art_options.append(
                                             {"meta": meta_data, "url": url}
@@ -2689,31 +3005,61 @@ class QobuzDL:
                                             item_category="album",
                                         )
                                         if art_selected:
+                                            art_nav, art_selected = (
+                                                _selection_navigation(art_selected)
+                                            )
+                                            navigation_action = art_nav
                                             for album_item, _ in art_selected:
-                                                _add_url(album_item["url"])
+                                                _add_url(
+                                                    album_item["url"],
+                                                    _item_label(album_item, art_name),
+                                                )
                                     else:
                                         logger.info(
                                             f"{YELLOW}Nenhum lançamento desse tipo encontrado.{OFF}"
                                         )
+                            if navigation_action == "home":
+                                selected_type = None
+                                sub_filter = None
+                                continue
+                            if navigation_action == "new":
+                                continue
+                            if navigation_action == "artist":
+                                continue
                         else:
                             for selected_item, _ in selected_items:
-                                _add_url(selected_item["url"])
+                                _add_url(
+                                    selected_item["url"],
+                                    _item_label(selected_item),
+                                )
 
                         yn_res = await _tui_select(
                             "Itens adicionados à fila. Deseja buscar mais?",
-                            ["✅ Sim", "❌ Não"],
+                            ["✅ Sim", "🏠 Menu inicial", "❌ Não"],
                             is_multi=False,
                             item_category="filter",
                         )
                         if not yn_res:
                             break
                         y_n, _ = yn_res
+                        if y_n == _NAV_HOME:
+                            selected_type = None
+                            sub_filter = None
+                            continue
+                        if y_n == _NAV_NEW_SEARCH:
+                            continue
+                        if "Menu inicial" in y_n:
+                            selected_type = None
+                            sub_filter = None
+                            continue
                         if "Não" in y_n:
                             break
                 else:
                     logger.info(f"{YELLOW}Ok, vamos tentar de novo...{RESET}")
                     if selected_type == "favorites":
-                        break
+                        selected_type = None
+                        sub_filter = None
+                        continue
                     continue
 
             if final_url_list and download:
@@ -2738,8 +3084,12 @@ class QobuzDL:
                     )
                     if not queue_action or "Cancelar" in queue_action[0]:
                         return
+                    if queue_action[0] in (_NAV_HOME, _NAV_NEW_SEARCH):
+                        return final_url_list
                     if "Remover" in queue_action[0]:
-                        await _review_queue()
+                        review_action = await _review_queue()
+                        if review_action:
+                            return final_url_list
                         continue
                     break
 

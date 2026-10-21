@@ -50,9 +50,23 @@ qobuz-dl dl "https://play.qobuz.com/album/..." --no-check-storage
 ```
 
 No modo interativo, itens repetidos são removidos automaticamente da fila.
+O fluxo é rotativo: depois de adicionar resultados, `✅ Sim` inicia uma nova
+pesquisa, `🏠 Menu inicial` permite escolher outra categoria sem perder a fila
+e `❌ Não` leva à revisão final. Os submenus de favoritos e artistas também
+oferecem retorno ao menu inicial; durante a pesquisa, `/menu` (ou `:menu`) faz
+o mesmo e `/novo` começa outra busca na categoria atual. Dentro de qualquer
+tabela ou cartão, `n` inicia nova pesquisa e `m` volta imediatamente ao menu
+inicial, sem precisar navegar até o fim da lista. Ao explorar um artista, `b`
+volta aos resultados de artistas; assim, o retorno do artista não é confundido
+com o menu inicial.
+
 Antes de iniciar o download, o programa mostra um resumo por tipo e permite
-remover itens selecionados ou cancelar a operação. Discografias com mais de 20
-álbuns também exigem confirmação explícita antes de entrar na fila.
+revisar a fila com nomes de artista/título, remover itens selecionados ou
+cancelar a operação. Em qualquer lista de resultados, use `a` para ordenar
+alfabeticamente (A-Z), `y` para ordenar por ano do mais novo ao mais antigo e
+`Y` para inverter a ordem do ano. Nas listas de faixas, o ano aparece no lugar
+da duração em todos os layouts. Discografias com mais de 20 álbuns também
+exigem confirmação explícita antes de entrar na fila.
 
 Metadados de leitura da API podem ser reutilizados automaticamente por até 12
 horas, reduzindo chamadas repetidas em playlists, discografias e sincronizações.

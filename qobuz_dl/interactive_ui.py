@@ -178,7 +178,7 @@ _MIN_FLEX = {"album": 34, "track": 42, "playlist": 28, "artist": 20}
 # Soma das colunas fixas + separadores " │ " de cada categoria.
 _FIXED_W = {
     "album": 12 + 4 + 6 + 12 + 5 * 3,
-    "track": 12 + 7 + 9 + 5 * 3,
+    "track": 12 + 6 + 9 + 5 * 3,
     "playlist": 6 + 10 + 3 * 3,
     "artist": 15 + 1 * 3,
 }
@@ -220,7 +220,7 @@ def _quality_tier(valor):
     return 2 if taxa <= 96 else 3
 
 
-def _get_table_layout(columns, is_multi, item_category):
+def _get_table_layout(columns, is_multi, item_category, album_role=False):
     """Decide se a tela é larga o bastante pra mostrar uma TABELA ou se deve
     cair no modo "cartão" (mais compacto, usado em telas estreitas/celular).
     A decisão é por categoria: a tabela só aparece quando a coluna de texto
@@ -254,14 +254,21 @@ def _get_table_layout(columns, is_multi, item_category):
         w_tit = int(flex * 0.55)
         w_art = flex - w_tit
         widths = [w_tit, w_art, 12, 4, 6, 12]
-        headers = ["ÁLBUM", "ARTISTA", "TIPO", "ANO", "FAIXAS", "QUALIDADE"]
+        headers = [
+            "ÁLBUM",
+            "ARTISTA",
+            "FUNÇÃO" if album_role else "TIPO",
+            "ANO",
+            "FAIXAS",
+            "QUALIDADE",
+        ]
 
     elif item_category == "track":
         w_tit = int(flex * 0.40)
         w_art = int(flex * 0.30)
         w_alb = flex - w_tit - w_art
-        widths = [w_tit, w_art, w_alb, 12, 7, 9]
-        headers = ["FAIXA", "ARTISTA", "ÁLBUM", "FUNÇÃO", "DURAÇÃO", "QUALIDADE"]
+        widths = [w_tit, w_art, w_alb, 12, 6, 9]
+        headers = ["FAIXA", "ARTISTA", "ÁLBUM", "FUNÇÃO", "ANO", "QUALIDADE"]
 
     elif item_category == "playlist":
         w_nom = int(flex * 0.60)

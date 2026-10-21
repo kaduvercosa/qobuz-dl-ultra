@@ -28,7 +28,7 @@ class TestGetTableLayoutModoEstreito:
 
     @pytest.mark.parametrize(
         "categoria,minimo",
-        [("album", 90), ("track", 92), ("playlist", 60), ("artist", 45)],
+        [("album", 90), ("track", 91), ("playlist", 60), ("artist", 45)],
     )
     def test_limite_de_tabela_por_categoria(self, categoria, minimo):
         assert _get_table_layout(minimo, False, categoria)[0] is True
@@ -85,6 +85,12 @@ class TestGetTableLayoutCategorias:
         _, _, headers, _ = _get_table_layout(120, is_multi=False, item_category="album")
         assert headers == ["ÁLBUM", "ARTISTA", "TIPO", "ANO", "FAIXAS", "QUALIDADE"]
 
+    def test_headers_de_single_podem_mostrar_funcao(self):
+        _, _, headers, _ = _get_table_layout(
+            120, is_multi=False, item_category="album", album_role=True
+        )
+        assert headers[2] == "FUNÇÃO"
+
     def test_headers_da_track_estao_corretos(self):
         _, _, headers, _ = _get_table_layout(120, is_multi=False, item_category="track")
         assert headers == [
@@ -92,7 +98,7 @@ class TestGetTableLayoutCategorias:
             "ARTISTA",
             "ÁLBUM",
             "FUNÇÃO",
-            "DURAÇÃO",
+            "ANO",
             "QUALIDADE",
         ]
 
@@ -113,7 +119,7 @@ class TestGetTableLayoutCategorias:
         # 0 ou negativa; abaixo disso a função devolve o modo cartão.
         for categoria, minimo in (
             ("album", 90),
-            ("track", 92),
+            ("track", 91),
             ("playlist", 60),
             ("artist", 45),
         ):
@@ -194,7 +200,7 @@ class TestColunasCompactasDaTrack:
         _, widths, headers, _ = _get_table_layout(
             120, is_multi=False, item_category="track"
         )
-        # DURAÇÃO (7) e QUALIDADE (9) não podem ser cortados no cabeçalho
+        # ANO (3) e QUALIDADE (9) não podem ser cortados no cabeçalho
         assert widths[4] >= len(headers[4]) and widths[5] >= len(headers[5])
 
 

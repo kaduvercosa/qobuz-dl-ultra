@@ -45,3 +45,9 @@ def test_interactive_define_qualidades():
     assert '"q": 6' in source
     assert '"q": 7' in source
     assert '"q": 27' in source
+
+
+def test_interactive_explica_hierarquia_de_navegacao_do_artista():
+    source = _interactive_source()
+    assert '"↩ Voltar aos resultados de artistas"' in source
+    assert "_NAV_ARTIST" in source

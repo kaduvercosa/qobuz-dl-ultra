@@ -139,6 +139,36 @@ async def test_interactive_deduplica_itens_adicionados_em_buscas_repetidas(monke
     assert result == ["track-url"]
 
 
+async def test_interactive_volta_ao_menu_sem_perder_a_fila(monkeypatch):
+    app = _app()
+    options = [{"meta": {"title": "Track", "id": "1"}, "url": "track-url"}]
+    selections = iter(
+        [
+            ("🎵 Tracks", 0),
+            [(options[0], 0)],
+            ("🏠 Menu inicial", 1),
+            ("🎵 Tracks", 0),
+            [(options[0], 0)],
+            ("❌ Não", 2),
+            ("🎚️ MP3", 0),
+        ]
+    )
+
+    async def tui(*args, **kwargs):
+        return next(selections)
+
+    async def search_by_type(*args, **kwargs):
+        return options
+
+    app.search_by_type = search_by_type
+    monkeypatch.setattr(core, "_tui_select", tui)
+    monkeypatch.setattr(core, "PromptSession", lambda: Prompt(["query", "query"]))
+
+    result = await core.QobuzDL.interactive(app, download=False)
+
+    assert result == ["track-url"]
+
+
 async def test_interactive_artista_discografia(monkeypatch):
     app = _app()
     options = [{"meta": {"name": "Artista", "id": "a1"}, "url": "artist-url"}]
