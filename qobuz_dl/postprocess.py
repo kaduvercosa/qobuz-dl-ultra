@@ -5,8 +5,8 @@ Gera o relatorio de downloads (album/faixa/playlist).
 -- lido e reescrito a cada faixa que termina, sob lock por pasta, pra
 suportar downloads em paralelo sem duplicar/perder entradas. Fica
 escondido de proposito: ninguem deveria abrir esse arquivo na mao,
-so' existe pra alimentar o report.html. report.html e' gerado
-automaticamente junto (ver _save_report), como a "vitrine" visivel pra
+so' existe pra alimentar o report.html. O report.html e' gerado na
+finalizacao do album (ver _save_report), como a "vitrine" visivel pra
 abrir no navegador -- nunca e' lido de volta, entao uma falha ao
 gera-lo nunca derruba o download em si (so' loga e segue).
 """
@@ -15,12 +15,16 @@ import asyncio
 import json
 import logging
 import os
+from contextvars import ContextVar
 from datetime import datetime
 from typing import Any, Callable
 
 logger = logging.getLogger(__name__)
 
 _renderizar_report_html: Callable[[dict[Any, Any]], str] | None
+_render_html_context: ContextVar[bool] = ContextVar(
+    "render_html_context", default=False
+)
 
 try:
     from qobuz_dl.report_viewer import renderizar_html as _renderizar_report_html
@@ -596,7 +600,11 @@ async def finalize_report(
             report["qualidade"]["alvo_atingida"] = qualidade_atingida
 
         _recalc_resumo(report)
-        await asyncio.to_thread(_save_report, path, report)
+        token = _render_html_context.set(True)
+        try:
+            await asyncio.to_thread(_save_report, path, report)
+        finally:
+            _render_html_context.reset(token)
 
 
 # ============================================================================
@@ -769,14 +777,12 @@ def _organizar_report(report: dict) -> dict:
     return organizado
 
 
-def _save_report(path: str, report: dict) -> None:
+def _save_report(path: str, report: dict, render_html: bool | None = None) -> None:
     """
     Escreve .report.json (fonte de verdade oculta, reorganizada numa
-    ordem de campos fixa -- ver `_organizar_report`) e, em seguida,
-    regenera o report.html correspondente na MESMA pasta -- sempre
-    juntos, nessa ordem, e sempre sob o mesmo lock por pasta que ja
-    protege o json (ver `_get_lock`/chamadores), entao os dois nunca
-    ficam dessincronizados mesmo com faixas terminando em paralelo.
+    ordem de campos fixa -- ver `_organizar_report`). O report.html só é
+    regenerado quando `render_html` é verdadeiro, normalmente na finalização
+    do álbum; o JSON continua sendo atualizado a cada faixa para retomada.
 
     O html e' visivel de proposito (e' a "vitrine"); o json fica oculto
     e nunca e' lido de volta -- se a geracao do html falhar por
@@ -787,7 +793,9 @@ def _save_report(path: str, report: dict) -> None:
     organizado = _organizar_report(report)
     _atomic_write_json(path, organizado)
 
-    if _renderizar_report_html is not None:
+    if render_html is None:
+        render_html = _render_html_context.get()
+    if render_html and _renderizar_report_html is not None:
         try:
             html_path = os.path.join(os.path.dirname(path), "report.html")
             tmp_path = f"{html_path}.tmp"

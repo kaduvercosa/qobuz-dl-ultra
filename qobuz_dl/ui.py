@@ -67,6 +67,11 @@ MEDIUM = 90  # iPad retrato, terminal de meia tela
 COMPACT_WIDTH = 72  # abaixo/igual: atalhos e metadados compactos na TUI
 # acima de MEDIUM -> "wide" (desktop, iPad paisagem)
 
+# Override opcional para terminais móveis. ``None`` preserva a detecção automática
+# pela largura; ``compact`` força cartões/atalhos e ``comfortable`` privilegia
+# detalhes mesmo quando o terminal informa poucas colunas.
+_ui_mode = None
+
 LAYOUT_NARROW = "narrow"
 LAYOUT_MEDIUM = "medium"
 LAYOUT_WIDE = "wide"
@@ -111,6 +116,10 @@ def layout():
     # que outras funções decidam como se adaptar (empilhar valor, quebrar
     # linha, etc.).
     """Return the current layout mode ('narrow' or 'wide') based on terminal width."""
+    if _ui_mode == "compact":
+        return LAYOUT_NARROW
+    if _ui_mode == "comfortable":
+        return LAYOUT_WIDE
     cols = raw_width()
     if cols < NARROW:
         return LAYOUT_NARROW
@@ -123,6 +132,15 @@ def is_narrow():
     # Atalho para checagens rápidas de "estou em tela estreita?".
     """Check whether the terminal is below the narrow-layout breakpoint."""
     return layout() == LAYOUT_NARROW
+
+
+def compact_mode(columns=None):
+    """Return whether dense/card rendering should be used."""
+    if _ui_mode == "compact":
+        return True
+    if _ui_mode == "comfortable":
+        return False
+    return (raw_width() if columns is None else columns) <= COMPACT_WIDTH
 
 
 def progress_ncols():
@@ -181,12 +199,12 @@ def unicode_enabled():
     return _unicode_enabled
 
 
-def configure(quiet=None, verbose=None, color=None, unicode=None):
+def configure(quiet=None, verbose=None, color=None, unicode=None, ui_mode=None):
     # Ponto único de ajuste do comportamento global da UI. Chamado uma vez,
     # no boot da CLI, com os valores vindos dos argumentos de linha de
     # comando. Parâmetros None são ignorados (mantêm o valor atual).
     """Configure UI system (color, Unicode, quiet/verbose modes)."""
-    global _quiet, _verbose, _color_enabled, _unicode_enabled
+    global _quiet, _verbose, _color_enabled, _unicode_enabled, _ui_mode
     if quiet is not None:
         _quiet = bool(quiet)
     if verbose is not None:
@@ -195,6 +213,10 @@ def configure(quiet=None, verbose=None, color=None, unicode=None):
         _color_enabled = bool(color)
     if unicode is not None:
         _unicode_enabled = bool(unicode)
+    if ui_mode is not None:
+        if ui_mode not in ("auto", "compact", "comfortable"):
+            raise ValueError(f"modo de UI inválido: {ui_mode}")
+        _ui_mode = None if ui_mode == "auto" else ui_mode
 
 
 def c(code):
@@ -538,6 +560,9 @@ def tagged_lines(kind, message):
             return []
     if state and not state["parallel"] and kind in {"lyrics", "lyrics_note"}:
         message = str(message).replace(tree_last(), tree_mid(), 1)
+    if state and not state["parallel"] and kind == "search":
+        # "Procurando letras" é um filho da faixa, como "Áudio transferido".
+        message = f"{tree_mid()} {message}"
     color, tag = _KINDS[kind]
     return _tagged(color, tag, message)
 
@@ -569,6 +594,9 @@ def progress(message):
 
 
 def search(message):
+    state = _track_view.get()
+    if state and not state["parallel"]:
+        message = f"{tree_mid()} {message}"
     _emit_kind("search", message)
 
 

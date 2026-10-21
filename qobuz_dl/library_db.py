@@ -34,7 +34,7 @@ import sqlite3
 from datetime import datetime, timezone
 from typing import Any, Iterable, Iterator, Optional
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 # Estados possíveis de ``albums.download_status``.
 STATUS_NOT_DOWNLOADED = "not_downloaded"
@@ -85,6 +85,12 @@ class LibraryDB:
         conn = sqlite3.connect(self.path, timeout=30)
         conn.row_factory = sqlite3.Row
         try:
+            conn.execute("PRAGMA busy_timeout=5000")
+            try:
+                conn.execute("PRAGMA journal_mode=WAL")
+                conn.execute("PRAGMA synchronous=NORMAL")
+            except sqlite3.DatabaseError:
+                pass
             with conn:  # commit/rollback automático
                 yield conn
         finally:
@@ -123,6 +129,10 @@ class LibraryDB:
                 );
                 CREATE INDEX IF NOT EXISTS idx_albums_status
                     ON albums (source, download_status);
+                CREATE INDEX IF NOT EXISTS idx_albums_artist_title
+                    ON albums (artist COLLATE NOCASE, title COLLATE NOCASE);
+                CREATE INDEX IF NOT EXISTS idx_albums_removed
+                    ON albums (source, removed_from_service);
                 CREATE TABLE IF NOT EXISTS sync_runs (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     source TEXT NOT NULL,

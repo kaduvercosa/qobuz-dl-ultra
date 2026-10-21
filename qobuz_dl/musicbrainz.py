@@ -21,6 +21,7 @@ import asyncio
 import logging
 import re
 import unicodedata
+from typing import Any
 
 import httpx
 
@@ -293,7 +294,7 @@ def escolher_correspondencia(
     Sem barcode disponível na resposta, preserva apenas a gravação/artistas.
     Título de álbum incompatível continua sendo motivo de rejeição.
     """
-    candidatos = {}
+    candidatos: dict[str, dict[str, Any]] = {}
     for gravacao in gravacoes or []:
         if not isinstance(gravacao, dict) or not gravacao.get("id"):
             continue

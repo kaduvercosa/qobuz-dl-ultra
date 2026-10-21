@@ -479,6 +479,16 @@ class TestUpdateTrackStatus:
 
 
 class TestFinalizeReport:
+    def test_html_so_e_gerado_na_finalizacao(self, pp, tmp_path):
+        asyncio.run(
+            pp.update_track_status(
+                str(tmp_path), numero="01", item_id="t1", titulo="X", status="ok"
+            )
+        )
+        assert not (tmp_path / "report.html").exists()
+        asyncio.run(pp.finalize_report(str(tmp_path), completo=True))
+        assert (tmp_path / "report.html").exists()
+
     def test_estado_completo(self, pp, tmp_path):
         asyncio.run(
             pp.update_track_status(

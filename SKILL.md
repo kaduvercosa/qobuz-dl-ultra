@@ -91,14 +91,16 @@ Tamanhos aproximados em linhas. **“Mexa aqui quando…”** é o atalho para a
 | Módulo | Papel | Mexa aqui quando… |
 | :--- |:--- |:--- |
 | `qopy.py` (~1270) | Cliente **assíncrono** da API (`Client.create`, `api_call`, `get_track_url`), assinatura/criptografia, fallback de qualidade | endpoints, autenticação, parsing de resposta |
+| `metadata_cache.py` | Cache SQLite assíncrono, com TTL e limite, somente para metadados de leitura; nunca guarda token, senha ou URL assinada | repetição de metadados/API |
 | `bundle.py` | Extrai `app_id`/segredos do `bundle.js` do Web Player (baseado em Spoofbuz). Pode quebrar quando o Qobuz muda o site | erro de app_id/secret |
 | `downloader.py` (~3130) | Classe `Download`: álbum/faixa/playlist, fallback de qualidade, download segmentado (bypass Akamai), capa, booklet, letras, nomes de arquivo/pasta. **Ponto de entrada:** `Download(...).download_id_by_type(...)` | fluxo de download |
 | `download_utils.py` | Funções puras extraídas do `downloader.py` (quebra em módulos menores em andamento) | helper de download testável |
-| `http_download.py` (~650) | Download HTTP **retomável e verificado** (capas, PDFs, áudio). Não toca no caminho segmentado/criptografado | corte de conexão, `Content-Length`, SSL |
+| `http_download.py` (~650) | Download HTTP **retomável e verificado** (capas, PDFs, áudio). O áudio direto passa por `.part`, `Range`, `fsync` e promoção atômica; não toca no caminho segmentado/criptografado | corte de conexão, `Content-Length`, SSL |
 | `fileio.py` | Escrita **atômica**, checksums, limpeza de temporários | gravar arquivo sem risco de ficar pela metade |
 | `track_identity.py` | Identidade de faixa por **ID Qobuz** (não por nome): evita colisão artista+título em playlists planas | nomes duplicados em playlist |
-| `core.py` (~2875) | “Motor”: TUI de seleção em tela cheia + classe `QobuzDL` (`handle_url`, `interactive`, busca, lotes, Last.fm, playlists) | modo interativo, orquestração |
+| `core.py` (~2875) | “Motor”: TUI de seleção em tela cheia + classe `QobuzDL` (`handle_url`, `interactive`, busca, lotes, Last.fm, playlists); o modo compacto usa `ui.compact_mode()` | modo interativo, orquestração |
 | `interactive_ui.py` | Tema e helpers **puros** de layout da TUI (`_shade`, `_align_text`, `_get_table_layout`) | tabela/colunas do interativo |
+| `storage.py` | Estimativa conservadora de tamanho e pré-verificação de espaço livre (`--check-storage`) | downloads em celular/iPad/NAS |
 | `search_prompt.py` | Tela “NOVA PESQUISA” (campo dentro de caixa arredondada) | tela de busca |
 | `playlist_import.py` | Lê TXT/CSV/JSON de qualquer plataforma → `{artist,title}` → fuzzy match com Qobuz | importar playlist |
 | `sync_playlist.py` | Sincronização bidirecional playlist Qobuz ⇄ pasta local (+ `.m3u`) | `sync-playlist` |
@@ -117,14 +119,14 @@ Tamanhos aproximados em linhas. **“Mexa aqui quando…”** é o atalho para a
 ### 3.4 Biblioteca local, banco e relatórios
 | Módulo | Papel | Mexa aqui quando… |
 |:--- |:--- |:--- |
-| `db.py` | `qobuz_dl.db`, tabela `downloads` (PK `(id, quality)`), com migração | dedup de downloads |
-| `library_db.py` | `library.db`: tabelas `albums` + `sync_runs` (favoritos + estado local) | catálogo local |
+| `db.py` | `qobuz_dl.db`, tabela `downloads` (PK `(id, quality)`), com migração, backup pré-migração, busy timeout, WAL oportunista e índices | dedup de downloads |
+| `library_db.py` | `library.db`: tabelas `albums` + `sync_runs` (favoritos + estado local), WAL/busy timeout e índices de catálogo | catálogo local |
 | `library_scan.py` (~820) | `scan`: casa pastas do disco com o catálogo (auto / revisar / sem-match) | casamento pasta ↔ álbum |
 | `favorites_sync.py` | `sync-favorites`: conta Qobuz ⇄ catálogo local (diff, histórico, baixar o que falta) | favoritos |
 | `library_cmd.py` | Terminal dos comandos `sync-favorites`, `scan`, `library` (cada `cmd_*` devolve **código de saída**, não chama `sys.exit`) | UX desses comandos |
 | `sentinel.py` | Sentinela por álbum **`.streamrip.json`** (nome herdado do libsync de propósito): dedup pelo sistema de arquivos | dedup por pasta |
 | `sync.py` | `--sync-db` (reconstrói o banco varrendo a biblioteca) e `--find-duplicates` (fingerprint Chromaprint/AcoustID) | reconstruir banco / duplicatas |
-| `postprocess.py` | Relatório de downloads: **`.report.json` oculto** (fonte da verdade, sob lock por pasta), `collection_index.jsonl`, `Tracklist.txt` | relatório pós-download |
+| `postprocess.py` | Relatório de downloads: **`.report.json` oculto** (fonte da verdade, sob lock por pasta), `report.html` gerado na finalização, `collection_index.jsonl`, `Tracklist.txt` | relatório pós-download |
 | `report_viewer.py` | Gera página HTML autônoma (estética “Nothing”) a partir do `.report.json` | visual do relatório |
 | `watcher.py` | `--watch`: retro-tagging automático quando aparecem arquivos novos (lib `watchdog`) | modo vigia |
 | `inspector.py` (~1450) | `inspect`: navegador de arquivos em tela cheia, relatório em seções (técnico, tags por assunto, capas, letras, diagnóstico, ffmpeg, autenticidade/gráfico espectral), `--resumo` de pasta, `--json` e `--comparar` (simula o `tags` numa cópia) | inspeção de áudio |
@@ -163,14 +165,14 @@ Definidos em `commands.py`, roteados em `cli.py::_handle_commands`. `DOWNLOAD_CO
 | `user` | — | Mostra informações do usuário e status da assinatura |
 | `doctor` | `check` | Saúde do ambiente |
 
-**Flags globais** (sem subcomando): `-r/--reset`, `-p/--purge`, `--sync-db [PATH]`, `--find-duplicates [PATH]`, `--watch [PATH]`, `-sc/--show-config`, mais `add_output_args` (saída/cores/progresso).
+**Flags globais** (sem subcomando): `-r/--reset`, `-p/--purge`, `--sync-db [PATH]`, `--find-duplicates [PATH]`, `--watch [PATH]`, `-sc/--show-config`, mais `add_output_args` (saída/cores/progresso). Os downloads aceitam `--ui auto|compact|comfortable` e `--check-storage`.
 
 ---
 
 ## 5. Fluxos principais
 
 ### 5.1 Download (`dl`)
-`cli.async_main` → lê config.ini + token (keyring/config) → `QobuzDLSettings` → `core.QobuzDL.handle_url` → `downloader.Download.download_id_by_type` → URL de stream (`qopy.get_track_url`, com fallback de qualidade) → `http_download` (ou segmentado) → `metadata.tag_flac/tag_mp3` → capa/booklet/letras → `postprocess` (`.report.json`, sentinela, `.m3u`, banco `downloads`).
+`cli.async_main` → lê config.ini + token (keyring/config) → `QobuzDLSettings` → `core.QobuzDL.handle_url` → `downloader.Download.download_id_by_type` → URL de stream (`qopy.get_track_url`, com fallback de qualidade) → `http_download` atômico/retomável (ou segmentado) → `metadata.tag_flac/tag_mp3` → capa/booklet/letras → `postprocess` (`.report.json`, sentinela, `.m3u`, banco `downloads`).
 
 ### 5.2 Tags retroativas (`tags`)
 `retro_tags.py`: varre arquivos → lê IDs Qobuz das tags → busca metadados atuais → compara e grava (mostra **diff por arquivo**) → opcionalmente busca capa Apple/iTunes validada (`utils.get_apple_hq_cover` + validação por correspondência de texto) e registra `Capa: Apple/iTunes` no comentário. Se a Apple não validar, a capa embutida é **preservada**.
@@ -195,9 +197,9 @@ Definidos em `commands.py`, roteados em `cli.py::_handle_commands`. `DOWNLOAD_CO
 
 **Arquivos gerados dentro da música baixada:** `.report.json` (oculto), `.streamrip.json` (sentinela), `collection_index.jsonl`, `Tracklist.txt`, `.m3u`, `.lrc`, `cover.jpg`/booklet.
 
-**Variáveis de ambiente lidas:** `CONFIG_DIR`, `QOBUZ_DL_IOS_HOME`, `NO_COLOR`, `FORCE_COLOR`, `COLUMNS`, `TERM`, `SSL_CERT_FILE`, `SSL_CERT_DIR`, `APPDIR` (a-Shell: procura ffmpeg em `$APPDIR/bin`), `QOBUZ_DL_STARTUP_TIMING`, e as de plataforma (`APPDATA`, `ANDROID_*`, `HOME`).
+**Variáveis de ambiente lidas:** `CONFIG_DIR`, `QOBUZ_DL_IOS_HOME`, `NO_COLOR`, `FORCE_COLOR`, `COLUMNS`, `TERM`, `SSL_CERT_FILE`, `SSL_CERT_DIR`, `APPDIR` (a-Shell: procura ffmpeg em `$APPDIR/bin`), `QOBUZ_DL_STARTUP_TIMING`, `QOBUZ_API_RATE_LIMIT`, `QOBUZ_API_RATE_PERIOD`, e as de plataforma (`APPDATA`, `ANDROID_*`, `HOME`).
 
-**Opções de config relevantes (leitura em `settings.py`):** `directory`, `write_sentinel`, `no_lrc_files`, `embed_lyrics`, `fetch_translation`, `only_synced_lyrics`, `lyrics_word_sync`, `artists_with_comma` (lista com `;`), `multi_value_tags`, além das de formato/qualidade/capa descritas no README. Precedência: **flag da CLI > config.ini > padrão**.
+**Opções de config relevantes (leitura em `settings.py`):** `directory`, `write_sentinel`, `no_lrc_files`, `embed_lyrics`, `fetch_translation`, `only_synced_lyrics`, `lyrics_word_sync`, `artists_with_comma` (lista com `;`), `multi_value_tags`, `progress_json`, `check_storage`, além das de formato/qualidade/capa descritas no README. Precedência: **flag da CLI > config.ini > padrão**.
 
 ---
 
@@ -242,7 +244,7 @@ Definidos em `commands.py`, roteados em `cli.py::_handle_commands`. `DOWNLOAD_CO
 
 **Fonte única de dependências = `pyproject.toml`.** Depois de mudar dependências: `python tools/gerar_requirements.py` (atualiza `requirements.txt`). O Docker instala direto do pyproject (extras `speed,covers,watch,genius,analyze`).
 
-**Extras:** `speed` (rapidfuzz, brotli), `covers` (Pillow), `watch` (watchdog), `duplicates` (pyacoustid), `genius`, `analyze` (numpy), `all`, `dev`, `dev-full`.
+**Extras:** `speed` (rapidfuzz, brotli), `covers` (Pillow), `watch` (watchdog), `duplicates` (pyacoustid), `genius`, `analyze` (numpy), `enhanced` (aiolimiter), `all`, `dev`, `dev-full` (inclui `respx` para testes HTTPX). O extra `enhanced` é opcional: aiolimiter limita chamadas da API; o renderer próprio da UI continua ativo e responsivo, com fallback completo sem o extra. O cache de metadados usa `aiosqlite`, já presente no núcleo, e não adiciona dependência runtime.
 
 **Subir versão:** editar `qobuz_dl/__version__`; o commit costuma ser `Bump version to X.Y.Z`.
 
@@ -263,6 +265,12 @@ Definidos em `commands.py`, roteados em `cli.py::_handle_commands`. `DOWNLOAD_CO
 | **Pasta da biblioteca** | Ao trocar, testar leitura/escrita; criar se não existir, independentemente de onde o programa está instalado (`paths.py`) |
 | **Sentinela `.streamrip.json`** | Nome mantido por compatibilidade com libsync/streamrip |
 | **Portabilidade a-Shell** | Sem dependência compilada no núcleo; `fuzzy.py` cai para `difflib`; Pillow sem piso de versão |
+| **UI entre dispositivos** | `--ui auto` é o padrão; `--ui compact` força cartões e rodapé curto; `--ui comfortable` privilegia detalhes. A decisão passa por `ui.compact_mode()` para TUI e renderizadores não divergirem |
+| **Fila interativa** | URLs repetidas são deduplicadas; antes do download há resumo por tipo, remoção seletiva e cancelamento; discografias acima de 20 álbuns pedem confirmação; submenus de favoritos/artistas têm `↩ Voltar` |
+| **Espaço em disco** | A checagem é automática e usa duração/qualidade com margem conservadora; `--no-check-storage` desliga. Quando a API não fornece duração, não inventa uma estimativa nem bloqueia o download |
+| **Cache de metadados** | Ativo por padrão por 12 h e 512 entradas; somente endpoints de leitura, com fallback silencioso e exclusão de tokens/assinaturas. Desligar com `QOBUZ_DL_DISABLE_METADATA_CACHE=1` |
+| **Relatório HTML** | `.report.json` é incremental; `report.html` só é gerado ao finalizar o álbum, reduzindo I/O no iPad |
+| **SQLite** | WAL é tentado, mas falhas de volume/FS não impedem a execução; migrações criam `.bak` antes da alteração quando possível |
 
 ---
 
@@ -304,7 +312,12 @@ Mais recente primeiro. Uma linha por alteração pedida.
 
 | Data | Alteração | Arquivos principais |
 | :--- |:--- |:--- |
+| 2026-10-20 | Extra opcional `enhanced` adicionado com aiolimiter para limitar chamadas assíncronas da API por event loop, configurável por `QOBUZ_API_RATE_LIMIT` e `QOBUZ_API_RATE_PERIOD`; renderer próprio da UI foi preservado para manter o layout responsivo do a-Shell | `pyproject.toml`, `qobuz_dl/qopy.py`, `tests/unit/test_qopy_api_call.py`, `README.md`, `SKILL.md` |
+| 2026-10-21 | Relatório HTML passou a ser gerado somente na finalização; cache SQLite assíncrono e limitado foi adicionado apenas para metadados de leitura; bancos receberam busy timeout, WAL oportunista, índices e backup pré-migração; RESPX entrou somente no extra de desenvolvimento | `qobuz_dl/postprocess.py`, `qobuz_dl/metadata_cache.py`, `qobuz_dl/qopy.py`, `qobuz_dl/db.py`, `qobuz_dl/library_db.py`, `pyproject.toml`, `tests/`, `README.md`, `SKILL.md` |
+| 2026-10-21 | Fluxo interativo refinado: fila sem duplicatas, resumo e revisão antes do download, confirmação para discografias grandes, opções de retorno nos submenus e rótulo de qualidade corrigido | `qobuz_dl/core.py`, `tests/unit/test_core_interactive_paths.py`, `README.md`, `SKILL.md` |
+| 2026-10-20 | Fluxo direto de áudio passou a usar o transporte HTTP atômico e retomável existente: `.part`, validação de tamanho, `Range`, `fsync` e promoção final; 416 sem `Content-Range` agora usa o tamanho observado da mesma tentativa | `qobuz_dl/downloader.py`, `qobuz_dl/http_download.py`, `README.md`, `SKILL.md` |
 | 2026-10-18 | Revisão geral: README e SKILL.md voltaram a ter `—` no lugar de `--` (13 flags no README, 25 no SKILL.md), 16 réguas `—` e o front-matter quebrado (Pontuação Inteligente do iPad); corrigidos e criado teste-guarda `test_docs_sem_pontuacao_inteligente.py`. `qobuz_dl/pyproject.toml` duplicado removido de fato (estava versionado apesar de registrado como removido). Versão e caminho do teste de loop corrigidos no SKILL.md | `README.md`, `SKILL.md`, `qobuz_dl/pyproject.toml`, `tests/regression/` |
+| 2026-10-20 | UI responsiva ganhou modo explícito `--ui auto|compact|comfortable`, centralizado em `ui.py` e usado também pela TUI; downloads passaram a verificar espaço automaticamente, com `--no-check-storage` como opt-out; estimativa conservadora por duração/qualidade antes de criar o álbum; testes unitários e documentação adicionados | `qobuz_dl/ui.py`, `qobuz_dl/core.py`, `qobuz_dl/storage.py`, `qobuz_dl/downloader.py`, `qobuz_dl/commands.py`, `qobuz_dl/settings.py`, `tests/`, `README.md` |
 | 2026-10-18 | Event loop: o que restava de I/O pesado síncrono em funções `async` foi para thread — `sync.py` (varredura + leitura de tags de `sync_database`: novos `_list_audio_files`/`_read_local_tags`; `find_duplicate_tracks`), `sync_playlist` (`_scan_local_tracks`, `_clean_empty_dirs`), `favorites_sync` (`lookup_saved_path`), `retro_tags` (`find_audio_files`), `downloader` (`_clean_embed_art`, `copyfile` da capa; espera de 1,5 s após CTRL+C virou `asyncio.sleep`), `inspector` (`copy2`), `library_cmd` (`scan --json`) e a pausa de `_reset_config`. **`shutil.rmtree` em thread TRAVA no a-Shell/iOS** (travou o primeiro teste de `tags --dry-run`; confirmado com um script isolado, enquanto `copyfile` e `copy2` em thread funcionam): o `rmtree` do dry-run ficou síncrono, em `PERMITIDOS` do guarda, e um teste proíbe `rmtree` dentro de `to_thread`. Novo teste-guarda por AST (`tests/unit/test_sem_bloqueio_pesado_no_loop.py`) falha se uma `async def` chamar direto mutagen, `os.walk`, `time.sleep`, `subprocess`, `shutil.copy*/rmtree`, `sqlite3` ou os auxiliares de disco do projeto | `qobuz_dl/{sync,sync_playlist,favorites_sync,retro_tags,downloader,inspector,library_cmd,cli}.py`, `tests/unit/test_sem_bloqueio_pesado_no_loop.py` |
 | 2026-10-18 | Letras retroativas em paralelo (opcional): `lyrics --max-workers N` (ou `max_workers` do `config.ini`) processa até **4** arquivos ao mesmo tempo (teto `_MAX_LYRICS_WORKERS`); o padrão continua sequencial. O corpo do laço virou `_processar_arquivo` e cada arquivo grava numa lista própria, então o relatório final sai sempre na ordem dos arquivos; falha ou CTRL+C cancela as outras tarefas antes de fechar a engine. Auditoria do `LyricsEngine`: o único estado compartilhado é `_mxm_token` (condição de corrida inofensiva) e o cliente HTTP síncrono (thread-safe); cada arquivo grava só o próprio `.lrc`/tags. README: documentado o `--max-workers` e aspas curvas dentro de blocos de código trocadas por retas; testes novos | `qobuz_dl/retro_tagger.py`, `qobuz_dl/commands.py`, `qobuz_dl/cli.py`, `README.md`, `tests/unit/test_retro_tagger_paralelo.py` |
 | 2026-10-18 | Event loop livre de I/O síncrono: `postprocess` lê/grava `.report.json` + `report.html` em `asyncio.to_thread` (o lock por pasta continua serializando); `retro_tagger.process_retroactive_lyrics_async` roda `os.walk`, leitura de tags (novos `_collect_audio_files`/`_read_basic_tags`), `extract_track_id`, `inspect_existing_lyrics` e `engine.fetch_and_inject` (cliente HTTP **síncrono**) em thread, mantendo o processamento sequencial; testes novos | `qobuz_dl/postprocess.py`, `qobuz_dl/retro_tagger.py`, `tests/regression/test_loop_nao_bloqueia.py` |

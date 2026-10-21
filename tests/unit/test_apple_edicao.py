@@ -121,3 +121,43 @@ async def test_capa_da_edicao_certa(album, esperada):
     )
     assert url is not None, motivo
     assert f"/{esperada}/" in url
+
+
+class _ClientSoDeluxe(_Client):
+    """Apple falsa que só conhece a edição Deluxe (a padrão não existe)."""
+
+    async def get(self, url, params=None, headers=None, timeout=None):
+        if "lookup?upc" in url or "lookup?isrc" in url:
+            return _Resp({"results": []})
+        if params and params.get("entity") == "album":
+            return _Resp({"results": [DLX]})
+        return _Resp({"results": []})
+
+
+async def test_edicao_estrita_nao_presume_deluxe_para_album_padrao():
+    # Pedido padrão + só Deluxe na Apple: sem presumir, não há capa (quem
+    # chama mantém a atual) em vez de gravar a capa da Deluxe.
+    url, _fonte, _motivo = await get_apple_hq_cover(
+        session=_ClientSoDeluxe(),
+        artist="Selena Gomez",
+        album="Rare",
+        release_kind="full",
+        strict_edition=True,
+    )
+    assert url is None
+
+
+@pytest.mark.parametrize(
+    "album,esperada",
+    [("Rare", "STD"), ("Rare (Explicit)", "STD"), ("Rare (Deluxe)", "DLX")],
+)
+async def test_edicao_estrita_continua_achando_a_edicao_certa(album, esperada):
+    url, _fonte, motivo = await get_apple_hq_cover(
+        session=_Client(),
+        artist="Selena Gomez",
+        album=album,
+        release_kind="full",
+        strict_edition=True,
+    )
+    assert url is not None, motivo
+    assert f"/{esperada}/" in url

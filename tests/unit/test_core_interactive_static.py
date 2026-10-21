@@ -25,6 +25,7 @@ def test_interactive_mantem_menu_de_tipos():
     assert '"🎤 Artists"' in source
     assert '"📋 Playlists"' in source
     assert '"⭐ Favorites"' in source
+    assert "Sync Favorites" not in source
 
 
 def test_interactive_trata_cancelamento_do_tui():

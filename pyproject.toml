@@ -78,8 +78,11 @@ genius = [
 analyze = [
     "numpy",
 ]
+enhanced = [
+    "aiolimiter>=1.2",
+]
 all = [
-    "qobuz-dl-ultra[speed,covers,watch,duplicates,genius,analyze,dev-full]",
+    "qobuz-dl-ultra[speed,covers,watch,duplicates,genius,analyze,enhanced,dev-full]",
 ]
 dev = [
     "pytest>=8",
@@ -94,6 +97,7 @@ dev-full = [
     "ruff>=0.6",
     "mypy>=1.11",
     "mypy-baseline>=0.7",
+    "respx>=0.23,<0.24",
 ]
 [project.urls]
 Homepage = "https://github.com/kaduvercosa/qobuz-dl-ultra"

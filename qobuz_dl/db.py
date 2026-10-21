@@ -2,6 +2,7 @@ import asyncio
 import contextlib
 import logging
 import os
+import shutil
 import sqlite3
 
 import aiosqlite
@@ -18,6 +19,33 @@ from qobuz_dl.color import WARNING as YELLOW
 logger = logging.getLogger(__name__)
 
 SQLITE_TIMEOUT_SECONDS = 30
+
+
+def _configure_connection(conn: sqlite3.Connection) -> None:
+    """Configura concorrência sem exigir WAL em volumes que não suportam."""
+    conn.execute("PRAGMA busy_timeout=5000")
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
+    except sqlite3.DatabaseError:
+        logger.debug("WAL indisponível para a conexão SQLite")
+
+
+def _backup_before_migration(db_path: str) -> None:
+    """Cria cópia atômica do banco antes de uma alteração de schema."""
+    if not os.path.exists(db_path):
+        return
+    backup = f"{db_path}.bak"
+    temporary = f"{backup}.tmp"
+    try:
+        shutil.copy2(db_path, temporary)
+        os.replace(temporary, backup)
+    except OSError as exc:
+        try:
+            os.remove(temporary)
+        except OSError:
+            pass
+        logger.warning("Backup pré-migração não criado: %s", exc)
 
 
 def create_db(db_path):
@@ -42,6 +70,7 @@ def create_db(db_path):
         ) as conn,
         conn,
     ):
+        _configure_connection(conn)
         cursor = conn.cursor()
 
         # PASSO 1: verifica se a tabela "downloads" ja existe no banco
@@ -57,6 +86,7 @@ def create_db(db_path):
             # MIGRACAO LEGADA (v1 -> v2): banco antigo so tinha coluna "id",
             # sem quality/file_format/etc. Se "quality" nao existe, e' banco v1.
             if "quality" not in columns:
+                _backup_before_migration(db_path)
                 logger.info(f"{YELLOW}Migrating old database to the new format...{OFF}")
 
                 conn.execute("SAVEPOINT migrate_v1")
@@ -110,6 +140,7 @@ def create_db(db_path):
             # ALTER TABLE ADD COLUMN aqui em vez de recriar a tabela toda,
             # porque so' precisa adicionar 2 colunas, sem quebrar nada existente.
             elif "artist" not in columns or "album" not in columns:
+                _backup_before_migration(db_path)
                 logger.info(
                     f"{YELLOW}Upgrading database schema: Adding artist and album columns...{OFF}"
                 )
@@ -152,6 +183,19 @@ def create_db(db_path):
             except sqlite3.OperationalError:
                 # ja existe (corrida entre processos, por exemplo) -> ignora
                 pass
+
+        try:
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_downloads_status ON downloads(status)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_downloads_artist ON downloads(artist)"
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_downloads_album ON downloads(album)"
+            )
+        except sqlite3.Error as exc:
+            logger.debug("Índices do banco ainda não puderam ser criados: %s", exc)
 
         return db_path
 
@@ -212,6 +256,12 @@ async def handle_download_id(
     # Chave PRIMARY KEY e' (id, quality) -> mesmo item_id pode existir
     # varias vezes com qualidades diferentes (ex: baixou em MP3 e depois em Hi-Res)
     async with aiosqlite.connect(db_path, timeout=SQLITE_TIMEOUT_SECONDS) as conn:
+        try:
+            await conn.execute("PRAGMA busy_timeout=5000")
+            await conn.execute("PRAGMA journal_mode=WAL")
+            await conn.execute("PRAGMA synchronous=NORMAL")
+        except sqlite3.DatabaseError:
+            logger.debug("WAL indisponível para a conexão assíncrona")
         if add_id:
             # MODO INSERT: grava um novo download concluido
             try:
@@ -310,6 +360,7 @@ def get_stats(db_path):
             ) as conn,
             conn,
         ):
+            _configure_connection(conn)
             c = conn.cursor()
 
             # --- totais gerais ---

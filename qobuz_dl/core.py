@@ -376,7 +376,7 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
         table_columns = max(32, columns - 2)
         # Em terminais estreitos (celulares), reduzir os detalhes do item
         # focado e do rodapé para preservar a área útil da lista.
-        compact_mobile = columns <= 72
+        compact_mobile = ui.compact_mode(columns)
 
         is_table, widths, headers, borders = _get_table_layout(
             table_columns, is_multi, item_category
@@ -1062,7 +1062,7 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
         )
         res = []
 
-        compact_mobile = columns <= 72
+        compact_mobile = ui.compact_mode(columns)
         if options_dicts:
             if compact_mobile and is_multi:
                 # Contador curto e estável em telas estreitas.
@@ -1183,7 +1183,7 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
             columns = get_app().output.get_size().columns
         except Exception:
             columns, _ = shutil.get_terminal_size((80, 24))
-        return Dimension.exact(2 if columns <= 72 else _FOOTER_LINES)
+        return Dimension.exact(2 if ui.compact_mode(columns) else _FOOTER_LINES)
 
     footer_window = Window(
         content=FormattedTextControl(text=get_footer_text),
@@ -2328,7 +2328,7 @@ class QobuzDL:
         qualities = [
             {"q_string": "320", "q": 5},
             {"q_string": "Lossless", "q": 6},
-            {"q_string": "Hi-res =< 96kHz", "q": 7},
+            {"q_string": "Hi-res <= 96 kHz", "q": 7},
             {"q_string": "Hi-Res > 96 kHz", "q": 27},
         ]
 
@@ -2340,7 +2340,6 @@ class QobuzDL:
                 "🎤 Artists",
                 "📋 Playlists",
                 "⭐ Favorites",
-                "🔄 Sync Favorites (Catálogo Local)",
             ]
 
             scelta_res = await _tui_select(
@@ -2355,22 +2354,6 @@ class QobuzDL:
             scelta_raw_visual, _ = scelta_res
             scelta_raw = scelta_raw_visual.split(" ", 1)[1]
 
-            if "Sync Favorites" in scelta_raw_visual:
-                from qobuz_dl.library_cmd import cmd_sync_favorites
-
-                class _Args:
-                    """Default arguments for favorites sync launched from the TUI."""
-
-                    download_new = False
-                    download_missing = False
-                    dry_run = False
-                    yes = False
-                    every = None
-                    limit = getattr(self, "interactive_limit", 50)
-
-                await cmd_sync_favorites(_Args(), self)
-                return
-
             sub_filter = None
             if scelta_raw == "Favorites":
                 selected_type = "favorites"
@@ -2384,6 +2367,51 @@ class QobuzDL:
                 selected_type = scelta_raw[:-1].lower()
 
             final_url_list = []
+
+            def _add_url(url):
+                """Adiciona uma URL uma única vez à fila interativa."""
+                if url and url not in final_url_list:
+                    final_url_list.append(url)
+
+            async def _review_queue():
+                """Permite remover itens selecionados antes do download."""
+                if not final_url_list:
+                    return
+                labels = [
+                    f"{index + 1:02d}. {url.rsplit('/', 1)[-1]}"
+                    for index, url in enumerate(final_url_list)
+                ]
+                selected = await _tui_select(
+                    "Selecione os itens que deseja remover",
+                    labels,
+                    is_multi=True,
+                    item_category="filter",
+                )
+                if not selected:
+                    return
+                remove_indices = {index for _, index in selected}
+                final_url_list[:] = [
+                    url
+                    for index, url in enumerate(final_url_list)
+                    if index not in remove_indices
+                ]
+
+            async def _confirm_large_discography(artist_name, added_count):
+                """Evita adicionar uma discografia extensa sem confirmação."""
+                if added_count <= 20:
+                    return True
+                ui.emit(
+                    f"{YELLOW}Discografia de {artist_name}: "
+                    f"{added_count} álbuns encontrados.{RESET}"
+                )
+                result = await _tui_select(
+                    "Adicionar toda essa discografia à fila?",
+                    ["✅ Adicionar à fila", "❌ Cancelar"],
+                    is_multi=False,
+                    item_category="filter",
+                )
+                return bool(result and "Adicionar" in result[0])
+
             session = PromptSession()
 
             while True:
@@ -2395,6 +2423,7 @@ class QobuzDL:
                         "📀 Singles",
                         "🎤 Artists",
                         "📋 Playlists",
+                        "↩ Voltar",
                     ]
                     fav_res = await _tui_select(
                         "Quais favoritos deseja explorar?",
@@ -2407,6 +2436,9 @@ class QobuzDL:
 
                     selected_fav_visual, _ = fav_res
                     selected_fav_raw = selected_fav_visual.split(" ", 1)[1]
+
+                    if selected_fav_raw == "Voltar":
+                        break
 
                     if selected_fav_raw == "Singles":
                         selected_fav = "albums"
@@ -2523,6 +2555,7 @@ class QobuzDL:
                                     "📀 Explorar Singles",
                                     "🔥 Explorar Top Tracks",
                                     "📥 Baixar Toda a Discografia",
+                                    "↩ Voltar",
                                 ],
                                 is_multi=False,
                                 item_category="filter",
@@ -2531,6 +2564,9 @@ class QobuzDL:
                             if not action_res:
                                 continue
                             action, _ = action_res
+
+                            if "Voltar" in action:
+                                continue
 
                             for item in selected_items:
                                 art_id = item[0]["meta"]["id"]
@@ -2583,24 +2619,26 @@ class QobuzDL:
                                         item_category="track",
                                     )
                                     if track_selected:
-                                        [
-                                            final_url_list.append(t[0]["url"])
-                                            for t in track_selected
-                                        ]
+                                        for track_item, _ in track_selected:
+                                            _add_url(track_item["url"])
 
                                 elif "Discografia" in action:
                                     logger.info(
                                         f"{YELLOW}Buscando toda a discografia de {art_name}...{RESET}"
                                     )
+                                    before_count = len(final_url_list)
                                     async for chunk in self.client.get_artist_meta(
                                         art_id
                                     ):
                                         for a in chunk.get("albums", {}).get(
                                             "items", []
                                         ):
-                                            final_url_list.append(
-                                                f"{WEB_URL}album/{a.get('id')}"
-                                            )
+                                            _add_url(f"{WEB_URL}album/{a.get('id')}")
+                                    added_count = len(final_url_list) - before_count
+                                    if not await _confirm_large_discography(
+                                        art_name, added_count
+                                    ):
+                                        del final_url_list[before_count:]
 
                                 else:
                                     logger.info(
@@ -2651,19 +2689,15 @@ class QobuzDL:
                                             item_category="album",
                                         )
                                         if art_selected:
-                                            [
-                                                final_url_list.append(a[0]["url"])
-                                                for a in art_selected
-                                            ]
+                                            for album_item, _ in art_selected:
+                                                _add_url(album_item["url"])
                                     else:
                                         logger.info(
                                             f"{YELLOW}Nenhum lançamento desse tipo encontrado.{OFF}"
                                         )
                         else:
-                            [
-                                final_url_list.append(item[0]["url"])
-                                for item in selected_items
-                            ]
+                            for selected_item, _ in selected_items:
+                                _add_url(selected_item["url"])
 
                         yn_res = await _tui_select(
                             "Itens adicionados à fila. Deseja buscar mais?",
@@ -2681,6 +2715,33 @@ class QobuzDL:
                     if selected_type == "favorites":
                         break
                     continue
+
+            if final_url_list and download:
+                while final_url_list:
+                    album_count = sum("/album/" in url for url in final_url_list)
+                    track_count = sum("/track/" in url for url in final_url_list)
+                    playlist_count = sum("/playlist/" in url for url in final_url_list)
+                    ui.emit(
+                        f"{CYAN}Fila pronta: {len(final_url_list)} item(ns) único(s) "
+                        f"— {album_count} álbum(ns), {track_count} faixa(s), "
+                        f"{playlist_count} playlist(s).{RESET}"
+                    )
+                    queue_action = await _tui_select(
+                        "O que deseja fazer com a fila?",
+                        [
+                            "✅ Iniciar download",
+                            "🧹 Remover itens",
+                            "❌ Cancelar",
+                        ],
+                        is_multi=False,
+                        item_category="filter",
+                    )
+                    if not queue_action or "Cancelar" in queue_action[0]:
+                        return
+                    if "Remover" in queue_action[0]:
+                        await _review_queue()
+                        continue
+                    break
 
             if final_url_list:
                 qualities_texts = [f"🎚️ {q.get('q_string')}" for q in qualities]

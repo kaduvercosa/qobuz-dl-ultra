@@ -1135,6 +1135,16 @@ def score_artista(pedido: str, candidato: str) -> float:
     return melhor
 
 
+def faixas_mesma_lista(pedidas: int, em_comum: int, na_apple: int) -> bool:
+    """True se a lista de faixas da Apple é a MESMA da Qobuz (com tolerância de
+    1 faixa por diferença de título). Deluxe x padrão tem faixas a mais, então
+    "metade das faixas conferem" não basta: 12 de 16 faixas já é outra edição."""
+    if pedidas <= 0:
+        return False
+    tol = 0 if pedidas <= 3 else (1 if pedidas <= 15 else pedidas // 15)
+    return em_comum >= pedidas - tol and abs(na_apple - pedidas) <= tol
+
+
 async def get_apple_hq_cover(
     session=None,
     upc: Optional[str] = None,
@@ -1148,6 +1158,7 @@ async def get_apple_hq_cover(
     album_tracks: Optional[list] = None,
     countries: Optional[tuple] = None,
     fallback_countries: bool = False,
+    strict_edition: bool = False,
 ) -> tuple[Optional[str], Optional[str], Optional[str]]:
     """Busca uma capa Apple e devolve URL, fonte e motivo se não encontrar.
 
@@ -1167,6 +1178,12 @@ async def get_apple_hq_cover(
     countries: lojas consultadas (padrão: br e us).
     fallback_countries: se as lojas principais não resolverem, tenta também
     gb, ca, au, de, fr, es, mx e jp.
+    strict_edition: a edição (Deluxe, Expanded, Remaster...) tem que ser a
+    MESMA nos dois sentidos, sem presumir nada: pedido sem edição só aceita
+    candidato sem edição, e Deluxe só aceita Deluxe. Explicit/Clean seguem
+    neutros. Sem isso, um pedido padrão aceitava a Deluxe quando a faixa só
+    aparecia nela. Sem candidato da edição certa, devolve "não encontrada"
+    (quem chamou mantém a capa atual) em vez de arriscar a capa errada.
 
     Resultado: (url, fonte, motivo). Em sucesso, motivo é None. Em falha,
     url/fonte são None e motivo explica a principal causa da rejeição.
@@ -1302,7 +1319,9 @@ async def get_apple_hq_cover(
                 last_error = f"{type(exc).__name__} em {resolution}"
         return None, last_error
 
-    async def evaluate(data, client, exact: str = "") -> Optional[str]:
+    async def evaluate(
+        data, client, exact: str = "", country: str = ""
+    ) -> Optional[str]:
         # exact: "" = busca textual (fuzzy), "upc" ou "isrc" = lookup exato.
         nonlocal search_had_results
         results = data.get("results", [])
@@ -1360,7 +1379,11 @@ async def get_apple_hq_cover(
             # mesma; pedido SEM edição continua aceitando a Deluxe quando a
             # faixa só existe nela (ex.: Jão, "Ressaca (Bonus Track)"), com
             # preferência pela edição idêntica.
-            if q_album and exact != "upc" and (exact == "isrc" or q_edition):
+            if (
+                q_album
+                and exact != "upc"
+                and (exact == "isrc" or q_edition or strict_edition)
+            ):
                 candidate_edition = edicao_album(candidate_album)
                 if candidate_edition != q_edition:
                     reject(
@@ -1403,6 +1426,45 @@ async def get_apple_hq_cover(
                         closeness,
                     )
                     continue
+                # Edição estrita: o UPC da Qobuz nem sempre é o da edição que a
+                # Apple vende com esse código. Antes de aceitar, a lista de
+                # faixas da Apple tem que ser a mesma da Qobuz.
+                if (
+                    strict_edition
+                    and exact == "upc"
+                    and album_tracks
+                    and result.get("collectionId")
+                ):
+                    lookup_tracks = await cached_get(
+                        client,
+                        "https://itunes.apple.com/lookup",
+                        {
+                            "id": result.get("collectionId"),
+                            "entity": "song",
+                            "country": country or "us",
+                            "limit": 200,
+                        },
+                        f"lookup álbum {country or 'us'}",
+                    )
+                    apple_titles = [
+                        str(t.get("trackName"))
+                        for t in (lookup_tracks or {}).get("results", [])
+                        if t.get("trackName")
+                    ]
+                    common = contar_faixas_em_comum(
+                        album_tracks, apple_titles, album or "", candidate_album
+                    )
+                    if apple_titles and not faixas_mesma_lista(
+                        len(album_tracks), common, len(apple_titles)
+                    ):
+                        reject(
+                            f"UPC aponta para outra edição (faixas diferentes: "
+                            f"{common}/{len(album_tracks)} da Qobuz, Apple tem "
+                            f"{len(apple_titles)}; álbum Apple={candidate_album!r})",
+                            label,
+                            closeness,
+                        )
+                        continue
                 valid_url, url_error = await artwork_url(
                     client, str(result.get("artworkUrl100") or "")
                 )
@@ -1738,7 +1800,7 @@ async def get_apple_hq_cover(
                 continue
             if marcadores_versao(name) != requested_markers:
                 continue
-            if q_edition and edicao_album(name) != q_edition:
+            if (q_edition or strict_edition) and edicao_album(name) != q_edition:
                 continue
             if release_kind in ("single", "full") and (
                 apple_release_kind(name) != release_kind
@@ -1789,7 +1851,11 @@ async def get_apple_hq_cover(
                 f"artist={result.get('artistName')!r}, album={name!r}, "
                 f"faixas Apple={len(titles)}"
             )
-            if matched < max(1, -(-wanted // 2)) or jaccard < 0.5:
+            if (
+                not faixas_mesma_lista(wanted, matched, len(titles))
+                if strict_edition
+                else (matched < max(1, -(-wanted // 2)) or jaccard < 0.5)
+            ):
                 reject(
                     f"faixas do álbum não conferem ({matched}/{wanted} da Qobuz "
                     f"estão no álbum Apple, que tem {len(titles)})",
@@ -1852,7 +1918,9 @@ async def get_apple_hq_cover(
                 continue
             if marcadores_versao(candidate_album) != requested_album_markers:
                 continue
-            if q_edition and edicao_album(candidate_album) != q_edition:
+            if (q_edition or strict_edition) and (
+                edicao_album(candidate_album) != q_edition
+            ):
                 continue
             if release_kind in ("single", "full") and (
                 apple_release_kind(candidate_album) != release_kind
@@ -1920,7 +1988,7 @@ async def get_apple_hq_cover(
                         None,
                         data,
                     )
-                    url = await evaluate(data, client, exact=kind)
+                    url = await evaluate(data, client, exact=kind, country=country)
                     if url:
                         return url, "Apple/iTunes", None
                 except Exception as exc:
@@ -2087,6 +2155,91 @@ async def get_apple_hq_cover(
 
     async with make_client() as client:
         return await search(client)
+
+
+def qobuz_release_kind(album: dict) -> Optional[str]:
+    """'single' ou 'full' (EP/álbum/ao vivo/coletânea) do álbum Qobuz; None se
+    não der para saber. Single só casa com "X - Single" da Apple e álbum/EP
+    nunca recebe a capa de um single."""
+    if not isinstance(album, dict) or not album:
+        return None
+    try:
+        tracks = (album.get("tracks") or {}).get("items") or []
+        kind = classify_release_type(
+            title=album.get("title"),
+            version=album.get("version"),
+            track_count=album.get("tracks_count") or len(tracks),
+            duration_seconds=album.get("duration"),
+            api_release_type=album.get("release_type") or album.get("product_type"),
+        )
+    except Exception:
+        return None
+    if not kind:
+        return None
+    return "single" if kind == "single" else "full"
+
+
+def qobuz_track_title(item: dict) -> str:
+    """Título da faixa juntando "title" e "version" (a Apple junta os dois)."""
+    title = (item.get("title") or "").strip()
+    version = (item.get("version") or "").strip()
+    if version and version.casefold() not in title.casefold():
+        title = f"{title} ({version})"
+    return title
+
+
+async def find_apple_cover(
+    session,
+    album: dict,
+    item: Optional[dict] = None,
+    artist: Optional[str] = None,
+    trace: Optional[list] = None,
+) -> tuple[Optional[str], Optional[str], Optional[str]]:
+    """ÚNICO ponto de busca de capa Apple, usado pelo download e pelo `tags`.
+
+    Monta os mesmos critérios nos dois comandos para que o resultado seja o
+    mesmo: título + versão do álbum, UPC, tipo (single x álbum) e edição
+    estrita (Deluxe só com Deluxe, padrão só com padrão; nada é presumido).
+
+    - Sem `item`: busca do ÁLBUM, confirmada pela lista de faixas.
+    - Com `item`: busca da FAIXA (ISRC/título), com o álbum da faixa.
+    Devolve (url, fonte, motivo), como get_apple_hq_cover.
+    """
+    album = album or {}
+    kwargs: dict = {}
+    if trace is not None:
+        kwargs["trace"] = trace
+
+    if item is None:
+        tracks = (album.get("tracks") or {}).get("items") or []
+        return await get_apple_hq_cover(
+            session=session,
+            upc=album.get("upc"),
+            artist=artist or (album.get("artist") or {}).get("name", ""),
+            album=album_titulo_completo(album),
+            release_kind=qobuz_release_kind(album),
+            deep_album_search=True,
+            album_tracks=[qobuz_track_title(t) for t in tracks] or None,
+            fallback_countries=True,
+            strict_edition=True,
+            **kwargs,
+        )
+
+    album_data = item.get("album") or album
+    artist_data = (
+        item.get("performer") or album_data.get("artist") or album.get("artist") or {}
+    )
+    return await get_apple_hq_cover(
+        session=session,
+        upc=album_data.get("upc") or album.get("upc"),
+        isrc=item.get("isrc"),
+        artist=artist or artist_data.get("name", ""),
+        album=album_titulo_completo(album_data) or album_titulo_completo(album),
+        track_title=qobuz_track_title(item),
+        release_kind=qobuz_release_kind(album) or qobuz_release_kind(album_data),
+        strict_edition=True,
+        **kwargs,
+    )
 
 
 def get_config_paths():

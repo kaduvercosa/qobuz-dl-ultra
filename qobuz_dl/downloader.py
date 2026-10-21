@@ -48,12 +48,26 @@ from qobuz_dl.constants import (
 from qobuz_dl.db import handle_download_id
 from qobuz_dl.exceptions import NonStreamable
 from qobuz_dl.executors import heavy_executor
-from qobuz_dl.http_download import make_client
+from qobuz_dl.http_download import (
+    DownloadAborted,
+    DownloadError,
+    download_file,
+    make_client,
+)
+from qobuz_dl.http_download import (
+    PermanentDownloadError as HttpPermanentDownloadError,
+)
 from qobuz_dl.playlist_links import (
     absorb_playlist_copies,
     scan_dest_folder,
 )
 from qobuz_dl.settings import QobuzDLSettings
+from qobuz_dl.storage import (
+    InsufficientStorageError,
+    ensure_free_space,
+    estimate_audio_bytes,
+    format_bytes,
+)
 from qobuz_dl.track_identity import (
     STATE_IN_PROGRESS,
     STATE_NEW,
@@ -66,6 +80,8 @@ from qobuz_dl.utils import (
     classify_release_type,
     clean_filename,
     get_apple_hq_cover,
+    qobuz_release_kind,
+    qobuz_track_title,
     verify_audio_integrity,
 )
 
@@ -552,6 +568,27 @@ class Download:
             ui.skip(f"Pulando {album_title} pois não atende ao requisito de qualidade")
             return
 
+        if getattr(self.settings, "check_storage", False):
+            tracks = album_meta.get("tracks", {}).get("items", [])
+            duration = album_meta.get("duration") or sum(
+                float(track.get("duration") or 0) for track in tracks
+            )
+            estimate = estimate_audio_bytes(
+                duration,
+                self.quality,
+                bit_depth=bit_depth,
+                sampling_rate=sampling_rate,
+            )
+            if estimate:
+                try:
+                    ensure_free_space(self.path, estimate)
+                except InsufficientStorageError as exc:
+                    ui.error(str(exc))
+                    ui.detail(
+                        f"Estimativa do álbum {album_title}: {format_bytes(estimate)}."
+                    )
+                    return False
+
         track_count = len(album_meta.get("tracks", {}).get("items", []))
         artist_name = _safe_get(album_meta, "artist", "name", default="")
         # Usado so pro report.json (cabecalho + campo por faixa) -- mais
@@ -719,6 +756,12 @@ class Download:
                     album=album_titulo_completo(album_meta),
                     upc=album_meta.get("upc", ""),
                     release_kind=_apple_release_kind(album_meta),
+                    # Lista de faixas: é o que separa Deluxe de padrão.
+                    album_tracks=[
+                        qobuz_track_title(t)
+                        for t in (album_meta.get("tracks") or {}).get("items") or []
+                    ]
+                    or None,
                 )
 
             if "goodies" in album_meta:
@@ -1439,9 +1482,10 @@ class Download:
         )
         view_token = ui.begin_track_view(parallel)
         try:
-            success = await self._download_and_tag_impl(
-                *args, _claimed=claimed_paths, **kwargs
-            )
+            call_kwargs = dict(kwargs)
+            call_kwargs.pop("_claimed", None)
+            call_kwargs["_claimed"] = claimed_paths
+            success = await self._download_and_tag_impl(*args, **call_kwargs)
             ui.finish_track_view(_get_title(track_meta), success is True)
             return success
         finally:
@@ -2465,6 +2509,98 @@ def _get_description(item: dict, track_title, multiple=None):
     return downloading_title
 
 
+async def _tqdm_download_atomic(
+    url_or_callable,
+    fname,
+    track_name,
+    *,
+    is_parallel=False,
+    session=None,
+    position_pool=None,
+):
+    """Baixa áudio em ``.part`` e promove atomicamente após validar o corpo."""
+    if abort_event.is_set():
+        return
+    started = time.monotonic()
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Accept": "audio/webm,audio/ogg,audio/wav,audio/*;q=0.9,*/*;q=0.5",
+        "Connection": "keep-alive",
+    }
+    owns_session = session is None
+    timeout_cfg = httpx.Timeout(60.0, connect=10.0)
+    http = session or make_client(follow_redirects=True, timeout=timeout_cfg)
+    bar = None
+
+    def on_progress(downloaded, total):
+        if bar is None:
+            return
+        if total is not None and bar.total != total:
+            bar.total = total
+        delta = downloaded - bar.n
+        if delta > 0:
+            bar.update(delta)
+
+    if not is_parallel:
+        ui.progress(ui.tail(f"Em Progresso: {track_name}", _progress_tail(track_name)))
+        bar = tqdm(
+            total=0,
+            unit="iB",
+            unit_scale=True,
+            unit_divisor=1024,
+            desc=f"  {RESET}⬇️{RESET}",
+            bar_format=(
+                "{desc}: {percentage:3.0f}%|{bar}| "
+                "{n_fmt}/{total_fmt} [{elapsed}<{remaining}]"
+            ),
+            dynamic_ncols=True,
+            leave=False,
+        )
+    elif position_pool:
+        ui.progress(ui.tail(f"Em Progresso: {track_name}", _progress_tail(track_name)))
+
+    try:
+        result = await download_file(
+            http,
+            url_or_callable,
+            fname,
+            headers=headers,
+            timeout=timeout_cfg,
+            max_attempts=5,
+            backoff_base=2.0,
+            backoff_max=32.0,
+            chunk_size=1024 * 1024,
+            on_progress=on_progress,
+            should_abort=abort_event.is_set,
+        )
+        if bar is not None:
+            bar.close()
+            bar = None
+        ui.done(
+            ui.tail(
+                f" Concluído: {track_name}",
+                ui.stats_text(result.size, time.monotonic() - started),
+            )
+        )
+    except HttpPermanentDownloadError as exc:
+        ui.warn(f"Indisponível: {track_name} ({exc})")
+        raise _PermanentDownloadError(str(exc)) from exc
+    except DownloadAborted:
+        abort_event.set()
+    except (KeyboardInterrupt, SystemExit):
+        abort_event.set()
+    except DownloadError as exc:
+        raise RuntimeError(f"Falha definitiva após 5 tentativas: {exc}") from exc
+    finally:
+        if bar is not None:
+            bar.close()
+        if owns_session:
+            try:
+                await http.aclose()
+            except Exception as exc:
+                logger.debug("Falha ao fechar client HTTP: %s", exc)
+
+
 async def tqdm_download(
     url_or_callable,
     fname,
@@ -2473,209 +2609,15 @@ async def tqdm_download(
     session=None,
     position_pool=None,
 ):
-    """Download file with tqdm progress bar."""
-    if abort_event.is_set():
-        return
-    R = RESET
-    _t0 = time.monotonic()
-
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Accept": "audio/webm,audio/ogg,audio/wav,audio/*;q=0.9,*/*;q=0.5",
-        "Connection": "keep-alive",
-    }
-
-    position = position_pool.acquire() if (is_parallel and position_pool) else 0
-
-    if not is_parallel:
-        ui.progress(ui.tail(f"Em Progresso: {track_name}", _progress_tail(track_name)))
-        tqdm_desc = f"  {R}⬇️{R}"
-        b_format = "{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]"
-        ncols = None
-        dynamic_ncols = True
-    else:
-        desc_len = position_pool.desc_len if position_pool else 14
-        short_name = _short_track_name(track_name, desc_len)
-        tqdm_desc = f" {short_name}"
-        b_format = "{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt}"
-        ncols = position_pool.ncols if position_pool else _get_safe_ncols()
-        dynamic_ncols = False
-
-    downloaded_size = 0
-    total_size = 0
-
-    owns_session = session is None
-    timeout_cfg = httpx.Timeout(60.0, connect=10.0)
-    http = session or make_client(follow_redirects=True, timeout=timeout_cfg)
-
-    try:
-        try:
-            async for attempt in AsyncRetrying(
-                stop=stop_after_attempt(5),
-                wait=wait_exponential(multiplier=2, min=2, max=32),
-                retry=retry_if_not_exception_type(
-                    (_PermanentDownloadError, KeyboardInterrupt, SystemExit)
-                ),
-                reraise=True,
-            ):
-                with attempt:
-                    if abort_event.is_set():
-                        return
-
-                    url = (
-                        url_or_callable()
-                        if callable(url_or_callable)
-                        else url_or_callable
-                    )
-
-                    if downloaded_size > 0:
-                        headers["Range"] = f"bytes={downloaded_size}-"
-                        mode = "ab"
-                    else:
-                        headers["Range"] = "bytes=0-"
-                        mode = "wb"
-
-                    if attempt.retry_state.attempt_number > 1:
-                        _n = attempt.retry_state.attempt_number
-                        ui.warn(f"Falha de Rede. Tentativa {_n}/5 para {track_name}")
-
-                    async with http.stream(
-                        "GET", url, headers=headers, timeout=timeout_cfg
-                    ) as r:
-                        if r.status_code == 416:
-                            total_remoto = None
-                            content_range = r.headers.get("content-range", "")
-                            match_total = re.fullmatch(r"bytes \*/(\d+)", content_range)
-                            if match_total:
-                                total_remoto = int(match_total.group(1))
-                            elif total_size:
-                                total_remoto = total_size
-                            if downloaded_size > 0 and downloaded_size == total_remoto:
-                                return
-                            raise Exception(
-                                "HTTP 416 recebido antes de o arquivo local estar completo"
-                            )
-                        if r.status_code == 404:
-                            raise _PermanentDownloadError(
-                                "HTTP 404: arquivo não encontrado no servidor."
-                            )
-                        if r.status_code in (401, 403, 451):
-                            raise _PermanentDownloadError(
-                                f"HTTP {r.status_code}: faixa indisponivel (bloqueio de "
-                                f"região, direitos autorais ou sessão expirada)."
-                            )
-                        if r.status_code not in [200, 206]:
-                            raise Exception(f"Status do servidor: {r.status_code}")
-
-                        # Alguns CDNs ignoram Range e devolvem 200 com o arquivo
-                        # inteiro. Anexar essa resposta ao parcial duplicaria os
-                        # primeiros bytes e produziria um áudio corrompido.
-                        if downloaded_size > 0 and r.status_code == 200:
-                            downloaded_size = 0
-                            mode = "wb"
-                            total_size = int(r.headers.get("content-length", 0))
-                        elif downloaded_size > 0 and r.status_code == 206:
-                            content_range = r.headers.get("content-range", "")
-                            match_range = re.match(
-                                r"bytes (\d+)-\d+/(?:\d+|\*)", content_range
-                            )
-                            if (
-                                not match_range
-                                or int(match_range.group(1)) != downloaded_size
-                            ):
-                                raise Exception(
-                                    "Resposta parcial com Content-Range incompatível"
-                                )
-
-                        if total_size == 0:
-                            total_size = downloaded_size + int(
-                                r.headers.get("content-length", 0)
-                            )
-
-                        if (
-                            is_parallel
-                            and downloaded_size == 0
-                            and attempt.retry_state.attempt_number == 1
-                        ):
-                            size_mb = total_size / (1024 * 1024) if total_size else 0
-                            ui.progress(
-                                ui.tail(
-                                    f"Em Progresso: {track_name}",
-                                    _progress_tail(track_name, size_mb),
-                                )
-                            )
-
-                        async with aiofiles.open(fname, mode) as file:
-                            with tqdm(
-                                total=total_size,
-                                unit="iB",
-                                unit_scale=True,
-                                unit_divisor=1024,
-                                desc=tqdm_desc,
-                                initial=downloaded_size,
-                                bar_format=b_format,
-                                position=position,
-                                leave=False,
-                                ncols=ncols,
-                                dynamic_ncols=dynamic_ncols,
-                                disable=is_parallel,
-                            ) as bar:
-                                async for data in r.aiter_bytes(chunk_size=524288):
-                                    if abort_event.is_set():
-                                        return
-                                    if data:
-                                        size = await file.write(data)
-                                        downloaded_size += size
-                                        bar.update(size)
-
-                        if downloaded_size >= total_size:
-                            ui.done(
-                                ui.tail(
-                                    f" Concluído: {track_name}",
-                                    ui.stats_text(
-                                        downloaded_size, time.monotonic() - _t0
-                                    ),
-                                )
-                            )
-                            return
-
-        except _PermanentDownloadError as e:
-            if os.path.exists(fname):
-                os.remove(fname)
-            ui.warn(f"Indisponível: {track_name} ({e})")
-            raise
-
-        except (KeyboardInterrupt, SystemExit):
-            abort_event.set()
-            if os.path.exists(fname):
-                try:
-                    os.remove(fname)
-                except OSError:
-                    pass
-            return
-
-        except Exception as e:
-            if os.path.exists(fname):
-                os.remove(fname)
-            raise Exception(
-                f"Timeout definitivo após 5 tentativas. Ultimo erro: {e}"
-            ) from e
-
-        if downloaded_size < total_size and not abort_event.is_set():
-            if os.path.exists(fname):
-                os.remove(fname)
-            raise Exception("Download Incompleto")
-    finally:
-        if owns_session:
-            try:
-                await http.aclose()
-            except Exception as e:
-                # Encerramento best-effort do client HTTP que este download
-                # criou pra si mesmo -- ja' estamos no `finally`, entao nao
-                # ha' nada mais a fazer alem de registrar.
-                logger.debug(f"Falha ao fechar client HTTP no finally: {e}")
-        if is_parallel and position_pool:
-            position_pool.release(position)
+    """Download file with tqdm progress bar and atomic finalization."""
+    return await _tqdm_download_atomic(
+        url_or_callable,
+        fname,
+        track_name,
+        is_parallel=is_parallel,
+        session=session,
+        position_pool=position_pool,
+    )
 
 
 async def fetch_qobuz_lyrics_json(client, http_session, track_id, language=None):
@@ -2830,25 +2772,8 @@ _APPLE_HEADERS = {
 
 
 def _apple_release_kind(album):
-    """'single' ou 'full' (EP/álbum/ao vivo/coletânea) do álbum Qobuz; None se
-    não der pra saber. Single só casa com "X - Single" da Apple e álbum/EP nunca
-    recebe a capa de um single."""
-    if not isinstance(album, dict) or not album:
-        return None
-    try:
-        tracks = (album.get("tracks") or {}).get("items") or []
-        kind = classify_release_type(
-            title=album.get("title"),
-            version=album.get("version"),
-            track_count=album.get("tracks_count") or len(tracks),
-            duration_seconds=album.get("duration"),
-            api_release_type=album.get("release_type") or album.get("product_type"),
-        )
-    except Exception:
-        return None
-    if not kind:
-        return None
-    return "single" if kind == "single" else "full"
+    """Atalho para utils.qobuz_release_kind (mesma regra do comando `tags`)."""
+    return qobuz_release_kind(album)
 
 
 async def _try_apple_cover_bytes(
@@ -2859,6 +2784,7 @@ async def _try_apple_cover_bytes(
     isrc=None,
     track_title=None,
     release_kind=None,
+    album_tracks=None,
 ):
     """
     Tenta achar E baixar a capa da Apple, em cascata de resolucoes ate
@@ -2884,6 +2810,12 @@ async def _try_apple_cover_bytes(
             album=album,
             track_title=track_title,
             release_kind=release_kind,
+            # Mesmos critérios do comando `tags`: edição estrita (sem presumir
+            # Deluxe/padrão) e, no álbum, confirmação pela lista de faixas.
+            strict_edition=True,
+            album_tracks=album_tracks,
+            deep_album_search=bool(album_tracks),
+            fallback_countries=bool(album_tracks),
         )
     except Exception as e:
         logger.debug(f"Busca de capa na Apple falhou, indo pra Qobuz: {e}")
@@ -2945,6 +2877,7 @@ async def _get_cover_and_embed(
     track_title=None,
     release_kind=None,
     notas=None,
+    album_tracks=None,
 ):
     """
     Baixa a capa salva (cover.jpg) e a capa de embed.
@@ -3029,6 +2962,7 @@ async def _get_cover_and_embed(
         isrc=isrc,
         track_title=track_title,
         release_kind=release_kind,
+        album_tracks=album_tracks,
     )
     if apple_bytes:
         if precisa_salva:

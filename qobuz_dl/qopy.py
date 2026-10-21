@@ -9,6 +9,7 @@ import logging
 import os
 import time
 import unicodedata
+from contextlib import asynccontextmanager
 from datetime import date, datetime
 from typing import Any
 
@@ -42,6 +43,17 @@ from qobuz_dl.exceptions import (
     NoActiveSubscriptionError,
 )
 from qobuz_dl.http_download import make_client
+from qobuz_dl.metadata_cache import (
+    MetadataCache,
+    cache_key,
+    cache_settings,
+    default_cache_path,
+)
+
+try:
+    from aiolimiter import AsyncLimiter
+except ImportError:  # pragma: no cover - exercised on minimal installations
+    AsyncLimiter = None
 
 Bundle: Any = None
 try:
@@ -122,6 +134,34 @@ class Client:
         self.label = "Studio"
         self.uat = None
         self.user_auth_token = None
+        self._api_limiter = None
+        self._api_limiter_loop = None
+        self._metadata_cache = None
+        if not os.environ.get("PYTEST_CURRENT_TEST") and os.environ.get(
+            "QOBUZ_DL_DISABLE_METADATA_CACHE", ""
+        ).strip().lower() not in {"1", "true", "yes", "on"}:
+            ttl, max_entries = cache_settings()
+            self._metadata_cache = MetadataCache(
+                default_cache_path(), ttl=ttl, max_entries=max_entries
+            )
+
+    _CACHEABLE_ENDPOINTS = frozenset(
+        {
+            "album/get",
+            "track/get",
+            "playlist/get",
+            "artist/get",
+            "label/get",
+            "catalog/search",
+            "playlist/getUserPlaylists",
+            "playlist/getUserPlaylistIds",
+        }
+    )
+
+    def _metadata_cache_key(self, epoint, params):
+        if epoint not in self._CACHEABLE_ENDPOINTS or self._metadata_cache is None:
+            return None
+        return cache_key(epoint, params)
 
     @classmethod
     async def create(
@@ -539,6 +579,24 @@ class Client:
         unpadder = padding.PKCS7(128).unpadder()
         return unpadder.update(padded) + unpadder.finalize()
 
+    @asynccontextmanager
+    async def _api_rate_slot(self):
+        """Reserve one API slot when the optional limiter is installed."""
+        if AsyncLimiter is None or not isinstance(self, Client):
+            yield
+            return
+        loop = asyncio.get_running_loop()
+        if self._api_limiter is None or self._api_limiter_loop is not loop:
+            try:
+                rate = float(os.environ.get("QOBUZ_API_RATE_LIMIT", "8"))
+                period = float(os.environ.get("QOBUZ_API_RATE_PERIOD", "1"))
+            except ValueError:
+                rate, period = 8.0, 1.0
+            self._api_limiter = AsyncLimiter(max(1, rate), max(0.1, period))
+            self._api_limiter_loop = loop
+        async with self._api_limiter:
+            yield
+
     async def api_call(self, epoint, **kwargs):
         """Build, sign, execute, and normalize one Qobuz API request.
 
@@ -699,6 +757,16 @@ class Client:
             "playlist/addTracks",
         }
 
+        cache_key_method = getattr(self, "_metadata_cache_key", None)
+        metadata_key = (
+            cache_key_method(epoint, params) if callable(cache_key_method) else None
+        )
+        if metadata_key:
+            cached = await self._metadata_cache.get(metadata_key)
+            if cached is not None:
+                logger.debug("Cache de metadados usado para '%s'.", epoint)
+                return cached
+
         def _retryable(exc):
             if isinstance(exc, (httpx.RequestError, asyncio.TimeoutError)):
                 if epoint not in mutable_endpoints:
@@ -726,9 +794,10 @@ class Client:
                     logger.debug(f"Retentativa de rede em '{epoint}' ({n}/4)...")
                 if request_timeout is not None:
                     req_kwargs["timeout"] = request_timeout
-                resp = await self.session.request(
-                    method, self.base + epoint, **req_kwargs
-                )
+                async with Client._api_rate_slot(self):
+                    resp = await self.session.request(
+                        method, self.base + epoint, **req_kwargs
+                    )
                 if epoint == "user/login" and resp.status_code == 400:
                     text = resp.text.lower()
                     # Só classifica como credencial inválida quando a resposta
@@ -765,7 +834,10 @@ class Client:
                     return {}
                 resp.raise_for_status()
                 data = resp.json()
-                return self._normalize_json_strings(data)
+                normalized = self._normalize_json_strings(data)
+                if metadata_key and isinstance(normalized, dict):
+                    await self._metadata_cache.set(metadata_key, normalized)
+                return normalized
 
     async def multi_meta(self, epoint, key, id, type):
         offset = 0

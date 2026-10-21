@@ -54,8 +54,9 @@ async def test_interactive_track_seleciona_e_nao_baixa(monkeypatch):
     selections = iter(
         [
             ("🎵 Tracks", 0),
-            [(options[0], 0)],
+            ([(options[0], 0)]),
             ("❌ Não", 1),
+            ("✅ Iniciar download", 0),
             ("🎚️ Lossless", 1),
         ]
     )
@@ -109,6 +110,35 @@ async def test_interactive_track_seleciona_sem_download(monkeypatch):
     assert app.quality == 5
 
 
+async def test_interactive_deduplica_itens_adicionados_em_buscas_repetidas(monkeypatch):
+    app = _app()
+    options = [{"meta": {"title": "Track", "id": "1"}, "url": "track-url"}]
+    selections = iter(
+        [
+            ("🎵 Tracks", 0),
+            [(options[0], 0)],
+            ("✅ Sim", 0),
+            [(options[0], 0)],
+            ("❌ Não", 1),
+            ("🎚️ MP3", 0),
+        ]
+    )
+
+    async def tui(*args, **kwargs):
+        return next(selections)
+
+    async def search_by_type(*args, **kwargs):
+        return options
+
+    app.search_by_type = search_by_type
+    monkeypatch.setattr(core, "_tui_select", tui)
+    monkeypatch.setattr(core, "PromptSession", lambda: Prompt(["query", "query"]))
+
+    result = await core.QobuzDL.interactive(app, download=False)
+
+    assert result == ["track-url"]
+
+
 async def test_interactive_artista_discografia(monkeypatch):
     app = _app()
     options = [{"meta": {"name": "Artista", "id": "a1"}, "url": "artist-url"}]
@@ -118,6 +148,7 @@ async def test_interactive_artista_discografia(monkeypatch):
             (options[0], 0),
             ("📥 Baixar Toda a Discografia", 3),
             ("❌ Não", 1),
+            ("✅ Iniciar download", 0),
             ("🎚️ Lossless", 1),
         ]
     )

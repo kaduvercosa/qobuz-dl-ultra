@@ -372,7 +372,7 @@ async def _decide_album_cover(
     por faixa obtidos na votação ficam em `track_results` (não se pesquisa
     duas vezes).
     """
-    from qobuz_dl.utils import get_apple_hq_cover
+    from qobuz_dl.utils import find_apple_cover
 
     decision: dict[str, Any] = {
         "url": None,
@@ -386,21 +386,13 @@ async def _decide_album_cover(
     reason = None
 
     try:
-        items_for_check = (album.get("tracks") or {}).get("items") or []
-        trace_kwargs: dict[str, Any] = {"trace": trace} if trace is not None else {}
-        result = await get_apple_hq_cover(
-            session=http_session,
-            upc=album.get("upc"),
+        # Mesma busca do download (utils.find_apple_cover): título + versão,
+        # UPC, single x álbum, lista de faixas e edição estrita.
+        result = await find_apple_cover(
+            http_session,
+            album,
             artist=artist,
-            album=_album_full_title(album),
-            release_kind=_release_kind(album),
-            deep_album_search=True,
-            # A versão certa do álbum é confirmada pela lista de faixas (single
-            # x álbum, Deluxe x padrão, versão estendida x normal) e a busca
-            # segue por outras lojas se as principais não tiverem o lançamento.
-            album_tracks=[_qobuz_track_title(i) for i in items_for_check] or None,
-            fallback_countries=True,
-            **trace_kwargs,
+            trace=trace,
         )
         if isinstance(result, tuple) and result and isinstance(result[0], str):
             if result[0].strip():
@@ -469,29 +461,10 @@ async def _fetch_apple_cover_for_track(
     http_session: httpx.AsyncClient,
     trace: Optional[list] = None,
 ) -> tuple[Optional[str], Optional[str], Optional[str]]:
-    """Busca URL, fonte e diagnóstico da busca Apple."""
-    from qobuz_dl.utils import get_apple_hq_cover
+    """Busca URL, fonte e diagnóstico da busca Apple (mesma regra do download)."""
+    from qobuz_dl.utils import find_apple_cover
 
-    album_data = item.get("album") or album or {}
-    artist_data = (
-        item.get("performer") or album_data.get("artist") or album.get("artist") or {}
-    )
-
-    track_title = _qobuz_track_title(item)
-
-    trace_kwargs: dict[str, Any] = {"trace": trace} if trace is not None else {}
-    result = await get_apple_hq_cover(
-        session=http_session,
-        upc=album_data.get("upc") or album.get("upc"),
-        isrc=item.get("isrc"),
-        artist=artist_data.get("name", ""),
-        # Título + versão (Deluxe etc.): a capa muda de uma edição pra outra.
-        album=_album_full_title(album_data) or _album_full_title(album),
-        track_title=track_title,
-        # Single so' casa com "X - Single"; album/EP nunca recebe capa de single.
-        release_kind=_release_kind(album) or _release_kind(album_data),
-        **trace_kwargs,
-    )
+    result = await find_apple_cover(http_session, album, item=item, trace=trace)
 
     if isinstance(result, tuple):
         url = result[0] if len(result) > 0 else None
@@ -883,6 +856,7 @@ async def retag_directory(
     dry_run=False,
     journal=None,
     progress=None,
+    force_covers=False,
 ):
     """Reescreve tags e tenta substituir capas por versoes Apple/iTunes.
 
@@ -896,6 +870,10 @@ async def retag_directory(
     tags_only=True: regrava as tags e NAO consulta a Apple; a capa embutida e
     as linhas de capa do comentario ficam como estao.
     Os dois juntos nao fazem sentido (ValueError); nenhum dos dois = ambos.
+
+    force_covers=True: troca a capa SEMPRE que a Apple devolver uma capa
+    validada, sem comparar resolucao/formato com a atual (por conta e risco
+    do usuario). Nao afeta a busca: sem candidato da Apple nada muda.
 
     dry_run=True: SIMULA. Faz tudo (consulta o Qobuz e a Apple) mas grava numa
     COPIA temporaria de cada arquivo e mostra o diff real; a biblioteca nao e
@@ -1175,7 +1153,12 @@ async def retag_directory(
 
             # Preserva a capa atual quando a candidata Apple não tem resolução
             # superior. A comparação é conservadora: em caso de dúvida, não troca.
-            if cover_path:
+            if cover_path and force_covers:
+                should_replace, compare_reason = True, None
+                cover_status = (
+                    f"{cover_status} | troca forçada (sem comparar com a atual)"
+                )
+            elif cover_path:
                 should_replace, compare_reason = await loop.run_in_executor(
                     None,
                     functools.partial(_compare_covers, file_path, cover_path),

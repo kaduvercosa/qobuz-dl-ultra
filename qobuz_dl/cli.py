@@ -1704,6 +1704,7 @@ async def async_main():
         quiet=getattr(arguments, "quiet", False),
         verbose=getattr(arguments, "verbose", False),
         color=False if getattr(arguments, "no_color", False) else None,
+        ui_mode=getattr(arguments, "ui", "auto"),
     )
     _log_level_arg = getattr(arguments, "log_level", None)
     ui.install_logging(
@@ -1980,6 +1981,16 @@ async def async_main():
             ui.error(f"Não foi possível autenticar no Qobuz para corrigir as tags: {e}")
             ui.detail(auth_failure_hint(e))
             sys.exit(1)
+        if getattr(arguments, "force_covers", False):
+            if getattr(arguments, "tags_only", False):
+                ui.warn(
+                    "--force-covers não tem efeito com --tags-only (a Apple não é consultada)."
+                )
+            else:
+                ui.warn(
+                    "Troca forçada de capas: a capa atual será substituída sempre que a "
+                    "Apple devolver uma capa, mesmo se for pior. Use --undo para desfazer."
+                )
         tags_dry_run = bool(getattr(arguments, "dry_run", False))
         tags_journal_run = None
         if not tags_dry_run and not getattr(arguments, "no_undo", False):
@@ -2036,6 +2047,7 @@ async def async_main():
                 dry_run=tags_dry_run,
                 journal=tags_journal_run,
                 progress=tags_progress,
+                force_covers=bool(getattr(arguments, "force_covers", False)),
             )
         except KeyboardInterrupt:
             ui.error("Operação interrompida manualmente pelo usuário (CTRL+C).")

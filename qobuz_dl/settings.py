@@ -106,6 +106,7 @@ class QobuzDLSettings:
         self.legacy_charmap = kwargs.get("legacy_charmap", False)
         self.verify_after_download = kwargs.get("verify_after_download", False)
         self.progress_json = kwargs.get("progress_json", False)
+        self.check_storage = kwargs.get("check_storage", True)
 
         self.no_album_artist_tag = kwargs.get("no_album_artist_tag", False)
         self.no_album_title_tag = kwargs.get("no_album_title_tag", False)
@@ -232,6 +233,11 @@ class QobuzDLSettings:
             or config.getboolean(section, "verify_after_download", fallback=False),
             "progress_json": getattr(arguments, "progress_json", False)
             or config.getboolean(section, "progress_json", fallback=False),
+            "check_storage": (
+                arguments.check_storage
+                if hasattr(arguments, "check_storage")
+                else config.getboolean(section, "check_storage", fallback=True)
+            ),
             "embed_art": getattr(arguments, "embed_art", None)
             or config.getboolean(section, "embed_art", fallback=True),
             "og_cover": getattr(arguments, "og_cover", None)

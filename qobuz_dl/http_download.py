@@ -547,6 +547,11 @@ async def _attempt(
 
         if status == 416:
             total = _parse_unsatisfied_total(response.headers.get("content-range"))
+            if total is None:
+                # Alguns CDNs devolvem 416 sem Content-Range quando o parcial
+                # já está completo. O total observado antes da interrupção é
+                # seguro para essa mesma chamada e evita baixar tudo de novo.
+                total = state.total or expected_size
             if offset and total is not None and offset == total:
                 already_complete = True  # o parcial já é o arquivo inteiro
                 target, written, verified = total, offset, True
@@ -601,18 +606,42 @@ async def _attempt(
 
             written = offset
             overrun = False
-            with open(part, mode) as fh:
-                async for chunk in response.aiter_bytes(chunk_size):
-                    _check_abort(should_abort)
-                    if not chunk:
-                        continue
-                    await loop.run_in_executor(None, fh.write, chunk)
-                    written += len(chunk)
-                    if target is not None and written > target:
-                        overrun = True
-                        break
-                    if on_progress is not None:
-                        on_progress(written, target)
+            # O arquivo é deliberadamente sem buffer: se a conexão cair no
+            # meio do aiter_bytes(), a próxima tentativa precisa enxergar no
+            # filesystem exatamente os bytes já recebidos para montar o Range
+            # correto. O fsync abaixo continua garantindo persistência.
+            with open(part, mode, buffering=0) as fh:
+                try:
+                    # Os helpers aiter_bytes/aiter_raw podem agrupar um chunk
+                    # até confirmar o fim do stream; em uma queda isso perde
+                    # bytes já entregues pelo transporte. A iteração direta do
+                    # stream preserva cada chunk bruto. O fallback mantém
+                    # compatibilidade com respostas reduzidas usadas por
+                    # clientes/testes externos.
+                    stream = getattr(response, "stream", None)
+                    if stream is not None and hasattr(stream, "__aiter__"):
+                        chunks = stream
+                    elif hasattr(response, "aiter_raw"):
+                        chunks = response.aiter_raw(chunk_size)
+                    else:
+                        chunks = response.aiter_bytes(chunk_size)
+                    async for chunk in chunks:
+                        _check_abort(should_abort)
+                        if not chunk:
+                            continue
+                        await loop.run_in_executor(None, fh.write, chunk)
+                        written += len(chunk)
+                        if target is not None and written > target:
+                            overrun = True
+                            break
+                        if on_progress is not None:
+                            on_progress(written, target)
+                except BaseException:
+                    # A ReadError pode acontecer depois de vários chunks. Não
+                    # deixe o buffer do descritor decidir se a próxima Range
+                    # começa em zero ou no ponto real da interrupção.
+                    await loop.run_in_executor(None, _flush_and_fsync, fh)
+                    raise
                 await loop.run_in_executor(None, _flush_and_fsync, fh)
 
             if overrun:

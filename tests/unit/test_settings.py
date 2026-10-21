@@ -192,7 +192,7 @@ class TestFromArgumentsConfigparser:
 
         assert s.default_folder == "/config/path"
 
-    def test_sem_cli_e_sem_config_usa_o_default_da_classe(self):
+    def test_sem_kwargs_e_sem_config_usa_o_default_da_classe(self):
         args = _args()
         config = _config()
 
@@ -200,6 +200,19 @@ class TestFromArgumentsConfigparser:
 
         assert s.default_folder == "QobuzDownloads"
         assert s.track_format == DEFAULT_TRACK
+        assert s.check_storage is True
+
+    def test_config_pode_desligar_a_checagem_automatica_de_espaco(self):
+        s = QobuzDLSettings.from_arguments_configparser(
+            _args(), _config({"check_storage": "false"})
+        )
+        assert s.check_storage is False
+
+    def test_cli_no_check_storage_tem_precedencia_sobre_config(self):
+        s = QobuzDLSettings.from_arguments_configparser(
+            _args(check_storage=False), _config({"check_storage": "true"})
+        )
+        assert s.check_storage is False
 
     def test_secrets_do_config_sao_divididos_por_virgula_sem_vazios(self):
         args = _args()

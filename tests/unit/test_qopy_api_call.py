@@ -41,6 +41,13 @@ class FakeResponse:
             )
 
 
+async def test_rate_slot_nao_exige_aiolimiter_em_cliente_fake(monkeypatch):
+    self, _ = _client()
+    monkeypatch.setattr(qopy, "AsyncLimiter", None)
+    async with qopy.Client._api_rate_slot(self):
+        pass
+
+
 def _client(response=None, **overrides):
     captured = {}
     resp = response if response is not None else FakeResponse()

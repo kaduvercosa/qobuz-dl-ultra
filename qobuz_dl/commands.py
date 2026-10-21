@@ -453,6 +453,19 @@ def tags_args(subparsers, default_folder=None):
             "de resolução maior); NÃO regrava nenhuma tag de metadados"
         ),
     )
+    tags.add_argument(
+        "--force-covers",
+        dest="force_covers",
+        action="store_true",
+        default=False,
+        help=(
+            "troca a capa embutida SEMPRE que a Apple/iTunes devolver uma capa "
+            "validada, mesmo que a atual tenha resolução igual ou maior (ou seja "
+            "quadrada e a nova não). POR SUA CONTA E RISCO: se a Apple "
+            "devolver uma capa de outra edição, ela será gravada. Não vale com "
+            "--tags-only"
+        ),
+    )
     what.add_argument(
         "--both",
         dest="both",
@@ -636,7 +649,7 @@ def import_playlist_args(subparsers):
 # Opções de saída no terminal (-v/--verbose, --quiet, --no-color)
 # ----------------------------------------------------------------------------
 def add_output_args(parser, suppress=False):
-    """Add output control arguments (--verbose, --quiet, --no-color, --log-level) to a parser."""
+    """Add output control arguments (--verbose, --quiet, --no-color, --log-level) to the parser."""
     kwargs = {"default": argparse.SUPPRESS} if suppress else {}
     group = parser.add_argument_group("saída no terminal")
     group.add_argument(
@@ -657,6 +670,15 @@ def add_output_args(parser, suppress=False):
         action="store_true",
         help="desliga as cores ANSI (respeita também a variável NO_COLOR)",
         **kwargs,
+    )
+    group.add_argument(
+        "--ui",
+        choices=["auto", "compact", "comfortable"],
+        default=argparse.SUPPRESS if suppress else "auto",
+        help=(
+            "modo visual: auto detecta a largura; compact usa cartões para "
+            "celular/iPad; comfortable privilegia detalhes"
+        ),
     )
     group.add_argument(
         "--log-level",
@@ -771,6 +793,20 @@ def add_common_arg(custom_parser, default_folder, default_quality):
             "emite uma linha JSON para cada evento track-start/track-done no "
             "stdout para interfaces externas (scripts, apps)."
         ),
+    )
+    custom_parser.add_argument(
+        "--check-storage",
+        dest="check_storage",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help=("verifica o espaço livre antes de iniciar cada álbum (padrão)"),
+    )
+    custom_parser.add_argument(
+        "--no-check-storage",
+        dest="check_storage",
+        action="store_false",
+        default=argparse.SUPPRESS,
+        help=("desativa a verificação automática de espaço livre antes do álbum"),
     )
     custom_parser.add_argument(
         "--delay",

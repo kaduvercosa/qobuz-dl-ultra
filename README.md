@@ -28,6 +28,43 @@
 
 __Pesquise, explore e baixe músicas Lossless e Hi-Res do [Qobuz](https://www.qobuz.com/).__
 
+### Uso em celular e iPad
+
+A interface interativa adapta tabelas e cartões à largura do terminal. Para
+manter a experiência consistente entre um celular e um iPad, é possível
+forçar o modo visual desejado:
+
+```bash
+qobuz-dl interactive --ui compact
+qobuz-dl interactive --ui comfortable
+```
+
+`--ui auto` é o padrão e continua detectando a largura automaticamente.
+Em dispositivos com pouco espaço livre, a verificação é automática: o programa
+estima o tamanho do álbum antes de começar e interrompe a operação com uma
+mensagem clara quando o download não cabe. Para desligá-la em um ambiente com
+quota ou montagem de disco incomum, use `--no-check-storage`:
+
+```bash
+qobuz-dl dl "https://play.qobuz.com/album/..." --no-check-storage
+```
+
+No modo interativo, itens repetidos são removidos automaticamente da fila.
+Antes de iniciar o download, o programa mostra um resumo por tipo e permite
+remover itens selecionados ou cancelar a operação. Discografias com mais de 20
+álbuns também exigem confirmação explícita antes de entrar na fila.
+
+Metadados de leitura da API podem ser reutilizados automaticamente por até 12
+horas, reduzindo chamadas repetidas em playlists, discografias e sincronizações.
+Tokens, credenciais e URLs assinadas nunca entram nesse cache. Para desativá-lo,
+defina `QOBUZ_DL_DISABLE_METADATA_CACHE=1`; o caminho, TTL e limite também podem
+ser ajustados com `QOBUZ_DL_METADATA_CACHE`, `QOBUZ_DL_METADATA_CACHE_TTL` e
+`QOBUZ_DL_METADATA_CACHE_MAX`.
+
+Durante o download, `.report.json` continua sendo atualizado a cada faixa, mas
+o `report.html` só é regenerado ao finalizar o álbum. Isso reduz escrita e
+processamento no iPad sem perder a retomada ou o diagnóstico incremental.
+
 ## ✨ Funcionalidades
 
 ### 🎧 Mecanismo Audiófilo e de Metadados
@@ -231,7 +268,7 @@ cd qobuz-dl-ultra
 pip3 install -r requirements.txt
 ```
 
-> **Recursos opcionais:** o `requirements.txt` e o `pip install qobuz-dl-ultra` trazem só o núcleo. Instale o que precisar: `pip install "qobuz-dl-ultra[covers]"` (Pillow), `[speed]`, `[watch]`, `[genius]`, `[duplicates]`, `[analyze]` ou `[all]` para tudo. O comando `tags` **não depende do Pillow** para comparar capas (lê as dimensões do próprio JPEG/PNG); o Pillow só é usado para recompactar uma capa acima do limite de 16 MB do FLAC. No **a-Shell**, não instale extras: use o que já vem instalado. Rode `qobuz-dl doctor` para ver o que está disponível.
+> **Recursos opcionais:** o `requirements.txt` e o `pip install qobuz-dl-ultra` trazem só o núcleo. Instale o que precisar: `pip install "qobuz-dl-ultra[covers]"` (Pillow), `[speed]`, `[watch]`, `[genius]`, `[duplicates]`, `[analyze]`, `[enhanced]` ou `[all]` para tudo. O extra `[enhanced]` instala aiolimiter, que protege chamadas à API contra rajadas; o layout de terminal continua usando o renderer próprio, responsivo e compatível com a-Shell. O comando `tags` **não depende do Pillow** para comparar capas (lê as dimensões do próprio JPEG/PNG); o Pillow só é usado para recompactar uma capa acima do limite de 16 MB do FLAC. No **a-Shell**, não instale extras: use o que já vem instalado. Rode `qobuz-dl doctor` para ver o que está disponível.
 
 *Execute o programa usando:* `python -m qobuz_dl`
 
@@ -771,6 +808,8 @@ Selecione **`yes`** se estiver em um ambiente de servidor ou NAS. Isso ignora o 
 ### 🩺 Verificação manual de integridade de áudio
 
 A verificação de integridade por decodificação real pode ser ativada em cada download com `--verify-download` (ou `verify_after_download = true` no `config.ini`). O utilitário manual não é instalado pelo pacote nem incluído na imagem Docker; a partir de um checkout do código-fonte, rode:
+
+O transporte direto de áudio também é finalizado de forma atômica: durante a rede o arquivo fica em `.part`, o tamanho e a resposta HTTP são conferidos e só então o nome final é promovido. Se a conexão cair, o mesmo download tenta continuar por `Range`; um arquivo parcial não aparece como faixa concluída.
 
 ```bash
 python check_audio.py

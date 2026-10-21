@@ -466,6 +466,8 @@ GRUPOS_DOWNLOAD = [
             "--segment-workers",
             "--delay",
             "--progress-json",
+            "--check-storage",
+            "--no-check-storage",
         ],
     ),
     (
