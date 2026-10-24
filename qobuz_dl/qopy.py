@@ -61,6 +61,7 @@ try:
 
     Bundle = _Bundle
 except ImportError:
+    # Dependência opcional ausente.
     pass
 
 logger = logging.getLogger(__name__)

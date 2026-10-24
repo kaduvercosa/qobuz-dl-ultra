@@ -206,7 +206,7 @@ def _read_tags(path: Path) -> dict:
             )
             out["upc"] = _first(t.get("TXXX:BARCODE") or t.get("TXXX:UPC"))
     except Exception:
-        pass
+        logger.debug("Sem IDs de serviço nas tags de %s", path, exc_info=True)
     return out
 
 

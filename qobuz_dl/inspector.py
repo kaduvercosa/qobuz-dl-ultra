@@ -16,6 +16,7 @@
 # ==============================================================================
 import asyncio
 import json
+import logging
 import os
 import subprocess
 from collections import Counter
@@ -23,6 +24,8 @@ from typing import Any
 
 from qobuz_dl import inspect_data, ui
 from qobuz_dl.utils import encontrar_binario, format_duration
+
+logger = logging.getLogger(__name__)
 
 Application: Any = None
 try:
@@ -34,6 +37,7 @@ try:
 
     Application = _Application
 except ImportError:
+    # Dependência opcional ausente.
     pass
 
 # Reaproveita o MESMO estilo visual do seletor principal (cores, "hovered",
@@ -556,6 +560,7 @@ def _checar_genuinidade(caminho, sample_rate, duracao_s):
                 timeout=30,
             )
         except (subprocess.TimeoutExpired, OSError):
+            logger.debug("ffmpeg falhou na janela de %.1fs", inicio, exc_info=True)
             continue
         if resultado.returncode != 0 or not resultado.stdout:
             continue

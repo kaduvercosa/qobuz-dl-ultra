@@ -317,16 +317,26 @@ class TestGetTagsToAdd:
         assert tags_normal["EXPLICIT"] == ""
         assert tags_normal["RATING"] == ""
 
-    def test_album_artist_e_sort_name_vem_como_texto(self):
-        # O comportamento atual de _get_tags_to_add() normaliza os valores
-        # recebidos de get_album_artist() para texto separado por vírgula.
+    def test_album_artist_e_sort_name_vem_do_album_ao_gravar_album(self):
         settings = QobuzDLSettings()
         album = _album(artist={"name": "The Beatles"})
 
-        tags = _get_tags_to_add(album, _item(), settings)
+        # No contexto de álbum completo, o performer da faixa não deve
+        # substituir o artista principal do álbum.
+        tags = _get_tags_to_add(album, _item(), settings, istrack=False)
 
         assert tags["ALBUMARTIST"] == "The Beatles"
         assert tags["ALBUMARTISTSORT"] == "Beatles, The"
+
+    def test_album_artist_prioriza_performer_ao_gravar_faixa(self):
+        settings = QobuzDLSettings()
+        album = _album(artist={"name": "The Beatles"})
+        item = _item(performer={"name": "Artista Principal"})
+
+        tags = _get_tags_to_add(album, item, settings, istrack=True)
+
+        assert tags["ALBUMARTIST"] == "Artista Principal"
+        assert tags["ALBUMARTISTSORT"] == "Artista Principal"
 
     def test_artistas_da_faixa_deduplicados_por_performers(self):
         settings = QobuzDLSettings()

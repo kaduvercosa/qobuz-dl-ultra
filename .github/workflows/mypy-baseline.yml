@@ -1,0 +1,78 @@
+name: Gerar mypy-baseline
+
+on:
+  workflow_dispatch:
+    inputs:
+      forcar:
+        description: "Regerar mesmo que o mypy-baseline.txt já exista"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: mypy-baseline
+  cancel-in-progress: false
+
+jobs:
+  gerar:
+    name: Gera e commita o mypy-baseline.txt
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v7
+
+      - name: Já existe baseline?
+        id: existe
+        shell: bash
+        run: |
+          if [ -f mypy-baseline.txt ] && [ "${{ inputs.forcar }}" != "true" ]; then
+            echo "pular=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::mypy-baseline.txt já existe. Use 'forcar' para regerar."
+          else
+            echo "pular=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup Python
+        if: steps.existe.outputs.pular == 'false'
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Instala o projeto, mypy e mypy-baseline
+        if: steps.existe.outputs.pular == 'false'
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[all]" mypy mypy-baseline
+
+      - name: Roda o mypy
+        if: steps.existe.outputs.pular == 'false'
+        shell: bash
+        run: |
+          mypy --python-version 3.12 qobuz_dl > mypy_saida.log 2>&1 || true
+          tail -n 5 mypy_saida.log
+
+      - name: Gera o baseline
+        if: steps.existe.outputs.pular == 'false'
+        shell: bash
+        run: |
+          rm -f mypy-baseline.txt
+          cat mypy_saida.log | mypy-baseline sync
+          echo "Linhas no baseline: $(wc -l < mypy-baseline.txt)"
+
+      - name: Commit do baseline
+        if: steps.existe.outputs.pular == 'false'
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add mypy-baseline.txt
+          if git diff --cached --quiet; then
+            echo "Sem mudanças no baseline."
+          else
+            git commit -m "chore(mypy): gera mypy-baseline.txt"
+            git push
+          fi

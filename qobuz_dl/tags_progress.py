@@ -54,6 +54,7 @@ def _atomic_write(path: str, text: str) -> None:
         try:
             os.remove(tmp)
         except OSError:
+            # Limpeza best-effort: o arquivo pode já ter sumido.
             pass
         raise
 

@@ -129,6 +129,7 @@ def write_sentinel(folder: str | os.PathLike, payload: dict) -> bool:
             if os.path.exists(tmp):
                 os.remove(tmp)
         except OSError:
+            # Limpeza best-effort: o arquivo pode já ter sumido.
             pass
         return False
 
@@ -200,6 +201,7 @@ def sentinel_downloaded_at(payload: dict) -> str:
         try:
             datetime.fromisoformat(value)
         except ValueError:
+            # Timestamp inválido: cai para 'agora'.
             pass
         else:
             return value
@@ -322,6 +324,7 @@ def count_audio_files(folder: str | os.PathLike, *, max_depth: int = 2) -> int:
         try:
             depth = len(cur.relative_to(root).parts)
         except ValueError:
+            # Pasta fora da raiz: ignorada.
             continue
         dirs[:] = (
             [d for d in dirs if not (cur / d).is_symlink()] if depth < max_depth else []

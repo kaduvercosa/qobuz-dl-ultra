@@ -87,6 +87,7 @@ def raw_width():
         if hasattr(sys.stdout, "isatty") and sys.stdout.isatty():
             return os.get_terminal_size(sys.stdout.fileno()).columns
     except (OSError, ValueError, AttributeError):
+        # Sem tty ou tamanho indisponível: cai para COLUMNS/fallback.
         pass
 
     env = os.environ.get("COLUMNS")
@@ -96,6 +97,7 @@ def raw_width():
             if value > 0:
                 return value
         except (TypeError, ValueError):
+            # COLUMNS inválido: segue para o fallback.
             pass
     try:
         return shutil.get_terminal_size(fallback=FALLBACK).columns
@@ -280,6 +282,7 @@ def _clear_pending_locked():
             sys.stdout.write("\r\033[2K")
             sys.stdout.flush()
         except Exception:
+            # Terminal sem suporte: efeito só cosmético.
             pass
 
 
@@ -298,6 +301,7 @@ def step_inline(message):
         try:
             sys.stdout.flush()
         except Exception:
+            # Terminal sem suporte: efeito só cosmético.
             pass
         _pending_status = True
 
@@ -416,6 +420,7 @@ def reset_track_index(token):
     try:
         _track_index.reset(token)
     except ValueError:
+        # Token de outro contexto: nada a restaurar.
         pass
 
 

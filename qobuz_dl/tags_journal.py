@@ -145,6 +145,7 @@ def _atomic_write_text(path: str, text: str) -> None:
         try:
             os.remove(tmp)
         except OSError:
+            # Limpeza best-effort: o arquivo pode já ter sumido.
             pass
         raise
 
@@ -238,6 +239,7 @@ class Journal:
         try:
             os.remove(self.pending_path)
         except OSError:
+            # Limpeza best-effort: o arquivo pode já ter sumido.
             pass
 
     def _commit(self, path: str, pre: Head, after_digest: str) -> None:
@@ -303,7 +305,7 @@ def list_runs(base_dir: str) -> list:
             with open(os.path.join(run_dir, "meta.json"), encoding="utf-8") as handle:
                 meta = json.load(handle)
         except (OSError, ValueError):
-            pass
+            logger.debug("meta.json ilegível em %s", run_dir, exc_info=True)
         count = 0
         try:
             with open(
@@ -311,7 +313,7 @@ def list_runs(base_dir: str) -> list:
             ) as handle:
                 count = sum(1 for line in handle if line.strip())
         except OSError:
-            pass
+            logger.debug("journal.jsonl ilegível em %s", run_dir, exc_info=True)
         runs.append(
             {
                 "id": name,
@@ -349,6 +351,7 @@ def _recover_pending(run_dir: str) -> bool:
         try:
             os.remove(pending_path)
         except OSError:
+            # Limpeza best-effort: o arquivo pode já ter sumido.
             pass
     return False
 
@@ -389,6 +392,7 @@ def _write_with_new_head(path: str, new_head: bytes, old_head_len: int) -> None:
         try:
             os.remove(tmp)
         except OSError:
+            # Limpeza best-effort: o arquivo pode já ter sumido.
             pass
         raise
 
@@ -442,8 +446,13 @@ def undo_run(
             for line in handle:
                 if line.strip():
                     entries.append(json.loads(line))
-    except OSError:
+    except FileNotFoundError:
+        # Execução sem nenhuma entrada gravada: não há o que desfazer.
         pass
+    except OSError:
+        # O journal existe mas não pôde ser lido: avisa em vez de parecer
+        # que a execução simplesmente estava vazia.
+        logger.warning("Não foi possível ler o journal de %s", run_dir, exc_info=True)
 
     def report(status: str, path: str) -> None:
         if on_file:
@@ -473,7 +482,7 @@ def undo_run(
             try:
                 os.utime(path, ns=(entry["atime_ns"], entry["mtime_ns"]))
             except OSError:
-                pass
+                logger.debug("Não restaurou as datas de %s", path, exc_info=True)
             restored = read_head(path)
             if restored is None or restored.digest != entry["before_hash"]:
                 result["verify_failed"] += 1

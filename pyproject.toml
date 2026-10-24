@@ -89,6 +89,7 @@ dev = [
     "pytest-asyncio>=0.24",
     "pytest-httpx>=0.30",
     "pytest-cov>=5",
+    "pytest-randomly>=3.15",
     "tomli; python_version < '3.11'",
 ]
 
@@ -161,7 +162,7 @@ branch = true
 
 [tool.coverage.report]
 precision = 2
-fail_under = 75
+fail_under = 60  # igual ao --cov-fail-under do CI e ao codecov.yml; suba os três juntos
 skip_covered = false
 exclude_also = [
     # Guarda de entrypoint (__main__.py): nunca roda sob pytest, cobrir

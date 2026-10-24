@@ -526,6 +526,7 @@ async def _download_apple_cover(
             try:
                 os.remove(path)
             except OSError:
+                # Limpeza best-effort: o arquivo pode já ter sumido.
                 pass
 
         return None
@@ -1170,6 +1171,7 @@ async def retag_directory(
                     try:
                         os.remove(cover_path)
                     except OSError:
+                        # Limpeza best-effort: o arquivo pode já ter sumido.
                         pass
                 cover_path = None
                 cover_source = None
@@ -1268,6 +1270,7 @@ async def retag_directory(
                     try:
                         os.remove(work_path)
                     except OSError:
+                        # Limpeza best-effort: o arquivo pode já ter sumido.
                         pass
                 if cover_path and not shared_cover:
                     try:

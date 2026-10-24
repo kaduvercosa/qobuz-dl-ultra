@@ -440,11 +440,13 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
                 else:
                     view["rechecks"] = 0
             except Exception:
+                # Redesenho opcional: não deve derrubar a tela.
                 pass
 
         try:
             asyncio.get_running_loop().call_soon(_recheck)
         except RuntimeError:
+            # Sem event loop ativo: o recheck é só cosmético.
             pass
 
     def get_list_text():

@@ -138,7 +138,7 @@ def _clean_empty_dirs(base_directory, exclude_dirs=None):
                     rel = os.path.relpath(dir_path, base_directory)
                     logger.info(f"  {RED}[-] Diretório vazio removido: {rel}{OFF}")
             except OSError:
-                pass
+                logger.debug("Não limpou o diretório %s", dir_path, exc_info=True)
 
 
 # # Fluxo principal: valida URL → busca remoto → compara local → confirma → sincroniza.

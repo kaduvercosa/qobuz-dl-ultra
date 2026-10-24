@@ -18,8 +18,8 @@ import random
 import re
 import shlex
 import sys
-from typing import Any, Callable, Optional
 import webbrowser
+from typing import Any, Callable, Optional
 
 from prompt_toolkit import PromptSession
 

@@ -686,6 +686,7 @@ class LyricsEngine:
                     if abs(float(found) - duration) > binilyrics.DURATION_TOLERANCE_S:
                         continue
                 except (TypeError, ValueError):
+                    # Duração inválida no resultado: aceita a letra sem comparar.
                     pass
             if not lrc_fits_duration(synced, duration):
                 continue

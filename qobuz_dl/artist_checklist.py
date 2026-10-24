@@ -14,8 +14,8 @@ ONDE PROCURAR: a confirmação (criar a playlist e gravar no banco) fica em
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import unicodedata
+from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
 from qobuz_dl import ui
@@ -1060,11 +1060,13 @@ async def run_checklist(
                 else:
                     view["rechecks"] = 0
             except Exception:
+                # Redesenho opcional: não deve derrubar a tela.
                 pass
 
         try:
             asyncio.get_running_loop().call_soon(_recheck)
         except RuntimeError:
+            # Sem event loop ativo: o recheck é só cosmético.
             pass
 
     def get_footer():

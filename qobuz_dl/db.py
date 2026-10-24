@@ -44,6 +44,7 @@ def _backup_before_migration(db_path: str) -> None:
         try:
             os.remove(temporary)
         except OSError:
+            # Limpeza best-effort: o arquivo pode já ter sumido.
             pass
         logger.warning("Backup pré-migração não criado: %s", exc)
 

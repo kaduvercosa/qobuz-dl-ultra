@@ -100,6 +100,7 @@ def fsync_dir(directory: PathLike) -> None:
     try:
         os.fsync(fd)
     except OSError:
+        # fsync não existe em todo armazenamento; só reforça a durabilidade.
         pass
     finally:
         os.close(fd)
@@ -323,6 +324,7 @@ def cleanup_stale_parts(
                 if os.path.islink(full) or os.stat(full).st_mtime > cutoff:
                     continue
             except OSError:
+                # O arquivo sumiu durante a varredura.
                 continue
             if dry_run or safe_remove(full):
                 found.append(full)

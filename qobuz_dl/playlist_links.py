@@ -292,6 +292,7 @@ def _rewrite_m3u(pl_dir, mapping):
             with open(path, encoding="utf-8") as f:
                 lines = f.read().split("\n")
         except (OSError, UnicodeDecodeError):
+            logger.debug("Playlist ilegível, ignorada: %s", path, exc_info=True)
             continue
         changed = False
         for i, line in enumerate(lines):

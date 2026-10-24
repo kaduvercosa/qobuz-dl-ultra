@@ -1341,6 +1341,7 @@ class Download:
                     try:
                         os.remove(embed_cover_path)
                     except OSError:
+                        # Limpeza best-effort: o arquivo pode já ter sumido.
                         pass
 
                 # Vale pra faixa avulsa, lote de faixas E faixa de playlist:
@@ -3232,6 +3233,7 @@ async def tqdm_download_segments(
             try:
                 os.remove(tmp_fname)
             except OSError:
+                # Limpeza best-effort: o arquivo pode já ter sumido.
                 pass
         if owns_session:
             try:
@@ -3372,4 +3374,5 @@ def _clean_embed_art(dirn, settings=None):
             time.sleep(0.5)
             os.remove(embed_file)
         except OSError:
+            # Capa embutida já removida ou em uso: segue sem remover.
             pass

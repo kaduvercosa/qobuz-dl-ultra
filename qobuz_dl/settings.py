@@ -8,6 +8,7 @@ from qobuz_dl.constants import (
     DEFAULT_FOLDER,
     DEFAULT_MULTIPLE_DISC_TRACK,
     DEFAULT_TRACK,
+    DEFAULT_VARIOUS_ARTISTS_ALIASES,
 )
 from qobuz_dl.utils import normalize_label_filter
 
@@ -35,6 +36,16 @@ def _parse_names_with_comma(value) -> tuple:
     itens = value.split(";") if isinstance(value, str) else list(value)
     return tuple(
         item.strip() for item in itens if isinstance(item, str) and "," in item
+    )
+
+
+def _parse_various_artists_aliases(value) -> frozenset:
+    """Normaliza a lista de nomes de 'Various Artists' (separados por vírgula)."""
+    if not value:
+        return frozenset()
+    itens = value.split(",") if isinstance(value, str) else list(value)
+    return frozenset(
+        str(item).strip().casefold() for item in itens if str(item).strip()
     )
 
 
@@ -145,6 +156,11 @@ class QobuzDLSettings:
         self.artists_with_comma = _parse_names_with_comma(
             kwargs.get("artists_with_comma")
         )
+        # Nomes de albúm-artista que marcam coletânea (COMPILATION=1)
+        # Configurável em config.ini: various_artists_aliases = Various Artists, VA, Artisti Vari
+        self.various_artists_aliases = _parse_various_artists_aliases(
+            kwargs.get("various_artists_aliases", DEFAULT_VARIOUS_ARTISTS_ALIASES)
+        )
 
         self.embed_art = kwargs.get("embed_art", False)
         self.cover_og_quality = kwargs.get("og_cover", False)
@@ -237,6 +253,11 @@ class QobuzDLSettings:
                 arguments.check_storage
                 if hasattr(arguments, "check_storage")
                 else config.getboolean(section, "check_storage", fallback=True)
+            ),
+            "various_artists_aliases": config.get(
+                section,
+                "various_artists_aliases",
+                fallback=DEFAULT_VARIOUS_ARTISTS_ALIASES,
             ),
             "embed_art": getattr(arguments, "embed_art", None)
             or config.getboolean(section, "embed_art", fallback=True),

@@ -316,6 +316,32 @@ def _format_copyright(s: str) -> str:
     return s
 
 
+def _eh_various_artists(qobuz_album: dict, settings=None) -> bool:
+    """True se o álbum-artista está na lista de coletâneas (various_artists_aliases)."""
+    aliases = getattr(settings, "various_artists_aliases", None) or frozenset()
+    if not aliases:
+        return False
+    nomes = get_album_artist(qobuz_album) or []
+    return any(str(n).strip().casefold() in aliases for n in nomes)
+
+
+def _tracktotal_do_disco(qobuz_album: dict, qobuz_item: dict) -> str:
+    """TRACKTOTAL por disco: total de faixas do disco atual, não do álbum inteiro.
+
+    Só aplica quando o álbum tem mais de um disco e a lista de faixas está
+    completa; caso contrário, mantém o total do álbum (faixa avulsa, playlist,
+    álbum parcialmente listado).
+    """
+    total = qobuz_album.get("tracks_count") or 1
+    items = (qobuz_album.get("tracks") or {}).get("items") or []
+    if (qobuz_album.get("media_count") or 1) > 1 and len(items) == total:
+        disco = qobuz_item.get("media_number", 1)
+        no_disco = sum(1 for t in items if t.get("media_number", 1) == disco)
+        if no_disco:
+            return str(no_disco)
+    return str(total)
+
+
 # # Remove caminhos/setas de gênero e elimina gêneros repetidos.
 def _format_genres(genres: list) -> str:
     """Format genre list for tags."""
@@ -935,6 +961,7 @@ def tag_flac(
         settings=settings,
         musicbrainz_ids=musicbrainz_ids,
         multi_out=multi_out,
+        istrack=istrack,
     )
     if em_image:
         _set_cover_source(tags, cover_source)
@@ -944,7 +971,7 @@ def tag_flac(
     if not settings.no_track_number_tag and _tem_valor(qobuz_item.get("track_number")):
         tags["TRACKNUMBER"] = str(qobuz_item["track_number"])
     if not settings.no_track_total_tag and _tem_valor(qobuz_album.get("tracks_count")):
-        tags["TRACKTOTAL"] = str(qobuz_album["tracks_count"])
+        tags["TRACKTOTAL"] = _tracktotal_do_disco(qobuz_album, qobuz_item)
     if not settings.no_disc_number_tag and _tem_valor(qobuz_item.get("media_number")):
         tags["DISCNUMBER"] = str(qobuz_item["media_number"])
     if not settings.no_disc_total_tag and _tem_valor(qobuz_album.get("media_count")):
@@ -1100,6 +1127,7 @@ def tag_mp3(
         settings=settings,
         musicbrainz_ids=musicbrainz_ids,
         multi_out=multi_out,
+        istrack=istrack,
     )
     if em_image:
         _set_cover_source(tags, cover_source)
@@ -1226,11 +1254,10 @@ def tag_mp3(
 
     # # TRCK/TPOS usam o formato número/total reconhecido por players. Sem o
     # # número da faixa/disco, o frame não é gravado; sem o total, vai só o número.
-    _trck = _numero_de_total(
-        qobuz_item.get("track_number"), qobuz_album.get("tracks_count")
-    )
-    if _trck:
-        audio["TRCK"] = id3.TRCK(encoding=3, text=_trck)
+    track = str(qobuz_item.get("track_number", "1"))
+    if not settings.no_track_total_tag and _tem_valor(qobuz_album.get("media_count")):
+        track += f"/{_tracktotal_do_disco(qobuz_album, qobuz_item)}"
+    audio["TRCK"] = id3.TRCK(encoding=3, text=track)
 
     _tpos = _numero_de_total(
         qobuz_item.get("media_number"), qobuz_album.get("media_count")
@@ -1351,6 +1378,7 @@ def _get_tags_to_add(
     settings: Optional[QobuzDLSettings] = None,
     musicbrainz_ids=None,
     multi_out: Optional[dict] = None,
+    istrack: bool = True,
 ):
     """Build dictionary of tags to add based on settings.
 
@@ -1386,7 +1414,15 @@ def _get_tags_to_add(
         tags["TITLE"] = track_title
 
     if not settings.no_album_artist_tag:
-        _albumartist_values = get_album_artist(qobuz_album)
+        # Faixa individual: prioriza o performer da faixa.
+        # Álbum completo: usa o artista principal do álbum, sem herdar o performer.
+        _performer = (qobuz_item.get("performer") or {}).get("name", "")
+        if _tem_valor(_performer) and (
+            istrack or _eh_various_artists(qobuz_album, settings)
+        ):
+            _albumartist_values = [_performer.strip()]
+        else:
+            _albumartist_values = get_album_artist(qobuz_album)
         _albumartist_text = ", ".join(
             str(value).strip() for value in _albumartist_values if str(value).strip()
         )
@@ -1574,7 +1610,7 @@ def _get_tags_to_add(
         duration_seconds=qobuz_album.get("duration", 0),
         api_release_type=qobuz_album.get("release_type"),
     )
-    if release_type == "compilation":
+    if _eh_various_artists(qobuz_album, settings) or release_type == "compilation":
         tags["COMPILATION"] = "1"
 
     if not getattr(settings, "no_replaygain_tag", False):

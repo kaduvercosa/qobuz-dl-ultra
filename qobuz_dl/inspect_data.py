@@ -18,6 +18,7 @@ O que sai de `ler_arquivo(caminho)`:
 from __future__ import annotations
 
 import base64
+import logging
 import os
 import re
 import subprocess
@@ -25,6 +26,8 @@ import time
 from typing import Optional
 
 from qobuz_dl.library_report import ISSUES, MIN_COVER_SIDE, diagnose
+
+logger = logging.getLogger(__name__)
 
 AUDIO_EXTS = (
     ".flac",
@@ -343,6 +346,7 @@ def _capas(audio) -> list:
             try:
                 pic = Picture(base64.b64decode(bruto))
             except Exception:  # noqa: BLE001
+                logger.debug("Capa embutida [%d] ilegível; ignorada", i, exc_info=True)
                 continue
             tipo = _TIPOS_CAPA.get(pic.type, f"tipo {pic.type}")
             capas.append(_capa(f"[{i}]", tipo, pic.mime, bytes(pic.data)))

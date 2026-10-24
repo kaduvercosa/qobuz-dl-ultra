@@ -14,6 +14,7 @@ Não modifica o Apple Notes nem estados de revisão; prepara arquivos para confe
 """
 
 from __future__ import annotations
+
 import argparse
 import contextlib
 import io
@@ -97,6 +98,7 @@ def extract_payload(text: str) -> dict | None:
         try:
             value = json.loads(cand)
         except (json.JSONDecodeError, TypeError):
+            # Linha que não é JSON: segue procurando.
             continue
         if isinstance(value, dict) and isinstance(value.get("artists"), list):
             return value
@@ -120,6 +122,7 @@ def _fetch_in_process() -> tuple[dict | None, str]:
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             cli.main()
     except SystemExit:
+        # cli.main() termina com SystemExit; o JSON já foi para a saída capturada.
         pass
     except KeyboardInterrupt:
         return None, "interrompido"

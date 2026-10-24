@@ -42,3 +42,9 @@ DEFAULT_MULTIPLE_DISC_TRACK = "{disc_number}.{track_number} - {track_title_base}
 # isso (procure por OK_MAX_CHARACTER_LENGTH em downloader.py/utils.py para
 # ver onde o corte é aplicado de fato -- não é feito aqui).
 OK_MAX_CHARACTER_LENGTH = 180
+
+# # Nomes de álbum-artista que indicam coletânea (Various Artists).
+# # Usado para gravar COMPILATION=1; configurável em config.ini.
+DEFAULT_VARIOUS_ARTISTS_ALIASES = (
+    "Various Artists, VA, Artisti Vari, Vários Artistas, Varios Artistas"
+)

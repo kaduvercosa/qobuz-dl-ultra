@@ -1663,6 +1663,7 @@ async def get_apple_hq_cover(
             try:
                 client._apple_json_cache = cache
             except Exception:
+                # Cliente sem atributo gravável: segue sem cache.
                 pass
         key = (url, tuple(sorted(params.items())))
         if key in cache:

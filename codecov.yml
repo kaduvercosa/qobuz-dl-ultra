@@ -1,6 +1,7 @@
 # Configuração completa do Codecov.
 #
-# O status project acompanha a cobertura total do repositório.
+# O status project acompanha a cobertura total do repositório (mesmo piso do
+# CI e do pyproject: 60%; ao subir, altere os três juntos).
 # O status patch acompanha apenas as linhas alteradas e é informativo,
 # portanto não bloqueia o merge.
 #
@@ -10,12 +11,12 @@
 coverage:
   precision: 2
   round: down
-  range: "75...100"
+  range: "60...100"
   status:
     project:
       default:
         enabled: true
-        target: 75%
+        target: 60%
         threshold: 0%
         if_ci_failed: error
         informational: false

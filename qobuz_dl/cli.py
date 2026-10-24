@@ -114,10 +114,12 @@ def _write_config_secure(config, config_file):
         try:
             os.close(fd)
         except OSError:
+            # Limpeza best-effort: o arquivo pode já ter sumido.
             pass
         try:
             os.unlink(temporary_path)
         except FileNotFoundError:
+            # Limpeza best-effort: o arquivo pode já ter sumido.
             pass
         raise
 
@@ -318,6 +320,7 @@ def _pick_accent_color() -> str:
                 name, rgb, escape = ACCENT_PRESETS[idx - 1]
                 break
         except ValueError:
+            # Entrada inválida: tratada como ausente.
             pass
         ui.emit(f" Por favor escolha entre 1 e {len(ACCENT_PRESETS)}.")
 
@@ -335,6 +338,7 @@ def _pick_accent_color() -> str:
                     escape = ui.c(f"\033[38;2;{parts[0]};{parts[1]};{parts[2]}m")
                     break
             except ValueError:
+                # Entrada inválida: tratada como ausente.
                 pass
             ui.emit(" Formato inválido. Use três números de 0 a 255, ex: 150;80;220")
 
@@ -613,6 +617,7 @@ def _purge_databases(config_path: str, downloads_db: str) -> list[str]:
             try:
                 os.remove(path)
             except FileNotFoundError:
+                # Limpeza best-effort: o arquivo pode já ter sumido.
                 continue
             removed.append(path)
     return removed
@@ -1640,7 +1645,13 @@ async def async_main():
             try:
                 _write_config_secure(config, CONFIG_FILE)
             except OSError:
-                pass
+                # O token já está no keyring, mas o config.ini não pôde ser
+                # regravado: o valor antigo continua em texto puro nele.
+                logger.warning(
+                    "Não foi possível limpar o token do config.ini depois de "
+                    "migrá-lo para o keyring; apague-o do arquivo à mão.",
+                    exc_info=True,
+                )
 
         _startup_timing("leitura de config/keyring/migração", config_read_started)
         fetch_lyrics = config.getboolean(section, "fetch_lyrics", fallback=False)
@@ -2181,6 +2192,7 @@ def _extract_checklist_json(captured: str) -> dict | None:
             try:
                 value = json.loads(candidate)
             except (json.JSONDecodeError, TypeError):
+                # Linha que não é JSON: segue procurando.
                 continue
             if isinstance(value, dict) and ("ok" in value or "parsed" in value):
                 return value

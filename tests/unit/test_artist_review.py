@@ -7,12 +7,12 @@ from types import SimpleNamespace
 
 from qobuz_dl.artist_review import (
     _open_profile_url,
+    _SelectionStore,
     cmd_artist_review,
     confirm_artists,
     playlist_name_for,
     refresh_artist_catalog,
     undo_artists,
-    _SelectionStore,
 )
 from qobuz_dl.commands import qobuz_dl_args
 from qobuz_dl.library_db import LibraryDB

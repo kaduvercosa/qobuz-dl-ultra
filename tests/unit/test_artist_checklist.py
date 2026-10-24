@@ -3,9 +3,9 @@
 from qobuz_dl import ui
 from qobuz_dl.artist_checklist import (
     ChecklistState,
+    detail_fragments,
     footer_fragments,
     footer_height,
-    detail_fragments,
     header_fragments,
     header_height,
     list_fragments,

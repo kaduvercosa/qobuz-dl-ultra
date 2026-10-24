@@ -29,12 +29,15 @@ Só usa ``sqlite3`` da biblioteca padrão (uma conexão curta por operação, en
 from __future__ import annotations
 
 import contextlib
+import logging
 import os
 import re
 import sqlite3
 import unicodedata
 from datetime import datetime, timezone
 from typing import Any, Iterable, Iterator, Optional
+
+logger = logging.getLogger(__name__)
 
 SCHEMA_VERSION = 5
 
@@ -113,7 +116,7 @@ class LibraryDB:
                 conn.execute("PRAGMA journal_mode=WAL")
                 conn.execute("PRAGMA synchronous=NORMAL")
             except sqlite3.DatabaseError:
-                pass
+                logger.debug("WAL indisponível neste armazenamento", exc_info=True)
             with conn:  # commit/rollback automático
                 yield conn
         finally:
