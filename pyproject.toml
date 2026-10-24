@@ -187,17 +187,26 @@ exclude_also = [
 # durations = 10
 
 [tool.mypy]
-# Configuracao DE PROPOSITO permissiva pra introduzir o mypy numa base de
-# codigo grande que nunca foi checada -- ver .github/workflows/tests.yml
-# (job "verificacao-de-tipos") e mypy-baseline.txt pra entender o
-# mecanismo de baseline (so' reclama de erro NOVO, nao dos ja existentes).
-# Aperte estas opcoes aos poucos conforme o baseline for encolhendo, nao
-# de uma vez.
+# Checagem rigida para prever erros. O que ja existia fica no
+# mypy-baseline.txt e so' erro NOVO derruba o CI (ver
+# .github/workflows/tests.yml, job "verificacao-de-tipos"). Ao corrigir
+# itens, regenere o baseline (workflow "Gerar mypy-baseline" com forcar).
 python_version = "3.10"
 ignore_missing_imports = true # muitas dependencias (ex.: mutagen) nao tem stubs de tipo
-check_untyped_defs = false # muita funcao ainda sem type hint completo -- ligar depois
+check_untyped_defs = true # checa tambem o corpo de funcoes sem type hint
 warn_redundant_casts = true
-warn_unused_ignores = false # idem -- ligar quando o baseline estiver menor
+warn_unused_ignores = true # acusa "# type: ignore" que nao serve mais
+warn_unreachable = true # codigo morto / condicao impossivel
+strict_equality = true # comparacao que nunca pode ser verdadeira
+extra_checks = true
+enable_error_code = [
+    "possibly-undefined", # variavel que pode nao existir (definida so em try/if)
+    "truthy-bool", # objeto que e' sempre "verdadeiro" num if
+    "truthy-iterable",
+    "ignore-without-code", # "# type: ignore" sem o codigo do erro
+    "redundant-expr",
+    "unused-awaitable", # task/future criada e esquecida (falta de await)
+]
 exclude = [
     "^tests/",
     "^build/",
