@@ -142,7 +142,6 @@ class FakeQobuz:
         self.settings = SimpleNamespace(write_sentinel=True)
         self.baixados = []
         self.ok = ok
-        outer = self
 
         class C:
             async def get_all_favorites(self, fav_type, *, page_size, max_pages):

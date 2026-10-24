@@ -27,7 +27,9 @@ def _run(argv):
 def _setup(tmp: str, artists=ARTISTS, banner=True):
     base = Path(tmp)
     raw = json.dumps({"artists": artists}, ensure_ascii=False)
-    (base / "artists.json").write_text(("Logando... OK\n" if banner else "") + raw + "\n", encoding="utf-8")
+    (base / "artists.json").write_text(
+        ("Logando... OK\n" if banner else "") + raw + "\n", encoding="utf-8"
+    )
     return base
 
 
@@ -46,12 +48,26 @@ def test_ids_na_nota_aceita_marcados_e_nao_marcados():
 def test_com_nota_so_adiciona_o_que_falta_em_ordem_alfabetica():
     with tempfile.TemporaryDirectory() as tmp:
         base = _setup(tmp)
-        (base / "nota.txt").write_text("- [x] Adele - [QOBUZ_ID:2] - u\n", encoding="utf-8")
-        code, out, _ = _run([str(base / "artists.json"), "--dir", str(base / "o"),
-                             "--nota", str(base / "nota.txt"), "--imprimir", "linhas"])
+        (base / "nota.txt").write_text(
+            "- [x] Adele - [QOBUZ_ID:2] - u\n", encoding="utf-8"
+        )
+        code, out, _ = _run(
+            [
+                str(base / "artists.json"),
+                "--dir",
+                str(base / "o"),
+                "--nota",
+                str(base / "nota.txt"),
+                "--imprimir",
+                "linhas",
+            ]
+        )
         assert code == 0
         lines = out.splitlines()
-        assert [ln.split(" - ")[0] for ln in lines] == ["- [ ] Beyoncé", "- [ ] Zé Ramalho"]
+        assert [ln.split(" - ")[0] for ln in lines] == [
+            "- [ ] Beyoncé",
+            "- [ ] Zé Ramalho",
+        ]
         assert "[QOBUZ_ID:3]" in lines[1] and lines[1].endswith("/artist/3")
         assert "Adele" not in out
 
@@ -61,14 +77,27 @@ def test_segunda_execucao_com_nota_atualizada_nao_repete_e_resume_novo():
         base = _setup(tmp)
         nota = base / "nota.txt"
         nota.write_text("- [ ] Adele - [QOBUZ_ID:2] - u\n", encoding="utf-8")
-        args = [str(base / "artists.json"), "--dir", str(base / "o"), "--nota", str(nota)]
+        args = [
+            str(base / "artists.json"),
+            "--dir",
+            str(base / "o"),
+            "--nota",
+            str(nota),
+        ]
         _run(args)
-        nota.write_text(nota.read_text() + "- [ ] Beyoncé - [QOBUZ_ID:1] - u\n- [ ] Zé - [QOBUZ_ID:3] - u\n")
+        nota.write_text(
+            nota.read_text()
+            + "- [ ] Beyoncé - [QOBUZ_ID:1] - u\n- [ ] Zé - [QOBUZ_ID:3] - u\n"
+        )
         novos = ARTISTS + [{"id": "4", "name": "Novo Artista"}]
-        (base / "artists.json").write_text(json.dumps({"artists": novos}), encoding="utf-8")
+        (base / "artists.json").write_text(
+            json.dumps({"artists": novos}), encoding="utf-8"
+        )
         code, out, _ = _run(args + ["--imprimir", "linhas"])
         assert code == 0
-        assert out.splitlines() == ["- [ ] Novo Artista - [QOBUZ_ID:4] - https://open.qobuz.com/artist/4"]
+        assert out.splitlines() == [
+            "- [ ] Novo Artista - [QOBUZ_ID:4] - https://open.qobuz.com/artist/4"
+        ]
         resumo = (base / "o" / "ultimo-resumo.txt").read_text(encoding="utf-8")
         assert "Novos: 1" in resumo and "Novo Artista" in resumo
         pend = json.loads((base / "o" / "artists-pending.json").read_text())
@@ -79,14 +108,36 @@ def test_nota_sem_ids_e_recusada_e_nada_vai_para_stdout():
     with tempfile.TemporaryDirectory() as tmp:
         base = _setup(tmp)
         (base / "nota.txt").write_text("", encoding="utf-8")
-        code, out, err = _run([str(base / "artists.json"), "--dir", str(base / "o"),
-                               "--nota", str(base / "nota.txt"), "--imprimir", "linhas"])
+        code, out, err = _run(
+            [
+                str(base / "artists.json"),
+                "--dir",
+                str(base / "o"),
+                "--nota",
+                str(base / "nota.txt"),
+                "--imprimir",
+                "linhas",
+            ]
+        )
         assert code == 1 and out == "" and "ERRO" in err
-        assert (base / "o" / "ultimo-resumo.txt").read_text(encoding="utf-8").startswith("ERRO")
+        assert (
+            (base / "o" / "ultimo-resumo.txt")
+            .read_text(encoding="utf-8")
+            .startswith("ERRO")
+        )
         assert not (base / "o" / "artists-current.json").exists()
-        code, out, _ = _run([str(base / "artists.json"), "--dir", str(base / "o"),
-                             "--nota", str(base / "nota.txt"), "--imprimir", "linhas",
-                             "--permitir-nota-vazia"])
+        code, out, _ = _run(
+            [
+                str(base / "artists.json"),
+                "--dir",
+                str(base / "o"),
+                "--nota",
+                str(base / "nota.txt"),
+                "--imprimir",
+                "linhas",
+                "--permitir-nota-vazia",
+            ]
+        )
         assert code == 0 and len(out.splitlines()) == 3
 
 
@@ -118,6 +169,7 @@ def test_busca_em_processo_ignora_banner_do_cli():
 
     fake.main = main
     import qobuz_dl
+
     old = sys.modules.get("qobuz_dl.cli")
     sys.modules["qobuz_dl.cli"] = fake
     qobuz_dl.cli = fake

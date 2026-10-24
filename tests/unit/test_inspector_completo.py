@@ -13,7 +13,7 @@ import sys
 
 import pytest
 
-from qobuz_dl import cli, inspector
+from qobuz_dl import cli, inspector, ui
 from qobuz_dl.commands import qobuz_dl_args
 
 FFMPEG = shutil.which("ffmpeg")
@@ -34,14 +34,26 @@ pytestmark = [
 
 
 def _ffmpeg(*args):
+    # -nostdin + stdin fechado + timeout: se o ffmpeg do ambiente (ex.: a-Shell)
+    # ficar esperando algo, o teste falha em vez de congelar a suíte.
     subprocess.run(
-        [FFMPEG, "-y", "-loglevel", "error", *args], check=True, capture_output=True
+        [FFMPEG, "-y", "-nostdin", "-loglevel", "error", *args],
+        check=True,
+        capture_output=True,
+        stdin=subprocess.DEVNULL,
+        timeout=120,
     )
 
 
 @pytest.fixture(scope="module")
 def biblioteca(tmp_path_factory):
     """Pasta com 2 FLAC (um completo, um sem capa/IDs), 1 MP3 e 1 arquivo ruim."""
+    if sys.platform == "ios":
+        # No a-Shell o ffmpeg roda dentro do próprio processo do Python e, com a
+        # suíte inteira rodando, trava de forma intermitente (visto com
+        # faulthandler, em pontos diferentes: criando a fixture e em --completo),
+        # congelando tudo. O CI (macOS/Linux) continua rodando estes testes.
+        pytest.skip("ffmpeg real trava intermitente no a-Shell/iOS; coberto no CI")
     pasta = tmp_path_factory.mktemp("biblioteca")
     capa = str(pasta / "capa.jpg")
     _ffmpeg("-f", "lavfi", "-i", "color=c=red:s=600x600:d=1", "-frames:v", "1", capa)
@@ -68,6 +80,24 @@ def _rodar(caminho, capsys, **kwargs):
     kwargs.setdefault("espectro", False)
     codigo = asyncio.run(inspector.run_inspector(caminho, **kwargs))
     return codigo, capsys.readouterr().out
+
+
+@pytest.fixture(autouse=True)
+def largura_fixa(monkeypatch):
+    """Fixa a largura do terminal em 100 colunas.
+
+    `ui.detail()` quebra linhas na largura da janela de quem roda a suíte. Sem
+    isto, numa janela estreita (iPhone/a-Shell) a linha técnica da faixa
+    ("FLAC · ... · capa 600x600") quebrava no meio e as asserções de texto
+    falhavam só em alguns ambientes.
+    """
+    monkeypatch.setenv("COLUMNS", "100")
+    monkeypatch.delenv("LINES", raising=False)
+
+    def _sem_terminal(fd=None):
+        raise OSError("sem terminal")
+
+    monkeypatch.setattr(ui.os, "get_terminal_size", _sem_terminal)
 
 
 @pytest.fixture(autouse=True)
@@ -180,7 +210,9 @@ def test_resumo_da_pasta(biblioteca, capsys):
     codigo, saida = _rodar(biblioteca["pasta"], capsys, resumo=True)
     assert codigo == 0
     assert "📚 RESUMO DA PASTA" in saida and "Arquivos de áudio" in saida
-    assert "Dua Lipa — Completo" in saida and "capa 600x600" in saida
+    # \u2014 = travessão (o separador artista/título do resumo). Escrito como
+    # escape ASCII para nenhum editor/teclado trocar o caractere por "--".
+    assert "Dua Lipa \u2014 Completo" in saida and "capa 600x600" in saida
     assert "sem capa" in saida
     assert "04 ruim.flac" in saida and "não foi possível ler" in saida
     assert "📊 TOTAIS" in saida and "Faixas lidas" in saida

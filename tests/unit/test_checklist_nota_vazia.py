@@ -40,7 +40,10 @@ def test_nota_vazia_devolve_todos_os_seguidos_como_novos():
         items = ar.parse_notes_checklist(text, allow_empty=True)
         missing = ar.compute_new_followed_missing(FOLLOWED, items)
         assert [a["name"] for a in missing] == ["Adele", "Alok", "Beyoncé"]
-        assert missing[0]["line"] == "- [ ] Adele - [QOBUZ_ID:1] - https://open.qobuz.com/artist/1"
+        assert (
+            missing[0]["line"]
+            == "- [ ] Adele - [QOBUZ_ID:1] - https://open.qobuz.com/artist/1"
+        )
 
 
 def test_linhas_novas_acrescentadas_ao_arquivo_entram_como_pendentes():
@@ -48,11 +51,14 @@ def test_linhas_novas_acrescentadas_ao_arquivo_entram_como_pendentes():
         lib = _db(tmp)
         base = "- [x] Adele - [QOBUZ_ID:1] - https://open.qobuz.com/artist/1"
         novas = "\n".join(
-            a["line"] for a in ar.compute_new_followed_missing(
+            a["line"]
+            for a in ar.compute_new_followed_missing(
                 FOLLOWED, ar.parse_notes_checklist(base)
             )
         )
-        result = asyncio.run(ar.sync_notes_checklist(f"# tracklist\n{base}\n{novas}\n", lib))
+        result = asyncio.run(
+            ar.sync_notes_checklist(f"# tracklist\n{base}\n{novas}\n", lib)
+        )
         assert result["parsed"] == 3
         assert sorted(i["name"] for i in result["pending"]) == ["Alok", "Beyoncé"]
         assert [i["name"] for i in result["marked"]] == ["Adele"]

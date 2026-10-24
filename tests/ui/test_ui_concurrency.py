@@ -88,6 +88,14 @@ def _rodar_cenario():
     import sys
     from pathlib import Path
 
+    if sys.platform == "ios" and os.environ.get("QOBUZ_REQUIRE_REAL_TOOLS") != "1":
+        # No a-Shell o `python3` filho roda dentro do mesmo processo e, de forma
+        # intermitente, escreve direto no terminal em vez de no pipe: o
+        # `subprocess.run` nunca recebe EOF e a suíte congela (visto com
+        # faulthandler). Não dá para tratar com `timeout`, porque matar o filho
+        # também não funciona lá. No CI estes testes continuam valendo.
+        pytest.skip("python3 filho com pipe trava no a-Shell/iOS; coberto no CI")
+
     raiz = Path(__file__).resolve().parents[2]
     env = dict(os.environ, NO_COLOR="1", COLUMNS="100")
     env["PYTHONPATH"] = os.pathsep.join(

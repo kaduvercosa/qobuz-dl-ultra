@@ -1080,8 +1080,7 @@ def test_parseia_checklist_apple_notas_e_rejeita_estados_conflitantes():
 
     with pytest.raises(ValueError, match="aparece marcado e desmarcado"):
         parse_notes_checklist(
-            "- [x] Lady Gaga - [QOBUZ_ID:61585]\n"
-            "- [ ] Lady Gaga - [QOBUZ_ID:61585]"
+            "- [x] Lady Gaga - [QOBUZ_ID:61585]\n- [ ] Lady Gaga - [QOBUZ_ID:61585]"
         )
 
 
@@ -1110,8 +1109,10 @@ def test_sync_checklist_espelha_estado_sem_criar_playlist(tmp_path):  # --espelh
     assert [row["source_artist_id"] for row in result["verified"]] == ["12698784"]
     assert [row["source_artist_id"] for row in result["pending"]] == ["61585"]
     assert result["playlists_created"] == 0
-    states = {row["source_artist_id"]: bool(row["last_reviewed_at"])
-              for row in lib.get_followed_artists("qobuz")}
+    states = {
+        row["source_artist_id"]: bool(row["last_reviewed_at"])
+        for row in lib.get_followed_artists("qobuz")
+    }
     assert states == {"61585": False, "12698784": True}
 
 
@@ -1140,12 +1141,19 @@ def test_sync_padrao_nao_desfaz_o_que_foi_confirmado_no_a_shell(tmp_path):
     from qobuz_dl.artist_review import sync_notes_checklist
 
     lib = _lib_com(tmp_path, "Ana", "Bia")
-    asyncio.run(confirm_artists(lib.get_followed_artists("qobuz")[:1], lib, FakePlaylistClient()))
+    asyncio.run(
+        confirm_artists(
+            lib.get_followed_artists("qobuz")[:1], lib, FakePlaylistClient()
+        )
+    )
     nota = _nota("- [ ] Ana - [QOBUZ_ID:1]", "- [x] Bia - [QOBUZ_ID:2]")
 
     result = asyncio.run(sync_notes_checklist(nota, lib))
 
-    por_nome = {a["name"]: bool(a["last_reviewed_at"]) for a in lib.get_followed_artists("qobuz")}
+    por_nome = {
+        a["name"]: bool(a["last_reviewed_at"])
+        for a in lib.get_followed_artists("qobuz")
+    }
     assert por_nome == {"Ana": True, "Bia": True}  # Ana continua conferida
     assert result["unmarked"] == [] and result["mirror"] is False
     assert [i["name"] for i in result["kept_verified"]] == ["Ana"]
@@ -1157,7 +1165,9 @@ def test_sync_espelhar_reabre_quem_esta_desmarcado_na_nota(tmp_path):
     from qobuz_dl.artist_review import sync_notes_checklist
 
     lib = _lib_com(tmp_path, "Ana")
-    asyncio.run(confirm_artists(lib.get_followed_artists("qobuz"), lib, FakePlaylistClient()))
+    asyncio.run(
+        confirm_artists(lib.get_followed_artists("qobuz"), lib, FakePlaylistClient())
+    )
     result = asyncio.run(
         sync_notes_checklist("- [ ] Ana - [QOBUZ_ID:1]", lib, mirror=True)
     )
@@ -1214,7 +1224,9 @@ def test_sync_desmarcado_com_lancamento_novo_nao_reabre_nem_no_espelho(tmp_path)
     result = asyncio.run(
         sync_notes_checklist("- [ ] Ana - [QOBUZ_ID:1]", lib, mirror=True)
     )
-    assert result["unmarked"] == [] and [i["name"] for i in result["pending"]] == ["Ana"]
+    assert result["unmarked"] == [] and [i["name"] for i in result["pending"]] == [
+        "Ana"
+    ]
     assert lib.get_followed_artists("qobuz")[0]["pending_count"] == 1
 
 
@@ -1233,7 +1245,10 @@ def test_sync_lista_os_seguidos_que_faltam_na_nota_prontos_para_colar(tmp_path):
     from qobuz_dl.artist_review import parse_notes_checklist
 
     lidas = parse_notes_checklist("\n".join(m["line"] for m in result["missing"]))
-    assert [(i["source_artist_id"], i["verified"]) for i in lidas] == [("3", True), ("2", False)]
+    assert [(i["source_artist_id"], i["verified"]) for i in lidas] == [
+        ("3", True),
+        ("2", False),
+    ]
 
 
 def _executar_sync(tmp_path, monkeypatch, nota, lib, qobuz, **opcoes):
@@ -1246,11 +1261,17 @@ def _executar_sync(tmp_path, monkeypatch, nota, lib, qobuz, **opcoes):
     return rc, json.loads(saidas[-1])
 
 
-def test_comando_sincroniza_arquivo_informado_sem_precisar_de_api(tmp_path, monkeypatch):
+def test_comando_sincroniza_arquivo_informado_sem_precisar_de_api(
+    tmp_path, monkeypatch
+):
     lib = _lib_com(tmp_path, "Ana", "Bia")
     qobuz = SimpleNamespace()  # sem client: provaria qualquer chamada à API
     rc, saida = _executar_sync(
-        tmp_path, monkeypatch, "- [x] Ana - [QOBUZ_ID:1]\n- [ ] Bia - [QOBUZ_ID:2]", lib, qobuz
+        tmp_path,
+        monkeypatch,
+        "- [x] Ana - [QOBUZ_ID:1]\n- [ ] Bia - [QOBUZ_ID:2]",
+        lib,
+        qobuz,
     )
     assert rc == 0 and saida["ok"] is True
     assert [i["name"] for i in saida["marked"]] == ["Ana"]
@@ -1279,9 +1300,16 @@ def test_comando_atualiza_seguidos_antes_de_sincronizar(tmp_path, monkeypatch):
 
 def test_comando_passa_o_modo_espelhar(tmp_path, monkeypatch):
     lib = _lib_com(tmp_path, "Ana")
-    asyncio.run(confirm_artists(lib.get_followed_artists("qobuz"), lib, FakePlaylistClient()))
+    asyncio.run(
+        confirm_artists(lib.get_followed_artists("qobuz"), lib, FakePlaylistClient())
+    )
     rc, saida = _executar_sync(
-        tmp_path, monkeypatch, "- [ ] Ana - [QOBUZ_ID:1]", lib, SimpleNamespace(), espelhar=True
+        tmp_path,
+        monkeypatch,
+        "- [ ] Ana - [QOBUZ_ID:1]",
+        lib,
+        SimpleNamespace(),
+        espelhar=True,
     )
     assert saida["mirror"] is True and [i["name"] for i in saida["unmarked"]] == ["Ana"]
 
@@ -1294,7 +1322,13 @@ def test_parser_sincronizar_checklist_aceita_arquivo_e_opcoes():
     assert simples.sincronizar_checklist is True
     assert simples.espelhar is False and simples.atualizar_seguidos is False
     completo = parser.parse_args(
-        ["artists", "--sincronizar-checklist", "nota.txt", "--espelhar", "--atualizar-seguidos"]
+        [
+            "artists",
+            "--sincronizar-checklist",
+            "nota.txt",
+            "--espelhar",
+            "--atualizar-seguidos",
+        ]
     )
     assert completo.sincronizar_checklist == "nota.txt"
     assert completo.espelhar is True and completo.atualizar_seguidos is True
@@ -1320,7 +1354,11 @@ def test_sincronizar_checklist_local_nao_precisa_de_login():
     parser = cli.qobuz_dl_args()
     local = parser.parse_args(["artists", "--sincronizar-checklist"])
     assert cli._is_local_checklist_sync(local) is True
-    com_api = parser.parse_args(["artists", "--sincronizar-checklist", "--atualizar-seguidos"])
+    com_api = parser.parse_args(
+        ["artists", "--sincronizar-checklist", "--atualizar-seguidos"]
+    )
     assert cli._is_local_checklist_sync(com_api) is False
     assert cli._is_local_checklist_sync(parser.parse_args(["artists"])) is False
-    assert cli._is_local_checklist_sync(parser.parse_args(["artists", "--json"])) is False
+    assert (
+        cli._is_local_checklist_sync(parser.parse_args(["artists", "--json"])) is False
+    )

@@ -137,8 +137,6 @@ class TestCheckForUpdates:
             r for r in caplog.records if "atualização falhou" in r.getMessage().lower()
         ]
 
-        # E que nada foi para stdout (silêncio para o usuário)
-        saida = capsys.readouterr().out.strip()
 
         assert records, f"Log de falha não encontrado. Records: {caplog.records}"
         # Se houver output, ele deve vir do logger, não de print cru

@@ -754,7 +754,7 @@ def _gerar_grafico_html(caminho_audio, genuinidade):
     nyquist_khz = nyquist_hz / 1000
     nome_faixa = os.path.splitext(os.path.basename(caminho_audio))[0]
 
-    largura, altura = 1200, 820
+    largura = 1200
     margem_esq, margem_dir = 70, 40
     y0, y1 = 190, 560
     x0, x1 = margem_esq, largura - margem_dir

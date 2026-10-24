@@ -533,11 +533,6 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
             final_fragments = []
             current_w = 0
 
-            row_st = (
-                "class:hovered"
-                if hovered
-                else ("class:highlight" if is_checked else "")
-            )
             border_st = "class:hovered" if hovered else border_style
 
             # Caractere físico mais grosso (Heavy Box Drawing) se estiver marcado
@@ -635,7 +630,6 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
                 res.append(("[SetCursorPosition]", ""))
 
             style = "class:highlight" if checked else ""
-            title_style = "class:highlight"
 
             ptr = "➤" if hovered else " "
             if is_multi:
@@ -1291,35 +1285,6 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
             bottom=lambda: 0 if _table_is_active() else card_state["below"],
         ),
         wrap_lines=False,
-    )
-
-    def get_table_bottom_text():
-        try:
-            columns = get_app().output.get_size().columns
-        except Exception:
-            columns, _ = shutil.get_terminal_size((80, 24))
-
-        table_columns = max(32, columns - 2)
-
-        is_table, widths, headers, borders = _get_table_layout(
-            table_columns,
-            is_multi,
-            item_category,
-            album_role=album_role_mode,
-        )
-
-        if not is_table:
-            return []
-
-        prefix_len = 5 if is_multi else 3
-        prefix = " " * prefix_len
-
-        return [("class:meta", prefix + borders["bot"])]
-
-    table_bottom_window = Window(
-        content=FormattedTextControl(text=get_table_bottom_text),
-        dont_extend_height=True,
-        height=Dimension.exact(1),
     )
 
     def _footer_height() -> Dimension:

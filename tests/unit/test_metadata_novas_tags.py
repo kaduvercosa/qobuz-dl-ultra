@@ -13,10 +13,14 @@ def test_tracktotal_por_disco():
     album = {
         "tracks_count": 4,
         "media_count": 2,
-        "tracks": {"items": [
-            {"media_number": 1}, {"media_number": 1},
-            {"media_number": 2}, {"media_number": 2},
-        ]},
+        "tracks": {
+            "items": [
+                {"media_number": 1},
+                {"media_number": 1},
+                {"media_number": 2},
+                {"media_number": 2},
+            ]
+        },
     }
     item = {"media_number": 2}
     assert _tracktotal_do_disco(album, item) == "2"

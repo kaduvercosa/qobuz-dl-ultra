@@ -243,7 +243,7 @@ def modulo_recarregado(monkeypatch):
         if pacote is not None:
             # O import de um submódulo grava o atributo no pacote; sem isto,
             # `from qobuz_dl import color` ainda devolveria o módulo recarregado.
-            setattr(pacote, "color", original)
+            pacote.color = original
     else:
         sys.modules.pop("qobuz_dl.color", None)
 

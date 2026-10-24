@@ -11,6 +11,7 @@ ponte com o módulo `logging`.
 """
 
 import logging
+import os
 import sys
 import types
 
@@ -81,11 +82,14 @@ class TestRawWidth:
     @pytest.mark.parametrize("valor", ["0", "-5", "abc", ""])
     def test_columns_invalida_cai_para_o_terminal(self, monkeypatch, sem_tty, valor):
         monkeypatch.setenv("COLUMNS", valor)
-        monkeypatch.setattr(
-            ui.shutil,
-            "get_terminal_size",
-            lambda fallback: types.SimpleNamespace(columns=77),
+        # Troca só o `shutil` do módulo `ui`, nunca o global: com `-v` (o padrão
+        # do projeto) o próprio pytest chama shutil.get_terminal_size() entre
+        # as fases do teste e quebraria (INTERNALERROR) com um retorno que não
+        # é um (colunas, linhas).
+        falso = types.SimpleNamespace(
+            get_terminal_size=lambda fallback: os.terminal_size((77, 24))
         )
+        monkeypatch.setattr(ui, "shutil", falso)
         assert ui.raw_width() == 77
 
     def test_erro_ao_consultar_o_terminal_usa_o_fallback(self, monkeypatch, sem_tty):
@@ -94,7 +98,10 @@ class TestRawWidth:
         def explode(fallback):
             raise OSError("sem tty")
 
-        monkeypatch.setattr(ui.shutil, "get_terminal_size", explode)
+        # Só no `shutil` do módulo `ui` (ver o teste acima).
+        monkeypatch.setattr(
+            ui, "shutil", types.SimpleNamespace(get_terminal_size=explode)
+        )
         assert ui.raw_width() == ui.FALLBACK[0]
 
 
@@ -123,7 +130,7 @@ class TestRawWidthComTerminalVivo:
 
         def tamanho(fd):
             pedidos.append(fd)
-            return types.SimpleNamespace(columns=133)
+            return os.terminal_size((133, 24))
 
         monkeypatch.setattr(ui.os, "get_terminal_size", tamanho)
         assert ui.raw_width() == 133
@@ -133,7 +140,7 @@ class TestRawWidthComTerminalVivo:
         monkeypatch.setenv("COLUMNS", "64")
         monkeypatch.setattr(ui.sys, "stdout", _SaidaFalsa(tty=False))
         monkeypatch.setattr(
-            ui.os, "get_terminal_size", lambda fd: types.SimpleNamespace(columns=999)
+            ui.os, "get_terminal_size", lambda fd: os.terminal_size((999, 24))
         )
         assert ui.raw_width() == 64
 
@@ -165,7 +172,7 @@ class TestRawWidthComTerminalVivo:
     def test_largura_do_tty_e_limitada_por_width_como_qualquer_outra(self, monkeypatch):
         monkeypatch.setattr(ui.sys, "stdout", _SaidaFalsa(tty=True))
         monkeypatch.setattr(
-            ui.os, "get_terminal_size", lambda fd: types.SimpleNamespace(columns=500)
+            ui.os, "get_terminal_size", lambda fd: os.terminal_size((500, 24))
         )
         assert ui.width() == ui.MAX_WIDTH
 
