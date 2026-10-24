@@ -903,5 +903,82 @@ async def _garantir_assinatura_ativa(qobuz: QobuzDL) -> bool:
     return True
 
 
+def _is_local_checklist_sync(arguments) -> bool:
+    """True quando ``artists --sincronizar-checklist`` só precisa do banco local."""
+    return (
+        arguments.command in ("artists", "artist-review")
+        and bool(getattr(arguments, "sincronizar_checklist", False))
+        and not getattr(arguments, "atualizar_seguidos", False)
+    )
+
+
+def _extract_checklist_json(captured: str) -> dict | None:
+    """Recupera o objeto JSON emitido pelo modo checklist, ignorando logs de startup."""
+    for line in reversed(captured.splitlines()):
+        candidates = [line.strip()]
+        start = line.find("{")
+        end = line.rfind("}")
+        if start >= 0 and end > start:
+            candidates.append(line[start : end + 1])
+        for candidate in candidates:
+            try:
+                value = json.loads(candidate)
+            except (json.JSONDecodeError, TypeError):
+                continue
+            if isinstance(value, dict) and ("ok" in value or "parsed" in value):
+                return value
+    return None
+
+
+def main():
+    # Atalhos do iOS precisa receber um único JSON válido, sem banners de login,
+    # assinatura, qualidade ou mensagens do logger. O comportamento dos demais
+    # comandos permanece inalterado.
+    checklist_json_mode = any(
+        arg == "--sincronizar-checklist" or arg.startswith("--sincronizar-checklist=")
+        for arg in sys.argv[1:]
+    )
+    if checklist_json_mode:
+        captured_out = io.StringIO()
+        captured_err = io.StringIO()
+        exit_code = 0
+        try:
+            with (
+                contextlib.redirect_stdout(captured_out),
+                contextlib.redirect_stderr(captured_err),
+            ):
+                asyncio.run(async_main())
+        except KeyboardInterrupt:
+            exit_code = 1
+        except SystemExit as exc:
+            exit_code = (
+                exc.code
+                if isinstance(exc.code, int)
+                else (0 if exc.code is None else 1)
+            )
+        except Exception as exc:
+            exit_code = 1
+            captured_err.write(str(exc))
+
+        payload = _extract_checklist_json(captured_out.getvalue())
+        if payload is None:
+            details = captured_err.getvalue().strip()
+            payload = {
+                "ok": False,
+                "error": details
+                or "A sincronização terminou sem retornar um JSON válido.",
+            }
+            exit_code = exit_code or 1
+        print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
+        if exit_code:
+            raise SystemExit(exit_code)
+        return
+
+    try:
+        asyncio.run(async_main())
+    except KeyboardInterrupt:
+        sys.exit(1)
+
+
 if __name__ == "__main__":
     main()
