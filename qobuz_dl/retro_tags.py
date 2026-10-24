@@ -464,9 +464,7 @@ async def _fetch_apple_cover_for_track(
     """Busca URL, fonte e diagnóstico da busca Apple (mesma regra do download)."""
     from qobuz_dl.utils import find_apple_cover
 
-    result: object = await find_apple_cover(
-        http_session, album, item=item, trace=trace
-    )
+    result: object = await find_apple_cover(http_session, album, item=item, trace=trace)
 
     if isinstance(result, tuple):
         url = result[0] if len(result) > 0 else None

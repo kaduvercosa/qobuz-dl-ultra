@@ -137,7 +137,6 @@ class TestCheckForUpdates:
             r for r in caplog.records if "atualização falhou" in r.getMessage().lower()
         ]
 
-
         assert records, f"Log de falha não encontrado. Records: {caplog.records}"
         # Se houver output, ele deve vir do logger, não de print cru
         # Em produção, --verbose mostraria; em teste, aceitamos que caplog basta

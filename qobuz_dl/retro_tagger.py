@@ -278,7 +278,10 @@ def _read_basic_tags(file_path, ext):
         try:
             audio_flac = FLAC(file_path)
             title = audio_flac.get("TITLE", [""])[0]
-            artist = audio_flac.get("ARTIST", [""])[0] or audio_flac.get("ALBUMARTIST", [""])[0]
+            artist = (
+                audio_flac.get("ARTIST", [""])[0]
+                or audio_flac.get("ALBUMARTIST", [""])[0]
+            )
             album = audio_flac.get("ALBUM", [""])[0]
         except Exception as e:
             logger.debug(f"Falha ao ler tags do FLAC: {e}")
