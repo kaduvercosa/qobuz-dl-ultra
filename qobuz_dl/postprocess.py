@@ -49,6 +49,7 @@ except ImportError as e:
 REPORT_FILENAME = ".report.json"
 _NO_PROCESS_LOCK = object()
 
+
 class _ReportLock:
     """Lock reutilizável que combina exclusão local e interprocesso."""
 
@@ -179,9 +180,7 @@ async def _acquire_process_lock(path: str) -> Any:
 
 
 async def _release_process_lock_async(handle: Any) -> None:
-    release_task = asyncio.create_task(
-        asyncio.to_thread(_release_process_lock, handle)
-    )
+    release_task = asyncio.create_task(asyncio.to_thread(_release_process_lock, handle))
     try:
         await asyncio.shield(release_task)
     except asyncio.CancelledError:

@@ -123,3 +123,52 @@ async def test_renderers_fallback_largura_e_texto_longo(monkeypatch):
     )
 
     assert FakeApplication.last is not None
+
+
+@pytest.mark.parametrize(
+    ("category", "sub_filter", "expected"),
+    [
+        ("track", None, 'FAIXAS · RESULTADOS PARA "Baco Exu"'),
+        ("album", None, 'ÁLBUNS · RESULTADOS PARA "Baco Exu"'),
+        ("album", ["single"], 'SINGLES · RESULTADOS PARA "Baco Exu"'),
+        ("artist", None, 'ARTISTAS · RESULTADOS PARA "Baco Exu"'),
+        ("playlist", None, 'PLAYLISTS · RESULTADOS PARA "Baco Exu"'),
+    ],
+)
+def test_titulo_de_resultados_identifica_categoria(category, sub_filter, expected):
+    assert core._search_results_title("Baco Exu", category, sub_filter) == expected
+
+
+@pytest.mark.parametrize("columns", [40, 60])
+async def test_legenda_compacta_explica_atalhos_sem_exceder_largura(
+    monkeypatch, columns
+):
+    monkeypatch.setattr(Size, "columns", columns)
+    monkeypatch.setattr(core, "Application", FakeApplication)
+    monkeypatch.setattr(core, "get_app", lambda: FakeApplication.last)
+    options = [{"meta": {"title": "A", "artist": "B", "type": "Album"}}]
+
+    await core._tui_select("Álbuns", options, is_multi=True, item_category="album")
+
+    footer = _render_windows()[-2]
+    rendered = footer.content.text()
+    text = "".join(value for _style, value in rendered)
+    for label in (
+        "Item 1/1",
+        "Sel.:",
+        "mover",
+        "marcar",
+        "todos",
+        "A-Z",
+        "ano",
+        "nova",
+        "artista",
+        "menu",
+        "confirmar",
+    ):
+        assert label in text
+    for _style, line in rendered:
+        for visual_line in line.splitlines():
+            assert core.get_cwidth(visual_line) <= columns
+    footer_dimension = footer.height()
+    assert footer_dimension.preferred == text.count("\n")

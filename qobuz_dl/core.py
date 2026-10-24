@@ -84,6 +84,22 @@ _NAV_NEW_SEARCH = "__qobuz_nav_new_search__"
 _NAV_HOME = "__qobuz_nav_home__"
 _NAV_ARTIST = "__qobuz_nav_artist__"
 
+
+def _search_results_title(query: str, category: str, sub_filter=None) -> str:
+    """Inclui no título dos resultados o tipo de busca escolhido."""
+    if category == "track":
+        category_label = "FAIXAS"
+    elif category == "album":
+        category_label = "SINGLES" if sub_filter == ["single"] else "ÁLBUNS"
+    elif category == "artist":
+        category_label = "ARTISTAS"
+    elif category == "playlist":
+        category_label = "PLAYLISTS"
+    else:
+        category_label = "RESULTADOS"
+    return f'{category_label} · RESULTADOS PARA "{query}"'
+
+
 # ANTES: o tema visual (pt_style/prompt_style) e os helpers _shade/
 # _align_text/_get_table_layout estavam definidos aqui direto. Movidos pra
 # qobuz_dl/interactive_ui.py (passo 2 de quebrar este arquivo em módulos
@@ -1205,6 +1221,40 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
         else:
             navigation_hint = " [n] Nova [m] Menu"
 
+        if compact_mobile:
+            # No rodapé estreito, explicar cada tecla em fragmentos curtos e
+            # quebrar somente a legenda. Os cartões/lista mantêm a largura e a
+            # altura próprias; o rodapé reserva as linhas necessárias.
+            hints = ["↑↓ mover"]
+            if is_multi:
+                hints.append("Espaço marcar")
+            if sortable:
+                hints.extend(("a A-Z", "y ano"))
+                if is_multi:
+                    hints.insert(2, "t todos")
+            elif is_multi:
+                hints.extend(("t todos", "1-9 ir"))
+
+            if item_category in {"album", "track"}:
+                hints.extend(("n nova busca", "b artista", "m menu"))
+            elif item_category != "filter":
+                hints.extend(("n nova busca", "m menu"))
+            hints.append("↵ abrir" if item_category == "artist" else "↵ confirmar")
+
+            hint_lines = []
+            current_line = ""
+            for hint in hints:
+                candidate = f"{current_line} · {hint}" if current_line else hint
+                if current_line and get_cwidth(candidate) > columns - 2:
+                    hint_lines.append(current_line)
+                    current_line = hint
+                else:
+                    current_line = candidate
+            if current_line:
+                hint_lines.append(current_line)
+            res.extend(("class:footer", f" {line}\n") for line in hint_lines)
+            return res
+
         if is_multi:
             if not compact_mobile:
                 res.append(
@@ -1292,14 +1342,16 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
     )
 
     def _footer_height() -> Dimension:
-        # No celular (<= 72 colunas) o rodapé multi tem só 2 linhas (contador e
-        # atalhos; "Selecionados" já está no contador): reservar 3 desperdiçava
-        # uma linha da lista.
+        # A altura acompanha as linhas reais da legenda compacta. Isso pode
+        # reservar linhas do rodapé, mas nunca altera as dimensões dos cartões.
         try:
             columns = get_app().output.get_size().columns
         except Exception:
             columns, _ = shutil.get_terminal_size((80, 24))
-        return Dimension.exact(2 if ui.compact_mode(columns) else _FOOTER_LINES)
+        if ui.compact_mode(columns):
+            footer_rows = sum(text.count("\n") for _style, text in get_footer_text())
+            return Dimension.exact(max(1, footer_rows))
+        return Dimension.exact(_FOOTER_LINES)
 
     footer_window = Window(
         content=FormattedTextControl(text=get_footer_text),
@@ -2786,7 +2838,7 @@ class QobuzDL:
                     )
                     continue
 
-                title = f'RESULTADOS PARA "{query_title}"'
+                title = _search_results_title(query_title, display_cat, sub_filter)
 
                 selected_items = await _tui_select(
                     title,
