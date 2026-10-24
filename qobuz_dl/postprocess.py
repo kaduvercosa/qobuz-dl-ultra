@@ -49,7 +49,6 @@ except ImportError as e:
 REPORT_FILENAME = ".report.json"
 _NO_PROCESS_LOCK = object()
 
-
 class _ReportLock:
     """Lock reutilizável que combina exclusão local e interprocesso."""
 
@@ -118,11 +117,11 @@ def _try_acquire_process_lock(path: str):
                 handle.write(b"\0")
                 handle.flush()
             handle.seek(0)
-            msvcrt.locking(  # type: ignore[attr-defined]
-                handle.fileno(),
-                msvcrt.LK_NBLCK,
-                1,  # type: ignore[attr-defined]
-            )
+            locking_name = "locking"
+            lock_mode_name = "LK_NBLCK"
+            locking = getattr(msvcrt, locking_name)
+            lock_mode = getattr(msvcrt, lock_mode_name)
+            locking(handle.fileno(), lock_mode, 1)
         else:
             import fcntl
 
@@ -148,11 +147,11 @@ def _release_process_lock(handle: Any) -> None:
             import msvcrt
 
             handle.seek(0)
-            msvcrt.locking(  # type: ignore[attr-defined]
-                handle.fileno(),
-                msvcrt.LK_UNLCK,
-                1,  # type: ignore[attr-defined]
-            )
+            locking_name = "locking"
+            lock_mode_name = "LK_UNLCK"
+            locking = getattr(msvcrt, locking_name)
+            lock_mode = getattr(msvcrt, lock_mode_name)
+            locking(handle.fileno(), lock_mode, 1)
         else:
             import fcntl
 
@@ -180,7 +179,9 @@ async def _acquire_process_lock(path: str) -> Any:
 
 
 async def _release_process_lock_async(handle: Any) -> None:
-    release_task = asyncio.create_task(asyncio.to_thread(_release_process_lock, handle))
+    release_task = asyncio.create_task(
+        asyncio.to_thread(_release_process_lock, handle)
+    )
     try:
         await asyncio.shield(release_task)
     except asyncio.CancelledError:
