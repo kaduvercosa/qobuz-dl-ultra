@@ -285,10 +285,12 @@ def test_legenda_explica_as_quatro_cores():
 def test_muted_nao_e_mais_o_mesmo_que_amarelo():
     # MUTED era um apelido de WARNING (amarelo): "sem alteração" e "capa
     # substituída" saíam da mesma cor. Agora vem do GRAY do color.py.
-    from qobuz_dl import color
-
-    assert retro_tags.MUTED is color.GRAY
-    assert color.GRAY == "" or color.GRAY != color.WARNING
+    # Compara com os nomes que o próprio retro_tags importou do color.py (e
+    # não com `qobuz_dl.color` relido agora): outro teste pode ter recarregado
+    # o módulo color, e o valor das constantes depende do ambiente de cada
+    # importação (sem TTY/NO_COLOR viram "").
+    assert retro_tags.MUTED is retro_tags.GRAY
+    assert retro_tags.GRAY == "" or retro_tags.GRAY != retro_tags.YELLOW
 
 
 # ---------------------------------------------------------------------------

@@ -219,7 +219,16 @@ def modulo_recarregado(monkeypatch):
     """Recarrega qobuz_dl.color do zero, com o ambiente já configurado
     pelo teste (NO_COLOR, FORCE_COLOR, argv). Necessário porque COLOR_ON
     e as constantes de cor são calculadas na importação, não a cada uso.
+
+    No final, devolve ao `sys.modules` o MESMO módulo que existia antes (não
+    reimporta um novo). Reimportar aqui não funciona: o `monkeypatch` é
+    desfeito DEPOIS deste fixture, então o "módulo normal" seria calculado
+    ainda com NO_COLOR/FORCE_COLOR/isatty do teste e a suíte herdaria cores
+    erradas (ex.: no CI, onde não há TTY, ficava um módulo colorido enquanto
+    `retro_tags.GRAY`, importado antes, continuava vazio -- falha que só
+    aparecia em certas ordens do pytest-randomly).
     """
+    original = sys.modules.get("qobuz_dl.color")
 
     def _recarregar():
         if "qobuz_dl.color" in sys.modules:
@@ -228,11 +237,15 @@ def modulo_recarregado(monkeypatch):
 
     yield _recarregar
 
-    # Sempre deixa o módulo real (sem NO_COLOR forçado neste teste)
-    # recarregado no estado normal pro resto da suíte não herdar o mock.
-    if "qobuz_dl.color" in sys.modules:
-        del sys.modules["qobuz_dl.color"]
-    importlib.import_module("qobuz_dl.color")
+    if original is not None:
+        sys.modules["qobuz_dl.color"] = original
+        pacote = sys.modules.get("qobuz_dl")
+        if pacote is not None:
+            # O import de um submódulo grava o atributo no pacote; sem isto,
+            # `from qobuz_dl import color` ainda devolveria o módulo recarregado.
+            setattr(pacote, "color", original)
+    else:
+        sys.modules.pop("qobuz_dl.color", None)
 
 
 class TestColorOnRegressao:
