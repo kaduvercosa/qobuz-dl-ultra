@@ -1107,6 +1107,8 @@ def tag_mp3(
     preserve_cover_info: bool = False,
 ):
     """Apply tags to MP3 file (preserve_cover_info: ver tag_flac)."""
+    if settings is None:
+        settings = QobuzDLSettings()
     try:
         audio = id3.ID3(filename)
     except ID3NoHeaderError:

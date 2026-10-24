@@ -211,7 +211,7 @@ async def sync_notes_checklist(
             unchanged.append(item)
             pending.append(item)
     in_note = {item["source_artist_id"] for item in items}
-    missing = []
+    missing: list[dict[str, Any]] = []
     for artist_id, row in by_id.items():
         if artist_id in in_note:
             continue
@@ -248,7 +248,8 @@ def _artist_data(item: Any) -> Optional[dict]:
     """Normaliza um artista retornado pelo endpoint de favoritos."""
     if not isinstance(item, dict):
         return None
-    artist = item.get("artist") if isinstance(item.get("artist"), dict) else item
+    inner = item.get("artist")
+    artist: dict = inner if isinstance(inner, dict) else item
     artist_id = artist.get("id")
     if artist_id in (None, ""):
         return None
@@ -737,7 +738,7 @@ async def _checklist_loop(
         state.message = f"{restored} marcação(ões) restaurada(s) da última sessão."
         store.save(state.selected_ids())
     state.on_change = lambda current: store.save(current.selected_ids())
-    empty = {"confirmed": [], "failed": [], "created": 0, "reused": 0}
+    empty: dict[str, Any] = {"confirmed": [], "failed": [], "created": 0, "reused": 0}
     while True:
         try:
             action, ids = await runner(state, url_opener=url_opener)
@@ -813,7 +814,7 @@ async def _create_empty_artist_playlist(
         playlist_name,
         stored_id=(followed_row or {}).get("review_playlist_id"),
     )
-    if followed_row is not None:
+    if lib is not None and followed_row is not None:
         await asyncio.to_thread(
             lib.set_artist_review_playlist, SOURCE, artist_id, playlist_id
         )

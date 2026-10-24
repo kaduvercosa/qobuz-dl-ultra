@@ -50,10 +50,13 @@ from qobuz_dl.metadata_cache import (
     default_cache_path,
 )
 
+AsyncLimiter: Any = None
 try:
-    from aiolimiter import AsyncLimiter
+    from aiolimiter import AsyncLimiter as _AsyncLimiter
+
+    AsyncLimiter = _AsyncLimiter
 except ImportError:  # pragma: no cover - exercised on minimal installations
-    AsyncLimiter = None
+    pass
 
 Bundle: Any = None
 try:

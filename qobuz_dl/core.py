@@ -274,11 +274,14 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
         def _(event):
             event.app.exit(result=(_NAV_HOME, -1))
 
-    if item_category in {"album", "track"}:
+    def _ir_para_artista(event):
+        event.app.exit(result=(_NAV_ARTIST, -1))
 
-        @bindings.add("b")
-        def _(event):
-            event.app.exit(result=(_NAV_ARTIST, -1))
+    # O atalho é registrado sem um "def" dentro do "if": um bloco com uma única
+    # função faz o mypy tentar fundi-la como overload ("Condition can't be
+    # inferred, unable to merge overloads").
+    if item_category in {"album", "track"}:
+        bindings.add("b")(_ir_para_artista)
 
     # Ordenação instantânea: funciona na mesma tela, sem obrigar o usuário a
     # sair e refazer a pesquisa. É especialmente útil para Singles, cuja API

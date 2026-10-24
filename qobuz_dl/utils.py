@@ -162,8 +162,8 @@ def make_m3u(pl_directory, remote_items=None):
         # diferentes). Por isso guardamos listas e só aceitamos um arquivo
         # cujo ID Qobuz gravado na tag seja o do item remoto -- ou que não
         # tenha ID nenhum (arquivos antigos).
-        by_isrc: dict[str, list] = {}
-        by_title: dict[str, list] = {}
+        by_isrc = {}  # dict[str, list]
+        by_title = {}  # dict[str, list]
         for _f in local_files_info:
             if _f.get("isrc"):
                 by_isrc.setdefault(str(_f["isrc"]), []).append(_f)

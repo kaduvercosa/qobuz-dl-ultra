@@ -959,11 +959,11 @@ async def retag_directory(
         return stats
 
     loop = asyncio.get_running_loop()
-    album_cache: dict = {}
+    album_cache = {}
     # Capa decidida UMA vez por álbum Qobuz (chave = ID do álbum): single,
     # álbum, edição Deluxe e coletânea têm IDs diferentes e nunca se misturam.
-    album_decisions: dict = {}
-    track_results: dict = {}  # faixa -> (url, fonte, motivo), da votação
+    album_decisions = {}
+    track_results = {}  # faixa -> (url, fonte, motivo), da votação
     shared_holder = {"decision": None}  # só a capa do álbum atual fica em disco
     last_album_key = None  # para imprimir o cabeçalho do álbum uma vez por álbum
     width = len(str(len(files)))
@@ -1038,8 +1038,8 @@ async def retag_directory(
             # Na simulação nem a capa temporária da Apple toca a pasta do usuário.
             dl_dir = dry_workdir if dry_run else root_dir
 
-            cover_path: Optional[str] = None
-            cover_source: Optional[str] = None
+            cover_path = None  # Optional[str]
+            cover_source = None  # Optional[str]
             # cover_outcome: replaced | kept | no_compare | not_found | download_failed |
             # embed_failed | error | not_searched (define cor e texto no log);
             # cover_status: detalhe em texto, mostrado abaixo da linha de capa.
