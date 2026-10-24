@@ -94,6 +94,7 @@ def create_missing_placeholder(
     """
     [OPÇÃO B] Cria o arquivo .missing.txt na pasta do álbum
     """
+    file_path = ".missing.txt"
     try:
         track_num = format_track_label(track, media_count)
         title = track.get("title", "Faixa").replace("/", "-").replace("\\", "-")

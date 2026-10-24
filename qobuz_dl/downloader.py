@@ -374,7 +374,7 @@ class Download:
         self._original_track_format = track_format or DEFAULT_TRACK
         self._original_multiple_disc_track_format = (
             settings.multiple_disc_track_format
-            if settings
+            if settings is not None
             else DEFAULT_MULTIPLE_DISC_TRACK
         )
 
@@ -384,10 +384,9 @@ class Download:
         """Download an item by ID and type (album, track, artist, etc.)."""
         self.folder_format = self._original_folder_format
         self.track_format = self._original_track_format
-        if self.settings:
-            self.settings.multiple_disc_track_format = (
-                self._original_multiple_disc_track_format
-            )
+        self.settings.multiple_disc_track_format = (
+            self._original_multiple_disc_track_format
+        )
 
         try:
             if not track:
@@ -473,7 +472,7 @@ class Download:
 
             if "sample" not in parse and parse.get("sampling_rate"):
                 is_mp3 = True if int(self.quality) == 5 else False
-                letras_info = {}
+                letras_info: dict[str, object] = {}
                 res = await self._download_and_tag(
                     dirn,
                     idx,
@@ -489,11 +488,7 @@ class Download:
                     cover_source=cover_source,
                 )
                 status = "ok" if res is True else "falha"
-                motivo = (
-                    ""
-                    if res is True
-                    else (str(res) if isinstance(res, Exception) else "erro")
-                )
+                motivo = "" if res is True else "erro"
                 await report_track(i, t_num, status, motivo, letras=letras_info)
                 return res
             else:
@@ -1120,6 +1115,16 @@ class Download:
         track_meta = await self.client.get_track_meta(self.item_id)
         track_title = _get_title(track_meta)
 
+        success = False
+        track_attr: dict[str, object] | None = None
+        file_format = "Unknown"
+        quality_met = False
+        bit_depth: object | None = None
+        sampling_rate: str | int | float | None = None
+        dirn: str | None = None
+        url = ""
+        release_date = ""
+
         is_sample_only = "sample" in parse or not parse.get("sampling_rate")
 
         if is_sample_only:
@@ -1136,9 +1141,9 @@ class Download:
             if (
                 getattr(self, "is_playlist", False)
                 and not getattr(self, "playlist_as_albums", False)
-                and getattr(self, "playlist_track_number", None)
+                and self.playlist_track_number
             ):
-                playlist_index = int(self.playlist_track_number)
+                playlist_index = self.playlist_track_number
 
             track_album = track_meta.get("album", {})
             artist = _artist_label(
@@ -1237,7 +1242,9 @@ class Download:
                 # Em playlist/lote várias faixas rodam juntas: a capa não ganha
                 # linhas próprias, vira uma nota na linha "Em Progresso" da faixa
                 # (o rótulo "[NN] título" é o mesmo que essa linha usa).
-                notas_capa = [] if getattr(self, "is_playlist", False) else None
+                notas_capa: list[str] | None = (
+                    [] if getattr(self, "is_playlist", False) else None
+                )
                 rotulo_faixa = ""
                 if notas_capa is not None:
                     _no = (
@@ -1316,7 +1323,7 @@ class Download:
                 if not getattr(self, "is_playlist", False):
                     ui.separator()
 
-                letras_info = {}
+                letras_info: dict[str, object] = {}
                 try:
                     success = await self._download_and_tag(
                         dirn,
@@ -1390,7 +1397,7 @@ class Download:
                     ),
                 )
 
-        if success:
+        if success and track_attr is not None and dirn is not None:
             db_artist = track_attr.get("artist", "Unknown")
             db_album = track_attr.get("album", "Unknown")
 
@@ -1434,7 +1441,7 @@ class Download:
         if not is_batch_or_playlist:
             # Faixa avulsa de verdade (nao playlist, nao lote): esta e a
             # unica faixa daquela pasta, entao ja da pra fechar o report.
-            if "dirn" in locals():
+            if dirn is not None:
                 await postprocess.finalize_report(dirn, completo=bool(success))
             try:
                 ui.summary(
@@ -2276,7 +2283,7 @@ class Download:
         is_multiple = True if media_count > 1 else False
         _extension = ".flac" if file_format.lower() == "flac" else ".mp3"
 
-        legacy_flag = getattr(settings, "legacy_charmap", False) if settings else False
+        legacy_flag = getattr(settings, "legacy_charmap", False)
 
         for folder_fmt, track_fmt, multi_disc_fmt in format_combinations:
             folder_fmt, track_fmt = _clean_format_str(
@@ -2331,8 +2338,7 @@ class Download:
             if valid_combination:
                 self.folder_format = folder_fmt
                 self.track_format = track_fmt
-                if self.settings:
-                    self.settings.multiple_disc_track_format = multi_disc_fmt
+                self.settings.multiple_disc_track_format = multi_disc_fmt
                 return
 
         self.folder_format = DEFAULT_FOLDER
@@ -2533,15 +2539,6 @@ async def _tqdm_download_atomic(
     http = session or make_client(follow_redirects=True, timeout=timeout_cfg)
     bar = None
 
-    def on_progress(downloaded, total):
-        if bar is None:
-            return
-        if total is not None and bar.total != total:
-            bar.total = total
-        delta = downloaded - bar.n
-        if delta > 0:
-            bar.update(delta)
-
     if not is_parallel:
         ui.progress(ui.tail(f"Em Progresso: {track_name}", _progress_tail(track_name)))
         bar = tqdm(
@@ -2559,6 +2556,15 @@ async def _tqdm_download_atomic(
         )
     elif position_pool:
         ui.progress(ui.tail(f"Em Progresso: {track_name}", _progress_tail(track_name)))
+
+    def on_progress(downloaded: int, total: int | None) -> None:
+        if bar is None:
+            return
+        if total is not None and bar.total != total:
+            bar.total = total
+        delta = downloaded - bar.n
+        if delta > 0:
+            bar.update(delta)
 
     try:
         result = await download_file(
@@ -2824,12 +2830,12 @@ async def _try_apple_cover_bytes(
 
     # get_apple_hq_cover devolve (url, fonte, motivo); tratar o retorno como
     # texto fazia re.sub() levantar TypeError e derrubava a etapa de capa.
-    # O formato antigo (so' a URL, ou None) continua aceito.
-    if isinstance(resultado, tuple):
-        apple_url = resultado[0] if resultado else None
-        motivo = resultado[2] if len(resultado) > 2 else None
+    resultado_compat: object = resultado
+    if isinstance(resultado_compat, tuple):
+        apple_url = resultado_compat[0] if resultado_compat else None
+        motivo = resultado_compat[2] if len(resultado_compat) > 2 else None
     else:
-        apple_url, motivo = resultado, None
+        apple_url, motivo = resultado_compat, None
 
     if not isinstance(apple_url, str) or not apple_url.strip():
         if motivo:
@@ -3000,9 +3006,14 @@ async def _get_cover_and_embed(
     if not precisa_embed:
         return _origem_qobuz()
 
-    if precisa_salva and saved_url == embed_url and os.path.isfile(saved_file):
+    if (
+        precisa_salva
+        and saved_url == embed_url
+        and os.path.isfile(saved_file)
+        and embed_file is not None
+    ):
         try:
-            await asyncio.to_thread(shutil.copyfile, saved_file, embed_file)
+            await asyncio.to_thread(lambda: shutil.copyfile(saved_file, embed_file))
             if notas is None:  # em playlist/lote a nota da capa salva já cobre
                 ui.ok(ui.tail("Capa de embed", f"reaproveitada de {saved_name}"))
             gravou_qobuz = True

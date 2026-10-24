@@ -131,8 +131,15 @@ class Client:
     O cliente principal da API Qobuz para o Qobuz-DL Ultra Edition.
     """
 
+    id: str
+    secrets: list[str] | None
+    force_english: bool
+    base: str
+    _session_init_lock: asyncio.Lock
+    session_id: str | None
+
     def __init__(self):
-        self.session = None
+        self.session: httpx.AsyncClient | None = None
         self.user_info = {}
         self.user_id = None
         self.label = "Studio"
@@ -743,6 +750,7 @@ class Client:
             "playlist/create",
             "playlist/addTracks",
         ]:
+            req_kwargs: dict[str, Any]
             method, req_kwargs = "post", {"data": params}
         elif epoint == "session/start":
             method, req_kwargs = (
@@ -765,8 +773,9 @@ class Client:
         metadata_key = (
             cache_key_method(epoint, params) if callable(cache_key_method) else None
         )
-        if metadata_key:
-            cached = await self._metadata_cache.get(metadata_key)
+        metadata_cache = getattr(self, "_metadata_cache", None)
+        if metadata_key and metadata_cache is not None:
+            cached = await metadata_cache.get(metadata_key)
             if cached is not None:
                 logger.debug("Cache de metadados usado para '%s'.", epoint)
                 return cached
@@ -798,8 +807,11 @@ class Client:
                     logger.debug(f"Retentativa de rede em '{epoint}' ({n}/4)...")
                 if request_timeout is not None:
                     req_kwargs["timeout"] = request_timeout
+                http_client = self.session
+                if http_client is None:
+                    raise RuntimeError("Cliente HTTP ainda não foi inicializado.")
                 async with Client._api_rate_slot(self):
-                    resp = await self.session.request(
+                    resp = await http_client.request(
                         method, self.base + epoint, **req_kwargs
                     )
                 if epoint == "user/login" and resp.status_code == 400:
@@ -839,8 +851,12 @@ class Client:
                 resp.raise_for_status()
                 data = resp.json()
                 normalized = self._normalize_json_strings(data)
-                if metadata_key and isinstance(normalized, dict):
-                    await self._metadata_cache.set(metadata_key, normalized)
+                if (
+                    metadata_key
+                    and isinstance(normalized, dict)
+                    and metadata_cache is not None
+                ):
+                    await metadata_cache.set(metadata_key, normalized)
                 return normalized
 
     async def multi_meta(self, epoint, key, id, type):
@@ -1173,8 +1189,9 @@ class Client:
     async def get_user_playlists(self, limit=100):
         """List the authenticated user's playlists through public client APIs."""
         user_id = getattr(self, "user_id", None)
-        if not user_id and isinstance(getattr(self, "user", None), dict):
-            user_id = self.user.get("id")
+        user = getattr(self, "user", None)
+        if not user_id and isinstance(user, dict):
+            user_id = user.get("id")
 
         try:
             response = await self.api_call(
@@ -1236,6 +1253,9 @@ class Client:
                     return track
             except Exception as e:
                 logger.debug(f"track/getFileUrl falhou, caindo pro segmentado: {e}")
+        http_client = self.session
+        if http_client is None:
+            raise RuntimeError("Cliente HTTP ainda não foi inicializado.")
         if self.session_id is None:
             async with self._session_init_lock:
                 if self.session_id is None:
@@ -1243,7 +1263,7 @@ class Client:
                     self.session_id = session["session_id"]
                     self.session_infos = session["infos"]
                     self.session_key = self._derive_session_key()
-                    self.session.headers.update({"X-Session-Id": self.session_id})
+                    http_client.headers.update({"X-Session-Id": self.session_id})
         track = await self.api_call("file/url", id=id, fmt_id=fmt_id)
         if "bits_depth" in track and "bit_depth" not in track:
             track["bit_depth"] = track["bits_depth"]

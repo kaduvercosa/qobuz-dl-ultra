@@ -10,11 +10,11 @@ import re
 import struct
 import threading
 import unicodedata
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 import humanize
 import mutagen.id3 as id3
-from mutagen.flac import FLAC, Picture
+from mutagen.flac import FLAC, Picture, VCFLACDict
 from mutagen.id3 import ID3NoHeaderError
 
 from qobuz_dl.settings import QobuzDLSettings
@@ -563,20 +563,23 @@ def _shrink_image_to_fit(image_path, max_bytes):
 
     try:
         with Image.open(image_path) as src:
-            if src.mode not in ("RGB", "L"):
-                src = src.convert("RGB")
+            image: Image.Image = src
+            if image.mode not in ("RGB", "L"):
+                image = image.convert("RGB")
+            resampling = getattr(Image, "Resampling", Image)
+            lanczos = resampling.LANCZOS
 
             for quality in (95, 90, 85, 80, 75, 70, 60, 50):
                 buf = io.BytesIO()
-                src.save(buf, format="JPEG", quality=quality, optimize=True)
+                image.save(buf, format="JPEG", quality=quality, optimize=True)
                 if buf.tell() <= max_bytes:
                     return buf.getvalue()
 
-            width, height = src.size
+            width, height = image.size
             scale = 0.9
             while scale > 0.19:
                 new_size = (max(1, int(width * scale)), max(1, int(height * scale)))
-                resized = src.resize(new_size, Image.LANCZOS)
+                resized = image.resize(new_size, lanczos)
                 buf = io.BytesIO()
                 resized.save(buf, format="JPEG", quality=85, optimize=True)
                 if buf.tell() <= max_bytes:
@@ -683,6 +686,7 @@ def _dimensions_from_header(data):
     instalado) e o comando `tags` não pode deixar de comparar capas por causa
     dele. Devolve None para dados truncados, corrompidos ou de outro formato.
     """
+    largura = altura = 0
     try:
         if not data or len(data) < 12:
             return None
@@ -803,7 +807,7 @@ def should_replace_embedded_cover(filename, candidate_path):
             try:
                 existing_tags = id3.ID3(filename)
                 existing_images = [
-                    frame.data
+                    getattr(frame, "data", b"")
                     for frame in existing_tags.values()
                     if isinstance(frame, id3.APIC) and getattr(frame, "data", None)
                 ]
@@ -1082,8 +1086,8 @@ def tag_flac(
         if junk_tag in audio:
             del audio[junk_tag]
 
-    if hasattr(audio, "tags") and audio.tags is not None:
-        audio.tags.vendor = ""
+    if audio.tags is not None:
+        cast(VCFLACDict, audio.tags).vendor = ""
 
     audio.save(padding=lambda info: 8192)
     # Origem == destino quando o arquivo e' retagueado no lugar (retro_tags).

@@ -306,6 +306,7 @@ def _pick_accent_color() -> str:
             ui.emit(f" {idx:2}. {name}")
 
     ui.blank()
+    rgb: str | None = None
     while True:
         _n = len(ACCENT_PRESETS)
         prompt = f"Escolha (1-{_n}) [Enter = 1 padrão]: "
@@ -1537,7 +1538,7 @@ async def async_main():
         except Exception as e:
             logger.debug(f"Checagem de atualização falhou: {e}")
 
-    asyncio.create_task(_async_check_updates())
+    update_task = asyncio.create_task(_async_check_updates())
 
     offline_args, _unknown = qobuz_dl_args().parse_known_args()
     offline_command = getattr(offline_args, "command", None)
@@ -1616,6 +1617,35 @@ async def async_main():
     config = configparser.ConfigParser(interpolation=None)
     config_read_started = time.perf_counter()
     config.read(CONFIG_FILE, encoding="utf-8")
+
+    # Os valores-padrão também cobrem o único caminho que pode continuar após
+    # um erro de configuração: o comando de reset, que termina logo abaixo.
+    section = "qobuz" if config.has_section("qobuz") else "DEFAULT"
+    email = ""
+    password = ""
+    token = ""
+    genius_token = ""
+    app_id = ""
+    secrets: list[str] = []
+    force_english = True
+    default_folder = "Qobuz Downloads"
+    default_quality = "6"
+    default_limit = "20"
+    fetch_lyrics = False
+    legacy_charmap = False
+    no_credits_flag = False
+    embed_art = True
+    albums_only = False
+    no_m3u = False
+    no_fallback = False
+    og_cover = True
+    no_cover = False
+    no_database = False
+    smart_discography = False
+    blacklist_config = "blacklist.txt"
+    playlist_as_albums_config = False
+    folder_format = DEFAULT_FOLDER
+    track_format = DEFAULT_TRACK
 
     try:
         section = "qobuz" if config.has_section("qobuz") else "DEFAULT"
@@ -2167,6 +2197,7 @@ async def async_main():
     finally:
         if hasattr(qobuz, "client") and qobuz.client:
             await qobuz.client.close()
+    await update_task
 
 
 def _is_local_checklist_sync(arguments) -> bool:

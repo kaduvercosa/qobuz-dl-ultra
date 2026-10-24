@@ -143,7 +143,7 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
         - Ctrl+C/Esc: propaga KeyboardInterrupt (capturado no chamador)
     """
     bindings = KeyBindings()
-    selected_indices = set()
+    selected_indices: set[int] = set()
     cursor_pos = 0
     album_role_mode = item_category == "album" and any(
         isinstance(option, dict) and option.get("meta", {}).get("show_role")
@@ -1347,7 +1347,7 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
         )
     )
 
-    app = Application(
+    app: Application[Any] = Application(
         layout=layout,
         key_bindings=bindings,
         full_screen=True,
@@ -1450,6 +1450,7 @@ class QobuzDL:
         self.playlist_as_albums = playlist_as_albums
 
         self.blacklist_patterns = []
+        self.allowed_release_types: list[str] | None = None
         if blacklist and os.path.isfile(blacklist):
             try:
                 with open(blacklist, encoding="utf-8") as f:
@@ -1580,7 +1581,7 @@ class QobuzDL:
                 )
             )
         except httpx.HTTPStatusError as e:
-            status = e.response.status_code if e.response is not None else None
+            status = e.response.status_code
             if status == 404:
                 tipo = "album" if album else "track"
                 provavel_url = f"{WEB_URL}/{tipo}/{item_id}"
@@ -1605,11 +1606,12 @@ class QobuzDL:
             if is_playlist:
                 self.settings.pl_failed = getattr(self.settings, "pl_failed", 0) + 1
 
-        if getattr(self, "delay", 0) > 0:
+        delay = getattr(self, "delay", 0)
+        if delay > 0:
             logger.info(
-                f"{YELLOW}[*] Sleeping for {self.delay} seconds to prevent rate limiting...{OFF}"
+                f"{YELLOW}[*] Sleeping for {delay} seconds to prevent rate limiting...{OFF}"
             )
-            await asyncio.sleep(self.delay)
+            await asyncio.sleep(delay)
         return success
 
     async def handle_url(self, url):
@@ -1756,10 +1758,11 @@ class QobuzDL:
                 self.settings.pl_skipped = 0
                 self.settings.pl_failed = 0
 
+            original_folder_format = self.folder_format
+            original_multi_disc_setting = getattr(
+                self.settings, "multiple_disc_one_dir", False
+            )
             if is_playlist and not getattr(self, "playlist_as_albums", False):
-                original_folder_format = self.folder_format
-                original_multi_disc_setting = self.settings.multiple_disc_one_dir
-
                 self.folder_format = "."
                 self.settings.multiple_disc_one_dir = True
 
@@ -1774,7 +1777,7 @@ class QobuzDL:
             position_pool = (
                 downloader._PositionPool(batch_workers) if can_parallelize else None
             )
-            semaphore = asyncio.Semaphore(batch_workers) if can_parallelize else None
+            semaphore = asyncio.Semaphore(batch_workers)
             pending_tasks = []
             outcomes = []
 
@@ -1843,7 +1846,10 @@ class QobuzDL:
                                 item_type="album",
                             )
 
-                            if r_type not in self.allowed_release_types:
+                            if (
+                                self.allowed_release_types is not None
+                                and r_type not in self.allowed_release_types
+                            ):
                                 continue
 
                         except Exception as e:
@@ -2530,7 +2536,7 @@ class QobuzDL:
             scelta_raw = selected_type
 
             final_url_list = []
-            queue_labels = {}
+            queue_labels: dict[str, str] = {}
 
             def _item_label(item, fallback=""):
                 meta = item.get("meta", {}) if isinstance(item, dict) else {}
@@ -2608,7 +2614,7 @@ class QobuzDL:
                 )
                 return bool(result and "Adicionar" in result[0])
 
-            session = PromptSession()
+            session: PromptSession[str] = PromptSession()
 
             while True:
                 if selected_type is None:
@@ -3291,7 +3297,7 @@ class QobuzDL:
         position_pool = (
             downloader._PositionPool(batch_workers) if can_parallelize else None
         )
-        semaphore = asyncio.Semaphore(batch_workers) if can_parallelize else None
+        semaphore = asyncio.Semaphore(batch_workers)
         pending_tasks = []
         outcomes = []
 

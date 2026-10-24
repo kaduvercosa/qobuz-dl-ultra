@@ -30,9 +30,11 @@ _rf_fuzz: Optional[ModuleType]
 _rf_process: Optional[ModuleType]
 
 try:
-    from rapidfuzz import fuzz as _rf_fuzz
-    from rapidfuzz import process as _rf_process
+    from rapidfuzz import fuzz as _rapidfuzz_fuzz
+    from rapidfuzz import process as _rapidfuzz_process
 
+    _rf_fuzz = _rapidfuzz_fuzz
+    _rf_process = _rapidfuzz_process
     RAPIDFUZZ_DISPONIVEL = True
 except ImportError:  # pragma: no cover - depende do ambiente
     _rf_fuzz = None

@@ -20,7 +20,8 @@ import logging
 import os
 import subprocess
 from collections import Counter
-from typing import Any
+from collections.abc import Iterator, Mapping
+from typing import Any, Protocol, TypedDict, cast
 
 from qobuz_dl import inspect_data, ui
 from qobuz_dl.utils import encontrar_binario, format_duration
@@ -56,6 +57,34 @@ from qobuz_dl.core import pt_style
 # arquivo já aberto.
 
 _AUDIO_EXTS = inspect_data.AUDIO_EXTS
+
+
+class _EntradaDiretorio(TypedDict):
+    nome: str
+    caminho: str
+    is_dir: bool
+
+
+class _DadosInspecao(TypedDict, total=False):
+    tecnico: dict[str, str | int]
+    tags: dict[str, str]
+    capas: list[str]
+    _sample_rate: int
+    _duracao_s: float
+
+
+class _InfoMP3(Protocol):
+    sample_rate: int
+    channels: int
+    length: float
+    bitrate: int
+
+
+def _obter_info_mp3(audio: object) -> _InfoMP3:
+    info = getattr(audio, "info", None)
+    if info is None:
+        raise ValueError("Arquivo MP3 sem informações técnicas de áudio.")
+    return cast(_InfoMP3, info)
 
 
 def _detectar_pasta_padrao():
@@ -138,7 +167,7 @@ def _listar_diretorio(caminho):
     sem permissão de leitura não derrubam a navegação -- aparecem vazios
     (o usuário só não consegue entrar neles).
     """
-    entradas = []
+    entradas: list[_EntradaDiretorio] = []
     try:
         with os.scandir(caminho) as it:
             brutos = list(it)
@@ -385,7 +414,7 @@ def _extrair_tudo(caminho):
     quem chama decide como reportar isso ao usuário.
     """
     ext = os.path.splitext(caminho)[1].lower()
-    dados = {"tecnico": {}, "tags": {}, "capas": []}
+    dados: _DadosInspecao = {"tecnico": {}, "tags": {}, "capas": []}
 
     tamanho = os.path.getsize(caminho)
     dados["tecnico"]["Arquivo"] = os.path.basename(caminho)
@@ -393,10 +422,10 @@ def _extrair_tudo(caminho):
     dados["tecnico"]["Extensão"] = ext.lstrip(".").upper()
 
     if ext == ".flac":
-        from mutagen.flac import FLAC
+        from mutagen.flac import FLAC, VCFLACDict
 
-        audio = FLAC(caminho)
-        info = audio.info
+        flac_audio = FLAC(caminho)
+        info = flac_audio.info
         dados["tecnico"].update(
             {
                 "Codec": "FLAC (lossless)",
@@ -412,12 +441,22 @@ def _extrair_tudo(caminho):
         dados["_sample_rate"] = info.sample_rate
         dados["_duracao_s"] = info.length
 
-        if audio.tags:
-            for chave, valores in audio.tags:
-                atual = dados["tags"].get(chave)
-                dados["tags"][chave] = f"{atual}, {valores}" if atual else valores
+        def iterar_tags_flac(tags: object) -> Iterator[tuple[str, object]]:
+            if isinstance(tags, VCFLACDict):
+                yield from tags
+            elif isinstance(tags, list):
+                # Compatibilidade com implementações que expõem os pares
+                # como lista (e com os objetos de teste do extrator).
+                for entrada in tags:
+                    if isinstance(entrada, tuple) and len(entrada) == 2:
+                        yield str(entrada[0]), entrada[1]
 
-        for i, pic in enumerate(audio.pictures, 1):
+        for chave, valores in iterar_tags_flac(flac_audio.tags):
+            atual = dados["tags"].get(chave)
+            valor = str(valores)
+            dados["tags"][chave] = f"{atual}, {valor}" if atual else valor
+
+        for i, pic in enumerate(flac_audio.pictures, 1):
             dados["capas"].append(
                 f"[{i}] {pic.mime}, {pic.width}x{pic.height}, {_formatar_tamanho(len(pic.data))}"
             )
@@ -426,8 +465,8 @@ def _extrair_tudo(caminho):
         from mutagen.id3 import APIC
         from mutagen.mp3 import MP3
 
-        audio = MP3(caminho)
-        info = audio.info
+        mp3_audio = MP3(caminho)
+        info = _obter_info_mp3(mp3_audio)
         dados["tecnico"].update(
             {
                 "Codec": "MP3",
@@ -441,11 +480,13 @@ def _extrair_tudo(caminho):
         dados["_sample_rate"] = info.sample_rate
         dados["_duracao_s"] = info.length
 
-        if audio.tags:
-            for frame_id, frame in audio.tags.items():
+        mp3_tags: object = mp3_audio.tags
+        if isinstance(mp3_tags, Mapping):
+            for frame_id, frame in mp3_tags.items():
                 if isinstance(frame, APIC):
                     dados["capas"].append(
-                        f"[{frame_id}] {frame.mime}, {_formatar_tamanho(len(frame.data))}"
+                        f"[{frame_id}] {getattr(frame, 'mime', 'N/A')}, "
+                        f"{_formatar_tamanho(len(getattr(frame, 'data', b'')))}"
                     )
                 else:
                     dados["tags"][frame_id] = str(frame)
@@ -455,13 +496,13 @@ def _extrair_tudo(caminho):
         # WAV, AIFF, APE, WavPack...).
         from mutagen import File as MutagenFile
 
-        audio = MutagenFile(caminho)
-        if audio is None:
+        generic_audio = MutagenFile(caminho)
+        if generic_audio is None:
             raise ValueError("Formato de áudio não reconhecido pelo mutagen.")
-        info = audio.info
+        info = generic_audio.info
         dados["tecnico"].update(
             {
-                "Codec": type(audio).__name__,
+                "Codec": type(generic_audio).__name__,
                 "Sample rate": f"{getattr(info, 'sample_rate', '?')} Hz",
                 "Canais": getattr(info, "channels", "?"),
                 "Duração": format_duration(info.length),
@@ -475,8 +516,8 @@ def _extrair_tudo(caminho):
         dados["_sample_rate"] = getattr(info, "sample_rate", 44100)
         dados["_duracao_s"] = info.length
 
-        if audio.tags:
-            for chave, valor in audio.tags.items():
+        if generic_audio.tags:
+            for chave, valor in generic_audio.tags.items():
                 if isinstance(valor, list):
                     valor = ", ".join(str(v) for v in valor)
                 dados["tags"][str(chave)] = str(valor)

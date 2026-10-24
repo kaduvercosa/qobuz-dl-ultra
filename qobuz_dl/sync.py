@@ -63,40 +63,40 @@ def _read_local_tags(file_path):
         )
 
     elif file_path.lower().endswith(".mp3"):
-        audio = ID3(file_path)
+        audio_id3 = ID3(file_path)
 
         # # Mesma hierarquia de busca do FLAC, adaptada aos frames TXXX do MP3.
         track_txxx = (
-            audio.get("TXXX:QDL_TRACK_ID")
-            or audio.get("TXXX:qdl_track_id")
-            or audio.get("TXXX:QOBUZTRACKID")
+            audio_id3.get("TXXX:QDL_TRACK_ID")
+            or audio_id3.get("TXXX:qdl_track_id")
+            or audio_id3.get("TXXX:QOBUZTRACKID")
         )
         if track_txxx:
             track_id = track_txxx.text[0]
 
         album_txxx = (
-            audio.get("TXXX:QDL_ALBUM_ID")
-            or audio.get("TXXX:qdl_album_id")
-            or audio.get("TXXX:QOBUZALBUMID")
+            audio_id3.get("TXXX:QDL_ALBUM_ID")
+            or audio_id3.get("TXXX:qdl_album_id")
+            or audio_id3.get("TXXX:QOBUZALBUMID")
         )
         if album_txxx:
             album_id = album_txxx.text[0]
 
-        tsrc = audio.get("TSRC")
+        tsrc = audio_id3.get("TSRC")
         if tsrc:
             isrc = tsrc.text[0]
 
-        tpe2 = audio.get("TPE2")
-        tpe1 = audio.get("TPE1")
-        talb = audio.get("TALB")
-        tdrc = audio.get("TDRC") or audio.get("TYER")
+        tpe2 = audio_id3.get("TPE2")
+        tpe1 = audio_id3.get("TPE1")
+        talb = audio_id3.get("TALB")
+        tdrc = audio_id3.get("TDRC") or audio_id3.get("TYER")
 
         artist_name = tpe2.text[0] if tpe2 else (tpe1.text[0] if tpe1 else "")
         album_name = talb.text[0] if talb else ""
         release_date = str(tdrc.text[0]) if tdrc else ""
         bit_depth = 16
         # ID3 só lê tags; não tem .info (isso é do MP3/FLAC).
-        mp3_rate = getattr(getattr(audio, "info", None), "sample_rate", None)
+        mp3_rate = getattr(getattr(audio_id3, "info", None), "sample_rate", None)
         sampling_rate = mp3_rate / 1000.0 if mp3_rate else None
 
     return (
@@ -345,7 +345,7 @@ async def find_duplicate_tracks(directory):
     )
 
     loop = asyncio.get_running_loop()
-    fingerprints = {}
+    fingerprints: dict[str, list[str]] = {}
     skipped = 0
 
     for idx, filepath in enumerate(all_files, start=1):

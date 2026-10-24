@@ -67,18 +67,20 @@ def extract_track_id(file_path: str) -> str | None:
 def _lyrics_lookup_hints(file_path):
     """ISRC e duração (s) do arquivo: ajudam fontes que identificam a gravação
     exata (BiniLyrics). Qualquer falha de leitura devolve só o que deu."""
-    hints = {}
+    hints: dict[str, str | int] = {}
     try:
         if file_path.lower().endswith(".flac"):
-            audio = FLAC(file_path)
-            isrc = (audio.get("ISRC") or [""])[0]
+            audio_flac = FLAC(file_path)
+            isrc = (audio_flac.get("ISRC") or [""])[0]
+            length = getattr(audio_flac.info, "length", 0)
         else:
-            audio = MP3(file_path)
-            frame = audio.tags.get("TSRC") if audio.tags else None
-            isrc = frame.text[0] if frame and frame.text else ""
+            audio_mp3 = MP3(file_path)
+            audio_tags = getattr(audio_mp3, "tags", None)
+            frame = audio_tags.get("TSRC") if audio_tags is not None else None
+            isrc = frame.text[0] if frame is not None and frame.text else ""
+            length = getattr(audio_mp3.info, "length", 0)
         if isrc:
             hints["isrc"] = str(isrc).strip()
-        length = getattr(audio.info, "length", 0)
         if length:
             hints["duration"] = int(round(length))
     except Exception as e:
@@ -92,7 +94,7 @@ _TIMED_LINE_RE = re.compile(r"^\s*\[(\d{2,}):(\d{2})\.(\d{2,3})\](.*)$")
 def _has_repeated_timestamp(lrc_text):
     """True se dois versos DIFERENTES compartilham o mesmo timestamp -- é
     assim que o formato atual guarda original + tradução."""
-    seen = {}
+    seen: dict[tuple[int, int, str], str] = {}
     for line in (lrc_text or "").splitlines():
         m = _TIMED_LINE_RE.match(line)
         if not m:
@@ -274,18 +276,18 @@ def _read_basic_tags(file_path, ext):
     title, artist, album = "", "", ""
     if ext == ".flac":
         try:
-            audio = FLAC(file_path)
-            title = audio.get("TITLE", [""])[0]
-            artist = audio.get("ARTIST", [""])[0] or audio.get("ALBUMARTIST", [""])[0]
-            album = audio.get("ALBUM", [""])[0]
+            audio_flac = FLAC(file_path)
+            title = audio_flac.get("TITLE", [""])[0]
+            artist = audio_flac.get("ARTIST", [""])[0] or audio_flac.get("ALBUMARTIST", [""])[0]
+            album = audio_flac.get("ALBUM", [""])[0]
         except Exception as e:
             logger.debug(f"Falha ao ler tags do FLAC: {e}")
     elif ext == ".mp3":
         try:
-            audio = id3.ID3(file_path)
-            title = audio.get("TIT2").text[0] if audio.get("TIT2") else ""
-            artist = audio.get("TPE1").text[0] if audio.get("TPE1") else ""
-            album = audio.get("TALB").text[0] if audio.get("TALB") else ""
+            audio_id3 = id3.ID3(file_path)
+            title = audio_id3.get("TIT2").text[0] if audio_id3.get("TIT2") else ""
+            artist = audio_id3.get("TPE1").text[0] if audio_id3.get("TPE1") else ""
+            album = audio_id3.get("TALB").text[0] if audio_id3.get("TALB") else ""
         except Exception as e:
             logger.debug(f"Falha ao ler tags do MP3: {e}")
     return title, artist, album
@@ -793,7 +795,7 @@ async def process_retroactive_lyrics_async(
                     )
 
         n_workers = _lyrics_workers(settings)
-        itens_por_arquivo = {}
+        itens_por_arquivo: dict[str, list[tuple[str, str, str]]] = {}
 
         async def _uma(file_path):
             local = itens_por_arquivo[file_path] = []

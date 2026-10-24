@@ -326,7 +326,7 @@ def _classify_album(album: dict) -> str:
     )
 
 
-def _release_kind(album: dict) -> Optional[str]:
+def _release_kind(album: object) -> Optional[str]:
     """'single' ou 'full' (EP/álbum/ao vivo/coletânea); None se desconhecido.
 
     É o que separa a capa do single da capa do álbum onde a mesma faixa
@@ -388,7 +388,7 @@ async def _decide_album_cover(
     try:
         # Mesma busca do download (utils.find_apple_cover): título + versão,
         # UPC, single x álbum, lista de faixas e edição estrita.
-        result = await find_apple_cover(
+        result: object = await find_apple_cover(
             http_session,
             album,
             artist=artist,
@@ -422,7 +422,7 @@ async def _decide_album_cover(
             except Exception as exc:
                 found = (None, None, f"erro ({type(exc).__name__}: {exc})")
             track_results[str(item.get("id"))] = found
-            if found and isinstance(found[0], str) and found[0].strip():
+            if isinstance(found[0], str) and found[0].strip():
                 votes[found[0]] = votes.get(found[0], 0) + 1
 
         ranked = sorted(votes.items(), key=lambda pair: -pair[1])
@@ -464,7 +464,9 @@ async def _fetch_apple_cover_for_track(
     """Busca URL, fonte e diagnóstico da busca Apple (mesma regra do download)."""
     from qobuz_dl.utils import find_apple_cover
 
-    result = await find_apple_cover(http_session, album, item=item, trace=trace)
+    result: object = await find_apple_cover(
+        http_session, album, item=item, trace=trace
+    )
 
     if isinstance(result, tuple):
         url = result[0] if len(result) > 0 else None
@@ -565,7 +567,7 @@ def _display_track_name(
             if entry
         )
     else:
-        artist = str(performer or "").strip()
+        artist = str(performer).strip()
 
     title = str(item.get("title") or "").strip()
     version = str(item.get("version") or "").strip()
@@ -923,7 +925,7 @@ async def retag_directory(
 
     all_files = await asyncio.to_thread(find_audio_files, directory_path)
     files = [f for f in all_files if not (progress and progress.is_done(f))]
-    stats = {
+    stats: dict[str, Any] = {
         "total": len(all_files),
         "skipped_done": len(all_files) - len(files),
         "updated": 0,
@@ -959,12 +961,16 @@ async def retag_directory(
         return stats
 
     loop = asyncio.get_running_loop()
-    album_cache = {}
+    album_cache: dict[str, Any] = {}
     # Capa decidida UMA vez por álbum Qobuz (chave = ID do álbum): single,
     # álbum, edição Deluxe e coletânea têm IDs diferentes e nunca se misturam.
-    album_decisions = {}
-    track_results = {}  # faixa -> (url, fonte, motivo), da votação
-    shared_holder = {"decision": None}  # só a capa do álbum atual fica em disco
+    album_decisions: dict[str, dict[str, Any]] = {}
+    track_results: dict[
+        str, tuple[Optional[str], Optional[str], Optional[str]]
+    ] = {}  # faixa -> (url, fonte, motivo), da votação
+    shared_holder: dict[str, Optional[dict[str, Any]]] = {
+        "decision": None
+    }  # só a capa do álbum atual fica em disco
     last_album_key = None  # para imprimir o cabeçalho do álbum uma vez por álbum
     width = len(str(len(files)))
 
@@ -1036,7 +1042,7 @@ async def retag_directory(
             )
             root_dir = os.path.dirname(file_path)
             # Na simulação nem a capa temporária da Apple toca a pasta do usuário.
-            dl_dir = dry_workdir if dry_run else root_dir
+            dl_dir = dry_workdir or root_dir
 
             cover_path = None  # Optional[str]
             cover_source = None  # Optional[str]
@@ -1199,6 +1205,7 @@ async def retag_directory(
             try:
                 if dry_run:
                     # Simulação: grava numa cópia e compara com o original.
+                    assert dry_workdir is not None
                     work_path = os.path.join(dry_workdir, os.path.basename(file_path))
                     await loop.run_in_executor(None, shutil.copy2, file_path, work_path)
                 elif journal is not None:

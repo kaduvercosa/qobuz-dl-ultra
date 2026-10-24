@@ -33,6 +33,7 @@ import shutil
 import sys
 import threading
 import unicodedata
+from typing import TypedDict
 
 from qobuz_dl.color import (
     ACCENT_DARK,
@@ -444,7 +445,16 @@ _LARGURA_TAG = 4
 
 
 # Presentation state is task-local; the same dict is shared with its lyric worker.
-_track_view = contextvars.ContextVar("ui_track_view", default=None)
+class _TrackView(TypedDict):
+    parallel: bool
+    audio: str
+    lyrics: list[str]
+    existing: bool
+
+
+_track_view: contextvars.ContextVar[_TrackView | None] = contextvars.ContextVar(
+    "ui_track_view", default=None
+)
 
 
 def begin_track_view(parallel=False):
@@ -911,7 +921,7 @@ def summary(title, rows, notes=(), cols=None, subtitle=""):
     """Print a closed summary box with status glyphs and right-aligned values."""
     inner = box_width(cols) - 4
     rst = c(RESET)
-    lines = []
+    lines: list[str | None] = []
     if subtitle:  # nome do álbum/playlist: quebra em vez de cortar o título
         lines.extend(f"{c(BG)}{part}{rst}" for part in _wrap_lines(subtitle, inner))
         lines.append(BOX_RULE)

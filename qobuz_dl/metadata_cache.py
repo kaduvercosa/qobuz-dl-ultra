@@ -43,27 +43,32 @@ class MetadataCache:
 
             self._init_lock = asyncio.Lock()
         async with self._init_lock:
-            if self._initialized:
-                return
-            Path(self.path).parent.mkdir(parents=True, exist_ok=True)
-            async with aiosqlite.connect(self.path, timeout=10) as conn:
-                await conn.execute("PRAGMA busy_timeout=5000")
-                await conn.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS metadata_cache (
-                        cache_key TEXT PRIMARY KEY,
-                        payload TEXT NOT NULL,
-                        created_at REAL NOT NULL,
-                        accessed_at REAL NOT NULL
-                    )
-                    """
+            await self._initialize_schema()
+
+    async def _initialize_schema(self) -> None:
+        # Recheck sob o lock: outra coroutine pode ter criado o schema enquanto
+        # esta aguardava a seção crítica.
+        if self._initialized:
+            return
+        Path(self.path).parent.mkdir(parents=True, exist_ok=True)
+        async with aiosqlite.connect(self.path, timeout=10) as conn:
+            await conn.execute("PRAGMA busy_timeout=5000")
+            await conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS metadata_cache (
+                    cache_key TEXT PRIMARY KEY,
+                    payload TEXT NOT NULL,
+                    created_at REAL NOT NULL,
+                    accessed_at REAL NOT NULL
                 )
-                await conn.execute(
-                    "CREATE INDEX IF NOT EXISTS idx_metadata_cache_accessed "
-                    "ON metadata_cache(accessed_at)"
-                )
-                await conn.commit()
-            self._initialized = True
+                """
+            )
+            await conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_metadata_cache_accessed "
+                "ON metadata_cache(accessed_at)"
+            )
+            await conn.commit()
+        self._initialized = True
 
     async def get(self, key: str) -> dict[str, Any] | None:
         if self.ttl == 0:

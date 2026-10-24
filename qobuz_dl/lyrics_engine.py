@@ -678,7 +678,7 @@ class LyricsEngine:
 
             data = response.json() or {}
             synced = data.get("syncedLyrics")
-            if not has_lrc_timestamps(synced):
+            if not isinstance(synced, str) or not has_lrc_timestamps(synced):
                 continue
             found = data.get("duration")
             if duration and found:
@@ -804,7 +804,7 @@ class LyricsEngine:
             for linha in ui.tagged_lines(kind, msg):
                 tqdm.write(linha)
 
-        result = {
+        result: dict[str, bool | str | None] = {
             "success": False,
             "source": None,
             "language": None,
@@ -948,23 +948,23 @@ class LyricsEngine:
                 audio.save()
             elif ext == ".mp3":
                 try:
-                    audio = ID3(file_path)
+                    audio_id3 = ID3(file_path)
                 except ID3NoHeaderError:
-                    audio = ID3()
+                    audio_id3 = ID3()
                 desc = source if source else ""
-                audio.add(USLT(encoding=3, lang="eng", desc=desc, text=lyrics))
+                audio_id3.add(USLT(encoding=3, lang="eng", desc=desc, text=lyrics))
                 if language:
-                    audio.delall("TXXX:LYRICS_LANG")
-                    audio.add(TXXX(encoding=3, desc="LYRICS_LANG", text=language))
-                audio.delall("TXXX:LYRICS_BILINGUAL")
-                audio.add(
+                    audio_id3.delall("TXXX:LYRICS_LANG")
+                    audio_id3.add(TXXX(encoding=3, desc="LYRICS_LANG", text=language))
+                audio_id3.delall("TXXX:LYRICS_BILINGUAL")
+                audio_id3.add(
                     TXXX(
                         encoding=3,
                         desc="LYRICS_BILINGUAL",
                         text="1" if bilingual else "0",
                     )
                 )
-                audio.save(file_path)
+                audio_id3.save(file_path)
             else:
                 return False
             return True

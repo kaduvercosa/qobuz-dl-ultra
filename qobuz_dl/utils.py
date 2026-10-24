@@ -113,18 +113,18 @@ def make_m3u(pl_directory, remote_items=None):
                 info["title"] = audio.get("TITLE", [""])[0]
                 info["artist"] = audio.get("ARTIST", [""])[0]
             else:
-                audio = ID3(audio_full_path)
+                audio_id3 = ID3(audio_full_path)
                 # Frames TXXX customizados precisam ser varridos
                 # manualmente (não têm chave direta como TIT2/TPE1).
-                for frame in audio.getall("TXXX"):
+                for frame in audio_id3.getall("TXXX"):
                     if frame.desc.upper() == "QOBUZTRACKID":
                         info["qobuz_id"] = frame.text[0]
                         break
-                isrc_frame = audio.get("TSRC")
+                isrc_frame = audio_id3.get("TSRC")
                 info["isrc"] = isrc_frame.text[0] if isrc_frame else None
-                tit2 = audio.get("TIT2")
+                tit2 = audio_id3.get("TIT2")
                 info["title"] = tit2.text[0] if tit2 else ""
-                tpe1 = audio.get("TPE1")
+                tpe1 = audio_id3.get("TPE1")
                 info["artist"] = tpe1.text[0] if tpe1 else ""
         except Exception as e:
             logger.debug(f"Erro ao ler tags de {f}: {e}")
@@ -162,8 +162,8 @@ def make_m3u(pl_directory, remote_items=None):
         # diferentes). Por isso guardamos listas e só aceitamos um arquivo
         # cujo ID Qobuz gravado na tag seja o do item remoto -- ou que não
         # tenha ID nenhum (arquivos antigos).
-        by_isrc = {}  # dict[str, list]
-        by_title = {}  # dict[str, list]
+        by_isrc: dict[str, list[dict[str, Any]]] = {}
+        by_title: dict[str, list[dict[str, Any]]] = {}
         for _f in local_files_info:
             if _f.get("isrc"):
                 by_isrc.setdefault(str(_f["isrc"]), []).append(_f)
@@ -1306,6 +1306,7 @@ async def get_apple_hq_cover(
     async def artwork_url(client, artwork: str) -> tuple[Optional[str], Optional[str]]:
         if not artwork:
             return None, "resultado sem artworkUrl100"
+        last_error = "nenhuma resolução foi verificada"
         for resolution in resolutions:
             url = artwork.replace("100x100bb", resolution)
             try:
@@ -2162,7 +2163,7 @@ def qobuz_release_kind(album: dict) -> Optional[str]:
     """'single' ou 'full' (EP/álbum/ao vivo/coletânea) do álbum Qobuz; None se
     não der para saber. Single só casa com "X - Single" da Apple e álbum/EP
     nunca recebe a capa de um single."""
-    if not isinstance(album, dict) or not album:
+    if not album:
         return None
     try:
         tracks = (album.get("tracks") or {}).get("items") or []

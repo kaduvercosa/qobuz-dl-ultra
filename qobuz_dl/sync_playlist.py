@@ -45,17 +45,19 @@ def _scan_local_tracks(directory):
 
             try:
                 if fpath.lower().endswith(".flac"):
-                    audio = FLAC(fpath)
+                    flac_audio = FLAC(fpath)
                     track_id_list = (
-                        audio.get("QDL_TRACK_ID") or audio.get("QOBUZTRACKID") or [None]
+                        flac_audio.get("QDL_TRACK_ID")
+                        or flac_audio.get("QOBUZTRACKID")
+                        or [None]
                     )
                     track_id = track_id_list[0]
                 else:
-                    audio = ID3(fpath)
+                    id3_audio = ID3(fpath)
                     track_txxx = (
-                        audio.get("TXXX:QDL_TRACK_ID")
-                        or audio.get("TXXX:qdl_track_id")
-                        or audio.get("TXXX:QOBUZTRACKID")
+                        id3_audio.get("TXXX:QDL_TRACK_ID")
+                        or id3_audio.get("TXXX:qdl_track_id")
+                        or id3_audio.get("TXXX:QOBUZTRACKID")
                     )
                     if track_txxx:
                         track_id = track_txxx.text[0]

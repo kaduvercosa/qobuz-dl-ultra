@@ -118,6 +118,9 @@ class QobuzDLSettings:
         self.verify_after_download = kwargs.get("verify_after_download", False)
         self.progress_json = kwargs.get("progress_json", False)
         self.check_storage = kwargs.get("check_storage", True)
+        self.pl_success = 0
+        self.pl_skipped = 0
+        self.pl_failed = 0
 
         self.no_album_artist_tag = kwargs.get("no_album_artist_tag", False)
         self.no_album_title_tag = kwargs.get("no_album_title_tag", False)
@@ -146,6 +149,7 @@ class QobuzDLSettings:
 
         self.lrc_files = kwargs.get("lrc_files", True)
         self.embed_lyrics = kwargs.get("embed_lyrics", True)
+        self.lyrics_translation_lang = kwargs.get("lyrics_translation_lang", "pt")
         self.fetch_translation = kwargs.get("fetch_translation", True)
         self.only_synced_lyrics = kwargs.get("only_synced_lyrics", False)
         self.lyrics_word_sync = kwargs.get("lyrics_word_sync", False)

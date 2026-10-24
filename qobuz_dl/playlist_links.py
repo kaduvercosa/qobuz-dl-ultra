@@ -31,6 +31,7 @@ import json
 import logging
 import os
 import sqlite3
+from typing import TypedDict
 
 from qobuz_dl.constants import PLAYLIST_FOLDER
 
@@ -40,6 +41,12 @@ LINKS_FILENAME = ".playlist_links.json"
 AUDIO_EXTS = (".flac", ".mp3")
 _SQLITE_TIMEOUT = 30
 _WEB_URL = "https://play.qobuz.com/"
+
+
+class _AbsorbStats(TypedDict):
+    absorbed: list[tuple[str, str, str]]
+    kept: list[str]
+    registered: int
 
 
 # --------------------------------------------------------------------------
@@ -154,11 +161,11 @@ def read_track_id(path):
             return str(vals[0]) if vals[0] else None
         from mutagen.id3 import ID3
 
-        audio = ID3(path)
+        audio_id3 = ID3(path)
         frame = (
-            audio.get("TXXX:QDL_TRACK_ID")
-            or audio.get("TXXX:qdl_track_id")
-            or audio.get("TXXX:QOBUZTRACKID")
+            audio_id3.get("TXXX:QDL_TRACK_ID")
+            or audio_id3.get("TXXX:qdl_track_id")
+            or audio_id3.get("TXXX:QOBUZTRACKID")
         )
         return str(frame.text[0]) if frame else None
     except Exception:
@@ -188,7 +195,7 @@ def audio_rank(path):
 
 def scan_track_paths(directory, reader=read_track_id):
     """{id: [caminhos]} de todos os áudios sob `directory`."""
-    out = {}
+    out: dict[str, list[str]] = {}
     for root, _dirs, files in os.walk(directory):
         for fname in files:
             if fname.lower().endswith(AUDIO_EXTS):
@@ -346,7 +353,7 @@ def absorb_playlist_copies_sync(
     """Faz as faixas em `dest_files` ({id: caminho no álbum}) existirem só no
     álbum. Retorna {"absorbed": [(id, antigo, novo)], "kept": [caminhos],
     "registered": n}."""
-    stats = {"absorbed": [], "kept": [], "registered": 0}
+    stats: _AbsorbStats = {"absorbed": [], "kept": [], "registered": 0}
     dest = {str(k): os.path.abspath(v) for k, v in (dest_files or {}).items()}
     if not dest:
         return stats
@@ -359,7 +366,7 @@ def absorb_playlist_copies_sync(
         return stats
 
     # 1) onde estão as cópias de playlist dessas faixas
-    copies = {}
+    copies: dict[str, set[str]] = {}
     if db_path:
         for tid, p in _db_rows(db_path, dest):
             if os.path.isdir(p) and _is_under(p, root):
