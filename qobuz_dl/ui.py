@@ -512,6 +512,7 @@ def _tagged(color, tag, message):
         )
     ):
         color = GRAY
+    completed = plain_label.startswith(("Concluído:", "Concluída:"))
     if idx:
         texto = _INDEX_AFTER_LABEL.sub(r"\1", texto, count=1)
     cabeca, sep, cauda = texto.partition(_TAIL_MARK)
@@ -536,7 +537,8 @@ def _tagged(color, tag, message):
     if reset and cor:
         partes = [p.replace(reset, reset + cor) for p in partes]
     if idx:
-        primeira = f"{c(GRAY)}{marca}{reset} {cor}{partes[0]}{reset}"
+        index_color = GRAY if completed else color
+        primeira = f"{c(index_color)}{marca}{reset} {cor}{partes[0]}{reset}"
     else:
         primeira = f"{cor}{marca} {partes[0]}{reset}"
     linhas = [primeira]
@@ -660,16 +662,25 @@ def error(message):
 
 
 def skip(message):
-    # Item ignorado/pulado -- prefixo "[-]" na cor apagada.
+    # Item ignorado/pulado -- cinza; faixa já existente é aviso amarelo.
     """Print a skip/omit message (yellow circle icon)."""
     state = _track_view.get()
-    if state and (
-        "Ja existe" in str(message)
-        or "Já existe" in str(message)
-        or "mesma faixa repetida" in str(message)
-    ):
+    texto = str(message)
+    normalizado = texto.casefold()
+    arquivo_existente = (
+        "ja existe" in normalizado
+        or "já existe" in normalizado
+        or "consta no banco local" in normalizado
+        or ("já baixada" in normalizado and "id " in normalizado)
+        or ("ja baixada" in normalizado and "id " in normalizado)
+    )
+    faixa_repetida = "mesma faixa repetida" in normalizado
+    if state and (arquivo_existente or faixa_repetida):
         state["existing"] = True
-    _emit_tagged(GRAY, "-", message)
+    if arquivo_existente:
+        _emit_tagged(WARNING, "!", message, sempre=True)
+    else:
+        _emit_tagged(GRAY, "-", message)
 
 
 def detail(message, indent=4):
@@ -945,11 +956,31 @@ def summary(title, rows, notes=(), cols=None, subtitle=""):
     emit_box(title, lines, cols=cols)
 
 
-def summary_downloads(kind, name, success, total, skipped=0, failed=0, notes=()):
+def summary_downloads(
+    kind, name, success, total, skipped=0, failed=0, notes=(), existing=0
+):
     """Resumo padrão de downloads (álbum, playlist, lote, playlist importada).
 
     Linhas sem ocorrência (0 puladas, 0 falhas) não aparecem, como antes.
     """
+    if existing:
+        completed = success + existing
+        completion_tone = (
+            "ok"
+            if completed == total and not skipped and not failed
+            else ("err" if failed else "warn")
+        )
+        rows = [("Concluídas", f"{completed}/{total}", completion_tone)]
+        if success:
+            rows.append(("Baixadas nesta execução", str(success), "info"))
+        rows.append(("Já existentes", str(existing), "warn"))
+        if skipped:
+            rows.append(("Puladas / indisponíveis", str(skipped), "warn"))
+        if failed:
+            rows.append(("Falhas", str(failed), "err"))
+        summary(f"RESUMO {kind}", rows, notes=notes, subtitle=name)
+        return
+
     ok_tone = "ok" if success else ("err" if failed else "info")
     rows = [("Baixadas", f"{success}/{total}", ok_tone)]
     if skipped:

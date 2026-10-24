@@ -478,7 +478,7 @@ def checar_binarios_externos(precisa_fpcalc=False):
     return resultado
 
 
-def verify_audio_integrity(filepath, timeout=180):
+def verify_audio_integrity(filepath, timeout=180) -> tuple[bool | None, str]:
     # Verifica se um arquivo de áudio está corrompido, decodificando-o por
     # INTEIRO com o ffmpeg -- não só lendo metadados/tags (que é o que
     # ffprobe -show_format/-show_streams fazia antes).
@@ -498,7 +498,7 @@ def verify_audio_integrity(filepath, timeout=180):
     # instalação, já saiu uma única vez em checar_binarios_externos().
     ffmpeg = encontrar_binario("ffmpeg")
     if not ffmpeg:
-        return False, "ffmpeg nao disponivel -- integridade nao verificada."
+        return None, "ffmpeg nao disponivel -- integridade nao verificada."
 
     try:
         result = subprocess.run(
@@ -520,7 +520,7 @@ def verify_audio_integrity(filepath, timeout=180):
         )
     except FileNotFoundError:
         return (
-            False,
+            None,
             "ffmpeg nao encontrado no sistema (necessario para verificar integridade).",
         )
     except subprocess.TimeoutExpired:

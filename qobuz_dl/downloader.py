@@ -15,7 +15,7 @@ import sys
 import textwrap
 import threading
 import time
-from typing import Optional
+from typing import Any, Optional
 
 import aiofiles
 import httpx
@@ -32,6 +32,7 @@ from tqdm import tqdm
 import qobuz_dl.metadata as metadata
 import qobuz_dl.postprocess as postprocess
 from qobuz_dl import musicbrainz, ui
+from qobuz_dl.concurrency import run_bounded
 from qobuz_dl.color import (
     OFF,
     RED,
@@ -48,6 +49,7 @@ from qobuz_dl.constants import (
 from qobuz_dl.db import handle_download_id
 from qobuz_dl.exceptions import NonStreamable
 from qobuz_dl.executors import heavy_executor
+from qobuz_dl.fileio import replace_atomic
 from qobuz_dl.http_download import (
     DownloadAborted,
     DownloadError,
@@ -664,7 +666,7 @@ class Download:
             except (ValueError, IndexError) as e:
                 logger.debug(f"--delay com valor invalido, ignorando: {e}")
 
-        active_workers = int(getattr(self.settings, "max_workers", 1))
+        active_workers = max(1, int(getattr(self.settings, "max_workers", 1)))
         is_parallel = False
         mode_label = "Sequencial"
 
@@ -700,7 +702,7 @@ class Download:
         failed_tracks = 0
         aborted_by_user = False
         cancelled_by_task = False
-        results = []
+        results: list[Any] = []
         abort_event.clear()
 
         original_sigint = None
@@ -865,29 +867,41 @@ class Download:
                 faixas_previstas=faixas_previstas,
             )
 
-            task_objs = [
-                asyncio.create_task(process_track(idx, i))
-                for idx, i in enumerate(album_meta["tracks"]["items"])
-            ]
+            album_tracks = album_meta["tracks"]["items"]
+            completed_ids = set()
+            if not getattr(self.settings, "verify_after_download", False):
+                completed_ids = await postprocess.resumable_track_ids(dirn)
+            results = [None] * len(album_tracks)
+            album_track_items = list(enumerate(album_tracks))
+
+            async def _bounded_process_track(_worker_index, entry):
+                idx, track = entry
+                if str(track.get("id", "")) in completed_ids:
+                    index_token = ui.set_track_index(
+                        ui.index_from_meta(track, album_meta)
+                    )
+                    try:
+                        ui.skip(
+                            f"Pulando: {track.get('title', 'Faixa Desconhecida')} "
+                            "(Já existe no dispositivo)"
+                        )
+                    finally:
+                        ui.reset_track_index(index_token)
+                    return "existing"
+                return await process_track(idx, track)
 
             try:
-                results = await asyncio.gather(*task_objs, return_exceptions=True)
+                pending_results = await run_bounded(
+                    album_track_items,
+                    _bounded_process_track,
+                    limit=max(1, active_workers),
+                )
+                for (idx, _track), result in zip(album_track_items, pending_results):
+                    results[idx] = result
             except (KeyboardInterrupt, asyncio.CancelledError) as exc:
                 abort_event.set()
                 aborted_by_user = True
                 cancelled_by_task = isinstance(exc, asyncio.CancelledError)
-                for t in task_objs:
-                    if not t.done():
-                        t.cancel()
-                # Não feche a sessão HTTP enquanto as tarefas ainda podem
-                # estar executando finally/limpeza ou tentando liberar recursos.
-                # Esperar por todas também evita tarefas órfãs após o cancelamento.
-                try:
-                    await asyncio.gather(*task_objs, return_exceptions=True)
-                except asyncio.CancelledError:
-                    # Um segundo cancelamento não deve impedir o fechamento
-                    # best-effort da sessão e a propagação do cancelamento inicial.
-                    pass
                 try:
                     await self.http_session.aclose()
                 except Exception as e:
@@ -911,7 +925,9 @@ class Download:
                         track_meta.get("id"),
                         exc_info=(type(result), result, result.__traceback__),
                     )
-            failed_tracks = sum(res is not True for res in results)
+            failed_tracks = sum(
+                res is not True and res != "existing" for res in results
+            )
 
             if not abort_event.is_set():
                 await asyncio.to_thread(_clean_embed_art, dirn, self.settings)
@@ -1085,6 +1101,7 @@ class Download:
                     )
 
             skipped_count = sum(1 for r in results if r == "skipped")
+            existing_count = sum(1 for r in results if r == "existing")
             real_failed = sum(
                 1 for r in results if r is False or isinstance(r, BaseException)
             )
@@ -1097,6 +1114,7 @@ class Download:
                 track_count,
                 skipped=skipped_count,
                 failed=real_failed,
+                existing=existing_count,
                 notes=(
                     ["Faixas puladas marcadas em .missing.txt"]
                     if skipped_count > 0
@@ -1640,7 +1658,7 @@ class Download:
                 ok, message = await loop.run_in_executor(
                     heavy_executor(), lambda: verify_audio_integrity(final_file)
                 )
-                if not ok:
+                if ok is False:
                     try:
                         os.replace(final_file, f"{final_file}.corrupt")
                     except OSError as e:
@@ -1656,6 +1674,11 @@ class Download:
                         "baixando novamente."
                     )
                 else:
+                    if ok is None:
+                        ui.warn(
+                            "Integridade não verificada (ffmpeg indisponível); "
+                            "mantendo o arquivo existente."
+                        )
                     ui.skip(
                         f"{_skip_pfx}Pulando: {os.path.basename(final_file)} (Ja existe)"
                     )
@@ -1984,7 +2007,7 @@ class Download:
             ok, verify_message = await loop.run_in_executor(
                 heavy_executor(), _run_verify
             )
-            if not ok:
+            if ok is False:
                 with print_lock:
                     tqdm.write(
                         f"{RED}[!] Verificação de integridade falhou para "
@@ -2024,6 +2047,8 @@ class Download:
                     reason=verify_message,
                 )
                 return False
+            if ok is None:
+                ui.warn(f"Integridade do áudio não verificada: {verify_message}")
 
         emit_progress_json(
             self.settings,
@@ -3049,6 +3074,7 @@ async def tqdm_download_segments(
     _t0 = time.monotonic()
 
     tmp_fname = fname + ".mp4"
+    remux_tmp_fname = fname + ".part"
     n_segments = track_url_dict["n_segments"]
     url_template = track_url_dict["url_template"]
     raw_key = track_url_dict["raw_key"]
@@ -3201,6 +3227,12 @@ async def tqdm_download_segments(
         if not is_parallel:
             ui.step(f" {ui.tree_last()} Montando o arquivo FLAC final...")
 
+        try:
+            os.remove(remux_tmp_fname)
+        except FileNotFoundError:
+            # Primeira tentativa ou temporário já limpo: nada a remover.
+            pass
+
         remux = await asyncio.create_subprocess_exec(
             "ffmpeg",
             "-nostdin",
@@ -3213,7 +3245,7 @@ async def tqdm_download_segments(
             "copy",
             "-f",
             "flac",
-            fname,
+            remux_tmp_fname,
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -3223,6 +3255,9 @@ async def tqdm_download_segments(
             raise ConnectionError(
                 f"Falha no remux do FFmpeg para {fname}: {stderr.decode()}"
             )
+        if not os.path.isfile(remux_tmp_fname) or os.path.getsize(remux_tmp_fname) == 0:
+            raise ConnectionError(f"Remux do FFmpeg não gerou um FLAC válido: {fname}")
+        replace_atomic(remux_tmp_fname, fname)
 
         ui.done(
             ui.tail(
@@ -3245,6 +3280,12 @@ async def tqdm_download_segments(
                 os.remove(tmp_fname)
             except OSError:
                 # Limpeza best-effort: o arquivo pode já ter sumido.
+                pass
+        if os.path.isfile(remux_tmp_fname):
+            try:
+                os.remove(remux_tmp_fname)
+            except OSError:
+                # Falha de limpeza não deve mascarar o erro principal do download.
                 pass
         if owns_session:
             try:

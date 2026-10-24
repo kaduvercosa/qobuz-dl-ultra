@@ -246,7 +246,7 @@ def test_verify_audio_sem_ffmpeg(tmp_path, monkeypatch):
     f.write_bytes(b"x")
     monkeypatch.setattr(utils, "encontrar_binario", lambda _n: None)
     ok, msg = utils.verify_audio_integrity(str(f))
-    assert not ok
+    assert ok is None
     assert "ffmpeg nao disponivel" in msg
 
 

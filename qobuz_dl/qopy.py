@@ -6,11 +6,14 @@ import asyncio
 import base64
 import hashlib
 import logging
+import math
 import os
+import random
 import time
 import unicodedata
 from contextlib import asynccontextmanager
-from datetime import date, datetime
+from datetime import date, datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import Any
 
 import httpx
@@ -124,6 +127,42 @@ def _log_startup_timing(stage: str, elapsed: float) -> None:
     """Registra somente duração; nunca inclui credenciais ou respostas da API."""
     if _startup_timing_enabled():
         logger.warning("[startup-timing] %s: %.3fs", stage, elapsed)
+
+
+def _retry_after_seconds(exc: BaseException, now: float | None = None) -> float | None:
+    """Retorna o atraso indicado por Retry-After, se o valor for válido."""
+    if not isinstance(exc, httpx.HTTPStatusError):
+        return None
+    value = exc.response.headers.get("Retry-After")
+    if value is None:
+        return None
+    value = value.strip()
+    try:
+        seconds = float(value)
+    except ValueError:
+        try:
+            retry_at = parsedate_to_datetime(value)
+            if retry_at.tzinfo is None:
+                retry_at = retry_at.replace(tzinfo=timezone.utc)
+            current_time = time.time() if now is None else now
+            seconds = max(0.0, retry_at.timestamp() - current_time)
+        except (TypeError, ValueError, OverflowError):
+            return None
+    if not math.isfinite(seconds) or seconds < 0:
+        return None
+    return seconds
+
+
+def _retry_wait(retry_state, exponential_wait) -> float:
+    """Use Retry-After or jitter the exponential fallback wait."""
+    outcome = retry_state.outcome
+    exc = outcome.exception() if outcome is not None else None
+    retry_after = _retry_after_seconds(exc) if exc is not None else None
+    if retry_after is not None:
+        return retry_after
+    base_delay = max(0.0, exponential_wait(retry_state))
+    jittered = base_delay * random.uniform(0.5, 1.5)
+    return min(6.0, jittered)
 
 
 class Client:
@@ -795,9 +834,10 @@ class Client:
                 )
             return False
 
+        exponential_wait = wait_exponential(multiplier=1, min=1, max=6)
         async for attempt in AsyncRetrying(
             stop=stop_after_attempt(max(1, int(max_attempts))),
-            wait=wait_exponential(multiplier=1, min=1, max=6),
+            wait=lambda retry_state: _retry_wait(retry_state, exponential_wait),
             retry=retry_if_exception(_retryable),
             reraise=True,
         ):

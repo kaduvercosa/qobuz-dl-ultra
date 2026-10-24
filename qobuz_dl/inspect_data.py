@@ -565,7 +565,7 @@ def verificar_integridade(caminho: str, timeout: int = 180) -> dict:
     if not encontrar_binario("ffmpeg"):
         return {"ok": None, "mensagem": "ffmpeg não encontrado"}
     ok, mensagem = verify_audio_integrity(caminho, timeout=timeout)
-    return {"ok": bool(ok), "mensagem": "" if ok else str(mensagem)}
+    return {"ok": ok, "mensagem": "" if ok is True else str(mensagem)}
 
 
 _NUM = r"(-?\d+(?:\.\d+)?|-inf)"

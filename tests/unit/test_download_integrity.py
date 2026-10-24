@@ -120,6 +120,8 @@ async def test_segmentos_iniciais_sao_gravados_e_memoria_e_limitada(
         entrada = args[args.index("-i") + 1]
         with open(entrada, "rb") as f:
             conteudo_remux = f.read()
+        with open(args[-1], "wb") as f:
+            f.write(b"flac-output")
         return _ProcessoFalso()
 
     monkeypatch.setattr(downloader, "_get_qobuz_segment_uuid", lambda _data: b"u" * 16)
@@ -149,3 +151,5 @@ async def test_segmentos_iniciais_sao_gravados_e_memoria_e_limitada(
     assert conteudo_remux == b"s0ds1ds2ds3ds4ds5"
     assert pico_gets <= 2
     assert not os.path.exists(f"{destino}.mp4")
+    assert destino.read_bytes() == b"flac-output"
+    assert not os.path.exists(f"{destino}.part")

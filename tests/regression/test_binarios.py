@@ -156,7 +156,7 @@ class TestVerifyAudioIntegrity:
 
         ok, motivo = utils.verify_audio_integrity(str(f))
 
-        assert ok is False
+        assert ok is None
         assert "ffmpeg" in motivo.lower()
         assert "nao verificada" in motivo.lower()
 

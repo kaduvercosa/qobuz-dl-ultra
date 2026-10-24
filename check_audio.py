@@ -78,18 +78,24 @@ def verify_library(root_dir):
 
     total = len(audio_list)
     corrupted = []
+    unverified = []
 
     for idx, (filename, full_path) in enumerate(audio_list, start=1):
         sys.stdout.write(f"\r  [{idx}/{total}] Verificando: {filename[:50]:<50}")
         sys.stdout.flush()
 
         ok, message = verify_audio_integrity(full_path)
-        if not ok:
+        if ok is False:
             corrupted.append((full_path, message))
+        elif ok is None:
+            unverified.append((full_path, message))
 
     sys.stdout.write("\r" + " " * 90 + "\r")
 
-    print(f"✅ {total - len(corrupted)}/{total} arquivos OK.\n")
+    verified_ok = total - len(corrupted) - len(unverified)
+    print(f"✅ {verified_ok}/{total} arquivos validados sem erros.")
+    if unverified:
+        print(f"⚠️ {len(unverified)} arquivo(s) não puderam ser verificados.\n")
 
     if corrupted:
         print(f"\033[31m[!] {len(corrupted)} arquivo(s) com problema:\033[0m")
@@ -97,6 +103,13 @@ def verify_library(root_dir):
             print(f"  \033[31m✗\033[0m {full_path}")
             print(f"      {message}")
         return 1
+
+    if unverified:
+        print("[!] Instale ffmpeg para verificar todos os arquivos.")
+        for full_path, message in unverified:
+            print(f"  ? {full_path}")
+            print(f"      {message}")
+        return 2
 
     print("\033[32m✓ Biblioteca íntegra, nenhum problema encontrado.\033[0m")
     return 0

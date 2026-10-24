@@ -388,7 +388,7 @@ class TestVerifyAudioIntegrity:
 
         ok, motivo = utils.verify_audio_integrity(str(arquivo))
 
-        assert ok is False
+        assert ok is None
         assert "ffmpeg nao disponivel" in motivo.lower()
 
     def test_sucesso_returncode_zero_sem_stderr(self, monkeypatch, tmp_path):
@@ -451,7 +451,7 @@ class TestVerifyAudioIntegrity:
 
         ok, motivo = utils.verify_audio_integrity(str(arquivo))
 
-        assert ok is False
+        assert ok is None
         assert "ffmpeg nao encontrado no sistema" in motivo.lower()
 
     def test_timeout(self, monkeypatch, tmp_path):

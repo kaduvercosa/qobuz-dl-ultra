@@ -12,12 +12,15 @@ gera-lo nunca derruba o download em si (so' loga e segue).
 """
 
 import asyncio
+import errno
 import json
 import logging
 import os
 from contextvars import ContextVar
 from datetime import datetime
 from typing import Any, Callable
+
+from qobuz_dl.fileio import atomic_write_json
 
 logger = logging.getLogger(__name__)
 
@@ -44,8 +47,37 @@ except ImportError as e:
     )
 
 REPORT_FILENAME = ".report.json"
+_NO_PROCESS_LOCK = object()
 
-_locks: dict[str, asyncio.Lock] = {}
+
+class _ReportLock:
+    """Lock reutilizável que combina exclusão local e interprocesso."""
+
+    def __init__(self, path: str):
+        self.path = path
+        self.local_lock = asyncio.Lock()
+        self.process_handle: Any | None = None
+
+    async def __aenter__(self) -> "_ReportLock":
+        await self.local_lock.acquire()
+        try:
+            self.process_handle = await _acquire_process_lock(self.path)
+        except BaseException:
+            self.local_lock.release()
+            raise
+        return self
+
+    async def __aexit__(self, exc_type: Any, exc: Any, traceback: Any) -> None:
+        handle = self.process_handle
+        self.process_handle = None
+        try:
+            if handle is not None:
+                await _release_process_lock_async(handle)
+        finally:
+            self.local_lock.release()
+
+
+_locks: dict[str, _ReportLock] = {}
 _locks_guard = asyncio.Lock()
 
 
@@ -54,14 +86,106 @@ _locks_guard = asyncio.Lock()
 # ============================================================================
 
 
-async def _get_lock(path: str) -> asyncio.Lock:
-    """Retorna um lock por arquivo para impedir gravacoes concorrentes."""
+async def _get_lock(path: str) -> _ReportLock:
+    """Lock local e interprocesso para impedir atualizacoes perdidas."""
     async with _locks_guard:
         lock = _locks.get(path)
         if lock is None:
-            lock = asyncio.Lock()
+            lock = _ReportLock(path)
             _locks[path] = lock
         return lock
+
+
+def _try_acquire_process_lock(path: str):
+    """Tenta adquirir lock exclusivo sem bloquear a thread do event loop."""
+    lock_path = f"{path}.lock"
+    try:
+        os.makedirs(os.path.dirname(os.path.abspath(lock_path)), exist_ok=True)
+        handle = open(lock_path, "a+b")
+    except OSError as exc:
+        logger.debug(
+            "Lock interprocesso indisponível em %s; usando lock local: %s",
+            lock_path,
+            exc,
+        )
+        return _NO_PROCESS_LOCK
+    try:
+        if os.name == "nt":
+            import msvcrt
+
+            handle.seek(0, os.SEEK_END)
+            if handle.tell() == 0:
+                handle.write(b"\0")
+                handle.flush()
+            handle.seek(0)
+            msvcrt.locking(  # type: ignore[attr-defined]
+                handle.fileno(),
+                msvcrt.LK_NBLCK,
+                1,  # type: ignore[attr-defined]
+            )
+        else:
+            import fcntl
+
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return handle
+    except OSError as exc:
+        handle.close()
+        if exc.errno in (errno.EACCES, errno.EAGAIN, errno.EDEADLK):
+            return None
+        logger.debug(
+            "Lock interprocesso indisponível em %s; usando lock local: %s",
+            lock_path,
+            exc,
+        )
+        return _NO_PROCESS_LOCK
+
+
+def _release_process_lock(handle: Any) -> None:
+    if handle is _NO_PROCESS_LOCK:
+        return
+    try:
+        if os.name == "nt":
+            import msvcrt
+
+            handle.seek(0)
+            msvcrt.locking(  # type: ignore[attr-defined]
+                handle.fileno(),
+                msvcrt.LK_UNLCK,
+                1,  # type: ignore[attr-defined]
+            )
+        else:
+            import fcntl
+
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+    finally:
+        handle.close()
+
+
+async def _acquire_process_lock(path: str) -> Any:
+    handle = None
+    while handle is None:
+        acquire_task = asyncio.create_task(
+            asyncio.to_thread(_try_acquire_process_lock, path)
+        )
+        try:
+            handle = await asyncio.shield(acquire_task)
+        except asyncio.CancelledError:
+            handle = await acquire_task
+            if handle is not None:
+                await asyncio.to_thread(_release_process_lock, handle)
+            raise
+        if handle is None:
+            await asyncio.sleep(0.05)
+    return handle
+
+
+async def _release_process_lock_async(handle: Any) -> None:
+    release_task = asyncio.create_task(asyncio.to_thread(_release_process_lock, handle))
+    try:
+        await asyncio.shield(release_task)
+    except asyncio.CancelledError:
+        await release_task
+        raise
 
 
 def _now_iso() -> str:
@@ -95,12 +219,7 @@ def _load_report(path: str) -> dict:
 
 def _atomic_write_json(path: str, data: Any) -> None:
     """Grava JSON de forma atomica."""
-    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
-    tmp_path = f"{path}.tmp"
-    with open(tmp_path, "w", encoding="utf-8") as file:
-        json.dump(data, file, ensure_ascii=False, indent=2)
-        file.write("\n")
-    os.replace(tmp_path, path)
+    atomic_write_json(path, data, ensure_ascii=False, indent=2)
 
 
 def _norm_id(value: Any) -> str | None:
@@ -569,6 +688,49 @@ async def update_track_status(
         _recalc_cabecalho_dinamico(report)
         _recalc_resumo(report)
         await asyncio.to_thread(_save_report, path, report)
+
+
+async def resumable_track_ids(directory: str) -> set[str]:
+    """Retorna IDs marcados como concluidos cujo arquivo de audio ainda existe.
+
+    O relatorio por faixa ja e a fonte persistente do progresso. Cruzar os IDs
+    concluidos com as tags Qobuz dos arquivos evita pular um arquivo apagado,
+    movido ou sem uma identificacao legivel depois da ultima execucao.
+    """
+    return await asyncio.to_thread(_resumable_track_ids_sync, directory)
+
+
+def _resumable_track_ids_sync(directory: str) -> set[str]:
+    if not os.path.isdir(directory):
+        return set()
+
+    completed: set[str] = set()
+    for root, _dirs, files in os.walk(directory):
+        if REPORT_FILENAME not in files:
+            continue
+        report = _load_report(os.path.join(root, REPORT_FILENAME))
+        tracks = report.get("faixas", [])
+        if not isinstance(tracks, list):
+            continue
+        for track in tracks:
+            if not isinstance(track, dict):
+                continue
+            download = track.get("download", {})
+            if not isinstance(download, dict):
+                continue
+            if _normalizar_status(download.get("situacao", "")) != "concluido":
+                continue
+            track_id = _norm_id(track.get("id"))
+            if track_id:
+                completed.add(track_id)
+
+    if not completed:
+        return set()
+
+    from qobuz_dl.playlist_links import scan_track_paths
+
+    audio_ids = scan_track_paths(directory)
+    return completed.intersection(audio_ids)
 
 
 async def finalize_report(

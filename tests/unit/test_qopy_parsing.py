@@ -22,7 +22,8 @@ requisição.
 """
 
 import unicodedata
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import httpx
@@ -37,6 +38,51 @@ def _cliente_com(user_info):
     c = Client()
     c.user_info = user_info
     return c
+
+
+def _http_status_error(
+    status, retry_after=None, method="GET", url="https://api.invalid/"
+):
+    headers = {"Retry-After": retry_after} if retry_after is not None else {}
+    response = httpx.Response(
+        status,
+        headers=headers,
+        request=httpx.Request(method, url),
+    )
+    with pytest.raises(httpx.HTTPStatusError) as raised:
+        response.raise_for_status()
+    return raised.value
+
+
+def test_retry_after_numerico_em_segundos():
+    exc = _http_status_error(429, "12.5")
+    assert qopy._retry_after_seconds(exc) == 12.5
+
+
+def test_retry_after_http_date_usa_clock_atual(monkeypatch):
+    current = datetime(1994, 11, 6, 8, 49, 0, tzinfo=timezone.utc).timestamp()
+    monkeypatch.setattr(qopy.time, "time", lambda: current)
+    exc = _http_status_error(503, "Sun, 06 Nov 1994 08:49:37 GMT")
+    assert qopy._retry_after_seconds(exc) == 37
+
+
+def test_retry_after_http_date_passado_nao_usa_backoff():
+    exc = _http_status_error(503, "Sun, 06 Nov 1994 08:49:37 GMT")
+    assert qopy._retry_after_seconds(exc, now=784111800) == 0
+
+
+def test_retry_after_invalido_usa_backoff_exponencial_com_jitter(monkeypatch):
+    exc = _http_status_error(503, "nao-e-uma-data")
+    retry_state = SimpleNamespace(outcome=SimpleNamespace(exception=lambda: exc))
+    jitter_bounds = []
+
+    def fixed_jitter(low, high):
+        jitter_bounds.append((low, high))
+        return 1.25
+
+    monkeypatch.setattr(qopy.random, "uniform", fixed_jitter)
+    assert qopy._retry_wait(retry_state, lambda _state: 4) == 5
+    assert jitter_bounds == [(0.5, 1.5)]
 
 
 async def test_api_call_repete_get_apos_erro_transitorio(monkeypatch):
@@ -61,6 +107,148 @@ async def test_api_call_repete_get_apos_erro_transitorio(monkeypatch):
 
     assert await client.api_call("track/get", id="10") == {"ok": True}
     assert client.session.request.await_count == 2
+
+
+async def test_api_call_respeita_limite_maximo_de_tentativas(monkeypatch):
+    client = Client()
+    client.id = "123"
+    client.base = "https://api.invalid/"
+    client.uat = "token"
+    request = httpx.Request("GET", "https://api.invalid/track/get")
+    response = httpx.Response(503, request=request)
+    client.session = type(
+        "Session",
+        (),
+        {"request": AsyncMock(return_value=response)},
+    )()
+
+    # A política de espera continua sendo exercitada, mas com zero segundos.
+    monkeypatch.setattr(qopy, "wait_exponential", lambda **kwargs: wait_none())
+    sleep_delays = []
+
+    async def record_sleep(delay):
+        sleep_delays.append(delay)
+
+    retrying_class = qopy.AsyncRetrying
+
+    def retrying_with_recorded_sleep(*args, **kwargs):
+        kwargs["sleep"] = record_sleep
+        return retrying_class(*args, **kwargs)
+
+    monkeypatch.setattr(qopy, "AsyncRetrying", retrying_with_recorded_sleep)
+
+    with pytest.raises(httpx.HTTPStatusError):
+        await client.api_call("track/get", id="10", _max_attempts=3)
+
+    assert client.session.request.await_count == 3
+    assert sleep_delays == [0, 0]
+
+
+@pytest.mark.parametrize(
+    ("retry_after", "expected_delay"),
+    [("7", 7), ("Sun, 06 Nov 1994 08:49:37 GMT", 37)],
+)
+async def test_api_call_usa_retry_after_sem_bloquear_event_loop(
+    monkeypatch, retry_after, expected_delay
+):
+    client = Client()
+    client.id = "123"
+    client.base = "https://api.invalid/"
+    client.uat = "token"
+    request = httpx.Request("GET", "https://api.invalid/track/get")
+    responses = [
+        httpx.Response(429, headers={"Retry-After": retry_after}, request=request),
+        httpx.Response(200, json={"ok": True}, request=request),
+    ]
+    client.session = type(
+        "Session",
+        (),
+        {"request": AsyncMock(side_effect=responses)},
+    )()
+    if retry_after.startswith("Sun,"):
+        fixed_now = datetime(1994, 11, 6, 8, 49, 0, tzinfo=timezone.utc).timestamp()
+        monkeypatch.setattr(qopy.time, "time", lambda: fixed_now)
+
+    sleep_delays = []
+
+    async def record_sleep(delay):
+        sleep_delays.append(delay)
+
+    retrying_class = qopy.AsyncRetrying
+
+    def retrying_with_recorded_sleep(*args, **kwargs):
+        kwargs["sleep"] = record_sleep
+        return retrying_class(*args, **kwargs)
+
+    monkeypatch.setattr(qopy, "AsyncRetrying", retrying_with_recorded_sleep)
+    assert await client.api_call("track/get", id="10") == {"ok": True}
+    assert sleep_delays == [expected_delay]
+
+
+async def test_api_call_repete_session_start_apos_5xx(monkeypatch):
+    client = Client()
+    client.id = "123"
+    client.base = "https://api.invalid/"
+    client.sec = "secret"
+    responses = [
+        httpx.Response(503, request=httpx.Request("POST", "https://api.invalid/")),
+        httpx.Response(
+            200,
+            json={"ok": True},
+            request=httpx.Request("POST", "https://api.invalid/"),
+        ),
+    ]
+    client.session = type(
+        "Session",
+        (),
+        {"request": AsyncMock(side_effect=responses)},
+    )()
+    monkeypatch.setattr(qopy, "wait_exponential", lambda **kwargs: wait_none())
+
+    assert await client.api_call("session/start") == {"ok": True}
+    assert client.session.request.await_count == 2
+
+
+async def test_api_call_nao_repete_post_mutavel_apos_5xx(monkeypatch):
+    client = Client()
+    client.id = "123"
+    client.base = "https://api.invalid/"
+    client.uat = "token"
+    response = httpx.Response(
+        503,
+        request=httpx.Request("POST", "https://api.invalid/playlist/create"),
+    )
+    client.session = type(
+        "Session",
+        (),
+        {"request": AsyncMock(return_value=response)},
+    )()
+    monkeypatch.setattr(qopy, "wait_exponential", lambda **kwargs: wait_none())
+
+    with pytest.raises(httpx.HTTPStatusError):
+        await client.api_call("playlist/create", name="Teste")
+    assert client.session.request.await_count == 1
+
+
+async def test_api_call_nao_repete_status_permanente(monkeypatch):
+    client = Client()
+    client.id = "123"
+    client.base = "https://api.invalid/"
+    client.uat = "token"
+    response = httpx.Response(
+        404,
+        request=httpx.Request("GET", "https://api.invalid/track/get"),
+    )
+    client.session = type(
+        "Session",
+        (),
+        {"request": AsyncMock(return_value=response)},
+    )()
+    monkeypatch.setattr(qopy, "wait_exponential", lambda **kwargs: wait_none())
+
+    with pytest.raises(httpx.HTTPStatusError):
+        await client.api_call("track/get", id="10")
+    assert client.session.request.await_count == 1
 
 
 async def test_api_call_nao_repete_post_mutavel_apos_erro_de_leitura(monkeypatch):

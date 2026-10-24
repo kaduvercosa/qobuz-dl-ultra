@@ -41,6 +41,7 @@ from qobuz_dl import downloader, qopy, ui
 from qobuz_dl.artist_role import funcao_do_artista
 from qobuz_dl.bundle import Bundle
 from qobuz_dl.color import GREEN, OFF, RED, RESET
+from qobuz_dl.concurrency import run_bounded
 from qobuz_dl.color import INFO as CYAN
 from qobuz_dl.color import WARNING as YELLOW
 from qobuz_dl.db import create_db, handle_download_id
@@ -1757,6 +1758,11 @@ class QobuzDL:
                 self.settings.pl_success = 0
                 self.settings.pl_skipped = 0
                 self.settings.pl_failed = 0
+            resumable_ids = set()
+            if is_playlist and not getattr(
+                self.settings, "verify_after_download", False
+            ):
+                resumable_ids = await postprocess.resumable_track_ids(new_path)
 
             original_folder_format = self.folder_format
             original_multi_disc_setting = getattr(
@@ -1767,7 +1773,7 @@ class QobuzDL:
                 self.settings.multiple_disc_one_dir = True
 
             is_track_batch = type_dict["iterable_key"] == "tracks"
-            batch_workers = int(getattr(self.settings, "max_workers", 1))
+            batch_workers = max(1, int(getattr(self.settings, "max_workers", 1)))
             can_parallelize = (
                 is_track_batch
                 and batch_workers > 1
@@ -1778,8 +1784,8 @@ class QobuzDL:
                 downloader._PositionPool(batch_workers) if can_parallelize else None
             )
             semaphore = asyncio.Semaphore(batch_workers)
-            pending_tasks = []
-            outcomes = []
+            pending_items = []
+            outcomes: list[Any] = []
 
             mode_label = (
                 f"Paralelo ({batch_workers} workers)"
@@ -1883,41 +1889,13 @@ class QobuzDL:
                             )
                             continue
 
+                    if is_playlist and str(item.get("id", "")) in resumable_ids:
+                        self.settings.pl_success += 1
+                        outcomes.append(True)
+                        continue
+
                     if can_parallelize:
-                        item_id_captured = item["id"]
-                        idx_captured = idx
-                        title_captured = item.get("title")
-
-                        async def _bounded_track_download(
-                            item_id=item_id_captured,
-                            idx=idx_captured,
-                            title_captured=title_captured,
-                        ):
-                            stagger_index = idx - 1
-                            # O semáforo é pego ANTES do stagger: assim as vagas
-                            # são ocupadas na ordem da playlist (01, 02, 03...).
-                            # Com o sleep antes do semáforo, as faixas depois da
-                            # 5ª não dormiam e tomavam as vagas das primeiras.
-                            async with semaphore:
-                                if stagger_index < batch_workers:
-                                    await asyncio.sleep(
-                                        stagger_index * HEADER_STAGGER_DELAY
-                                    )
-                                return await self.download_from_id(
-                                    item_id,
-                                    False,
-                                    new_path,
-                                    is_playlist=is_playlist,
-                                    playlist_index=idx,
-                                    is_parallel=True,
-                                    position_pool=position_pool,
-                                    suppress_header=is_playlist,
-                                    title=title_captured,
-                                )
-
-                        pending_tasks.append(
-                            asyncio.create_task(_bounded_track_download())
-                        )
+                        pending_items.append((idx, item))
                     else:
                         outcomes.append(
                             await self.download_from_id(
@@ -1933,16 +1911,38 @@ class QobuzDL:
                             )
                         )
 
-                if pending_tasks:
-                    outcomes.extend(await asyncio.gather(*pending_tasks))
+                if pending_items:
 
-            except BaseException:
-                for task in pending_tasks:
-                    if not task.done():
-                        task.cancel()
-                if pending_tasks:
-                    await asyncio.gather(*pending_tasks, return_exceptions=True)
-                raise
+                    async def _bounded_track_download(_worker_index, entry):
+                        idx, item = entry
+                        stagger_index = idx - 1
+                        # Preserva o stagger inicial sem alocar uma task por faixa.
+                        async with semaphore:
+                            if stagger_index < batch_workers:
+                                await asyncio.sleep(
+                                    stagger_index * HEADER_STAGGER_DELAY
+                                )
+                            return await self.download_from_id(
+                                item["id"],
+                                False,
+                                new_path,
+                                is_playlist=is_playlist,
+                                playlist_index=idx,
+                                is_parallel=True,
+                                position_pool=position_pool,
+                                suppress_header=is_playlist,
+                                title=item.get("title"),
+                            )
+
+                    bounded_results = await run_bounded(
+                        pending_items,
+                        _bounded_track_download,
+                        limit=max(1, batch_workers),
+                    )
+                    outcomes.extend(bounded_results)
+                    for result in bounded_results:
+                        if isinstance(result, Exception):
+                            raise result
             finally:
                 if is_playlist and not getattr(self, "playlist_as_albums", False):
                     self.folder_format = original_folder_format
@@ -2017,7 +2017,7 @@ class QobuzDL:
             logger.info(f"{OFF}Nothing to download")
             return
 
-        batch_workers = int(getattr(self.settings, "max_workers", 1))
+        batch_workers = max(1, int(getattr(self.settings, "max_workers", 1)))
         parallel_allowed = batch_workers > 1 and getattr(self, "delay", 0) <= 0
 
         track_urls = []
@@ -2068,8 +2068,27 @@ class QobuzDL:
         if track_urls:
             position_pool = downloader._PositionPool(batch_workers)
             semaphore = asyncio.Semaphore(batch_workers)
+            resumable_ids = set()
+            music_directory = getattr(self, "directory", None)
+            if (
+                txt_file
+                and music_directory
+                and not getattr(self.settings, "verify_after_download", False)
+            ):
+                resumable_ids = await postprocess.resumable_track_ids(music_directory)
 
-            async def _bounded_track_url(original_url, item_id, stagger_index=0):
+            pending_track_urls = []
+            for stagger_index, (_url_index, original_url, item_id) in enumerate(
+                track_urls
+            ):
+                if str(item_id) in resumable_ids:
+                    self.mark_url_done_in_file(txt_file, original_url)
+                    self.settings.pl_success += 1
+                else:
+                    pending_track_urls.append((stagger_index, original_url, item_id))
+
+            async def _bounded_track_url(_worker_index, entry):
+                stagger_index, original_url, item_id = entry
                 # Semáforo antes do stagger (ver nota no lote de playlist).
                 async with semaphore:
                     if stagger_index < batch_workers:
@@ -2086,12 +2105,14 @@ class QobuzDL:
                     self.mark_url_done_in_file(txt_file, original_url)
                 return success
 
-            await asyncio.gather(
-                *[
-                    _bounded_track_url(original_url, item_id, stagger_index=i)
-                    for i, (_, original_url, item_id) in enumerate(track_urls)
-                ]
+            download_results = await run_bounded(
+                pending_track_urls,
+                _bounded_track_url,
+                limit=max(1, batch_workers),
             )
+            for result in download_results:
+                if isinstance(result, Exception):
+                    raise result
 
             if total_track_urls > 1:
                 succ = getattr(self.settings, "pl_success", 0)
@@ -3290,7 +3311,7 @@ class QobuzDL:
             self.folder_format = "."
             self.settings.multiple_disc_one_dir = True
 
-        batch_workers = int(getattr(self.settings, "max_workers", 1))
+        batch_workers = max(1, int(getattr(self.settings, "max_workers", 1)))
         can_parallelize = (
             batch_workers > 1 and len(track_ids) > 1 and getattr(self, "delay", 0) <= 0
         )
@@ -3298,8 +3319,14 @@ class QobuzDL:
             downloader._PositionPool(batch_workers) if can_parallelize else None
         )
         semaphore = asyncio.Semaphore(batch_workers)
-        pending_tasks = []
-        outcomes = []
+        self.settings.pl_success = 0
+        self.settings.pl_skipped = 0
+        self.settings.pl_failed = 0
+        resumable_ids = set()
+        if not getattr(self.settings, "verify_after_download", False):
+            resumable_ids = await postprocess.resumable_track_ids(pl_directory)
+        pending_items = []
+        outcomes: list[Any] = []
 
         from qobuz_dl.downloader import print_download_header
 
@@ -3317,32 +3344,12 @@ class QobuzDL:
 
         try:
             for idx, track_id in enumerate(track_ids, start=1):
+                if str(track_id) in resumable_ids:
+                    self.settings.pl_success += 1
+                    outcomes.append(True)
+                    continue
                 if can_parallelize:
-                    track_id_captured = track_id
-                    idx_captured = idx
-
-                    async def _bounded_track_download(
-                        t_id=track_id_captured, t_idx=idx_captured
-                    ):
-                        stagger_index = t_idx - 1
-                        # Semáforo antes do stagger (ver nota no lote de playlist).
-                        async with semaphore:
-                            if stagger_index < batch_workers:
-                                await asyncio.sleep(
-                                    stagger_index * HEADER_STAGGER_DELAY
-                                )
-                            return await self.download_from_id(
-                                t_id,
-                                album=False,
-                                alt_path=pl_directory,
-                                is_playlist=True,
-                                playlist_index=t_idx,
-                                is_parallel=True,
-                                position_pool=position_pool,
-                                suppress_header=True,
-                            )
-
-                    pending_tasks.append(asyncio.create_task(_bounded_track_download()))
+                    pending_items.append((idx, track_id))
                 else:
                     outcomes.append(
                         await self.download_from_id(
@@ -3357,15 +3364,34 @@ class QobuzDL:
                         )
                     )
 
-            if pending_tasks:
-                outcomes.extend(await asyncio.gather(*pending_tasks))
-        except BaseException:
-            for task in pending_tasks:
-                if not task.done():
-                    task.cancel()
-            if pending_tasks:
-                await asyncio.gather(*pending_tasks, return_exceptions=True)
-            raise
+            if pending_items:
+
+                async def _bounded_track_download(_worker_index, entry):
+                    idx, track_id = entry
+                    stagger_index = idx - 1
+                    async with semaphore:
+                        if stagger_index < batch_workers:
+                            await asyncio.sleep(stagger_index * HEADER_STAGGER_DELAY)
+                        return await self.download_from_id(
+                            track_id,
+                            album=False,
+                            alt_path=pl_directory,
+                            is_playlist=True,
+                            playlist_index=idx,
+                            is_parallel=True,
+                            position_pool=position_pool,
+                            suppress_header=True,
+                        )
+
+                bounded_results = await run_bounded(
+                    pending_items,
+                    _bounded_track_download,
+                    limit=max(1, batch_workers),
+                )
+                outcomes.extend(bounded_results)
+                for result in bounded_results:
+                    if isinstance(result, Exception):
+                        raise result
         finally:
             self.folder_format = original_folder_format
             self.settings.multiple_disc_one_dir = original_multi_disc_setting

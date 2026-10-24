@@ -1082,6 +1082,48 @@ class TestResultadoEIndiceCinza:
             ui.reset_track_index(token)
         assert saida == ["<D>[03/09]<R> <G>└─ Concluído: Song<R>"]
 
+    def test_indice_acompanha_a_cor_durante_o_download(
+        self, estado_limpo, saida, colunas, monkeypatch
+    ):
+        colunas(100)
+        ui.configure(color=True, unicode=True)
+        monkeypatch.setitem(ui._KINDS, "progress", ("<H>", "*"))
+        monkeypatch.setattr(ui, "RESET", "<R>")
+        token = ui.set_track_index("03/09")
+        try:
+            ui.progress("Baixando: Song")
+        finally:
+            ui.reset_track_index(token)
+        assert saida == ["<H>[03/09]<R> <H>Baixando: Song<R>"]
+
+    def test_indice_e_linha_de_faixa_existente_ficam_amarelos(
+        self, estado_limpo, saida, colunas, monkeypatch
+    ):
+        colunas(100)
+        ui.configure(color=True, unicode=True)
+        monkeypatch.setattr(ui, "WARNING", "<Y>")
+        monkeypatch.setattr(ui, "RESET", "<R>")
+        token = ui.set_track_index("03/09")
+        view_token = ui.begin_track_view(parallel=True)
+        try:
+            ui.skip("Pulando: Song.flac (Já existe)")
+        finally:
+            ui.end_track_view(view_token)
+            ui.reset_track_index(token)
+        assert saida == ["<Y>[03/09]<R> <Y>Pulando: Song.flac (Já existe)<R>"]
+
+    def test_faixa_ja_registrada_no_banco_fica_amarela(
+        self, estado_limpo, saida, colunas, monkeypatch
+    ):
+        colunas(100)
+        ui.configure(color=True, unicode=True)
+        monkeypatch.setattr(ui, "WARNING", "<Y>")
+        monkeypatch.setattr(ui, "RESET", "<R>")
+        ui.skip("[03] Song (já baixada: ID 42 consta no banco local)")
+        assert saida == [
+            "<Y>[!] [03] Song (já baixada: ID 42 consta no banco local)<R>"
+        ]
+
     @pytest.mark.parametrize("unicode,branch", [(True, "└─"), (False, "`-")])
     def test_resultado_tem_um_unico_ramo(
         self, estado_limpo, saida, colunas, unicode, branch

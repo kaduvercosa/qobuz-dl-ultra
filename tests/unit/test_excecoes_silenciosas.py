@@ -18,7 +18,7 @@ def _tem_justificativa(linhas: list[str]) -> bool:
         if "#" not in linha:
             continue
         texto = linha.split("#", 1)[1].strip()
-        # "# noqa: ..." sozinho silencia o linter, mas não explica nada.
+        # Uma diretiva de supressão sozinha silencia o linter, mas não explica nada.
         if texto and not texto.lower().startswith("noqa"):
             return True
     return False

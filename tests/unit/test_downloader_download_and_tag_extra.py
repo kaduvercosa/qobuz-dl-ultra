@@ -162,3 +162,28 @@ async def test_integrity_failure_emits_failed_event(monkeypatch, tmp_path):
     )
     assert result is False
     assert any(args[1] == "track_failed" for args, kwargs in events)
+
+
+async def test_ffmpeg_indisponivel_mantem_arquivo_existente(monkeypatch, tmp_path):
+    obj = make_obj(tmp_path, monkeypatch)
+    obj.settings.verify_after_download = True
+    existing_file = tmp_path / "01 - Song.flac"
+    existing_file.write_bytes(b"tagged audio")
+    monkeypatch.setattr(
+        downloader,
+        "verify_audio_integrity",
+        lambda *_args, **_kwargs: (None, "ffmpeg unavailable"),
+    )
+
+    async def unexpected_network(*_args, **_kwargs):
+        raise AssertionError("arquivo existente não deveria gerar novo download")
+
+    obj.client.get_track_url = unexpected_network
+
+    result = await obj._download_and_tag(
+        str(tmp_path), 1, {"url": "initial"}, metadata(), metadata(), True, False
+    )
+
+    assert result is True
+    assert existing_file.is_file()
+    assert not Path(f"{existing_file}.corrupt").exists()
