@@ -1186,6 +1186,98 @@ def sync_favorites_args(subparsers):
 
 
 # ----------------------------------------------------------------------------
+# Subcomando: "artists" -- revisão manual de artistas seguidos
+# ----------------------------------------------------------------------------
+def artist_review_args(subparsers):
+    """Define a listagem alfabética e o sorteio de artistas para revisão."""
+    artists = subparsers.add_parser(
+        "artists",
+        aliases=["artist-review"],
+        allow_abbrev=False,
+        usage=(
+            "qobuz-dl artists [--modo alfabetica|sorteio] [--sem-sincronizar] "
+            "[--json] [--criar-playlist-vazia --id-artista ID [--abrir-perfil]] "
+            "[--sincronizar-checklist [ARQUIVO] [--espelhar] [--atualizar-seguidos]]"
+        ),
+        description=(
+            "Sincroniza artistas seguidos e lançamentos e mostra uma tabela com "
+            "checkbox. A criação da playlist pelo Atalhos é separada da conferência. "
+            "Também pode espelhar a checklist exportada do Apple Notas no banco local."
+        ),
+        help="revisa artistas seguidos em ordem alfabética ou por sorteio",
+    )
+    artists.add_argument(
+        "--modo",
+        choices=("alfabetica", "sorteio"),
+        default="alfabetica",
+        help="lista todos em ordem alfabética ou sorteia um artista (padrão: alfabetica)",
+    )
+    artists.add_argument(
+        "--sem-sincronizar",
+        action="store_true",
+        default=False,
+        help="usa o catálogo local sem consultar favoritos e discografias no Qobuz",
+    )
+    artists.add_argument(
+        "--json",
+        action="store_true",
+        help=(
+            "emite os artistas como JSON (id, nome e URL), sem abrir a interface "
+            "interativa nem consultar as discografias"
+        ),
+    )
+    artists.add_argument(
+        "--sincronizar-checklist",
+        nargs="?",
+        const=True,
+        default=False,
+        metavar="ARQUIVO",
+        help=(
+            "traz para o banco o que está marcado na checklist do Apple Notas; sem "
+            "ARQUIVO usa tracklist-artists.txt junto ao config.ini. Só marca por "
+            "padrão e não exige login"
+        ),
+    )
+    artists.add_argument(
+        "--espelhar",
+        action="store_true",
+        default=False,
+        help=(
+            "com --sincronizar-checklist: a Nota manda; reabre quem está conferido "
+            "no banco mas desmarcado na Nota"
+        ),
+    )
+    artists.add_argument(
+        "--atualizar-seguidos",
+        action="store_true",
+        default=False,
+        help=(
+            "com --sincronizar-checklist: antes, atualiza a lista de seguidos pela "
+            "API (exige login)"
+        ),
+    )
+    artists.add_argument(
+        "--criar-playlist-vazia",
+        action="store_true",
+        help=(
+            "cria uma playlist privada e vazia com o nome do artista em maiúsculas; "
+            "requer --id-artista"
+        ),
+    )
+    artists.add_argument(
+        "--id-artista",
+        metavar="ID",
+        help="ID Qobuz do artista para --criar-playlist-vazia",
+    )
+    artists.add_argument(
+        "--abrir-perfil",
+        action="store_true",
+        help="abre o perfil do artista depois de criar a playlist vazia",
+    )
+    return artists
+
+
+# ----------------------------------------------------------------------------
 # Subcomando: "scan"  -- casa pastas do disco com o catálogo (ideia do libsync)
 # ----------------------------------------------------------------------------
 def scan_args(subparsers):
@@ -1417,6 +1509,7 @@ def qobuz_dl_args(default_quality=6, default_limit=20, default_folder=None):
     auth_cmd = auth_args(subparsers)
     user_cmd = user_args(subparsers)
     sync_fav_cmd = sync_favorites_args(subparsers)
+    artists_cmd = artist_review_args(subparsers)
     scan_cmd = scan_args(subparsers)
     library_cmd = library_args(subparsers)
     doctor_cmd = doctor_args(subparsers)
@@ -1437,6 +1530,7 @@ def qobuz_dl_args(default_quality=6, default_limit=20, default_folder=None):
         auth_cmd,
         user_cmd,
         sync_fav_cmd,
+        artists_cmd,
         scan_cmd,
         library_cmd,
         doctor_cmd,

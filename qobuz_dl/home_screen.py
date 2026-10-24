@@ -49,6 +49,10 @@ EXEMPLOS = {
         "sync-favorites [--dry-run] [--download-new] [--limit N]",
         "sf --dry-run",
     ),
+    "artists": (
+        "artists [--modo alfabetica|sorteio] [--sem-sincronizar]",
+        "artists --modo sorteio",
+    ),
     "scan": ("scan [opções] [DIR]", "scan ~/Music --dry-run"),
     "library": ("library [ação] [opções]", "library missing --limit 20"),
     "doctor": ("doctor [--json]", "doctor"),

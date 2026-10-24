@@ -742,8 +742,69 @@ qobuz-dl library reconcile [PASTA] [--fix] # sentinelas do disco ⇄ catálogo
 qobuz-dl library reset-stuck             # destrava álbuns presos após um CTRL+C
 qobuz-dl library unmark <ID>             # desmarca um álbum (e remove a sentinela)
 
+qobuz-dl artists                         # tabela A-Z com checkbox; confirmar cria a playlist NOME EM MAIÚSCULAS
+qobuz-dl artists --modo sorteio          # sorteia um artista; prioriza os que têm lançamentos pendentes
+qobuz-dl artists --sem-sincronizar       # usa o catálogo local sem consultar o Qobuz
+qobuz-dl --quiet artists --json          # exporta artistas seguidos em JSON para Atalhos
+
 qobuz-dl doctor [--json]                 # diagnóstico: ambiente, config, keyring, bancos
 ```
+
+**Revisão de artistas.**  
+
+`artists` abre uma TABELA no mesmo estilo do modo interativo (colunas ARTISTA, NOVOS, STATUS, CONFERIDO EM e PERFIL; linha atual com `➤` e fundo de destaque; `◇` pendente, `*` marcado agora, `✔` conferido, `↺` a desfazer; em tela estreita vira cartões).  
+
+Teclado: setas/PgUp/PgDn/Home/End movem;  
+
+**Espaço** (ou `x`) marca;  
+**A** marca todos os pendentes visíveis (de novo, desmarca);  
+**D** (ou →) abre a tela do artista;  
+**O** abre o perfil no navegador (no a-Shell usa o comando nativo `open`);  
+**S** alterna a ordem A-Z / novos primeiro;  
+**/** busca (ignora acentos);  
+**F** mostra só os pendentes;  
+**Enter** confirma;  
+**Q** sai (com marcados sem confirmar, pede um segundo `q`).  
+
+Toque/clique: tocar no nome abre a tela do artista; tocar na caixa, no STATUS ou nas bordas marca; tocar em `[abrir]` abre o perfil.   
+
+**Tela do artista:** mostra o estado, o link do perfil e a tabela dos lançamentos pendentes (LANÇAMENTO, TIPO, DATA, com rolagem), com `O` para abrir o perfil, Espaço para marcar e Esc/Q/← para voltar.  
+**Confirmar:** cada artista marcado ganha no Qobuz uma playlist **vazia com o nome dele em MAIÚSCULAS** (por exemplo `SELENA GOMEZ`), pronta para você adicionar as músicas dele, e a conferência é gravada no banco junto com o id da playlist.  
+
+A playlist é procurada primeiro pelo id guardado, depois pelo nome na conta, e só criada se não existir (sem duplicar; se a listagem falhar, confia no id guardado).  
+Se a criação falhar, o artista continua pendente e marcado.  
+
+**Desfazer:** Espaço num artista conferido o marca como `↺ A DESFAZER`; o Enter pede um segundo Enter para confirmar. Desfazer reabre a última conferência (a data anterior e os lançamentos que estavam pendentes voltam) e **não apaga** a playlist no Qobuz.  
+
+**Marcações salvas:** as marcações ainda não confirmadas ficam em `artist_review_selection.json`, ao lado do `library.db`, e são restauradas se o a-Shell for encerrado (por exemplo ao abrir o Safari); sair com `q` descarta.  
+Sem terminal interativo (ou se a tela falhar) volta o prompt de texto com a mesma tabela numerada (`o 4` abre, `m 1,3` confirma).   
+
+Abrir um perfil não marca o artista automaticamente. O primeiro scan estabelece a data-base e não coloca toda a discografia histórica na fila. Ao confirmar um artista, a data-base avança; só lançamentos com data igual ou posterior a ela entram como novidades. Quando a API não informa uma data utilizável, a primeira observação posterior à data-base é usada como fallback.  
+O modo `--modo sorteio` prioriza artistas com novidades pendentes e mostra a tabela de lançamentos (`o` abre, `m` confirma e cria a playlist); `--sem-sincronizar` usa o catálogo já salvo. A revisão não favorita álbuns.
+
+**Atalho do iOS para Notas.**  
+
+No a-Shell, a ação **Execute Command** (opção **In App**) pode executar `python3 -m qobuz_dl --quiet artists --json`.  
+
+A saída é um objeto JSON `{"artists":[...]}` com ID Qobuz estável, nome e URL de cada artista; esse modo consulta os favoritos, sem varrer discografias.  
+No Atalhos, use a saída em **Get Dictionary from Input**, leia a chave `artists` e acrescente novos itens com a ação **Append Checklist Item** do Notas.  
+Para impedir duplicatas entre execuções, mantenha um registro persistente dos IDs já adicionados (por exemplo, em um arquivo de texto no iCloud Drive/Atalhos); compare pelo ID, não pelo nome, pois nomes não são únicos.  
+Um registro recém-criado não reconhece automaticamente artistas que já estavam em uma nota antiga sem IDs.
+
+LINK DO ATALHO: [CLIQUE AQUI](https://www.icloud.com/shortcuts/74bb82306a9e443f9687e37aae598c54)  
+
+_No IOS, é necessário ter o [A-Shell](https://apps.apple.com/br/app/a-shell/id1473805438) instalado_
+
+**Sincronizar a Nota com o banco.**  
+
+`qobuz-dl artists --sincronizar-checklist [ARQUIVO]` lê a checklist do Apple Notas (linhas `- [x] Nome - [QOBUZ_ID:123] - URL`; sem ARQUIVO usa `tracklist-artists.txt` ao lado do `config.ini`) e imprime um único JSON.  
+Só mexe no banco local: **não faz login nem usa a rede** e não cria playlists.  
+Por padrão só **marca**: `[x]` na Nota de um artista ainda não conferido o marca no banco, e quem você já conferiu na tela do a-Shell continua conferido mesmo se a Nota ainda estiver `[ ]` (vem em `kept_verified`, para você marcar na Nota).  
+
+Use `--espelhar` para a Nota mandar (reabre quem está conferido no banco e desmarcado na Nota).  
+A regra de "conferido" é a da tela: tem data de conferência **e** nenhum lançamento novo pendente.  
+Artista marcado `[x]` na Nota que ganhou lançamento novo **não** é remarcado (apagaria as novidades sem você ver); ele vem em `needs_review`, com `pending_count`, para o Atalhos desmarcar na Nota. `missing` traz as linhas, prontas para colar na Nota, dos seguidos que ainda não estão nela.  
+`--atualizar-seguidos` atualiza antes a lista de seguidos pela API (esta variante exige login). Como a marcação grava a data-base do momento da sincronização, sincronize logo depois de conferir.
 
 **Primeira vez com uma biblioteca grande:** rode `sync-favorites` (sem download) e depois `scan`, para marcar o que você já tem antes de usar `--download-missing`.
 

@@ -244,3 +244,11 @@ class TestCLIConfigHandling:
             mock_makedirs.assert_called()
         finally:
             sys.argv = original_argv
+
+
+
+def test_artists_sync_checklist_does_not_require_path():
+    """A opção de sincronização deve ser um sinalizador sem argumento."""
+    parser = cli.qobuz_dl_args()
+    args = parser.parse_args(["artists", "--sincronizar-checklist"])
+    assert args.sincronizar_checklist is True

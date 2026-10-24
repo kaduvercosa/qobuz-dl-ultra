@@ -21,6 +21,7 @@ reais, mas qualquer tentativa de login falha em `AuthenticationError` -- ou
 seja, nenhum teste consegue tocar a API do Qobuz por acidente.
 """
 
+import logging
 import os
 import sys
 import tempfile
@@ -111,3 +112,29 @@ def sem_binarios(monkeypatch):
     monkeypatch.setattr(utils, "_DIRS_EXTRA", [])
     yield
     utils._BINARIOS_CHECADOS.clear()
+
+
+@pytest.fixture(autouse=True)
+def _restaura_logging_do_ui():
+    """Desfaz o `ui.install_logging()` feito por um teste.
+
+    `install_logging` troca os handlers do logger raiz pelo TqdmLoggingHandler,
+    que manda todo warning para `ui.emit_always`. Se o handler vazar para os
+    testes seguintes, qualquer `logger.warning` do codigo cai no meio da saida
+    que eles capturam (ex.: um aviso antes do JSON). So mexe no que o ui criou,
+    sem tocar nos handlers do proprio pytest.
+    """
+    root = logging.getLogger()
+    nivel = root.level
+    ruidosos = ("httpx", "httpcore", "urllib3", "asyncio", "PIL")
+    niveis = {nome: logging.getLogger(nome).level for nome in ruidosos}
+    yield
+    ui = sys.modules.get("qobuz_dl.ui")
+    if ui is None:  # o teste nem importou o ui: nada a desfazer
+        return
+    for handler in list(root.handlers):
+        if isinstance(handler, ui.TqdmLoggingHandler):
+            root.removeHandler(handler)
+    root.setLevel(nivel)
+    for nome, valor in niveis.items():
+        logging.getLogger(nome).setLevel(valor)

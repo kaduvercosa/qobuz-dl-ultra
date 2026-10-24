@@ -1,4 +1,4 @@
-"""Catálogo local da biblioteca (``library.db``): favoritos + estado de download.
+"""Catálogo local (``library.db``): favoritos, downloads e revisão de artistas.
 
 ORIGEM DA IDEIA
 ---------------
@@ -30,11 +30,13 @@ from __future__ import annotations
 
 import contextlib
 import os
+import re
 import sqlite3
+import unicodedata
 from datetime import datetime, timezone
 from typing import Any, Iterable, Iterator, Optional
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 5
 
 # Estados possíveis de ``albums.download_status``.
 STATUS_NOT_DOWNLOADED = "not_downloaded"
@@ -64,6 +66,26 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+def _release_is_after_cutoff(release_date: Any, seen_at: str, cutoff: str) -> bool:
+    """Compara datas Qobuz de precisão variável com a data-base do artista."""
+    value = str(release_date or "").strip()
+    baseline = str(cutoff or "")
+    if value:
+        date_match = re.match(r"^(\d{4})(?:-(\d{2})(?:-(\d{2}))?)?", value)
+        cutoff_match = re.match(r"^(\d{4})-(\d{2})-(\d{2})", baseline)
+        if date_match and cutoff_match:
+            year, month, day = date_match.groups()
+            base_year, base_month, base_day = cutoff_match.groups()
+            if day:
+                return (year, month, day) >= (base_year, base_month, base_day)
+            if month:
+                return (year, month) > (base_year, base_month)
+            return year > base_year
+    # Se o serviço não fornecer uma data utilizável, a primeira observação
+    # posterior ao baseline é o único sinal disponível de novidade.
+    return bool(baseline and str(seen_at) > baseline)
+
+
 class AlbumNotFoundError(LookupError):
     """Álbum inexistente no catálogo local."""
 
@@ -86,6 +108,7 @@ class LibraryDB:
         conn.row_factory = sqlite3.Row
         try:
             conn.execute("PRAGMA busy_timeout=5000")
+            conn.execute("PRAGMA foreign_keys=ON")
             try:
                 conn.execute("PRAGMA journal_mode=WAL")
                 conn.execute("PRAGMA synchronous=NORMAL")
@@ -144,7 +167,105 @@ class LibraryDB:
                     albums_removed INTEGER NOT NULL DEFAULT 0,
                     albums_downloaded INTEGER NOT NULL DEFAULT 0
                 );
+                CREATE TABLE IF NOT EXISTS followed_artists (
+                    source TEXT NOT NULL,
+                    source_artist_id TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    is_followed INTEGER NOT NULL DEFAULT 1,
+                    first_seen_at TEXT NOT NULL,
+                    last_seen_at TEXT NOT NULL,
+                    tracking_since_at TEXT,
+                    last_reviewed_at TEXT,
+                    last_catalog_sync_at TEXT,
+                    review_playlist_id TEXT,
+                    undo_available INTEGER NOT NULL DEFAULT 0,
+                    undo_reviewed_at TEXT,
+                    undo_tracking_since_at TEXT,
+                    PRIMARY KEY (source, source_artist_id)
+                );
+                CREATE INDEX IF NOT EXISTS idx_followed_artists_name
+                    ON followed_artists (name COLLATE NOCASE);
+                CREATE TABLE IF NOT EXISTS artist_releases (
+                    source TEXT NOT NULL,
+                    source_artist_id TEXT NOT NULL,
+                    source_release_id TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    release_date TEXT,
+                    release_type TEXT,
+                    first_seen_at TEXT NOT NULL,
+                    last_seen_at TEXT NOT NULL,
+                    reviewed_at TEXT,
+                    pending_review INTEGER NOT NULL DEFAULT 0,
+                    undo_pending INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY (source, source_artist_id, source_release_id),
+                    FOREIGN KEY (source, source_artist_id)
+                        REFERENCES followed_artists(source, source_artist_id)
+                );
+                CREATE INDEX IF NOT EXISTS idx_artist_releases_pending
+                    ON artist_releases (source, source_artist_id, reviewed_at);
                 """
+            )
+            artist_columns = {
+                row["name"] for row in c.execute("PRAGMA table_info(followed_artists)")
+            }
+            if "tracking_since_at" not in artist_columns:
+                c.execute(
+                    "ALTER TABLE followed_artists ADD COLUMN tracking_since_at TEXT"
+                )
+            for column, ddl in (
+                ("review_playlist_id", "TEXT"),
+                ("undo_available", "INTEGER NOT NULL DEFAULT 0"),
+                ("undo_reviewed_at", "TEXT"),
+                ("undo_tracking_since_at", "TEXT"),
+            ):
+                if column not in artist_columns:
+                    c.execute(f"ALTER TABLE followed_artists ADD COLUMN {column} {ddl}")
+            release_columns = {
+                row["name"] for row in c.execute("PRAGMA table_info(artist_releases)")
+            }
+            if "undo_pending" not in release_columns:
+                c.execute(
+                    "ALTER TABLE artist_releases ADD COLUMN undo_pending "
+                    "INTEGER NOT NULL DEFAULT 0"
+                )
+            if "pending_review" not in release_columns:
+                c.execute(
+                    "ALTER TABLE artist_releases ADD COLUMN pending_review "
+                    "INTEGER NOT NULL DEFAULT 0"
+                )
+            # A migração não converte o histórico v3 em novidades: usa a última
+            # sincronização/revisão como baseline e deixa os registros antigos fora da fila.
+            c.execute(
+                "UPDATE followed_artists SET tracking_since_at="
+                "COALESCE(last_reviewed_at, last_catalog_sync_at, first_seen_at) "
+                "WHERE tracking_since_at IS NULL"
+            )
+            unreviewed_releases = c.execute(
+                "SELECT r.source, r.source_artist_id, r.source_release_id, "
+                "r.release_date, r.first_seen_at, a.last_reviewed_at "
+                "FROM artist_releases r JOIN followed_artists a "
+                "ON a.source=r.source AND a.source_artist_id=r.source_artist_id "
+                "WHERE r.reviewed_at IS NULL AND r.pending_review=0 "
+                "AND a.last_reviewed_at IS NOT NULL"
+            ).fetchall()
+            for release in unreviewed_releases:
+                if _release_is_after_cutoff(
+                    release["release_date"],
+                    release["first_seen_at"],
+                    release["last_reviewed_at"],
+                ):
+                    c.execute(
+                        "UPDATE artist_releases SET pending_review=1 "
+                        "WHERE source=? AND source_artist_id=? AND source_release_id=?",
+                        (
+                            release["source"],
+                            release["source_artist_id"],
+                            release["source_release_id"],
+                        ),
+                    )
+            c.execute(
+                "CREATE INDEX IF NOT EXISTS idx_artist_releases_pending_state "
+                "ON artist_releases (source, source_artist_id, pending_review)"
             )
             c.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
@@ -264,6 +385,259 @@ class LibraryDB:
     def get_all_albums_for_index(self, source: Optional[str] = None) -> list[dict]:
         """Linhas leves usadas para montar o índice de matching do ``scan``."""
         return self.get_albums(source, include_removed=True)
+
+    # -- artistas seguidos e revisão de lançamentos ------------------------
+
+    def sync_followed_artists(self, source: str, artists: Iterable[dict]) -> int:
+        """Atualiza artistas seguidos; só deve ser chamado após paginação completa."""
+        now = _now()
+        parsed = {
+            str(a["source_artist_id"]): str(a.get("name") or "Unknown")
+            for a in artists
+            if a.get("source_artist_id") not in (None, "")
+        }
+        with self._conn() as c:
+            for artist_id, name in parsed.items():
+                c.execute(
+                    "INSERT INTO followed_artists "
+                    "(source, source_artist_id, name, is_followed, first_seen_at, last_seen_at) "
+                    "VALUES (?, ?, ?, 1, ?, ?) "
+                    "ON CONFLICT(source, source_artist_id) DO UPDATE SET "
+                    "name=excluded.name, is_followed=1, last_seen_at=excluded.last_seen_at",
+                    (source, artist_id, name, now, now),
+                )
+            rows = c.execute(
+                "SELECT source_artist_id FROM followed_artists "
+                "WHERE source=? AND is_followed=1",
+                (source,),
+            ).fetchall()
+            for row in rows:
+                if row["source_artist_id"] not in parsed:
+                    c.execute(
+                        "UPDATE followed_artists SET is_followed=0 "
+                        "WHERE source=? AND source_artist_id=?",
+                        (source, row["source_artist_id"]),
+                    )
+        return len(parsed)
+
+    def record_artist_releases(
+        self, source: str, artist_id: Any, releases: Iterable[dict]
+    ) -> int:
+        """Registra lançamentos e retorna quantos novos entraram na fila de revisão."""
+        artist_id = str(artist_id)
+        now = _now()
+        newly_pending = 0
+        with self._conn() as c:
+            artist = c.execute(
+                "SELECT tracking_since_at, last_reviewed_at, last_catalog_sync_at "
+                "FROM followed_artists WHERE source=? AND source_artist_id=?",
+                (source, artist_id),
+            ).fetchone()
+            if artist is None:
+                return 0
+            cutoff = (
+                artist["tracking_since_at"]
+                or artist["last_reviewed_at"]
+                or artist["last_catalog_sync_at"]
+            )
+            first_catalog = cutoff is None
+            if first_catalog:
+                cutoff = now
+                c.execute(
+                    "UPDATE followed_artists SET tracking_since_at=? "
+                    "WHERE source=? AND source_artist_id=?",
+                    (cutoff, source, artist_id),
+                )
+            for release in releases:
+                release_id = release.get("source_release_id")
+                if release_id in (None, ""):
+                    continue
+                pending = (
+                    0
+                    if first_catalog
+                    else int(
+                        _release_is_after_cutoff(
+                            release.get("release_date"), now, str(cutoff)
+                        )
+                    )
+                )
+                cur = c.execute(
+                    "INSERT OR IGNORE INTO artist_releases "
+                    "(source, source_artist_id, source_release_id, title, release_date, "
+                    "release_type, first_seen_at, last_seen_at, pending_review) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        source,
+                        artist_id,
+                        str(release_id),
+                        str(release.get("title") or "Unknown"),
+                        release.get("release_date"),
+                        release.get("release_type"),
+                        now,
+                        now,
+                        pending,
+                    ),
+                )
+                if cur.rowcount > 0 and pending:
+                    newly_pending += 1
+                c.execute(
+                    "UPDATE artist_releases SET title=?, "
+                    "release_date=COALESCE(?, release_date), "
+                    "release_type=COALESCE(?, release_type), last_seen_at=? "
+                    "WHERE source=? AND source_artist_id=? AND source_release_id=?",
+                    (
+                        str(release.get("title") or "Unknown"),
+                        release.get("release_date"),
+                        release.get("release_type"),
+                        now,
+                        source,
+                        artist_id,
+                        str(release_id),
+                    ),
+                )
+            c.execute(
+                "UPDATE followed_artists SET last_catalog_sync_at=? "
+                "WHERE source=? AND source_artist_id=?",
+                (now, source, artist_id),
+            )
+        return newly_pending
+
+    def get_followed_artists(self, source: Optional[str] = None) -> list[dict]:
+        sql = (
+            "SELECT a.*, (SELECT COUNT(*) FROM artist_releases r "
+            "WHERE r.source=a.source AND r.source_artist_id=a.source_artist_id "
+            "AND r.pending_review=1) AS pending_count "
+            "FROM followed_artists a WHERE a.is_followed=1"
+        )
+        args: list[Any] = []
+        if source:
+            sql += " AND a.source=?"
+            args.append(source)
+        sql += " ORDER BY a.name COLLATE NOCASE, a.source_artist_id"
+        with self._conn() as c:
+            artists = [dict(row) for row in c.execute(sql, args).fetchall()]
+
+        def sort_key(artist: dict) -> tuple[str, str, str]:
+            name = str(artist.get("name") or "")
+            folded = unicodedata.normalize("NFKD", name.casefold())
+            plain = "".join(ch for ch in folded if not unicodedata.combining(ch))
+            return plain, name.casefold(), str(artist.get("source_artist_id") or "")
+
+        return sorted(artists, key=sort_key)
+
+    def get_artist_releases(
+        self, source: str, artist_id: Any, *, pending_only: bool = False
+    ) -> list[dict]:
+        sql = "SELECT * FROM artist_releases WHERE source=? AND source_artist_id=?"
+        args: list[Any] = [source, str(artist_id)]
+        if pending_only:
+            sql += " AND pending_review=1"
+        sql += " ORDER BY COALESCE(release_date, '') DESC, title COLLATE NOCASE"
+        with self._conn() as c:
+            return [dict(row) for row in c.execute(sql, args).fetchall()]
+
+    def mark_artist_reviewed(self, source: str, artist_id: Any) -> bool:
+        """Marca como conferidos os lançamentos pendentes encontrados até agora.
+
+        Guarda o estado anterior (um nível) para ``unmark_artist_reviewed``
+        poder desfazer, inclusive quais lançamentos estavam pendentes.
+        """
+        now = _now()
+        with self._conn() as c:
+            previous = c.execute(
+                "SELECT last_reviewed_at, tracking_since_at FROM followed_artists "
+                "WHERE source=? AND source_artist_id=? AND is_followed=1",
+                (source, str(artist_id)),
+            ).fetchone()
+            if previous is None:
+                return False
+            c.execute(
+                "UPDATE followed_artists SET last_reviewed_at=?, tracking_since_at=?, "
+                "undo_available=1, undo_reviewed_at=?, undo_tracking_since_at=? "
+                "WHERE source=? AND source_artist_id=?",
+                (
+                    now,
+                    now,
+                    previous["last_reviewed_at"],
+                    previous["tracking_since_at"],
+                    source,
+                    str(artist_id),
+                ),
+            )
+            c.execute(
+                "UPDATE artist_releases SET undo_pending=pending_review "
+                "WHERE source=? AND source_artist_id=?",
+                (source, str(artist_id)),
+            )
+            c.execute(
+                "UPDATE artist_releases SET reviewed_at=?, pending_review=0 "
+                "WHERE source=? AND source_artist_id=?",
+                (now, source, str(artist_id)),
+            )
+        return True
+
+    def unmark_artist_reviewed(self, source: str, artist_id: Any) -> bool:
+        """Desfaz a última conferência do artista (a playlist não é tocada).
+
+        Restaura a data da conferência anterior e os lançamentos que estavam
+        pendentes. Sem estado guardado (conferido antes deste recurso), só
+        limpa a data da conferência. Devolve False se o artista não estiver
+        seguido ou não estiver conferido.
+        """
+        with self._conn() as c:
+            row = c.execute(
+                "SELECT last_reviewed_at, undo_available, undo_reviewed_at, "
+                "undo_tracking_since_at FROM followed_artists "
+                "WHERE source=? AND source_artist_id=? AND is_followed=1",
+                (source, str(artist_id)),
+            ).fetchone()
+            if row is None or not row["last_reviewed_at"]:
+                return False
+            if row["undo_available"]:
+                restored = c.execute(
+                    "UPDATE artist_releases SET pending_review=1, reviewed_at=NULL, "
+                    "undo_pending=0 WHERE source=? AND source_artist_id=? "
+                    "AND undo_pending=1",
+                    (source, str(artist_id)),
+                ).rowcount
+                # Sem lançamentos de volta à fila, o artista tem de aparecer como
+                # não conferido; com eles, volta a data da conferência anterior.
+                c.execute(
+                    "UPDATE followed_artists SET last_reviewed_at=?, "
+                    "tracking_since_at=COALESCE(?, tracking_since_at), "
+                    "undo_available=0, undo_reviewed_at=NULL, "
+                    "undo_tracking_since_at=NULL "
+                    "WHERE source=? AND source_artist_id=?",
+                    (
+                        row["undo_reviewed_at"] if restored else None,
+                        row["undo_tracking_since_at"],
+                        source,
+                        str(artist_id),
+                    ),
+                )
+            else:
+                c.execute(
+                    "UPDATE followed_artists SET last_reviewed_at=NULL "
+                    "WHERE source=? AND source_artist_id=?",
+                    (source, str(artist_id)),
+                )
+        return True
+
+    def set_artist_review_playlist(
+        self, source: str, artist_id: Any, playlist_id: Any
+    ) -> bool:
+        """Guarda o id da playlist de controle do artista (None limpa)."""
+        with self._conn() as c:
+            cur = c.execute(
+                "UPDATE followed_artists SET review_playlist_id=? "
+                "WHERE source=? AND source_artist_id=?",
+                (
+                    None if playlist_id in (None, "") else str(playlist_id),
+                    source,
+                    str(artist_id),
+                ),
+            )
+        return bool(cur.rowcount)
 
     # -- estado de download ------------------------------------------------
 
