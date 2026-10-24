@@ -21,11 +21,21 @@ import pytest
 
 
 @pytest.fixture
-def sem_qobuz_dl_no_cache(monkeypatch):
+def sem_qobuz_dl_no_cache():
     """Remove qobuz_dl (e cli/qopy) do cache de módulos antes e depois do
     teste -- garante um __getattr__ realmente fresco a cada teste, sem
     herdar de import anterior (o resto da suíte já importou qobuz_dl
-    "de verdade" bem antes deste arquivo rodar)."""
+    "de verdade" bem antes deste arquivo rodar).
+
+    IMPORTANTE: os testes que usam este fixture colocam os stand-ins direto
+    em `sys.modules[...]` (NÃO via `monkeypatch.setitem`). Motivo: o
+    `monkeypatch` é desfeito DEPOIS deste fixture; como ele lembra que a
+    chave estava ausente (foi removida acima), o undo apagaria de novo o
+    módulo real que este fixture acabou de restaurar. Resultado: o
+    `qobuz_dl.qopy` real sumia do cache, o próximo `from qobuz_dl.qopy
+    import Client` reimportava um módulo NOVO (outra classe Client) e os
+    mocks de outros testes (ex.: test_cli.py) deixavam de valer -- falha que
+    só aparecia em certas ordens do pytest-randomly."""
     nomes = ("qobuz_dl", "qobuz_dl.cli", "qobuz_dl.qopy")
     originais = {n: sys.modules.get(n) for n in nomes}
     for n in nomes:
@@ -37,24 +47,24 @@ def sem_qobuz_dl_no_cache(monkeypatch):
             sys.modules[n] = originais[n]
 
 
-def test_main_e_carregado_de_qobuz_dl_cli(sem_qobuz_dl_no_cache, monkeypatch):
+def test_main_e_carregado_de_qobuz_dl_cli(sem_qobuz_dl_no_cache):
     fake_cli = types.ModuleType("qobuz_dl.cli")
     fake_cli.main = lambda: "resultado do main"
-    monkeypatch.setitem(sys.modules, "qobuz_dl.cli", fake_cli)
+    sys.modules["qobuz_dl.cli"] = fake_cli
 
     import qobuz_dl
 
     assert qobuz_dl.main is fake_cli.main
 
 
-def test_client_e_carregado_de_qobuz_dl_qopy(sem_qobuz_dl_no_cache, monkeypatch):
+def test_client_e_carregado_de_qobuz_dl_qopy(sem_qobuz_dl_no_cache):
     fake_qopy = types.ModuleType("qobuz_dl.qopy")
 
     class ClienteFalso:
         pass
 
     fake_qopy.Client = ClienteFalso
-    monkeypatch.setitem(sys.modules, "qobuz_dl.qopy", fake_qopy)
+    sys.modules["qobuz_dl.qopy"] = fake_qopy
 
     import qobuz_dl
 

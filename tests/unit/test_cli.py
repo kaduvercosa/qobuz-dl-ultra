@@ -31,6 +31,7 @@ justamente o cenário que expôs o bug.
 
 import configparser
 import os
+import sys
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -299,6 +300,12 @@ def cliente_qobuz_falso(monkeypatch):
             close=AsyncMock(),
         )
         monkeypatch.setattr(qopy.Client, "create", AsyncMock(return_value=cliente))
+        # `_auth_command` faz `from qobuz_dl.qopy import Client` na hora da
+        # chamada. Se outro teste tiver deixado `qobuz_dl.qopy` fora (ou
+        # trocado) em sys.modules, esse import devolveria uma classe Client
+        # DIFERENTE da que foi mockada acima. Fixar o módulo aqui deixa o
+        # teste independente da ordem de execução.
+        monkeypatch.setitem(sys.modules, "qobuz_dl.qopy", qopy)
         return cliente
 
     return _instala
