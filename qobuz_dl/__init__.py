@@ -1,6 +1,6 @@
 from typing import Any
 
-__version__ = "2.6.6"
+__version__ = "2.6.7"
 
 
 def __getattr__(name: str) -> Any:
