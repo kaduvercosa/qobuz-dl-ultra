@@ -122,3 +122,71 @@ def test_quebrar_e_cortar():
     assert all(len(l) <= 10 for l in hs._quebrar("x" * 50, 10))
     assert hs._cortar("abcdef", 4).endswith("…")
     assert hs._cortar("abc", 4) == "abc"
+
+
+class TestAvisoUpdate:
+    """A linha 'versao nova disponivel' da tela inicial: uma linha so', centralizada."""
+
+    @pytest.mark.parametrize("largura", LARGURAS)
+    def test_uma_linha_que_cabe_em_qualquer_largura(self, largura):
+        texto = hs.render_aviso_update("2.6.6", "2.7.0", largura=largura, cor=False)
+        assert "\n" not in texto
+        assert hs._largura_visivel(texto) <= max(largura, 20)
+        assert "2.7.0" in texto
+
+    def test_versao_completa_quando_ha_espaco(self):
+        texto = hs.render_aviso_update("2.6.6", "2.7.0", largura=100, cor=False)
+        assert "Atualização disponível" in texto
+        assert "v2.6.6" in texto and "v2.7.0" in texto
+        assert "pip install -U qobuz-dl-ultra" in texto
+
+    def test_versao_curta_em_terminal_estreito(self):
+        texto = hs.render_aviso_update("2.6.6", "2.7.0", largura=24, cor=False).strip()
+        assert texto == "▲ v2.7.0 disponível"
+
+    def test_sem_cor_nao_emite_ansi(self):
+        texto = hs.render_aviso_update("2.6.6", "2.7.0", largura=100, cor=False)
+        assert not ANSI.search(texto)
+
+    def test_com_cor_emite_ansi(self):
+        texto = hs.render_aviso_update("2.6.6", "2.7.0", largura=100, cor=True)
+        assert ANSI.search(texto)
+
+    def test_centralizado(self):
+        texto = hs.render_aviso_update("2.6.6", "2.7.0", largura=120, cor=False)
+        esquerda = len(texto) - len(texto.lstrip())
+        direita = 120 - esquerda - hs._largura_visivel(texto.strip())
+        assert abs(esquerda - direita) <= 1
+
+
+class TestAvisoNaTelaInicial:
+    def _tela(self, monkeypatch, capsys, nova):
+        from qobuz_dl import cli, update_check
+
+        monkeypatch.delenv("QOBUZ_DL_NO_UPDATE_CHECK", raising=False)
+        monkeypatch.setattr(
+            update_check, "nova_versao_disponivel", lambda *a, **k: nova
+        )
+        cli._print_welcome_screen()
+        return ANSI.sub("", capsys.readouterr().out)
+
+    def test_aparece_quando_ha_versao_nova(self, monkeypatch, capsys):
+        saida = self._tela(monkeypatch, capsys, "99.0.0")
+        assert "v99.0.0" in saida
+        assert "pip install -U qobuz-dl-ultra" in saida or "disponível" in saida
+
+    def test_nao_aparece_quando_esta_atualizado(self, monkeypatch, capsys):
+        saida = self._tela(monkeypatch, capsys, None)
+        assert "disponível" not in saida
+
+    def test_falha_de_rede_nao_quebra_a_tela(self, monkeypatch, capsys):
+        from qobuz_dl import cli, update_check
+
+        monkeypatch.delenv("QOBUZ_DL_NO_UPDATE_CHECK", raising=False)
+
+        def _boom(*a, **k):
+            raise OSError("sem rede")
+
+        monkeypatch.setattr(update_check, "nova_versao_disponivel", _boom)
+        cli._print_welcome_screen()
+        assert "Uso:" in ANSI.sub("", capsys.readouterr().out)

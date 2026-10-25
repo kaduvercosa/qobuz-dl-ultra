@@ -170,7 +170,9 @@ class Journal:
         return os.path.basename(self.run_dir)
 
     @classmethod
-    def create(cls, base_dir: str, mode: str, root: str, keep: int = KEEP_RUNS):
+    def create(
+        cls, base_dir: str, mode: str, root: str, keep: int = KEEP_RUNS
+    ) -> "Journal":
         """Cria a pasta da execução e apaga as mais antigas (mantém ``keep``)."""
         base = os.path.join(base_dir, JOURNAL_DIRNAME)
         os.makedirs(base, exist_ok=True)

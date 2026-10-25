@@ -18,6 +18,7 @@ import logging
 import os
 import re
 from dataclasses import dataclass
+from typing import TypedDict
 
 from mutagen.flac import FLAC
 from mutagen.id3 import ID3, TXXX, USLT, ID3NoHeaderError
@@ -150,6 +151,19 @@ class LyricsCandidate:
     synchronized: bool
     language: str = "unknown"
     bilingual: bool = False
+
+
+class LyricsResult(TypedDict):
+    """Status devolvido por ``LyricsEngine.fetch_and_save`` ao chamador."""
+
+    success: bool
+    source: str | None
+    language: str | None
+    synchronized: bool
+    bilingual: bool
+    embedded: bool
+    saved_external: bool
+    error: str | None
 
 
 class LyricsEngine:
@@ -804,7 +818,7 @@ class LyricsEngine:
             for linha in ui.tagged_lines(kind, msg):
                 tqdm.write(linha)
 
-        result: dict[str, bool | str | None] = {
+        result: LyricsResult = {
             "success": False,
             "source": None,
             "language": None,

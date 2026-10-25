@@ -127,6 +127,13 @@ GRAY = _e("\033[38;5;245m")
 GRAY_LIGHT = _e("\033[38;5;250m")  # Letras Prontas
 GRAY_DIM = _e("\033[38;5;240m")  # métricas
 
+# Sequencias CRUAS (nao passam por _e()): servem para controle de tela/estilo
+# que o chamador filtra por conta propria (ex.: `ui.c(ANSI_BOLD)`) ou que so'
+# sao emitidas em TTY. Centralizadas aqui para nao haver mais "\033[..." solto.
+ANSI_BOLD = "\033[1m"
+ANSI_CLEAR_SCREEN = "\033[2J\033[H"  # limpa a tela e volta ao topo
+ANSI_CLEAR_LINE = "\033[K"  # apaga do cursor ate o fim da linha
+
 # --------------------------------------------------------------------------
 # Cor de destaque (accent) -- personalizável pelo usuário via wizard
 # --------------------------------------------------------------------------
@@ -164,7 +171,7 @@ if not COLOR_ON:
     ]
 
 
-def _find_config_file():
+def _find_config_file() -> str:
     """Localiza o config.ini usando a mesma logica de utils.get_config_paths()
     mas sem importar utils (evita importacao circular no boot do modulo)."""
     ios_home = os.environ.get("QOBUZ_DL_IOS_HOME")
@@ -185,7 +192,7 @@ def _find_config_file():
     return os.path.join(config_dir, "qobuz-dl", "config.ini")
 
 
-def _rgb_escape(r, g, b) -> str:
+def _rgb_escape(r: int, g: int, b: int) -> str:
     """Generate 24-bit RGB ANSI escape sequence, respecting COLOR_ON setting."""
     # Passa pela mesma porta: e' daqui que saem ACCENT/HIGHLIGHT/INFO/PROGRESS,
     # as cores mais usadas do programa.

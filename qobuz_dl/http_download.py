@@ -189,7 +189,7 @@ def _ssl_context_from_memory(ca_file: str | None, ca_dir: str | None) -> ssl.SSL
     return context
 
 
-def _create_compatible_client(client_class, kwargs: dict[str, Any]):
+def _create_compatible_client(client_class: Any, kwargs: dict[str, Any]) -> Any:
     """Cria clientes HTTP compatíveis com fábricas reduzidas usadas em testes.
 
     Primeiro mantém o caminho padrão do HTTPX. Somente se o carregamento de

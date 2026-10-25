@@ -213,8 +213,47 @@ exclude = [
     "^dist/",
 ]
 
+# Módulos já 100% anotados: aqui função sem type hint passa a ser erro, para o
+# que já está tipado não voltar atrás. Ao anotar outro módulo, acrescente-o.
+[[tool.mypy.overrides]]
+module = [
+    "qobuz_dl",
+    "qobuz_dl.__main__",
+    "qobuz_dl.artist_review",
+    "qobuz_dl.bundle",
+    "qobuz_dl.color",
+    "qobuz_dl.concurrency",
+    "qobuz_dl.constants",
+    "qobuz_dl.db",
+    "qobuz_dl.doctor",
+    "qobuz_dl.exceptions",
+    "qobuz_dl.executors",
+    "qobuz_dl.favorites_sync",
+    "qobuz_dl.fileio",
+    "qobuz_dl.fuzzy",
+    "qobuz_dl.http_download",
+    "qobuz_dl.library_db",
+    "qobuz_dl.library_scan",
+    "qobuz_dl.metadata_cache",
+    "qobuz_dl.name_suggest",
+    "qobuz_dl.paths",
+    "qobuz_dl.playlist_import",
+    "qobuz_dl.postprocess",
+    "qobuz_dl.qobuz_notes_sync",
+    "qobuz_dl.sentinel",
+    "qobuz_dl.stats_view",
+    "qobuz_dl.storage",
+    "qobuz_dl.tags_journal",
+    "qobuz_dl.tags_progress",
+    "qobuz_dl.track_identity",
+    "qobuz_dl.update_check",
+    "qobuz_dl.watcher",
+]
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+
 [tool.ruff]
-target-version = "py312"
+target-version = "py310"  # igual ao requires-python (>=3.10)
 line-length = 88
 
 [tool.ruff.lint]

@@ -3,6 +3,7 @@
 # # Reúne valores da CLI e do config.ini para serem consumidos pelo restante do projeto.
 # # ============================================================================
 import os
+from typing import Any, Optional
 
 from qobuz_dl.constants import (
     DEFAULT_FOLDER,
@@ -73,6 +74,98 @@ class QobuzDLSettings:
     Central configuration object for Qobuz-DL Ultimate Edition.
     """
 
+    # ------------------------------------------------------------------
+    # Campos. Todos são atribuídos em ``__init__`` (a partir de ``kwargs``);
+    # as anotações abaixo documentam o tipo de cada um para o mypy/IDE.
+    # ------------------------------------------------------------------
+    # Conta e pastas
+    email: Optional[str]
+    password: Optional[str]
+    user_auth_token: str
+    app_id: Optional[str]
+    secrets: Optional[list[str]]
+    default_folder: str
+    default_quality: Any  # int (6/27) ou texto vindo do config.ini
+    default_limit: Any  # int ou texto vindo do config.ini
+    library_root: Optional[str]  # preenchido por QobuzDL.__init__
+    folder_format: Optional[str]
+    fallback_folder_format: str
+    track_format: Optional[str]
+    multiple_disc_prefix: str
+    multiple_disc_one_dir: bool
+    multiple_disc_track_format: str
+
+    # Comportamento do download
+    no_m3u: bool
+    playlist_dedupe: bool
+    albums_only: bool
+    no_fallback: bool
+    no_database: bool
+    smart_discography: bool
+    filter_label: Any  # ver utils.normalize_label_filter
+    interactive_sort_date: bool
+    dry_run: bool
+    tag_only: bool
+    since_date: Optional[str]
+    before_date: Optional[str]
+    legacy_charmap: bool
+    verify_after_download: bool
+    progress_json: bool
+    check_storage: bool
+    write_sentinel: bool
+    max_workers: int
+    segment_workers: int
+
+    # Estado de execução do lote/playlist: zerado em ``__init__`` e atualizado
+    # por core.py/downloader.py durante o download (não vem do config.ini).
+    pl_success: int
+    pl_skipped: int
+    pl_failed: int
+
+    # Tags (``no_*`` desliga a tag correspondente)
+    musicbrainz: bool
+    multi_value_tags: bool
+    artists_with_comma: tuple[str, ...]
+    various_artists_aliases: frozenset[str]
+    no_album_artist_tag: bool
+    no_album_title_tag: bool
+    no_track_artist_tag: bool
+    no_track_title_tag: bool
+    no_release_date_tag: bool
+    no_media_type_tag: bool
+    no_genre_tag: bool
+    no_track_number_tag: bool
+    no_track_total_tag: bool
+    no_disc_number_tag: bool
+    no_disc_total_tag: bool
+    no_composer_tag: bool
+    no_conductor_tag: bool
+    no_credits_tag: bool
+    no_ensemble_tag: bool
+    no_work_tag: bool
+    no_explicit_tag: bool
+    no_copyright_tag: bool
+    no_label_tag: bool
+    no_upc_tag: bool
+    no_isrc_tag: bool
+    no_replaygain_tag: bool
+    no_album_url_tag: bool
+
+    # Letras
+    lrc_files: bool
+    embed_lyrics: bool
+    lyrics_translation_lang: str
+    fetch_translation: bool
+    only_synced_lyrics: bool
+    lyrics_word_sync: bool
+
+    # Capas
+    embed_art: bool
+    cover_og_quality: bool
+    no_cover: bool
+    embedded_art_size: str
+    saved_art_size: str
+
     # # Constrói o objeto a partir de kwargs, aplicando defaults quando uma opção não foi informada.
     def __init__(self, **kwargs):
         self.email = kwargs.get("email")
@@ -136,7 +229,6 @@ class QobuzDLSettings:
         self.no_composer_tag = kwargs.get("no_composer_tag", False)
         self.no_conductor_tag = kwargs.get("no_conductor_tag", False)
         self.no_credits_tag = kwargs.get("no_credits_tag", False)
-        self.musicbrainz = kwargs.get("musicbrainz", False)
         self.no_ensemble_tag = kwargs.get("no_ensemble_tag", False)
         self.no_work_tag = kwargs.get("no_work_tag", False)
         self.no_explicit_tag = kwargs.get("no_explicit_tag", False)

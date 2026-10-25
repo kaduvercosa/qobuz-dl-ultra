@@ -66,7 +66,7 @@ class Bundle:
     Obtém o arquivo JavaScript do Qobuz e decodifica chaves de API e segredos.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         """
         Inicializador síncrono.
         1. Acessa a página de login para descobrir a URL do bundle.js atual.
@@ -97,7 +97,7 @@ class Bundle:
             self._bundle = response.text
 
     @classmethod
-    async def create(cls):
+    async def create(cls) -> "Bundle":
         """
         Factory method assíncrono para inicialização com suporte a asyncio/httpx.AsyncClient.
 

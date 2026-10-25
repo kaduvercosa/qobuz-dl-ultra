@@ -8,6 +8,7 @@ import argparse
 import os
 import shutil
 
+from qobuz_dl.color import ANSI_BOLD
 from qobuz_dl.color import RESET as OFF
 
 
@@ -109,7 +110,7 @@ class ColoredArgumentParser(argparse.ArgumentParser):
                 uso = uso[len(prefixo) :].strip()
         nome = self.prog.split()[-1]
         exemplo = (self.epilog or "").strip() or EXEMPLOS.get(nome, ("", ""))[1]
-        negrito = ui.c("\033[1m")
+        negrito = ui.c(ANSI_BOLD)
         return render_ajuda_comando(
             uso,
             self.description or "",
@@ -1077,18 +1078,14 @@ def inspect_args(subparsers):
         nargs="?",
         default=None,
         metavar="ARQUIVO_OU_PASTA",
-        # ANTES: default=default_folder (a pasta de DOWNLOADS, tipo
-        # "QobuzDownloads" relativo -- pensada pra onde arquivos NOVOS são
-        # salvos, não pra onde a biblioteca de música da pessoa já mora).
-        # Isso preenchia `caminho` antes mesmo de chegar em run_inspector(),
-        # o que por sua vez nunca deixava a detecção de pasta por
-        # dispositivo (_detectar_pasta_padrao() em inspector.py --
-        # iOS/Android/Windows/macOS) rodar de verdade. Agora fica None de
-        # propósito quando a pessoa não digita nada, pra essa detecção
-        # continuar valendo.
+        # Fica None quando a pessoa não digita nada: o cli.py então usa a
+        # pasta `directory` do config.ini (se configurada e existente) e, na
+        # falta dela, run_inspector() detecta a pasta de música pelo
+        # dispositivo (_detectar_pasta_padrao() em inspector.py).
         help=(
             "arquivo de áudio (inspeciona direto) ou pasta (onde começar a "
-            "navegação; padrão: detecta pelo dispositivo)"
+            "navegação; padrão: a pasta do config.ini; sem ela, detecta pelo "
+            "dispositivo)"
         ),
     )
     inspect.add_argument(

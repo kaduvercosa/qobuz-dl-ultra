@@ -71,7 +71,7 @@ COMPACT_WIDTH = 72  # abaixo/igual: atalhos e metadados compactos na TUI
 # Override opcional para terminais móveis. ``None`` preserva a detecção automática
 # pela largura; ``compact`` força cartões/atalhos e ``comfortable`` privilegia
 # detalhes mesmo quando o terminal informa poucas colunas.
-_ui_mode = None
+_ui_mode: str | None = None
 
 LAYOUT_NARROW = "narrow"
 LAYOUT_MEDIUM = "medium"

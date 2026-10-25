@@ -32,7 +32,7 @@ try:
 
     _CRYPTO_AVAILABLE = True
 except ImportError:
-    hashes = padding = Cipher = algorithms = modes = HKDF = None  # type: ignore[assignment,misc]
+    hashes = padding = Cipher = algorithms = modes = HKDF = None
     _CRYPTO_AVAILABLE = False
 
 from qobuz_dl import ui
@@ -75,6 +75,7 @@ logger = logging.getLogger(__name__)
 # App ID padrão do Qobuz-DL Ultra. Só consultamos o bundle se a API rejeitar
 # explicitamente este identificador (ou se o usuário solicitar atualização manual).
 DEFAULT_APP_ID = "798273057"
+API_BASE_URL = "https://www.qobuz.com/api.json/0.2/"
 
 
 def _is_app_id_rejection(exc: httpx.HTTPStatusError) -> bool:
@@ -170,15 +171,19 @@ class Client:
     O cliente principal da API Qobuz para o Qobuz-DL Ultra Edition.
     """
 
-    id: str
-    secrets: list[str] | None
-    force_english: bool
-    base: str
-    _session_init_lock: asyncio.Lock
-    session_id: str | None
-
     def __init__(self):
         self.session: httpx.AsyncClient | None = None
+        # Valores neutros: ``Client.create`` preenche de verdade. Assim um
+        # ``Client()`` recém-criado nunca fica com atributos inexistentes.
+        self.id: str = ""
+        self.secrets: list[str] | None = None
+        self.force_english: bool = True
+        self.base: str = API_BASE_URL
+        self.sec: Any = None  # segredo validado (hex) usado nas assinaturas
+        self.session_id: str | None = None
+        self.session_infos: Any = None  # "salt.info" do session/start
+        self.session_key: Any = None  # chave derivada (HKDF) da sessão
+        self._session_init_lock = asyncio.Lock()
         self.user_info = {}
         self.user_id = None
         self.label = "Studio"
@@ -335,12 +340,6 @@ class Client:
         _log_startup_timing(
             "criação do cliente HTTP", time.perf_counter() - http_client_started
         )
-        self.base = "https://www.qobuz.com/api.json/0.2/"
-        self.sec = None
-        self.session_id = None
-        self._session_init_lock = asyncio.Lock()
-        self.session_infos = None
-        self.session_key = None
         self.uat = None
         self.user_auth_token = None
 

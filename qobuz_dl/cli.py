@@ -10,6 +10,7 @@ import argparse
 import asyncio
 import configparser
 import contextlib
+import dataclasses
 import glob
 import io
 import json
@@ -19,6 +20,7 @@ import signal
 import string
 import sys
 import tempfile
+import threading
 import time
 from datetime import datetime
 from typing import Optional
@@ -26,14 +28,15 @@ from typing import Optional
 import httpx
 import keyring
 import send2trash
-from packaging.version import Version
 
-from qobuz_dl import fuzzy, ui
+from qobuz_dl import fuzzy, ui, update_check
 
 # Módulos internos do ecossistema QOBUZ-DL
 from qobuz_dl.bundle import Bundle
 from qobuz_dl.color import (
     ACCENT_PRESETS,
+    ANSI_BOLD,
+    ANSI_CLEAR_LINE,
     BG,
     GREEN,
     MUTED,
@@ -48,7 +51,6 @@ from qobuz_dl.color import WARNING as YELLOW
 from qobuz_dl.commands import qobuz_dl_args
 from qobuz_dl.core import QobuzDL
 from qobuz_dl.downloader import DEFAULT_FOLDER, DEFAULT_TRACK
-from qobuz_dl.http_download import make_sync_client
 from qobuz_dl.paths import DirectoryNotUsable, ensure_directory_ready
 from qobuz_dl.settings import QobuzDLSettings
 from qobuz_dl.utils import checar_binarios_externos, get_config_paths
@@ -829,7 +831,7 @@ async def _reset_config(config_file: str):
 
     ui.emit(f"{ACCENT}\n [*] Atualizando interface...{OFF}", end="")
     await asyncio.sleep(2.0)
-    ui.emit("\r\033[K", end="")
+    ui.emit("\r" + ANSI_CLEAR_LINE, end="")
     _print_welcome_screen()
 
 
@@ -941,7 +943,7 @@ async def _auth_command(
         update_credentials = True
     else:
         ui.emit(
-            f"\n\r{CYAN}[*] Consultando dados da conta e assinatura no Qobuz...{OFF}\033[K"
+            f"\n\r{CYAN}[*] Consultando dados da conta e assinatura no Qobuz...{OFF}{ANSI_CLEAR_LINE}"
         )
 
     try:
@@ -1391,16 +1393,59 @@ _FLAG_DESCRIPTIONS_PT = {
 }
 
 
+def _start_update_probe(timeout: float = 1.2):
+    """Começa a consultar o PyPI em segundo plano; devolve `esperar()`.
+
+    A consulta roda enquanto a tela inicial é montada, então quase não soma
+    tempo. `esperar()` devolve a versão nova (texto) ou None -- sem rede,
+    timeout, checagem desligada ou já atualizado, a tela sai igual a antes.
+    """
+    if update_check.desativada():
+        return lambda: None
+    achado: list = []
+
+    def _consultar():
+        try:
+            achado.append(update_check.nova_versao_disponivel(timeout=timeout))
+        except Exception as e:
+            logger.debug("Checagem de atualização falhou: %s: %s", type(e).__name__, e)
+
+    worker = threading.Thread(target=_consultar, daemon=True)
+    worker.start()
+
+    def _esperar():
+        worker.join(timeout + 0.3)
+        return achado[0] if achado else None
+
+    return _esperar
+
+
 def _print_welcome_screen():
     from qobuz_dl import __version__
-    from qobuz_dl.home_screen import render_home
+    from qobuz_dl.home_screen import render_aviso_update, render_home
 
+    esperar_update = _start_update_probe()
     cols = ui.width()
     ui.emit_always("")
     _print_logo(cols)
     version_line = f"v{__version__}"
     pad_version = " " * max((cols - len(version_line)) // 2, 0)
-    ui.emit_always(f"{RESET}{pad_version}{version_line}\n")
+    nova_versao = esperar_update()
+    aviso = ""
+    if nova_versao:
+        negrito_aviso = ui.c(ANSI_BOLD)
+        aviso = "\n" + render_aviso_update(
+            __version__,
+            nova_versao,
+            largura=cols,
+            cor=bool(negrito_aviso),
+            destaque=ACCENT,
+            mudo=MUTED,
+            reset=RESET,
+            negrito=negrito_aviso,
+            comando=update_check.COMANDO_ATUALIZAR,
+        )
+    ui.emit_always(f"{RESET}{pad_version}{version_line}{aviso}\n")
     parser = qobuz_dl_args()
 
     comandos = []
@@ -1426,7 +1471,7 @@ def _print_welcome_screen():
     for flag_str, dest, help_text in _extract_global_flags(parser):
         flags.append((flag_str, _FLAG_DESCRIPTIONS_PT.get(dest, help_text or "")))
 
-    negrito = ui.c("\033[1m")
+    negrito = ui.c(ANSI_BOLD)
     ui.emit_always(
         render_home(
             comandos,
@@ -1493,37 +1538,162 @@ def _find_command(argv: list):
     return next((arg for arg in argv if arg in names), None)
 
 
+def _config_directory_if_exists() -> Optional[str]:
+    """A pasta `directory` do config.ini, se estiver configurada e existir.
+
+    Para os comandos locais que rodam antes do login (como o `inspect`): sem
+    pasta no comando, usam a pasta padrão do config.ini, igual aos demais.
+    None -> o chamador usa o próprio padrão (ex.: detecção pelo dispositivo).
+    """
+    from qobuz_dl import doctor
+
+    configured = doctor.resolve_directory(CONFIG_FILE)
+    if not configured:
+        return None
+    path = os.path.expanduser(configured)
+    if IOS_HOME and not os.path.isabs(path):
+        path = os.path.join(IOS_HOME, path)
+    return path if os.path.isdir(path) else None
+
+
 def check_for_updates():
     try:
         from qobuz_dl import __version__
 
-        url = "https://api.github.com/repos/kaduvercosa/qobuz-dl-ultra/releases/latest"
-        with make_sync_client(timeout=2) as client:
-            response = client.get(url)
-            response.raise_for_status()
-            payload = response.json()
-        latest_version_str = payload.get("tag_name", "").lstrip("vV")
-        if not latest_version_str:
+        if update_check.desativada():
             return
-        current_version_str = __version__
-        try:
-            versao_remota = Version(latest_version_str)
-            versao_local = Version(current_version_str)
-        except Exception:
-            logger.debug(
-                "Checagem de atualização falhou: InvalidVersion: tag=%s, current=%s",
-                latest_version_str,
-                current_version_str,
-            )
-            return
-        if versao_remota > versao_local:
+        latest_version_str = update_check.nova_versao_disponivel(__version__)
+        if latest_version_str:
             ui.warn(
                 f"ATUALIZAÇÃO DISPONÍVEL: Ultra Edition v{latest_version_str} está disponível!"
             )
-            ui.detail("- PyPI: rode 'pip install --upgrade qobuz-dl-ultra'")
+            ui.detail(f"- PyPI: rode '{update_check.COMANDO_ATUALIZAR}'")
             ui.detail("- Docker: puxe a imagem mais recente")
     except Exception as e:
         logger.debug("Checagem de atualização falhou: %s: %s", type(e).__name__, e)
+
+
+@dataclasses.dataclass
+class CliConfig:
+    """Valores lidos do config.ini (já com os padrões usados quando faltam)."""
+
+    section: str = "DEFAULT"
+    email: str = ""
+    password: str = ""
+    token: str = ""
+    genius_token: str = ""
+    app_id: str = ""
+    secrets: list[str] = dataclasses.field(default_factory=list)
+    force_english: bool = True
+    default_folder: str = "Qobuz Downloads"
+    default_quality: str = "6"
+    default_limit: str = "20"
+    fetch_lyrics: bool = False
+    legacy_charmap: bool = False
+    no_credits_config: bool = False
+    no_credits_flag: bool = False
+    embed_art: bool = True
+    albums_only: bool = False
+    no_m3u: bool = False
+    no_fallback: bool = False
+    og_cover: bool = True
+    no_cover: bool = False
+    no_database: bool = False
+    smart_discography: bool = False
+    blacklist_config: str = "blacklist.txt"
+    playlist_as_albums_config: bool = False
+    folder_format: str = DEFAULT_FOLDER
+    track_format: str = DEFAULT_TRACK
+
+
+def _load_cli_config(config: configparser.ConfigParser, started: float) -> CliConfig:
+    """Lê o config.ini já carregado em ``config`` (e migra tokens para o keyring).
+
+    Pode levantar ``configparser.Error``/``KeyError`` quando faltam chaves
+    obrigatórias; quem chama decide o que fazer (ver ``async_main``).
+    """
+    section = "qobuz" if config.has_section("qobuz") else "DEFAULT"
+    cfg = CliConfig(section=section)
+    cfg.email = config.get(section, "email")
+    ini_token = config.get(section, "auth_token", fallback="")
+    ini_genius = config.get(section, "genius_token", fallback="")
+    disable_keyring = str(
+        config.get(section, "disable_keyring", fallback="false")
+    ).strip().lower() in ["true", "yes", "y", "1"]
+
+    if disable_keyring:
+        ini_password = config.get(section, "password", fallback="")
+        cfg.token = ini_token if ini_token else ini_password
+        cfg.genius_token = ini_genius
+        cfg.password = ini_password
+    else:
+        cfg.token = _keyring_load("auth_token") or ini_token
+        cfg.password = (
+            cfg.token if cfg.token else config.get(section, "password", fallback="")
+        )
+        cfg.genius_token = _keyring_load("genius_token") or ini_genius
+
+    migrated = False
+    for k, v in (("auth_token", ini_token), ("genius_token", ini_genius)):
+        if v and _keyring_save(k, v):
+            config.set(section, k, "")
+            migrated = True
+    if migrated:
+        try:
+            _write_config_secure(config, CONFIG_FILE)
+        except OSError:
+            # O token já está no keyring, mas o config.ini não pôde ser
+            # regravado: o valor antigo continua em texto puro nele.
+            logger.warning(
+                "Não foi possível limpar o token do config.ini depois de "
+                "migrá-lo para o keyring; apague-o do arquivo à mão.",
+                exc_info=True,
+            )
+
+    _startup_timing("leitura de config/keyring/migração", started)
+    cfg.fetch_lyrics = config.getboolean(section, "fetch_lyrics", fallback=False)
+
+    directory_val = config.get(section, "directory", fallback=None)
+    if directory_val is not None:
+        cfg.default_folder = directory_val
+    else:
+        legacy_val = config.get(section, "default_folder", fallback=None)
+        if legacy_val is not None:
+            ui.warn(
+                "Aviso: 'default_folder' está obsoleto. Renomeie para 'directory' no config.ini."
+            )
+            cfg.default_folder = legacy_val
+        else:
+            cfg.default_folder = "Qobuz Downloads"
+
+    if IOS_HOME and not os.path.isabs(cfg.default_folder):
+        cfg.default_folder = os.path.join(IOS_HOME, cfg.default_folder)
+
+    cfg.default_limit = config.get(section, "default_limit")
+    cfg.default_quality = config.get(section, "default_quality")
+    cfg.no_m3u = config.getboolean(section, "no_m3u", fallback=False)
+    cfg.albums_only = config.getboolean(section, "albums_only", fallback=False)
+    cfg.no_fallback = config.getboolean(section, "no_fallback", fallback=False)
+    cfg.og_cover = config.getboolean(section, "og_cover", fallback=True)
+    cfg.embed_art = config.getboolean(section, "embed_art", fallback=True)
+    cfg.no_cover = config.getboolean(section, "no_cover", fallback=False)
+    cfg.no_database = config.getboolean(section, "no_database", fallback=False)
+    cfg.legacy_charmap = config.getboolean(section, "legacy_charmap", fallback=False)
+    cfg.no_credits_config = config.getboolean(section, "no_credits", fallback=False)
+    cfg.blacklist_config = config.get(section, "blacklist", fallback="blacklist.txt")
+    cfg.playlist_as_albums_config = config.getboolean(
+        section, "playlist_as_albums", fallback=False
+    )
+
+    cfg.app_id = config.get(section, "app_id")
+    cfg.secrets = [s for s in config.get(section, "secrets").split(",") if s]
+    cfg.smart_discography = config.getboolean(
+        section, "smart_discography", fallback=False
+    )
+
+    cfg.folder_format = config.get(section, "folder_format", fallback=DEFAULT_FOLDER)
+    cfg.track_format = config.get(section, "track_format", fallback=DEFAULT_TRACK)
+    return cfg
 
 
 async def async_main():
@@ -1559,7 +1729,7 @@ async def async_main():
 
         sys.exit(
             await run_inspector(
-                getattr(offline_args, "caminho", None),
+                getattr(offline_args, "caminho", None) or _config_directory_if_exists(),
                 json_saida=bool(getattr(offline_args, "json", False)),
                 resumo=bool(getattr(offline_args, "resumo", False)),
                 completo=bool(getattr(offline_args, "completo", False)),
@@ -1618,128 +1788,26 @@ async def async_main():
     config_read_started = time.perf_counter()
     config.read(CONFIG_FILE, encoding="utf-8")
 
-    # Os valores-padrão também cobrem o único caminho que pode continuar após
-    # um erro de configuração: o comando de reset, que termina logo abaixo.
-    section = "qobuz" if config.has_section("qobuz") else "DEFAULT"
-    email = ""
-    password = ""
-    token = ""
-    genius_token = ""
-    app_id = ""
-    secrets: list[str] = []
-    force_english = True
-    default_folder = "Qobuz Downloads"
-    default_quality = "6"
-    default_limit = "20"
-    fetch_lyrics = False
-    legacy_charmap = False
-    no_credits_flag = False
-    embed_art = True
-    albums_only = False
-    no_m3u = False
-    no_fallback = False
-    og_cover = True
-    no_cover = False
-    no_database = False
-    smart_discography = False
-    blacklist_config = "blacklist.txt"
-    playlist_as_albums_config = False
-    folder_format = DEFAULT_FOLDER
-    track_format = DEFAULT_TRACK
+    # Valores-padrão: cobrem o único caminho que pode continuar após um erro de
+    # configuração (o comando de reset, que termina logo abaixo).
+    cfg = CliConfig(section="qobuz" if config.has_section("qobuz") else "DEFAULT")
 
     try:
-        section = "qobuz" if config.has_section("qobuz") else "DEFAULT"
-        email = config.get(section, "email")
-        ini_token = config.get(section, "auth_token", fallback="")
-        ini_genius = config.get(section, "genius_token", fallback="")
-        disable_keyring = str(
-            config.get(section, "disable_keyring", fallback="false")
-        ).strip().lower() in ["true", "yes", "y", "1"]
-
-        if disable_keyring:
-            ini_password = config.get(section, "password", fallback="")
-            token = ini_token if ini_token else ini_password
-            genius_token = ini_genius
-            password = ini_password
-        else:
-            token = _keyring_load("auth_token") or ini_token
-            password = token if token else config.get(section, "password", fallback="")
-            genius_token = _keyring_load("genius_token") or ini_genius
-
-        migrated = False
-        for k, v in (("auth_token", ini_token), ("genius_token", ini_genius)):
-            if v and _keyring_save(k, v):
-                config.set(section, k, "")
-                migrated = True
-        if migrated:
-            try:
-                _write_config_secure(config, CONFIG_FILE)
-            except OSError:
-                # O token já está no keyring, mas o config.ini não pôde ser
-                # regravado: o valor antigo continua em texto puro nele.
-                logger.warning(
-                    "Não foi possível limpar o token do config.ini depois de "
-                    "migrá-lo para o keyring; apague-o do arquivo à mão.",
-                    exc_info=True,
-                )
-
-        _startup_timing("leitura de config/keyring/migração", config_read_started)
-        fetch_lyrics = config.getboolean(section, "fetch_lyrics", fallback=False)
-
-        directory_val = config.get(section, "directory", fallback=None)
-        if directory_val is not None:
-            default_folder = directory_val
-        else:
-            legacy_val = config.get(section, "default_folder", fallback=None)
-            if legacy_val is not None:
-                ui.warn(
-                    "Aviso: 'default_folder' está obsoleto. Renomeie para 'directory' no config.ini."
-                )
-                default_folder = legacy_val
-            else:
-                default_folder = "Qobuz Downloads"
-
-        if IOS_HOME and not os.path.isabs(default_folder):
-            default_folder = os.path.join(IOS_HOME, default_folder)
-
-        default_limit = config.get(section, "default_limit")
-        default_quality = config.get(section, "default_quality")
-        no_m3u = config.getboolean(section, "no_m3u", fallback=False)
-        albums_only = config.getboolean(section, "albums_only", fallback=False)
-        no_fallback = config.getboolean(section, "no_fallback", fallback=False)
-        og_cover = config.getboolean(section, "og_cover", fallback=True)
-        embed_art = config.getboolean(section, "embed_art", fallback=True)
-        no_cover = config.getboolean(section, "no_cover", fallback=False)
-        no_database = config.getboolean(section, "no_database", fallback=False)
-        legacy_charmap = config.getboolean(section, "legacy_charmap", fallback=False)
-        no_credits_config = config.getboolean(section, "no_credits", fallback=False)
-        blacklist_config = config.get(section, "blacklist", fallback="blacklist.txt")
-        playlist_as_albums_config = config.getboolean(
-            section, "playlist_as_albums", fallback=False
-        )
-
-        app_id = config.get(section, "app_id")
-        secrets = [s for s in config.get(section, "secrets").split(",") if s]
-        smart_discography = config.getboolean(
-            section, "smart_discography", fallback=False
-        )
-
-        folder_format = config.get(section, "folder_format", fallback=DEFAULT_FOLDER)
-        track_format = config.get(section, "track_format", fallback=DEFAULT_TRACK)
+        cfg = _load_cli_config(config, config_read_started)
 
         arguments = qobuz_dl_args(
-            default_quality, default_limit, default_folder
+            cfg.default_quality, cfg.default_limit, cfg.default_folder
         ).parse_args()
 
         if getattr(arguments, "no_lyrics", False):
-            fetch_lyrics = False
+            cfg.fetch_lyrics = False
 
-        force_english = not getattr(arguments, "native_lang", False)
+        cfg.force_english = not getattr(arguments, "native_lang", False)
         with_credits_flag = getattr(arguments, "with_credits", False)
-        no_credits_flag = (
+        cfg.no_credits_flag = (
             False
             if with_credits_flag
-            else (getattr(arguments, "no_credits", False) or no_credits_config)
+            else (getattr(arguments, "no_credits", False) or cfg.no_credits_config)
         )
 
     except (configparser.Error, KeyError) as error:
@@ -1748,6 +1816,34 @@ async def async_main():
             sys.exit(
                 f"{RED}Configuração inválida ou corrompida ({error}).\n{RESET}{YELLOW}Execute 'python -m qobuz_dl -r' para consertar isto.{RESET}"
             )
+
+    # Nomes usados no resto da função (mantidos para não mexer no fluxo abaixo).
+    section = cfg.section
+    email = cfg.email
+    password = cfg.password
+    token = cfg.token
+    genius_token = cfg.genius_token
+    app_id = cfg.app_id
+    secrets = cfg.secrets
+    force_english = cfg.force_english
+    default_folder = cfg.default_folder
+    default_quality = cfg.default_quality
+    default_limit = cfg.default_limit
+    fetch_lyrics = cfg.fetch_lyrics
+    legacy_charmap = cfg.legacy_charmap
+    no_credits_flag = cfg.no_credits_flag
+    embed_art = cfg.embed_art
+    albums_only = cfg.albums_only
+    no_m3u = cfg.no_m3u
+    no_fallback = cfg.no_fallback
+    og_cover = cfg.og_cover
+    no_cover = cfg.no_cover
+    no_database = cfg.no_database
+    smart_discography = cfg.smart_discography
+    blacklist_config = cfg.blacklist_config
+    playlist_as_albums_config = cfg.playlist_as_albums_config
+    folder_format = cfg.folder_format
+    track_format = cfg.track_format
 
     ui.configure(
         quiet=getattr(arguments, "quiet", False),

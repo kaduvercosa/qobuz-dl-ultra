@@ -24,7 +24,7 @@ ImportError` pelos modulos que precisam comparar strings.
 
 import difflib
 from types import ModuleType
-from typing import Optional
+from typing import Any, Optional
 
 _rf_fuzz: Optional[ModuleType]
 _rf_process: Optional[ModuleType]
@@ -63,7 +63,7 @@ def ratio(a: str, b: str) -> float:
     return difflib.SequenceMatcher(None, a, b).ratio()
 
 
-def melhor_match(consulta: str, opcoes, corte: float = 0.6):
+def melhor_match(consulta: str, opcoes: Any, corte: float = 0.6) -> Any:
     """Devolve a opcao mais parecida com `consulta`, ou None.
 
     Args:

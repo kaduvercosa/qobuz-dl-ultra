@@ -96,7 +96,7 @@ async def _get_lock(path: str) -> _ReportLock:
         return lock
 
 
-def _try_acquire_process_lock(path: str):
+def _try_acquire_process_lock(path: str) -> Any:
     """Tenta adquirir lock exclusivo sem bloquear a thread do event loop."""
     lock_path = f"{path}.lock"
     try:

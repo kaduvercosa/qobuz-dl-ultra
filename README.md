@@ -502,7 +502,7 @@ qobuz-dl <comando> -h        # ajuda completa do comando
 **Inspecionar uma faixa.** `qobuz-dl inspect` mostra tudo sobre um arquivo de áudio local, em seções: dados técnicos (codec, qualidade, bitrate real, encoder, assinatura MD5 do FLAC), tags agrupadas por assunto (identificação, faixa e disco, códigos, IDs do Qobuz, ReplayGain — o que não couber vai para "Outras tags", nada some), capas embutidas (tamanho, se é quadrada), letras (embutida, sincronizada, `.lrc` ao lado), um diagnóstico com os mesmos avisos do `tags --report` e a checagem de autenticidade. Funciona com FLAC, MP3, M4A/ALAC, Ogg Vorbis e Opus.
 
 ```bash
-qobuz-dl inspect                              # abre o navegador de arquivos
+qobuz-dl inspect                              # abre o navegador na pasta do config.ini
 qobuz-dl inspect ~/Music/faixa.flac           # direto, sem navegador
 qobuz-dl inspect ~/Music/faixa.flac --completo  # + integridade e volume/pico (ffmpeg)
 qobuz-dl inspect ~/Music/faixa.flac --sem-espectro  # sem a análise espectral (mais rápido)

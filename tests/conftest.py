@@ -32,6 +32,9 @@ from pathlib import Path
 _TMP = Path(tempfile.mkdtemp(prefix="qdl-testes-"))
 os.environ["CONFIG_DIR"] = str(_TMP)
 os.environ["NO_COLOR"] = "1"
+# A checagem de versao no PyPI e' ao vivo (sem cache): nos testes fica desligada
+# para nao tocar a rede nem mudar a tela inicial. Os testes dela religam.
+os.environ["QOBUZ_DL_NO_UPDATE_CHECK"] = "1"
 
 # O a-Shell define APPDIR e o projeto procura ffmpeg em $APPDIR/bin. Se a
 # variavel existir no ambiente de quem roda os testes, os testes que simulam

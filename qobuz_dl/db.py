@@ -4,6 +4,7 @@ import logging
 import os
 import shutil
 import sqlite3
+from typing import Any
 
 import aiosqlite
 
@@ -49,7 +50,7 @@ def _backup_before_migration(db_path: str) -> None:
         logger.warning("Backup pré-migração não criado: %s", exc)
 
 
-def create_db(db_path):
+def create_db(db_path: Any) -> Any:
     """
     Initializes or upgrades the SQLite database used for the Smart Reverse Lookup feature.
 
@@ -202,22 +203,22 @@ def create_db(db_path):
 
 
 async def handle_download_id(
-    db_path,
-    item_id,
-    add_id=False,
-    media_type="album",
-    quality=27,
-    file_format="FLAC",
-    quality_met=0,
-    bit_depth=None,
-    sampling_rate=None,
-    saved_path="",
-    status="downloaded",
-    url="",
-    release_date="",
-    artist="",
-    album="",
-):
+    db_path: Any,
+    item_id: Any,
+    add_id: bool = False,
+    media_type: str = "album",
+    quality: Any = 27,
+    file_format: Any = "FLAC",
+    quality_met: Any = 0,
+    bit_depth: Any = None,
+    sampling_rate: Any = None,
+    saved_path: Any = "",
+    status: str = "downloaded",
+    url: Any = "",
+    release_date: Any = "",
+    artist: Any = "",
+    album: Any = "",
+) -> Any:
     """
     Checks for existing downloads or inserts new completed downloads into the database.
 
@@ -322,7 +323,7 @@ async def handle_download_id(
             return row
 
 
-def get_stats(db_path):
+def get_stats(db_path: Any) -> dict[str, Any]:
     """
     Retorna um dicionario rico com todas as estatisticas do banco de downloads.
     Usado pelo comando `qobuz-dl stats` pra exibir um painel completo.

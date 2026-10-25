@@ -25,6 +25,7 @@ import csv
 import json
 import os
 import re
+from typing import Any
 
 
 def parse_playlist_file(path: str) -> list[dict[str, str]]:
@@ -270,7 +271,7 @@ def _parse_json(path: str) -> list[dict[str, str]]:
 _SEP_RE = re.compile(r"\s*(?:\s–\s|\s-\s|:\s|\s\|\s)\s*", re.UNICODE)
 
 
-def _split_artist_title(line: str):
+def _split_artist_title(line: str) -> tuple[str, str]:
     """
     Divide "Artista - Título" em (artista, título).
     Retorna ("", line) se não conseguir detectar o separador.
@@ -281,7 +282,7 @@ def _split_artist_title(line: str):
     return "", line.strip()
 
 
-def _find_col(headers_lower: dict, candidates: list):
+def _find_col(headers_lower: dict, candidates: list) -> Any:
     """Retorna o nome original da primeira coluna que bate com candidates."""
     for c in candidates:
         if c in headers_lower:

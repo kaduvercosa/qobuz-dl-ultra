@@ -40,7 +40,7 @@ import qobuz_dl.postprocess as postprocess
 from qobuz_dl import downloader, qopy, ui
 from qobuz_dl.artist_role import funcao_do_artista
 from qobuz_dl.bundle import Bundle
-from qobuz_dl.color import GREEN, OFF, RED, RESET
+from qobuz_dl.color import ANSI_BOLD, ANSI_CLEAR_SCREEN, GREEN, OFF, RED, RESET
 from qobuz_dl.concurrency import run_bounded
 from qobuz_dl.color import INFO as CYAN
 from qobuz_dl.color import WARNING as YELLOW
@@ -2759,7 +2759,7 @@ class QobuzDL:
                     query_title = f"Meus Favoritos ({display_name})"
                     display_cat = selected_fav[:-1]
                 else:
-                    sys.stdout.write("\033[2J\033[H")
+                    sys.stdout.write(ANSI_CLEAR_SCREEN)
                     sys.stdout.flush()
 
                     async def _classic_prompt():
@@ -3156,14 +3156,14 @@ class QobuzDL:
                 self.quality = qualities[sq_idx]["q"]
 
                 if download:
-                    sys.stdout.write("\033[2J\033[H")
+                    sys.stdout.write(ANSI_CLEAR_SCREEN)
                     sys.stdout.flush()
                     await self.download_list_of_urls(final_url_list)
 
                 return final_url_list
 
         except KeyboardInterrupt:
-            sys.stdout.write("\033[2J\033[H")
+            sys.stdout.write(ANSI_CLEAR_SCREEN)
             logger.info(f"{YELLOW}Operação cancelada pelo usuário.{OFF}")
             return
 
@@ -3225,7 +3225,7 @@ class QobuzDL:
         cols = min(ui.raw_width(), 90)
         bar = "━" * cols
         ui.emit(f"\n{CYAN}{bar}{OFF}")
-        ui.emit(f"\033[1m{CYAN}{'  O QUE DESEJA FAZER?':^{cols}}{OFF}")
+        ui.emit(f"{ui.c(ANSI_BOLD)}{CYAN}{'  O QUE DESEJA FAZER?':^{cols}}{OFF}")
         ui.emit(f"{CYAN}{bar}{OFF}\n")
         ui.emit(
             f"  {CYAN}[1]{OFF} Baixar faixas             (matching Qobuz → download)"

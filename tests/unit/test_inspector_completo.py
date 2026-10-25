@@ -357,6 +357,69 @@ def test_cli_padrao_do_inspetor(monkeypatch, tmp_path):
     }
 
 
+def test_cli_sem_caminho_usa_a_pasta_do_config(monkeypatch, tmp_path):
+    """Sem pasta no comando, o inspect abre na `directory` do config.ini."""
+    musicas = tmp_path / "musicas"
+    musicas.mkdir()
+    monkeypatch.setattr(cli, "CONFIG_PATH", str(tmp_path))
+    monkeypatch.setattr(cli, "CONFIG_FILE", str(tmp_path / "config.ini"))
+    (tmp_path / "config.ini").write_text(f"[DEFAULT]\ndirectory = {musicas}\n")
+    monkeypatch.setattr(sys, "argv", ["qobuz-dl", "inspect"])
+    monkeypatch.setattr(cli, "check_for_updates", lambda: None)
+    visto = {}
+
+    async def espiao(caminho=None, **kwargs):
+        visto["caminho"] = caminho
+        return 0
+
+    monkeypatch.setattr(inspector, "run_inspector", espiao)
+    with pytest.raises(SystemExit):
+        asyncio.run(cli.async_main())
+    assert visto["caminho"] == str(musicas)
+
+
+def test_cli_caminho_informado_vence_a_pasta_do_config(monkeypatch, tmp_path):
+    (tmp_path / "musicas").mkdir()
+    monkeypatch.setattr(cli, "CONFIG_PATH", str(tmp_path))
+    monkeypatch.setattr(cli, "CONFIG_FILE", str(tmp_path / "config.ini"))
+    (tmp_path / "config.ini").write_text(
+        f"[DEFAULT]\ndirectory = {tmp_path / 'musicas'}\n"
+    )
+    monkeypatch.setattr(sys, "argv", ["qobuz-dl", "inspect", "/outra/pasta"])
+    monkeypatch.setattr(cli, "check_for_updates", lambda: None)
+    visto = {}
+
+    async def espiao(caminho=None, **kwargs):
+        visto["caminho"] = caminho
+        return 0
+
+    monkeypatch.setattr(inspector, "run_inspector", espiao)
+    with pytest.raises(SystemExit):
+        asyncio.run(cli.async_main())
+    assert visto["caminho"] == "/outra/pasta"
+
+
+def test_cli_pasta_do_config_inexistente_cai_na_deteccao(monkeypatch, tmp_path):
+    """Se a pasta do config.ini não existe, vale a detecção pelo dispositivo."""
+    monkeypatch.setattr(cli, "CONFIG_PATH", str(tmp_path))
+    monkeypatch.setattr(cli, "CONFIG_FILE", str(tmp_path / "config.ini"))
+    (tmp_path / "config.ini").write_text(
+        f"[DEFAULT]\ndirectory = {tmp_path / 'nao-existe'}\n"
+    )
+    monkeypatch.setattr(sys, "argv", ["qobuz-dl", "inspect"])
+    monkeypatch.setattr(cli, "check_for_updates", lambda: None)
+    visto = {}
+
+    async def espiao(caminho=None, **kwargs):
+        visto["caminho"] = caminho
+        return 0
+
+    monkeypatch.setattr(inspector, "run_inspector", espiao)
+    with pytest.raises(SystemExit):
+        asyncio.run(cli.async_main())
+    assert visto["caminho"] is None
+
+
 def test_cli_comparar_autentica_e_chama_a_comparacao(biblioteca, monkeypatch, tmp_path):
     """`inspect ARQUIVO --comparar` vai pelo caminho com login (não pelo offline)."""
     import qobuz_dl.qopy as qopy

@@ -1,7 +1,9 @@
+from typing import Any
+
 __version__ = "2.6.6"
 
 
-def __getattr__(name):
+def __getattr__(name: str) -> Any:
     """Lazy-load main and Client to avoid circular imports."""
     if name == "main":
         from .cli import main

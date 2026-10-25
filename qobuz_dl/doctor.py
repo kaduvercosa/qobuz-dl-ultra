@@ -413,7 +413,15 @@ def next_action(check: Check) -> Optional[str]:
 def render(results: list[Check]) -> int:
     """Imprime pela camada ``ui`` e devolve o código de saída (1 se houve FAIL)."""
     from qobuz_dl import ui
-    from qobuz_dl.color import GREEN, HIGHLIGHT, MUTED, RED, RESET, YELLOW
+    from qobuz_dl.color import (
+        ANSI_BOLD,
+        GREEN,
+        HIGHLIGHT,
+        MUTED,
+        RED,
+        RESET,
+        YELLOW,
+    )
     from qobuz_dl.home_screen import render_checks
 
     fails = sum(1 for r in results if r.level == FAIL)
@@ -438,7 +446,7 @@ def render(results: list[Check]) -> int:
         destaque=HIGHLIGHT,
         mudo=MUTED,
         reset=RESET,
-        negrito=ui.c("\033[1m"),
+        negrito=ui.c(ANSI_BOLD),
         verde=GREEN,
         amarelo=YELLOW,
         vermelho=RED,

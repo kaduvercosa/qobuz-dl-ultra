@@ -34,7 +34,7 @@ import logging
 import os
 import re
 import threading
-from typing import Iterable, Optional
+from typing import Callable, Iterable, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -178,7 +178,7 @@ def build_name_stems(
     album_title: Optional[str],
     track_id: str,
     *,
-    sanitize,
+    sanitize: Callable[..., str],
     max_len: int = 180,
 ) -> list[str]:
     """Monta os nomes (sem extensão) candidatos, do mais simples ao mais específico.

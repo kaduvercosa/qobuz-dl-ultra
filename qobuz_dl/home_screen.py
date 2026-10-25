@@ -319,6 +319,39 @@ def _painel_dicas(largura: int, st: _Estilo) -> list:
     return _painel("Dicas", _com_separadores(blocos), largura, st)
 
 
+def render_aviso_update(
+    atual: str,
+    nova: str,
+    largura: int | None = None,
+    cor: bool = True,
+    destaque: str = "\033[36m",
+    mudo: str = "\033[2m",
+    reset: str = "\033[0m",
+    negrito: str = "\033[1m",
+    comando: str = "pip install -U qobuz-dl-ultra",
+) -> str:
+    """Uma linha centralizada avisando que há versão nova (para a tela inicial).
+
+    Discreta de propósito: sem caixa, sem linha em branco extra. Escolhe a
+    versão do texto que cabe na largura (completa > média > curta).
+    """
+    if largura is None:
+        largura = shutil.get_terminal_size((100, 24)).columns
+    st = _Estilo(cor, destaque, mudo, reset, negrito)
+    marca = st.dest("▲")
+    versoes = f"{st.mudo('v' + atual)} → {st.neg(st.dest('v' + nova))}"
+    candidatas = [
+        f"{marca} Atualização disponível: {versoes}  {st.mudo('·')}  {st.mudo(comando)}",
+        f"{marca} {st.neg(st.dest('v' + nova))} disponível  {st.mudo('·')}  {st.mudo(comando)}",
+        f"{marca} {st.neg(st.dest('v' + nova))} disponível",
+    ]
+    linha = next(
+        (c for c in candidatas if _largura_visivel(c) <= largura), candidatas[-1]
+    )
+    margem = " " * max((largura - _largura_visivel(linha)) // 2, 0)
+    return margem + linha
+
+
 def render_home(
     comandos,
     flags=(),

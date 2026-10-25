@@ -14,6 +14,10 @@ publicar, renomeie a seção para a nova versão e a data.
 ## [Não lançado]
 
 ### Adicionado
+- Aviso de versão nova na tela inicial: uma linha discreta (`▲ Atualização disponível:
+  v2.6.6 → v2.7.0 · pip install -U qobuz-dl-ultra`) que aparece em toda abertura até a
+  pessoa atualizar. Compara a versão instalada com a última do **PyPI**, sempre ao vivo e
+  sem cache (`update_check.py`); `QOBUZ_DL_NO_UPDATE_CHECK=1` desliga a checagem.
 - `qobuz_notes_sync`: `--nota ARQUIVO` usa a Nota do iOS como fonte da verdade
   (só entram os artistas cujo `[QOBUZ_ID:...]` ainda não está nela);
   `--imprimir linhas` devolve só as linhas a acrescentar; grava
@@ -26,6 +30,10 @@ publicar, renomeie a seção para a nova versão e a data.
 - Workflow `mypy-baseline.yml` para gerar o `mypy-baseline.txt` uma única vez.
 
 ### Alterado
+- `inspect` sem pasta no comando abre na `directory` do `config.ini` (se existir);
+  sem ela, mantém a detecção pela pasta de música do dispositivo. Os demais comandos
+  com pasta (`tags`, `lyrics`, `scan`, `library reconcile`, `--sync-db`,
+  `--find-duplicates`, `--watch`, `dl`) já usavam essa pasta como padrão.
 - Erros antes engolidos agora são registrados: `warning` quando o usuário precisa
   saber (token que não saiu do `config.ini` depois de migrar para o keyring;
   journal do `tags` ilegível) e `debug` com traceback nos demais casos

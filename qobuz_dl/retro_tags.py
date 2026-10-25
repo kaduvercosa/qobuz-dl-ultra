@@ -26,7 +26,8 @@ import re
 import shutil
 import tempfile
 import textwrap
-from typing import Any, Optional
+from collections.abc import Mapping
+from typing import Any, Optional, TypedDict
 
 import httpx
 import mutagen.id3 as id3
@@ -351,12 +352,41 @@ def _album_full_title(album: dict) -> str:
     return title
 
 
+class CoverDecision(TypedDict):
+    """Capa Apple escolhida para um álbum (ver ``_decide_album_cover``)."""
+
+    url: Optional[str]
+    source: Optional[str]
+    method: Optional[str]
+    note: Optional[str]
+    path: Optional[str]  # arquivo temporário já baixado, se houver
+    used: bool
+
+
+class RetagStats(TypedDict):
+    """Contadores do ``retag_directory`` (devolvidos ao chamador)."""
+
+    total: int
+    skipped_done: int
+    updated: int
+    unchanged: int
+    no_id: int
+    not_found: int
+    errors: int
+    apple_embedded: int
+    apple_not_found: int
+    apple_failed: int
+    # Para o resumo final: quais campos mais mudaram e o que houve com as capas.
+    field_changes: "collections.Counter[str]"
+    cover_outcomes: "collections.Counter[str]"
+
+
 async def _decide_album_cover(
     album: dict,
     http_session: httpx.AsyncClient,
     track_results: dict,
     trace: Optional[list] = None,
-) -> dict:
+) -> CoverDecision:
     """Escolhe UMA capa Apple para o álbum Qobuz inteiro.
 
     1) Busca no nível do álbum (UPC e busca por álbum, com o tipo single/
@@ -374,7 +404,7 @@ async def _decide_album_cover(
     """
     from qobuz_dl.utils import find_apple_cover
 
-    decision: dict[str, Any] = {
+    decision: CoverDecision = {
         "url": None,
         "source": None,
         "method": None,
@@ -397,9 +427,12 @@ async def _decide_album_cover(
         if isinstance(result, tuple) and result and isinstance(result[0], str):
             if result[0].strip():
                 decision.update(
-                    url=result[0],
-                    source=(result[1] if len(result) > 1 else None) or "Apple/iTunes",
-                    method="busca do álbum",
+                    {
+                        "url": result[0],
+                        "source": (result[1] if len(result) > 1 else None)
+                        or "Apple/iTunes",
+                        "method": "busca do álbum",
+                    }
                 )
                 return decision
         if isinstance(result, tuple) and len(result) > 2:
@@ -432,9 +465,11 @@ async def _decide_album_cover(
             and (len(ranked) == 1 or ranked[0][1] > ranked[1][1])
         ):
             decision.update(
-                url=ranked[0][0],
-                source="Apple/iTunes",
-                method=f"consenso de {ranked[0][1]}/{len(items)} faixas",
+                {
+                    "url": ranked[0][0],
+                    "source": "Apple/iTunes",
+                    "method": f"consenso de {ranked[0][1]}/{len(items)} faixas",
+                }
             )
             return decision
 
@@ -532,7 +567,7 @@ async def _download_apple_cover(
         return None
 
 
-def _discard_shared_cover(decision: dict) -> None:
+def _discard_shared_cover(decision: CoverDecision) -> None:
     """Apaga o temporário da capa compartilhada de um álbum."""
     path = decision.get("path")
     decision["path"] = None
@@ -815,10 +850,12 @@ _COVER_OUTCOME_LABELS = (
 )
 
 
-def _summary_detail_lines(stats: dict, tags_only: bool, dry_run: bool, top: int = 10):
+def _summary_detail_lines(
+    stats: RetagStats, tags_only: bool, dry_run: bool, top: int = 10
+):
     """Linhas extras do resumo: campos mais alterados e destino das capas."""
     lines = []
-    fields = stats.get("field_changes") or {}
+    fields: Mapping[str, int] = stats.get("field_changes") or {}
     if fields:
         ranked = sorted(fields.items(), key=lambda kv: (-kv[1], kv[0]))
         lines.append("")
@@ -830,7 +867,7 @@ def _summary_detail_lines(stats: dict, tags_only: bool, dry_run: bool, top: int 
             lines.append(f"{CYAN} • {str(key).ljust(26)}:{RESET} {GREEN}{count}{OFF}")
         if len(ranked) > top:
             lines.append(f"{MUTED}   … e mais {len(ranked) - top} campo(s){OFF}")
-    outcomes = stats.get("cover_outcomes") or {}
+    outcomes: Mapping[str, int] = stats.get("cover_outcomes") or {}
     if outcomes and not tags_only:
         lines.append("")
         lines.append(f"{CYAN} Capas (o que houve em cada faixa):{RESET}")
@@ -923,7 +960,7 @@ async def retag_directory(
 
     all_files = await asyncio.to_thread(find_audio_files, directory_path)
     files = [f for f in all_files if not (progress and progress.is_done(f))]
-    stats: dict[str, Any] = {
+    stats: RetagStats = {
         "total": len(all_files),
         "skipped_done": len(all_files) - len(files),
         "updated": 0,
@@ -962,11 +999,11 @@ async def retag_directory(
     album_cache: dict[str, Any] = {}
     # Capa decidida UMA vez por álbum Qobuz (chave = ID do álbum): single,
     # álbum, edição Deluxe e coletânea têm IDs diferentes e nunca se misturam.
-    album_decisions: dict[str, dict[str, Any]] = {}
+    album_decisions: dict[str, CoverDecision] = {}
     track_results: dict[
         str, tuple[Optional[str], Optional[str], Optional[str]]
     ] = {}  # faixa -> (url, fonte, motivo), da votação
-    shared_holder: dict[str, Optional[dict[str, Any]]] = {
+    shared_holder: dict[str, Optional[CoverDecision]] = {
         "decision": None
     }  # só a capa do álbum atual fica em disco
     last_album_key = None  # para imprimir o cabeçalho do álbum uma vez por álbum
@@ -1055,7 +1092,7 @@ async def retag_directory(
 
             apple_cover_url = apple_cover_source = apple_diagnostic = None
             try:
-                album_decision = None
+                album_decision: Optional[CoverDecision] = None
                 if album_key and not tags_only:
                     album_decision = album_decisions.get(album_key)
                     if album_decision is None:
@@ -1383,6 +1420,7 @@ async def retag_directory(
             ui.emit(f"{GREEN}[+] Correção de tags concluída.{OFF}")
         ui.emit("")
         ui.emit(f"{CYAN} Resumo{' da simulação' if dry_run else ''}:{RESET}")
+        counts: Mapping[str, object] = stats
         for text_label, key, color_on, explanation in (
             (
                 "Arquivos analisados",
@@ -1434,9 +1472,9 @@ async def retag_directory(
         ):
             if tags_only and key.startswith("apple_"):
                 continue  # sem etapa Apple neste modo
-            if key == "skipped_done" and not stats[key]:
+            if key == "skipped_done" and not counts[key]:
                 continue  # só aparece quando houve arquivos pulados
-            value = stats[key]
+            value = counts[key]
             value_color = color_on if (color_on and value) else MUTED
             ui.emit(
                 f"{CYAN} • {text_label.ljust(26)}:{RESET} "

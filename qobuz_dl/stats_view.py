@@ -13,6 +13,8 @@ Agora e' um modulo proprio que:
     propria, o que torna a funcao testavel.
 """
 
+from typing import Any
+
 from qobuz_dl import ui
 from qobuz_dl.db import get_stats
 
@@ -21,7 +23,7 @@ from qobuz_dl.db import get_stats
 _STACK_ON_NARROW = ("Bit depths", "Sample rates")
 
 
-def _fmt_date(value):
+def _fmt_date(value: Any) -> Any:
     """``2019-05-31T...`` -> ``31/05/2019`` (ou ``?`` quando ausente)."""
     if not value:
         return "?"
@@ -32,12 +34,12 @@ def _fmt_date(value):
         return value
 
 
-def _row(label, value):
+def _row(label: str, value: Any) -> None:
     """Generate a table row with columns."""
     ui.kv(label, value, narrow_stack=label in _STACK_ON_NARROW)
 
 
-def render_stats(db_path, show_all_artists=False):
+def render_stats(db_path: Any, show_all_artists: bool = False) -> int:
     """Imprime o relatorio de estatisticas. Retorna o codigo de saida."""
     stats = get_stats(db_path)
 
