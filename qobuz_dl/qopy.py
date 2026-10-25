@@ -48,6 +48,8 @@ try:
     algorithms, modes, HKDF = _algorithms, _modes, _HKDF
     _CRYPTO_AVAILABLE = True
 except ImportError:
+    # cryptography é opcional (iOS/a-Shell): os nomes seguem None e
+    # _CRYPTO_AVAILABLE False; quem precisa de HKDF/AES checa isso antes.
     pass
 
 from qobuz_dl import ui
