@@ -50,6 +50,10 @@ def nova_versao_disponivel(
 ) -> Optional[str]:
     """A versão do PyPI (texto) se for MAIS NOVA que a instalada; senão None."""
     if atual is None:
-        from qobuz_dl import __version__ as atual
+        from qobuz_dl import __version__
+
+        instalada = __version__
+    else:
+        instalada = atual
     remota = ultima_versao_pypi(timeout=timeout)
-    return remota if Version(remota) > Version(atual) else None
+    return remota if Version(remota) > Version(instalada) else None

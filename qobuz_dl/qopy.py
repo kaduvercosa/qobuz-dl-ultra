@@ -25,15 +25,30 @@ from tenacity import (
 )
 
 # Import condicional do cryptography para compatibilidade com iOS/a-Shell
+#
+# Os nomes são declarados como `Any` (None quando a lib falta) e preenchidos pelo
+# import com alias: assim o mypy aceita o mesmo código com ou sem o cryptography
+# instalado, sem depender de `# type: ignore` (que fica "sem uso" em um dos casos).
+hashes: Any = None
+padding: Any = None
+Cipher: Any = None
+algorithms: Any = None
+modes: Any = None
+HKDF: Any = None
+_CRYPTO_AVAILABLE = False
 try:
-    from cryptography.hazmat.primitives import hashes, padding
-    from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-    from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+    from cryptography.hazmat.primitives import hashes as _hashes
+    from cryptography.hazmat.primitives import padding as _padding
+    from cryptography.hazmat.primitives.ciphers import Cipher as _Cipher
+    from cryptography.hazmat.primitives.ciphers import algorithms as _algorithms
+    from cryptography.hazmat.primitives.ciphers import modes as _modes
+    from cryptography.hazmat.primitives.kdf.hkdf import HKDF as _HKDF
 
+    hashes, padding, Cipher = _hashes, _padding, _Cipher
+    algorithms, modes, HKDF = _algorithms, _modes, _HKDF
     _CRYPTO_AVAILABLE = True
 except ImportError:
-    hashes = padding = Cipher = algorithms = modes = HKDF = None
-    _CRYPTO_AVAILABLE = False
+    pass
 
 from qobuz_dl import ui
 from qobuz_dl.color import GREEN, OFF, RED, RESET
