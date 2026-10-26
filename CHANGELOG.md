@@ -38,6 +38,13 @@ publicar, renomeie a seção para a nova versão e a data.
 - Workflow `mypy-baseline.yml` para gerar o `mypy-baseline.txt` uma única vez.
 
 ### Alterado
+- Changelog automático (`tools/gerar_changelog.py` + workflow `changelog.yml`): em vez de
+  só listar os títulos dos commits, a release agora descreve o que mudou, lendo o diff de
+  cada commit com o **GitHub Models** (IA gratuita do GitHub, via `GITHUB_TOKEN` com
+  `models: read`), com resumo da versão e lista dos arquivos alterados. Sem token, com
+  `--sem-ia` ou se a IA falhar, volta ao modo antigo pelos títulos. Novas opções:
+  `--sem-ia`, `--exigir-ia`, `--modelo` (ou a variável `CHANGELOG_MODELO` do repositório)
+  e `--limite-prompt`. Regerar a release ainda em rascunho agora atualiza as notas.
 - `inspect` sem pasta no comando abre na `directory` do `config.ini` (se existir);
   sem ela, mantém a detecção pela pasta de música do dispositivo. Os demais comandos
   com pasta (`tags`, `lyrics`, `scan`, `library reconcile`, `--sync-db`,
