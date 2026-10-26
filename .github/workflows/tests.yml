@@ -129,7 +129,7 @@ jobs:
         # Falha no SMTP (ex.: credencial inválida) não pode mascarar o resultado
         # real do job: o e-mail é só um aviso extra.
         continue-on-error: true
-        uses: dawidd6/action-send-mail@v22
+        uses: dawidd6/action-send-mail@v23
         with:
           server_address: smtp.gmail.com
           server_port: 465
@@ -227,7 +227,7 @@ jobs:
         # Falha no SMTP (ex.: credencial inválida) não pode mascarar o resultado
         # real do job: o e-mail é só um aviso extra.
         continue-on-error: true
-        uses: dawidd6/action-send-mail@v22
+        uses: dawidd6/action-send-mail@v23
         with:
           server_address: smtp.gmail.com
           server_port: 465
