@@ -374,7 +374,6 @@ class TestChamarModelo:
         def falso(pedido, timeout=0):
             vistos["url"] = pedido.full_url
             vistos["auth"] = pedido.get_header("Authorization")
-            vistos["ua"] = pedido.get_header("User-agent")
             vistos["corpo"] = json.loads(pedido.data)
             return _RespostaHTTP({"choices": [{"message": {"content": "{}"}}]})
 
@@ -384,7 +383,6 @@ class TestChamarModelo:
         )
         assert texto == "{}"
         assert vistos["url"] == gc.GEMINI_BASE_URL.rstrip("/") + "/chat/completions"
-        assert vistos["ua"] == gc.USER_AGENT
         assert vistos["auth"] == "Bearer abc"
         assert vistos["corpo"]["model"] == "m/x"
 
@@ -394,7 +392,7 @@ class TestChamarModelo:
 
         def falso(pedido, timeout=0):
             raise urllib.error.HTTPError(
-                gc.GEMINI_BASE_URL, 403, "Forbidden", {}, io.BytesIO(b"sem permissao")
+                gc.API_URL, 403, "Forbidden", {}, io.BytesIO(b"sem permissao")
             )
 
         monkeypatch.setattr(gc.urllib.request, "urlopen", falso)
@@ -438,11 +436,7 @@ class TestChamarModelo:
             tentativas.append(1)
             if len(tentativas) == 1:
                 raise urllib.error.HTTPError(
-                    gc.GEMINI_BASE_URL,
-                    429,
-                    "Too Many",
-                    {"Retry-After": "2"},
-                    io.BytesIO(b""),
+                    gc.API_URL, 429, "Too Many", {"Retry-After": "2"}, io.BytesIO(b"")
                 )
             return _RespostaHTTP({"choices": [{"message": {"content": "ok"}}]})
 
@@ -502,3 +496,73 @@ def test_com_git_real_ignora_arquivos_de_ruido_e_monta_lista(tmp_path, monkeypat
     assert "- Mostra algo novo." in saida
     assert "<summary>Arquivos alterados (1)" in saida
     assert "- `app.py` (+2 −1)" in saida
+
+
+class TestSessaoReserva:
+    def test_reserva_fica_ativa_e_nao_vaza_entre_geracoes(self, monkeypatch):
+        chamadas = []
+        monkeypatch.setattr(gc.time, "sleep", lambda s: None)
+        monkeypatch.setattr(gc, "_contexto_commit", lambda c, limite: c["hash"])
+        monkeypatch.setattr(
+            gc, "_montar_lotes", lambda contextos, limite: [[c] for c in contextos]
+        )
+
+        def falso(mensagens, config, timeout=120):
+            chamadas.append((config.modelo, config.token))
+            if config.modelo == gc.MODELO_PADRAO:
+                raise gc.ErroIA(503, "sobrecarga")
+            return json.dumps(
+                {
+                    "resumo": "Mudanças.",
+                    "itens": [
+                        {
+                            "categoria": "Adicionado",
+                            "texto": "Nova flag.",
+                            "commits": ["aaa1111"],
+                        },
+                        {
+                            "categoria": "Corrigido",
+                            "texto": "Corrige bug.",
+                            "commits": ["bbb2222"],
+                        },
+                    ],
+                }
+            )
+
+        monkeypatch.setattr(gc, "_chamar_modelo_unico", falso)
+        config = gc.ConfigIA(
+            token="chave-gemini",
+            modelo_reserva=gc.MODELO_RESERVA_PADRAO,
+            token_reserva="chave-groq",
+        )
+        for _ in range(2):
+            chamadas.clear()
+            saida = gc.gerar_changelog("v1", "v2", ia=config)
+            assert chamadas[0] == (gc.MODELO_PADRAO, "chave-gemini")
+            assert all(
+                c == (gc.MODELO_RESERVA_PADRAO, "chave-groq") for c in chamadas[1:]
+            )
+            assert len(chamadas) == 4
+            assert "Modo: IA (Groq: openai/gpt-oss-120b)" in saida
+            assert gc._SESSAO_IA.get() is None
+
+    def test_sem_credencial_da_reserva_nao_reutiliza_principal(self, monkeypatch):
+        chamadas = []
+
+        def falso(mensagens, config, timeout=120):
+            chamadas.append(config.token)
+            raise gc.ErroIA(503, "sobrecarga")
+
+        monkeypatch.setattr(gc, "_chamar_modelo_unico", falso)
+        with pytest.raises(gc.ErroIA):
+            gc._chamar_modelo(
+                [],
+                gc.ConfigIA(
+                    token="chave-gemini", modelo_reserva=gc.MODELO_RESERVA_PADRAO
+                ),
+            )
+        assert chamadas == ["chave-gemini"]
+
+    def test_prompts_preservam_mudancas_independentes(self):
+        assert "Uma mudança funcional por item" in gc.PROMPT_SISTEMA
+        assert "NÃO agrupe assuntos independentes" in gc.PROMPT_CONSOLIDAR

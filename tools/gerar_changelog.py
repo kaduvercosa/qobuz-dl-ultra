@@ -4,7 +4,7 @@
 Dois modos:
 
 * **Com IA** (padrão quando existe `GEMINI_API_KEY` ou `GROQ_API_KEY` no ambiente): lê o
-  diff de cada commit e pede ao Gemini (com Groq opcional como reserva) para descrever
+  diff de cada commit e pede ao Gemini (com Groq como reserva) para descrever
   **o que realmente mudou**, agrupado em Adicionado / Modificado / Corrigido etc.
   Também lista os arquivos alterados entre as duas versões.
 * **Sem IA** (`--sem-ia`, sem token, ou se a IA falhar): usa só os títulos e corpos
@@ -33,6 +33,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from contextvars import ContextVar
 from datetime import date
 from pathlib import Path
 from typing import NamedTuple, TypedDict
@@ -169,7 +170,12 @@ comando, flag, opção do config.ini, tela ou comportamento. Escreva nomes de fl
 comandos, opções e arquivos entre `crases`.
 - Use somente o que aparece no diff, no título e no corpo. Não invente \
 funcionalidades, números nem motivos. Se algo não estiver claro, seja mais genérico.
-- Junte commits que tratam da mesma coisa em um único item.
+- Uma mudança funcional por item. Um commit pode originar vários itens.
+- Separe funcionalidades independentes mesmo quando pertencem ao mesmo arquivo.
+- Junte commits somente quando descrevem a MESMA mudança funcional.
+- Explique comportamento anterior e novo quando houver evidência no diff.
+- Classifique correções em Corrigido, sem misturá-las com novidades.
+- Não transforme nomes de funções isolados em benefícios que o diff não comprova.
 - Ignore o que não afeta quem usa nem quem desenvolve (formatação, imports \
 reordenados, comentários, renomear variável).
 - Refatoração interna, testes e CI relevantes entram em "Modificado", em um item \
@@ -194,6 +200,10 @@ português do Brasil.
 
 Regras:
 - Não acrescente nenhuma informação nova e não apague mudanças relevantes.
+- Preserve uma mudança funcional por item: NÃO agrupe assuntos independentes.
+- Não reduza a quantidade de itens apenas para encurtar a versão.
+- Una apenas duplicatas da MESMA mudança, mantendo detalhes e efeitos.
+- Separe correções de funcionalidades adicionadas.
 - Ao unir itens, junte também as listas de "commits".
 - Cada item continua com 1 a 3 frases e sem markdown além de `crases`.
 - Categorias permitidas: Adicionado, Modificado, Removido, Corrigido, Obsoleto, \
@@ -378,8 +388,8 @@ def _diff_do_commit(commit_hash: str) -> str:
 
 def _e_teste(caminho: str) -> bool:
     nome = caminho.rsplit("/", 1)[-1]
-    return caminho.startswith("tests/") or "/tests/" in caminho or nome.startswith(
-        "test_"
+    return (
+        caminho.startswith("tests/") or "/tests/" in caminho or nome.startswith("test_")
     )
 
 
@@ -503,34 +513,79 @@ def _espera_retry_after(erro: urllib.error.HTTPError) -> float:
         return 15.0
 
 
+class SessaoIA:
+    """Estado isolado por geração; nunca persiste entre releases."""
+
+    def __init__(self) -> None:
+        self.reserva_ativa = False
+        self.usados: list[str] = []
+
+
+_SESSAO_IA: ContextVar[SessaoIA | None] = ContextVar("sessao_changelog", default=None)
+
+
+def _rotulo_modelo(config: ConfigIA) -> str:
+    if "api.groq.com" in config.base_url:
+        return f"Groq: {config.modelo}"
+    if "generativelanguage.googleapis.com" in config.base_url:
+        return f"Gemini: {config.modelo}"
+    return f"{config.base_url}: {config.modelo}"
+
+
+def _registrar_sucesso(config: ConfigIA) -> None:
+    rotulo = _rotulo_modelo(config)
+    sessao = _SESSAO_IA.get()
+    if sessao is not None and rotulo not in sessao.usados:
+        sessao.usados.append(rotulo)
+    _log(f"IA: resposta recebida de {rotulo}")
+
+
 def _chamar_modelo(
     mensagens: list[dict[str, str]], config: ConfigIA, timeout: float = 120.0
 ) -> str:
     principal = config._replace(modelo=config.modelo.strip() or MODELO_PADRAO)
-    try:
-        return _chamar_modelo_unico(mensagens, principal, timeout)
-    except ErroIA as erro:
-        reserva = (config.modelo_reserva or "").strip()
-        if erro.codigo == 413 or not reserva or reserva.lower() == "nenhum":
-            raise
-        if not config.token_reserva or not config.token_reserva.strip():
-            _log("reserva desabilitada: falta a chave própria do provedor de reserva")
-            raise
-        if reserva == principal.modelo and config.base_url_reserva == principal.base_url:
-            raise
-        _log(f"modelo {principal.modelo} falhou ({erro}); tentando reserva {reserva}")
+    reserva = (config.modelo_reserva or "").strip()
+    secundaria = None
+    if reserva and reserva.lower() != "nenhum" and config.token_reserva:
         secundaria = config._replace(
-            token=config.token_reserva.strip(), modelo=reserva,
-            base_url=config.base_url_reserva, modelo_reserva=None,
+            token=config.token_reserva.strip(),
+            modelo=reserva,
+            base_url=config.base_url_reserva,
+            modelo_reserva=None,
             token_reserva=None,
         )
+    sessao = _SESSAO_IA.get()
+    if sessao is not None and sessao.reserva_ativa and secundaria is not None:
+        texto = _chamar_modelo_unico(mensagens, secundaria, timeout)
+        _registrar_sucesso(secundaria)
+        return texto
+    try:
+        texto = _chamar_modelo_unico(mensagens, principal, timeout)
+    except ErroIA as erro:
+        if erro.codigo == 413 or secundaria is None:
+            raise
+        if (
+            secundaria.modelo == principal.modelo
+            and secundaria.base_url == principal.base_url
+        ):
+            raise
+        _log(f"modelo {principal.modelo} falhou ({erro}); tentando reserva {reserva}")
         try:
-            return _chamar_modelo_unico(mensagens, secundaria, timeout)
+            texto = _chamar_modelo_unico(mensagens, secundaria, timeout)
         except ErroIA as falha:
             raise ErroIA(
                 falha.codigo,
                 f"principal {principal.modelo}: {erro}; reserva {reserva}: {falha}",
             ) from falha
+        if sessao is not None:
+            sessao.reserva_ativa = True
+            _log(
+                f"IA: mantendo {reserva} nos próximos lotes e na consolidação desta geração"
+            )
+        _registrar_sucesso(secundaria)
+        return texto
+    _registrar_sucesso(principal)
+    return texto
 
 
 def _chamar_modelo_unico(
@@ -539,21 +594,26 @@ def _chamar_modelo_unico(
     if not config.token.strip():
         raise ErroIA(401, f"chave ausente para {config.modelo}")
     corpo: dict[str, object] = {
-        "model": config.modelo, "messages": mensagens,
-        "temperature": 0.2, "max_tokens": 2500,
+        "model": config.modelo,
+        "messages": mensagens,
+        "temperature": 0.2,
+        "max_tokens": 5000,
         "response_format": {"type": "json_object"},
     }
     url = config.base_url.rstrip("/") + "/chat/completions"
     cabecalhos = {
         "Accept": "application/json",
         "Authorization": f"Bearer {config.token.strip()}",
-        "Content-Type": "application/json", "User-Agent": USER_AGENT,
+        "Content-Type": "application/json",
+        "User-Agent": USER_AGENT,
     }
     for tentativa in range(1, MAX_TENTATIVAS + 1):
         ultima = tentativa == MAX_TENTATIVAS
         pedido = urllib.request.Request(
-            url, data=json.dumps(corpo).encode("utf-8"),
-            headers=cabecalhos, method="POST",
+            url,
+            data=json.dumps(corpo).encode("utf-8"),
+            headers=cabecalhos,
+            method="POST",
         )
         try:
             with urllib.request.urlopen(pedido, timeout=timeout) as resposta:
@@ -568,8 +628,7 @@ def _chamar_modelo_unico(
                     f"modelo {config.modelo}: resposta que não é JSON "
                     f"(status {status}, tipo {tipo!r}, url {url}, "
                     f"{len(bruto)} bytes): {amostra!r}; "
-                    "não foi possível extrair a resposta de chat; "
-                    "a causa no provedor/rede não foi informada"
+                    "o provedor não informou a causa da resposta inválida"
                 )
                 if ultima:
                     raise ErroIA(None, detalhe) from erro
@@ -586,18 +645,34 @@ def _chamar_modelo_unico(
             for segredo in (config.token, config.token_reserva):
                 if segredo:
                     detalhe = detalhe.replace(segredo, "[CHAVE OCULTA]")
-            if erro.code == 400 and "response_format" in detalhe and "response_format" in corpo and not ultima:
+            if (
+                erro.code == 400
+                and "response_format" in detalhe
+                and "response_format" in corpo
+                and not ultima
+            ):
                 corpo.pop("response_format")
                 continue
             if erro.code in (429, 500, 502, 503, 504) and not ultima:
-                espera = (_espera_retry_after(erro) if erro.code == 429
-                          else PAUSAS_NAO_JSON[min(tentativa - 1, 1)])
-                _log(f"modelo {config.modelo}: HTTP {erro.code}; aguardando {espera:.0f}s")
+                espera = (
+                    _espera_retry_after(erro)
+                    if erro.code == 429
+                    else PAUSAS_NAO_JSON[min(tentativa - 1, 1)]
+                )
+                _log(
+                    f"modelo {config.modelo}: HTTP {erro.code}; aguardando {espera:.0f}s"
+                )
                 time.sleep(espera)
                 continue
             raise ErroIA(erro.code, detalhe) from erro
-        except (urllib.error.URLError, TimeoutError, KeyError, IndexError,
-                TypeError, ValueError) as erro:
+        except (
+            urllib.error.URLError,
+            TimeoutError,
+            KeyError,
+            IndexError,
+            TypeError,
+            ValueError,
+        ) as erro:
             if ultima:
                 raise ErroIA(None, f"{type(erro).__name__}: {erro}") from erro
             time.sleep(2.0 * tentativa)
@@ -742,14 +817,18 @@ def _descrever_com_ia(
                 raise
             falhas += 1
             ultimo_erro = str(erro)
-            _log(f"IA falhou no lote {numero}: {erro}; usando os títulos desses commits")
+            _log(
+                f"IA falhou no lote {numero}: {erro}; usando os títulos desses commits"
+            )
             continue
         if resumo:
             resumos.append(resumo)
         itens.extend(novos)
 
     if falhas == len(lotes):
-        raise ErroIA(None, f"a IA falhou em todos os lotes (último erro: {ultimo_erro})")
+        raise ErroIA(
+            None, f"a IA falhou em todos os lotes (último erro: {ultimo_erro})"
+        )
 
     resumo_final = " ".join(resumos)
     if len(lotes) > 1 and itens:
@@ -786,9 +865,7 @@ def _linhas_por_titulo(
         linhas.append(f"### {categoria}")
         linhas.append("")
         for item in itens:
-            linhas.append(
-                f"- {item['titulo']} ({_referencia(item['hash'], url_base)})"
-            )
+            linhas.append(f"- {item['titulo']} ({_referencia(item['hash'], url_base)})")
 
             if detalhado and item["corpo"]:
                 for texto in item["corpo"].splitlines():
@@ -859,16 +936,39 @@ def _secao_arquivos(ref_de: str, ref_para: str, url_base: str | None) -> list[st
         else:
             linhas.append(f"- `{caminho}` (+{adicionadas} −{removidas})")
     if len(arquivos) > LIMITE_ARQUIVOS_NA_LISTA:
-        linhas.append(f"- … e mais {len(arquivos) - LIMITE_ARQUIVOS_NA_LISTA} arquivo(s)")
+        linhas.append(
+            f"- … e mais {len(arquivos) - LIMITE_ARQUIVOS_NA_LISTA} arquivo(s)"
+        )
     linhas.extend(["", "</details>", ""])
     if url_base:
         linhas.extend(
-            [f"[Comparar `{ref_de}...{ref_para}`]({url_base}/compare/{ref_de}...{ref_para})", ""]
+            [
+                f"[Comparar `{ref_de}...{ref_para}`]({url_base}/compare/{ref_de}...{ref_para})",
+                "",
+            ]
         )
     return linhas
 
 
 def gerar_changelog(
+    ref_de: str,
+    ref_para: str,
+    detalhado: bool = True,
+    versao: str | None = None,
+    data_lancamento: str | None = None,
+    ia: ConfigIA | None = None,
+    exigir_ia: bool = False,
+) -> str:
+    marcador = _SESSAO_IA.set(SessaoIA())
+    try:
+        return _gerar_changelog_impl(
+            ref_de, ref_para, detalhado, versao, data_lancamento, ia, exigir_ia
+        )
+    finally:
+        _SESSAO_IA.reset(marcador)
+
+
+def _gerar_changelog_impl(
     ref_de: str,
     ref_para: str,
     detalhado: bool = True,
@@ -898,7 +998,11 @@ def gerar_changelog(
     if ia and detalhado and relevantes:
         try:
             resultado_ia = _descrever_com_ia(relevantes, ia)
-            modo = f"IA ({ia.modelo})"
+            sessao = _SESSAO_IA.get()
+            usados = sessao.usados if sessao is not None else []
+            modo = f"IA ({'; '.join(usados) if usados else ia.modelo})"
+            if sessao is not None and sessao.reserva_ativa:
+                modo += " (reserva mantida após falha do principal)"
         except ErroIA as erro:
             if exigir_ia:
                 raise
@@ -1003,7 +1107,8 @@ def main() -> None:
         help="Modelo de reserva; use nenhum para desligar.",
     )
     parser.add_argument(
-        "--base-url", default=os.environ.get("CHANGELOG_IA_BASE_URL") or GEMINI_BASE_URL,
+        "--base-url",
+        default=os.environ.get("CHANGELOG_IA_BASE_URL") or GEMINI_BASE_URL,
     )
     parser.add_argument(
         "--base-url-reserva",
@@ -1039,16 +1144,21 @@ def main() -> None:
                 _log("GROQ_API_KEY ausente: reserva desabilitada")
                 reserva = None
             config = ConfigIA(
-                token=token, modelo=modelo, limite_prompt=args.limite_prompt,
-                modelo_reserva=reserva, base_url=args.base_url,
+                token=token,
+                modelo=modelo,
+                limite_prompt=args.limite_prompt,
+                modelo_reserva=reserva,
+                base_url=args.base_url,
                 base_url_reserva=args.base_url_reserva,
                 token_reserva=token_reserva or None,
             )
         elif token_reserva and reserva:
             _log("GEMINI_API_KEY ausente: usando Groq como principal")
             config = ConfigIA(
-                token=token_reserva, modelo=reserva,
-                limite_prompt=args.limite_prompt, base_url=args.base_url_reserva,
+                token=token_reserva,
+                modelo=reserva,
+                limite_prompt=args.limite_prompt,
+                base_url=args.base_url_reserva,
             )
         else:
             _log("sem chave de IA configurada: usando os títulos dos commits")
