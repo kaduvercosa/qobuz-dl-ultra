@@ -540,8 +540,9 @@ def _chamar_modelo(
         modelo_indisponivel = (
             erro.codigo == 404 and "no longer available" in erro.detalhe
         )
+        servidor_indisponivel = erro.codigo in (500, 502, 503, 504)
         if (
-            (erro.fatal and not modelo_indisponivel)
+            (erro.fatal and not modelo_indisponivel and not servidor_indisponivel)
             or erro.codigo == 413
             or not reserva
             or reserva == config.modelo
@@ -609,6 +610,14 @@ def _chamar_modelo_unico(
             return str(dados["choices"][0]["message"]["content"])
         except urllib.error.HTTPError as erro:
             detalhe = erro.read().decode("utf-8", "replace")[:300]
+            if erro.code in (500, 502, 503, 504) and not ultima:
+                pausa = PAUSAS_NAO_JSON[min(tentativa, len(PAUSAS_NAO_JSON)) - 1]
+                _log(
+                    f"modelo {modelo}: erro {erro.code} do provedor; "
+                    f"tentando de novo em {pausa:.0f}s"
+                )
+                time.sleep(pausa)
+                continue
             if erro.code == 429 and not ultima:
                 espera = _espera_retry_after(erro)
                 _log(f"limite de requisições da IA; aguardando {espera:.0f}s")
@@ -1049,7 +1058,8 @@ def main() -> None:
     parser.add_argument(
         "--modelo-reserva",
         default=os.environ.get("CHANGELOG_MODELO_RESERVA", MODELO_RESERVA_PADRAO),
-        help="Modelo usado se o principal falhar (ex.: modelo indisponível). "
+        help="Modelo usado se o principal falhar (ex.: modelo indisponível ou "
+        "sobrecarregado). "
         f"Padrão: {MODELO_RESERVA_PADRAO} (ou CHANGELOG_MODELO_RESERVA). "
         "Use 'nenhum' para desligar.",
     )
@@ -1072,10 +1082,6 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    if not args.modelo.strip():
-        args.modelo = MODELO_PADRAO
-        _log(f"--modelo vazio; usando o padrão {MODELO_PADRAO}")
-
     ref_de = args.de or _tag_anterior(args.para)
     if ref_de is None:
         print(
@@ -1094,6 +1100,12 @@ def main() -> None:
             or os.environ.get("GH_TOKEN")
         )
         if token:
+            if not args.modelo.strip():
+                args.modelo = MODELO_PADRAO
+                _log(f"--modelo vazio; usando o padrão {MODELO_PADRAO}")
+            if not args.modelo_reserva.strip():
+                args.modelo_reserva = MODELO_RESERVA_PADRAO
+                _log(f"--modelo-reserva vazio; usando o padrão {MODELO_RESERVA_PADRAO}")
             reserva = (
                 None if args.modelo_reserva.lower() == "nenhum" else args.modelo_reserva
             )
