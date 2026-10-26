@@ -3,8 +3,10 @@
 
 Dois modos:
 
-* **Com IA** (padrão quando existe `GITHUB_TOKEN` ou `GH_TOKEN` no ambiente): lê o
-  diff de cada commit e pede ao GitHub Models (IA gratuita do GitHub) para descrever
+* **Com IA** (padrão quando existe `GEMINI_API_KEY`, `GROQ_API_KEY`,
+  `OPENAI_API_KEY`, `GITHUB_TOKEN` ou `GH_TOKEN` no ambiente): lê o
+  diff de cada commit e pede ao modelo configurado (Gemini por padrão,
+  Groq como reserva) para descrever
   **o que realmente mudou**, agrupado em Adicionado / Modificado / Corrigido etc.
   Também lista os arquivos alterados entre as duas versões.
 * **Sem IA** (`--sem-ia`, sem token, ou se a IA falhar): usa só os títulos e corpos
@@ -18,8 +20,9 @@ Exemplos:
     python tools/gerar_changelog.py --para v2.6.0 --sem-ia
     python tools/gerar_changelog.py --para v2.6.0 --exigir-ia --modelo openai/gpt-4.1
 
-Localmente, use um token pessoal com a permissão `models:read`:
-    GITHUB_TOKEN=ghp_... python tools/gerar_changelog.py --para v2.6.0
+Localmente, use a chave do provedor:
+    GEMINI_API_KEY=... python tools/gerar_changelog.py --para v2.6.0
+    GROQ_API_KEY=... python tools/gerar_changelog.py --para v2.6.0
 """
 
 from __future__ import annotations
@@ -43,8 +46,13 @@ _RS = "\x1e"
 # --- IA (GitHub Models) -----------------------------------------------------
 
 API_URL = "https://models.github.ai/inference/chat/completions"
-MODELO_PADRAO = "openai/gpt-4.1"
-MODELO_RESERVA_PADRAO = "openai/gpt-4.1-mini"
+# Provedores de IA. A API é compatível com OpenAI (chat/completions), então
+# Gemini e Groq usam o mesmo formato de requisição; muda só a URL e a chave.
+GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
+GROQ_BASE_URL = "https://api.groq.com/openai/v1/"
+
+MODELO_PADRAO = "gemini-2.5-flash"
+MODELO_RESERVA_PADRAO = "openai/gpt-oss-120b"
 
 # Limite de caracteres de contexto (metadados + diff) por requisição. O plano
 # gratuito do GitHub Models limita os tokens de entrada, então o diff é enxugado
@@ -58,8 +66,6 @@ LIMITE_ARQUIVOS_NA_LISTA = 80
 AVISO_CORTE = 40  # espaço reservado para o aviso "[... N linhas omitidas ...]"
 
 MAX_TENTATIVAS = 3
-# Pausas (s) após uma resposta 200 que não é JSON (ex.: "OK" de gateway/instabilidade).
-# Mais longas que o backoff comum, porque esse tipo de falha costuma ser temporária.
 PAUSAS_NAO_JSON = (5.0, 20.0, 45.0)
 PAUSA_ENTRE_LOTES = 4.0  # segundos; o plano gratuito limita requisições por minuto
 
@@ -233,6 +239,8 @@ class ConfigIA(NamedTuple):
     modelo: str = MODELO_PADRAO
     limite_prompt: int = LIMITE_PROMPT
     modelo_reserva: str | None = None
+    base_url: str = GEMINI_BASE_URL
+    base_url_reserva: str = GROQ_BASE_URL
 
 
 def _log(mensagem: str) -> None:
@@ -374,8 +382,8 @@ def _diff_do_commit(commit_hash: str) -> str:
 
 def _e_teste(caminho: str) -> bool:
     nome = caminho.rsplit("/", 1)[-1]
-    return caminho.startswith("tests/") or "/tests/" in caminho or nome.startswith(
-        "test_"
+    return (
+        caminho.startswith("tests/") or "/tests/" in caminho or nome.startswith("test_")
     )
 
 
@@ -500,53 +508,50 @@ def _espera_retry_after(erro: urllib.error.HTTPError) -> float:
 
 
 def _diagnostico_resposta(bruto: bytes, status: int | None, tipo: str) -> str:
-    """Explica por que uma resposta 200 sem JSON impede o uso da IA."""
     amostra = bruto[:300].decode("utf-8", "replace").strip()
     baixo = amostra.lower()
-
     if baixo in ("ok", "ok\r\n", "ok\n"):
         return (
-            "o endpoint do GitHub Models respondeu 'OK' em vez de uma resposta "
-            "de chat; isso indica instabilidade do serviço, manutenção ou algo "
-            "(proxy/rede) interceptando a requisição -- não é um problema do "
-            "prompt, do modelo nem do response_format"
+            "o endpoint respondeu 'OK' em vez de uma resposta de chat; se a URL "
+            "for do GitHub Models (models.github.ai), o serviço foi desativado "
+            "em 30/07/2026 e não voltará; para outros provedores, isso indica "
+            "instabilidade, manutenção ou algo (proxy/rede) interceptando a "
+            "requisição -- não é um problema do prompt, do modelo nem do "
+            "response_format"
         )
     if "<html" in baixo or "<!doctype html" in baixo:
-        return (
-            "o endpoint devolveu uma página HTML em vez de JSON; provável "
-            "página de erro, manutenção ou bloqueio de rede/proxy"
-        )
+        return "o endpoint devolveu uma página HTML em vez de JSON; provável página de erro, manutenção ou bloqueio de rede/proxy"
     if not amostra:
         return "o endpoint devolveu uma resposta vazia; falha do serviço ou da rede"
     if "rate limit" in baixo or "quota" in baixo:
         return "o endpoint indicou limite de uso/cota atingido"
-    return (
-        "o endpoint devolveu um corpo que não é JSON; não dá para extrair a "
-        "resposta do modelo"
-    )
+    return "o endpoint devolveu um corpo que não é JSON; não dá para extrair a resposta do modelo"
 
 
 def _chamar_modelo(
     mensagens: list[dict[str, str]], config: ConfigIA, timeout: float = 120.0
 ) -> str:
-    """Chama o modelo principal; se falhar (sem ser erro fatal), tenta o de reserva."""
     try:
-        return _chamar_modelo_unico(mensagens, config, config.modelo, timeout)
+        return _chamar_modelo_unico(
+            mensagens, config, config.modelo, config.base_url, timeout
+        )
     except ErroIA as erro:
         reserva = config.modelo_reserva
         if erro.fatal or erro.codigo == 413 or not reserva or reserva == config.modelo:
             raise
         _log(
-            f"modelo principal '{config.modelo}' falhou após "
-            f"{MAX_TENTATIVAS} tentativas ({erro}); tentando reserva '{reserva}'"
+            f"modelo principal '{config.modelo}' ({config.base_url}) falhou após {MAX_TENTATIVAS} tentativas ({erro}); tentando reserva '{reserva}' ({config.base_url_reserva})"
         )
-        return _chamar_modelo_unico(mensagens, config, reserva, timeout)
+        return _chamar_modelo_unico(
+            mensagens, config, reserva, config.base_url_reserva, timeout
+        )
 
 
 def _chamar_modelo_unico(
     mensagens: list[dict[str, str]],
     config: ConfigIA,
     modelo: str,
+    base_url: str,
     timeout: float = 120.0,
 ) -> str:
     corpo: dict[str, object] = {
@@ -565,7 +570,7 @@ def _chamar_modelo_unico(
 
     for tentativa in range(1, MAX_TENTATIVAS + 1):
         pedido = urllib.request.Request(
-            API_URL,
+            base_url.rstrip("/") + "/chat/completions",
             data=json.dumps(corpo).encode("utf-8"),
             headers=cabecalhos,
             method="POST",
@@ -576,7 +581,7 @@ def _chamar_modelo_unico(
                 bruto = resposta.read()
                 status = getattr(resposta, "status", None)
                 tipo = getattr(resposta, "headers", {}).get("Content-Type", "")
-                url_final = getattr(resposta, "url", API_URL)
+                url_final = getattr(resposta, "url", base_url)
             try:
                 dados = json.loads(bruto)
             except json.JSONDecodeError as erro:
@@ -601,7 +606,11 @@ def _chamar_modelo_unico(
                 _log(f"limite de requisições da IA; aguardando {espera:.0f}s")
                 time.sleep(espera)
                 continue
-            if erro.code == 400 and "response_format" in detalhe and "response_format" in corpo:
+            if (
+                erro.code == 400
+                and "response_format" in detalhe
+                and "response_format" in corpo
+            ):
                 # Nem todo modelo aceita o modo JSON; tenta de novo sem ele.
                 corpo.pop("response_format")
                 continue
@@ -815,9 +824,7 @@ def _linhas_por_titulo(
         linhas.append(f"### {categoria}")
         linhas.append("")
         for item in itens:
-            linhas.append(
-                f"- {item['titulo']} ({_referencia(item['hash'], url_base)})"
-            )
+            linhas.append(f"- {item['titulo']} ({_referencia(item['hash'], url_base)})")
 
             if detalhado and item["corpo"]:
                 for texto in item["corpo"].splitlines():
@@ -888,11 +895,16 @@ def _secao_arquivos(ref_de: str, ref_para: str, url_base: str | None) -> list[st
         else:
             linhas.append(f"- `{caminho}` (+{adicionadas} −{removidas})")
     if len(arquivos) > LIMITE_ARQUIVOS_NA_LISTA:
-        linhas.append(f"- … e mais {len(arquivos) - LIMITE_ARQUIVOS_NA_LISTA} arquivo(s)")
+        linhas.append(
+            f"- … e mais {len(arquivos) - LIMITE_ARQUIVOS_NA_LISTA} arquivo(s)"
+        )
     linhas.extend(["", "</details>", ""])
     if url_base:
         linhas.extend(
-            [f"[Comparar `{ref_de}...{ref_para}`]({url_base}/compare/{ref_de}...{ref_para})", ""]
+            [
+                f"[Comparar `{ref_de}...{ref_para}`]({url_base}/compare/{ref_de}...{ref_para})",
+                "",
+            ]
         )
     return linhas
 
@@ -1023,15 +1035,18 @@ def main() -> None:
     parser.add_argument(
         "--modelo",
         default=os.environ.get("CHANGELOG_MODELO", MODELO_PADRAO),
-        help=f"Modelo do GitHub Models. Padrão: {MODELO_PADRAO} "
+        help=f"Modelo principal. Padrão: {MODELO_PADRAO} "
         "(ou a variável CHANGELOG_MODELO).",
     )
     parser.add_argument(
-        "--modelo-reserva",
-        default=os.environ.get("CHANGELOG_MODELO_RESERVA", MODELO_RESERVA_PADRAO),
-        help="Modelo usado se o principal falhar (ex.: resposta que não é JSON). "
-        f"Padrão: {MODELO_RESERVA_PADRAO} (ou CHANGELOG_MODELO_RESERVA). "
-        "Use 'nenhum' para desligar.",
+        "--base-url",
+        default=os.environ.get("CHANGELOG_IA_BASE_URL", GEMINI_BASE_URL),
+        help="URL base da API (compatível com OpenAI). Padrão: Gemini.",
+    )
+    parser.add_argument(
+        "--base-url-reserva",
+        default=os.environ.get("CHANGELOG_IA_BASE_URL_RESERVA", GROQ_BASE_URL),
+        help="URL base da API do modelo de reserva. Padrão: Groq.",
     )
     parser.add_argument(
         "--limite-prompt",
@@ -1056,18 +1071,24 @@ def main() -> None:
 
     config: ConfigIA | None = None
     if not (args.sem_ia or args.resumido):
-        token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+        token = (
+            os.environ.get("GEMINI_API_KEY")
+            or os.environ.get("GROQ_API_KEY")
+            or os.environ.get("OPENAI_API_KEY")
+            or os.environ.get("GITHUB_TOKEN")
+            or os.environ.get("GH_TOKEN")
+        )
         if token:
             reserva = (
-                None
-                if args.modelo_reserva.lower() == "nenhum"
-                else args.modelo_reserva
+                None if args.modelo_reserva.lower() == "nenhum" else args.modelo_reserva
             )
             config = ConfigIA(
                 token=token,
                 modelo=args.modelo,
                 limite_prompt=args.limite_prompt,
                 modelo_reserva=reserva,
+                base_url=args.base_url,
+                base_url_reserva=args.base_url_reserva,
             )
         else:
             _log("sem GITHUB_TOKEN/GH_TOKEN: usando só os títulos dos commits")
