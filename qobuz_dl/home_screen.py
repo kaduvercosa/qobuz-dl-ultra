@@ -540,6 +540,7 @@ GRUPOS_DOWNLOAD = [
         [
             "--multi-tags",
             "--no-multi-tags",
+            "--continuous-track-numbers",
             "--musicbrainz",
             "--native-lang",
             "--no-*-tag",  # as demais --no-<campo>-tag, na ordem em que aparecem

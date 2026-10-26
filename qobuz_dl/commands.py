@@ -432,6 +432,13 @@ def tags_args(subparsers, default_folder=None):
         action="store_true",
         help='grava artistas, compositores e gêneros como texto único "A, B" (sobrescreve config.ini)',
     )
+    tags.add_argument(
+        "--continuous-track-numbers",
+        dest="continuous_track_numbers",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help="grava o número da faixa seguido em álbuns com vários discos (1 a 11, em vez de reiniciar em cada disco); DISCNUMBER/DISCTOTAL continuam gravados e o nome do arquivo continua por disco (ou continuous_track_numbers = true no config.ini)",
+    )
     # O que alterar: só tags, só capas ou os dois (padrão).
     what = tags.add_mutually_exclusive_group()
     what.add_argument(
@@ -1016,6 +1023,13 @@ def add_common_arg(custom_parser, default_folder, default_quality):
         "--multiple-disc-one-dir",
         action="store_true",
         help="armazena todos os lançamentos com discos múltiplos no mesmo diretório base",
+    )
+    multiple_disc_group.add_argument(
+        "--continuous-track-numbers",
+        dest="continuous_track_numbers",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help="grava o número da faixa seguido em álbuns com vários discos (1 a 11, em vez de reiniciar em cada disco); DISCNUMBER/DISCTOTAL continuam gravados e o nome do arquivo continua por disco (ou continuous_track_numbers = true no config.ini)",
     )
     multiple_disc_group.add_argument(
         "--multiple-disc-track-format",

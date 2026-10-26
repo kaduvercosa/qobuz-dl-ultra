@@ -125,6 +125,7 @@ class QobuzDLSettings:
     # Tags (``no_*`` desliga a tag correspondente)
     musicbrainz: bool
     multi_value_tags: bool
+    continuous_track_numbers: bool
     artists_with_comma: tuple[str, ...]
     various_artists_aliases: frozenset[str]
     no_album_artist_tag: bool
@@ -247,6 +248,9 @@ class QobuzDLSettings:
         self.lyrics_word_sync = kwargs.get("lyrics_word_sync", False)
 
         self.multi_value_tags = kwargs.get("multi_value_tags", False)
+        # # Álbum com vários discos: False (padrão) = TRACKNUMBER por disco; True =
+        # # numeração seguida de 1 a N (DISCNUMBER/DISCTOTAL continuam gravados).
+        self.continuous_track_numbers = kwargs.get("continuous_track_numbers", False)
         # # Nomes de artista que contêm vírgula (ex.: "Tyler, The Creator") e que
         # # não podem ser quebrados em dois. Aceita lista/tupla ou texto com ";".
         self.artists_with_comma = _parse_names_with_comma(
@@ -464,6 +468,12 @@ class QobuzDLSettings:
             # # artists_with_comma = Tyler, The Creator; Earth, Wind & Fire).
             "artists_with_comma": config.get(
                 section, "artists_with_comma", fallback=""
+            ),
+            # # --continuous-track-numbers liga a numeração 1..N em álbuns multi-disco.
+            "continuous_track_numbers": _merge_bool_opt_in(
+                arguments,
+                "continuous_track_numbers",
+                config.getboolean(section, "continuous_track_numbers", fallback=False),
             ),
             # # --no-multi-tags força False; caso contrário, CLI tem precedência sobre config.ini.
             "multi_value_tags": (

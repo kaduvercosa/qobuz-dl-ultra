@@ -1495,12 +1495,16 @@ class Download:
     async def _com_lista_completa_de_faixas(self, track_metadata: dict) -> dict:
         """Faixa avulsa/playlist de álbum multi-disco: completa a lista de faixas.
 
+        Só age com `continuous_track_numbers` ligado (numeração 1..N).
+
         A API da faixa (`track/get`) não traz a lista de faixas do álbum, e sem
         ela não dá para numerar 1..N. Busca o álbum uma vez (cache por id) e
         devolve uma CÓPIA de `track_metadata` com `album.tracks` preenchido. Em
         qualquer falha devolve o original e a faixa segue com a numeração por
         disco (comportamento anterior).
         """
+        if not getattr(self.settings, "continuous_track_numbers", False):
+            return track_metadata
         album = track_metadata.get("album") or {}
         total = album.get("tracks_count") or 0
         itens = (album.get("tracks") or {}).get("items") or []

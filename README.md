@@ -229,7 +229,7 @@ O Qobuz-DL Ultra permite profunda personalização da estrutura da sua bibliotec
 ```
 
 - **Roteamento Multi-Disco:** Armazene lançamentos com múltiplos discos em um único diretório ou divida-os usando prefixos personalizáveis (ex.: `CD 01`).
-  - **Tags em álbuns com vários discos:** `TRACKNUMBER` vai de 1 ao total do álbum (ex.: 1 a 11) e `TRACKTOTAL` é esse total, então o player mostra a numeração contínua. `DISCNUMBER`/`DISCTOTAL` (e `TPOS` no MP3) continuam gravados, para o player dividir a lista por disco. Vale para álbum, faixa avulsa, playlist e para o comando `tags`; faixa avulsa e playlist consultam o álbum uma vez para saber a ordem das faixas (se a consulta falhar, aquela faixa fica com a numeração por disco). O nome do arquivo dentro de `CD 01`/`CD 02` continua por disco (`CD 02/01 - Temporal`).
+  - **Tags em álbuns com vários discos:** por padrão `TRACKNUMBER` e `TRACKTOTAL` são por disco (ex.: 1 a 5 no disco 1 e 1 a 6 no disco 2), com `DISCNUMBER`/`DISCTOTAL` (e `TPOS` no MP3) gravados para o player dividir a lista por disco. Quem prefere a numeração seguida (1 a 11) usa `--continuous-track-numbers` nos comandos `dl` e `tags`, ou `continuous_track_numbers = true` no `config.ini`: `TRACKNUMBER` vai de 1 ao total do álbum e as tags de disco continuam gravadas. Vale para álbum, faixa avulsa e playlist (faixa avulsa e playlist consultam o álbum uma vez para saber a ordem; se a consulta falhar, aquela faixa fica por disco). O nome do arquivo dentro de `CD 01`/`CD 02` é sempre por disco (`CD 02/01 - Temporal`).
  
 - **Geração Universal de Playlists:** Arquivos `.m3u` são rigorosamente codificados em UTF-8, garantindo 100% de estabilidade mesmo com caracteres Unicode complexos ou japoneses (Resolve a issue #304).
  

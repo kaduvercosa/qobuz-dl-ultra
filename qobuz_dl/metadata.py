@@ -350,7 +350,8 @@ def _numeracao_continua(qobuz_album: dict, qobuz_item: dict):
     nessa lista. Nos demais casos (disco único, faixa avulsa, playlist, lista
     parcial) retorna None e o chamador mantém o comportamento anterior.
 
-    Só afeta TRACKNUMBER/TRACKTOTAL/TRCK. DISCNUMBER/DISCTOTAL/TPOS continuam
+    Só é usada com `continuous_track_numbers` ligado (padrão: desligado, e o
+    TRACKNUMBER fica por disco). Só afeta TRACKNUMBER/TRACKTOTAL/TRCK. DISCNUMBER/DISCTOTAL/TPOS continuam
     sendo gravados (é por eles que o player divide a lista por disco) e o nome
     do arquivo continua usando o número por disco.
     """
@@ -1023,7 +1024,11 @@ def tag_flac(
     # seria um dado errado, pior que tag ausente.
     # Álbum com vários discos e lista completa: o player mostra 1..N, e
     # DISCNUMBER/DISCTOTAL (abaixo) continuam dividindo a lista por disco.
-    continua = _numeracao_continua(qobuz_album, qobuz_item)
+    continua = (
+        _numeracao_continua(qobuz_album, qobuz_item)
+        if getattr(settings, "continuous_track_numbers", False)
+        else None
+    )
     if continua:
         if not settings.no_track_number_tag:
             tags["TRACKNUMBER"] = str(continua[0])
@@ -1322,7 +1327,11 @@ def tag_mp3(
 
     # # TRCK/TPOS usam o formato número/total reconhecido por players. Sem o
     # # número da faixa/disco, o frame não é gravado; sem o total, vai só o número.
-    continua = _numeracao_continua(qobuz_album, qobuz_item)
+    continua = (
+        _numeracao_continua(qobuz_album, qobuz_item)
+        if getattr(settings, "continuous_track_numbers", False)
+        else None
+    )
     if continua:
         # Multi-disco completo: TRCK 1..N; o TPOS (abaixo) segue dividindo por disco.
         track = str(continua[0])

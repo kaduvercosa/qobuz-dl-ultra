@@ -755,6 +755,7 @@ async def _reset_config(config_file: str):
     config["qobuz"]["no_lrc_files"] = "true"
     config["qobuz"]["embed_lyrics"] = "true"
     config["qobuz"]["multi_value_tags"] = "false"
+    config["qobuz"]["continuous_track_numbers"] = "false"
     config["qobuz"]["legacy_charmap"] = "false"
     config["qobuz"]["blacklist"] = "blacklist.txt"
 
