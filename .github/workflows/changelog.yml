@@ -79,26 +79,31 @@ jobs:
         env:
           TAG: ${{ steps.release.outputs.tag }}
           TAG_PREVIOUS: ${{ steps.previous.outputs.tag }}
-          # Chave da IA principal (Google Gemini, free tier).
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          # Chave da IA de reserva (Groq, free tier).
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-          # Para trocar o modelo principal, crie a variável CHANGELOG_MODELO em
-          # Settings > Secrets and variables > Actions > Variables
-          # (ex.: gemini-2.5-flash). Vazia = modelo padrão do script.
           CHANGELOG_MODELO: ${{ vars.CHANGELOG_MODELO }}
-          # Para trocar o modelo de reserva, crie a variável
-          # CHANGELOG_MODELO_RESERVA (ex.: openai/gpt-oss-120b).
           CHANGELOG_MODELO_RESERVA: ${{ vars.CHANGELOG_MODELO_RESERVA }}
         shell: bash
         run: |
           set -euo pipefail
 
-          ARGS=(--de "$TAG_PREVIOUS" --para "$TAG" --versao "$TAG" \
+          if [[ -n "${GEMINI_API_KEY:-}" ]]; then
+            echo "GEMINI_API_KEY: configurada"
+          else
+            echo "::warning::GEMINI_API_KEY ausente"
+          fi
+          if [[ -n "${GROQ_API_KEY:-}" ]]; then
+            echo "GROQ_API_KEY: configurada"
+          else
+            echo "::warning::GROQ_API_KEY ausente"
+          fi
+
+          ARGS=(--de "$TAG_PREVIOUS" --para "$TAG" --versao "$TAG"
                 --data "$(date -u +%F)" --output /tmp/changelog.md)
           if [[ -n "${CHANGELOG_MODELO:-}" ]]; then
             ARGS+=(--modelo "$CHANGELOG_MODELO")
           fi
+
           if [[ -n "${CHANGELOG_MODELO_RESERVA:-}" ]]; then
             ARGS+=(--modelo-reserva "$CHANGELOG_MODELO_RESERVA")
           fi

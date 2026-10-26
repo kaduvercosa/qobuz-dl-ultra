@@ -3,10 +3,8 @@
 
 Dois modos:
 
-* **Com IA** (padrão quando existe `GEMINI_API_KEY`, `GROQ_API_KEY`,
-  `OPENAI_API_KEY`, `GITHUB_TOKEN` ou `GH_TOKEN` no ambiente): lê o
-  diff de cada commit e pede ao modelo configurado (Gemini por padrão,
-  Groq como reserva) para descrever
+* **Com IA** (padrão quando existe `GEMINI_API_KEY` ou `GROQ_API_KEY` no ambiente): lê o
+  diff de cada commit e pede ao Gemini (com Groq opcional como reserva) para descrever
   **o que realmente mudou**, agrupado em Adicionado / Modificado / Corrigido etc.
   Também lista os arquivos alterados entre as duas versões.
 * **Sem IA** (`--sem-ia`, sem token, ou se a IA falhar): usa só os títulos e corpos
@@ -20,9 +18,8 @@ Exemplos:
     python tools/gerar_changelog.py --para v2.6.0 --sem-ia
     python tools/gerar_changelog.py --para v2.6.0 --exigir-ia --modelo openai/gpt-4.1
 
-Localmente, use a chave do provedor:
+Localmente, use GEMINI_API_KEY e, opcionalmente, GROQ_API_KEY:
     GEMINI_API_KEY=... python tools/gerar_changelog.py --para v2.6.0
-    GROQ_API_KEY=... python tools/gerar_changelog.py --para v2.6.0
 """
 
 from __future__ import annotations
@@ -46,17 +43,12 @@ _RS = "\x1e"
 # --- IA (GitHub Models) -----------------------------------------------------
 
 API_URL = "https://models.github.ai/inference/chat/completions"
-# Provedores de IA. A API é compatível com OpenAI (chat/completions), então
-# Gemini e Groq usam o mesmo formato de requisição; muda só a URL e a chave.
 GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 GROQ_BASE_URL = "https://api.groq.com/openai/v1/"
-
 MODELO_PADRAO = "gemini-3.8-flash"
 MODELO_RESERVA_PADRAO = "openai/gpt-oss-120b"
-
-# User-Agent normal: a Groq usa Cloudflare e bloqueia o User-Agent padrão do
-# urllib ("Python-urllib/3.x") com o erro 1010 ("browser's signature").
 USER_AGENT = "qobuz-dl-ultra-changelog/1.0"
+PAUSAS_NAO_JSON = (5.0, 20.0)
 
 # Limite de caracteres de contexto (metadados + diff) por requisição. O plano
 # gratuito do GitHub Models limita os tokens de entrada, então o diff é enxugado
@@ -70,7 +62,6 @@ LIMITE_ARQUIVOS_NA_LISTA = 80
 AVISO_CORTE = 40  # espaço reservado para o aviso "[... N linhas omitidas ...]"
 
 MAX_TENTATIVAS = 3
-PAUSAS_NAO_JSON = (5.0, 20.0, 45.0)
 PAUSA_ENTRE_LOTES = 4.0  # segundos; o plano gratuito limita requisições por minuto
 
 # Arquivos que só atrapalham a leitura (gerados, caches, o próprio changelog).
@@ -245,6 +236,7 @@ class ConfigIA(NamedTuple):
     modelo_reserva: str | None = None
     base_url: str = GEMINI_BASE_URL
     base_url_reserva: str = GROQ_BASE_URL
+    token_reserva: str | None = None
 
 
 def _log(mensagem: str) -> None:
@@ -386,8 +378,8 @@ def _diff_do_commit(commit_hash: str) -> str:
 
 def _e_teste(caminho: str) -> bool:
     nome = caminho.rsplit("/", 1)[-1]
-    return (
-        caminho.startswith("tests/") or "/tests/" in caminho or nome.startswith("test_")
+    return caminho.startswith("tests/") or "/tests/" in caminho or nome.startswith(
+        "test_"
     )
 
 
@@ -511,146 +503,105 @@ def _espera_retry_after(erro: urllib.error.HTTPError) -> float:
         return 15.0
 
 
-def _diagnostico_resposta(bruto: bytes, status: int | None, tipo: str) -> str:
-    amostra = bruto[:300].decode("utf-8", "replace").strip()
-    baixo = amostra.lower()
-    if baixo in ("ok", "ok\r\n", "ok\n"):
-        return (
-            "o endpoint respondeu 'OK' em vez de uma resposta de chat; se a URL "
-            "for do GitHub Models (models.github.ai), o serviço foi desativado "
-            "em 30/07/2026 e não voltará; para outros provedores, isso indica "
-            "instabilidade, manutenção ou algo (proxy/rede) interceptando a "
-            "requisição -- não é um problema do prompt, do modelo nem do "
-            "response_format"
-        )
-    if "<html" in baixo or "<!doctype html" in baixo:
-        return "o endpoint devolveu uma página HTML em vez de JSON; provável página de erro, manutenção ou bloqueio de rede/proxy"
-    if not amostra:
-        return "o endpoint devolveu uma resposta vazia; falha do serviço ou da rede"
-    if "rate limit" in baixo or "quota" in baixo:
-        return "o endpoint indicou limite de uso/cota atingido"
-    return "o endpoint devolveu um corpo que não é JSON; não dá para extrair a resposta do modelo"
-
-
 def _chamar_modelo(
     mensagens: list[dict[str, str]], config: ConfigIA, timeout: float = 120.0
 ) -> str:
+    principal = config._replace(modelo=config.modelo.strip() or MODELO_PADRAO)
     try:
-        return _chamar_modelo_unico(
-            mensagens, config, config.modelo, config.base_url, timeout
-        )
+        return _chamar_modelo_unico(mensagens, principal, timeout)
     except ErroIA as erro:
-        reserva = config.modelo_reserva
-        modelo_indisponivel = (
-            erro.codigo == 404 and "no longer available" in erro.detalhe
-        )
-        servidor_indisponivel = erro.codigo in (500, 502, 503, 504)
-        if (
-            (erro.fatal and not modelo_indisponivel and not servidor_indisponivel)
-            or erro.codigo == 413
-            or not reserva
-            or reserva == config.modelo
-        ):
+        reserva = (config.modelo_reserva or "").strip()
+        if erro.codigo == 413 or not reserva or reserva.lower() == "nenhum":
             raise
-        _log(
-            f"modelo principal '{config.modelo}' ({config.base_url}) falhou ({erro}); tentando reserva '{reserva}' ({config.base_url_reserva})"
+        if not config.token_reserva or not config.token_reserva.strip():
+            _log("reserva desabilitada: falta a chave própria do provedor de reserva")
+            raise
+        if reserva == principal.modelo and config.base_url_reserva == principal.base_url:
+            raise
+        _log(f"modelo {principal.modelo} falhou ({erro}); tentando reserva {reserva}")
+        secundaria = config._replace(
+            token=config.token_reserva.strip(), modelo=reserva,
+            base_url=config.base_url_reserva, modelo_reserva=None,
+            token_reserva=None,
         )
-        return _chamar_modelo_unico(
-            mensagens, config, reserva, config.base_url_reserva, timeout
-        )
+        try:
+            return _chamar_modelo_unico(mensagens, secundaria, timeout)
+        except ErroIA as falha:
+            raise ErroIA(
+                falha.codigo,
+                f"principal {principal.modelo}: {erro}; reserva {reserva}: {falha}",
+            ) from falha
 
 
 def _chamar_modelo_unico(
-    mensagens: list[dict[str, str]],
-    config: ConfigIA,
-    modelo: str,
-    base_url: str,
-    timeout: float = 120.0,
+    mensagens: list[dict[str, str]], config: ConfigIA, timeout: float = 120.0
 ) -> str:
+    if not config.token.strip():
+        raise ErroIA(401, f"chave ausente para {config.modelo}")
     corpo: dict[str, object] = {
-        "model": modelo,
-        "messages": mensagens,
-        "temperature": 0.2,
-        "max_tokens": 2500,
+        "model": config.modelo, "messages": mensagens,
+        "temperature": 0.2, "max_tokens": 2500,
         "response_format": {"type": "json_object"},
     }
+    url = config.base_url.rstrip("/") + "/chat/completions"
     cabecalhos = {
-        "Accept": "application/vnd.github+json",
-        "Authorization": f"Bearer {config.token}",
-        "X-GitHub-Api-Version": "2022-11-28",
-        "Content-Type": "application/json",
-        "User-Agent": USER_AGENT,
+        "Accept": "application/json",
+        "Authorization": f"Bearer {config.token.strip()}",
+        "Content-Type": "application/json", "User-Agent": USER_AGENT,
     }
-
     for tentativa in range(1, MAX_TENTATIVAS + 1):
-        pedido = urllib.request.Request(
-            base_url.rstrip("/") + "/chat/completions",
-            data=json.dumps(corpo).encode("utf-8"),
-            headers=cabecalhos,
-            method="POST",
-        )
         ultima = tentativa == MAX_TENTATIVAS
+        pedido = urllib.request.Request(
+            url, data=json.dumps(corpo).encode("utf-8"),
+            headers=cabecalhos, method="POST",
+        )
         try:
             with urllib.request.urlopen(pedido, timeout=timeout) as resposta:
                 bruto = resposta.read()
                 status = getattr(resposta, "status", None)
                 tipo = getattr(resposta, "headers", {}).get("Content-Type", "")
-                url_final = getattr(resposta, "url", base_url)
             try:
                 dados = json.loads(bruto)
             except json.JSONDecodeError as erro:
-                motivo = _diagnostico_resposta(bruto, status, tipo)
+                amostra = bruto[:300].decode("utf-8", "replace")
                 detalhe = (
-                    f"modelo {modelo}: resposta que não é JSON "
-                    f"(status {status}, tipo {tipo!r}, url {url_final}, "
-                    f"{len(bruto)} bytes): "
-                    f"{bruto[:300].decode('utf-8', 'replace')!r}; motivo: {motivo}"
+                    f"modelo {config.modelo}: resposta que não é JSON "
+                    f"(status {status}, tipo {tipo!r}, url {url}, "
+                    f"{len(bruto)} bytes): {amostra!r}; "
+                    "não foi possível extrair a resposta de chat; "
+                    "a causa no provedor/rede não foi informada"
                 )
                 if ultima:
                     raise ErroIA(None, detalhe) from erro
                 _log(f"{detalhe}; tentativa {tentativa}/{MAX_TENTATIVAS}")
                 corpo.pop("response_format", None)
-                time.sleep(PAUSAS_NAO_JSON[min(tentativa, len(PAUSAS_NAO_JSON)) - 1])
+                time.sleep(PAUSAS_NAO_JSON[min(tentativa - 1, 1)])
                 continue
-            return str(dados["choices"][0]["message"]["content"])
+            conteudo = dados["choices"][0]["message"]["content"]
+            if not isinstance(conteudo, str) or not conteudo.strip():
+                raise ValueError("resposta de chat sem conteúdo textual")
+            return conteudo
         except urllib.error.HTTPError as erro:
-            detalhe = erro.read().decode("utf-8", "replace")[:300]
-            if erro.code in (500, 502, 503, 504) and not ultima:
-                pausa = PAUSAS_NAO_JSON[min(tentativa, len(PAUSAS_NAO_JSON)) - 1]
-                _log(
-                    f"modelo {modelo}: erro {erro.code} do provedor; "
-                    f"tentando de novo em {pausa:.0f}s"
-                )
-                time.sleep(pausa)
-                continue
-            if erro.code == 429 and not ultima:
-                espera = _espera_retry_after(erro)
-                _log(f"limite de requisições da IA; aguardando {espera:.0f}s")
-                time.sleep(espera)
-                continue
-            if (
-                erro.code == 400
-                and "response_format" in detalhe
-                and "response_format" in corpo
-            ):
-                # Nem todo modelo aceita o modo JSON; tenta de novo sem ele.
+            detalhe = erro.read().decode("utf-8", "replace")[:2000]
+            for segredo in (config.token, config.token_reserva):
+                if segredo:
+                    detalhe = detalhe.replace(segredo, "[CHAVE OCULTA]")
+            if erro.code == 400 and "response_format" in detalhe and "response_format" in corpo and not ultima:
                 corpo.pop("response_format")
                 continue
-            raise ErroIA(erro.code, detalhe) from erro
-        except (
-            urllib.error.URLError,
-            TimeoutError,
-            json.JSONDecodeError,
-            KeyError,
-            IndexError,
-            TypeError,
-        ) as erro:
-            if not ultima:
-                time.sleep(2.0 * tentativa)
+            if erro.code in (429, 500, 502, 503, 504) and not ultima:
+                espera = (_espera_retry_after(erro) if erro.code == 429
+                          else PAUSAS_NAO_JSON[min(tentativa - 1, 1)])
+                _log(f"modelo {config.modelo}: HTTP {erro.code}; aguardando {espera:.0f}s")
+                time.sleep(espera)
                 continue
-            raise ErroIA(None, f"{type(erro).__name__}: {erro}") from erro
-
-    raise ErroIA(None, "sem resposta da IA")  # pragma: no cover
+            raise ErroIA(erro.code, detalhe) from erro
+        except (urllib.error.URLError, TimeoutError, KeyError, IndexError,
+                TypeError, ValueError) as erro:
+            if ultima:
+                raise ErroIA(None, f"{type(erro).__name__}: {erro}") from erro
+            time.sleep(2.0 * tentativa)
+    raise ErroIA(None, "sem resposta da IA")
 
 
 def _extrair_json(bruto: str) -> dict[str, object]:
@@ -791,25 +742,14 @@ def _descrever_com_ia(
                 raise
             falhas += 1
             ultimo_erro = str(erro)
-            _log(
-                f"IA falhou no lote {numero} após tentar o modelo principal "
-                f"'{config.modelo}' e a reserva "
-                f"'{config.modelo_reserva or 'nenhuma'}': {erro}; "
-                "usando os títulos desses commits"
-            )
+            _log(f"IA falhou no lote {numero}: {erro}; usando os títulos desses commits")
             continue
         if resumo:
             resumos.append(resumo)
         itens.extend(novos)
 
     if falhas == len(lotes):
-        raise ErroIA(
-            None,
-            f"a IA falhou em todos os lotes; modelos tentados: "
-            f"'{config.modelo}' e reserva "
-            f"'{config.modelo_reserva or 'nenhuma'}'; "
-            f"último erro: {ultimo_erro}",
-        )
+        raise ErroIA(None, f"a IA falhou em todos os lotes (último erro: {ultimo_erro})")
 
     resumo_final = " ".join(resumos)
     if len(lotes) > 1 and itens:
@@ -846,7 +786,9 @@ def _linhas_por_titulo(
         linhas.append(f"### {categoria}")
         linhas.append("")
         for item in itens:
-            linhas.append(f"- {item['titulo']} ({_referencia(item['hash'], url_base)})")
+            linhas.append(
+                f"- {item['titulo']} ({_referencia(item['hash'], url_base)})"
+            )
 
             if detalhado and item["corpo"]:
                 for texto in item["corpo"].splitlines():
@@ -917,16 +859,11 @@ def _secao_arquivos(ref_de: str, ref_para: str, url_base: str | None) -> list[st
         else:
             linhas.append(f"- `{caminho}` (+{adicionadas} −{removidas})")
     if len(arquivos) > LIMITE_ARQUIVOS_NA_LISTA:
-        linhas.append(
-            f"- … e mais {len(arquivos) - LIMITE_ARQUIVOS_NA_LISTA} arquivo(s)"
-        )
+        linhas.append(f"- … e mais {len(arquivos) - LIMITE_ARQUIVOS_NA_LISTA} arquivo(s)")
     linhas.extend(["", "</details>", ""])
     if url_base:
         linhas.extend(
-            [
-                f"[Comparar `{ref_de}...{ref_para}`]({url_base}/compare/{ref_de}...{ref_para})",
-                "",
-            ]
+            [f"[Comparar `{ref_de}...{ref_para}`]({url_base}/compare/{ref_de}...{ref_para})", ""]
         )
     return linhas
 
@@ -1062,21 +999,15 @@ def main() -> None:
     )
     parser.add_argument(
         "--modelo-reserva",
-        default=os.environ.get("CHANGELOG_MODELO_RESERVA", MODELO_RESERVA_PADRAO),
-        help="Modelo usado se o principal falhar (ex.: modelo indisponível ou "
-        "sobrecarregado). "
-        f"Padrão: {MODELO_RESERVA_PADRAO} (ou CHANGELOG_MODELO_RESERVA). "
-        "Use 'nenhum' para desligar.",
+        default=os.environ.get("CHANGELOG_MODELO_RESERVA") or MODELO_RESERVA_PADRAO,
+        help="Modelo de reserva; use nenhum para desligar.",
     )
     parser.add_argument(
-        "--base-url",
-        default=os.environ.get("CHANGELOG_IA_BASE_URL", GEMINI_BASE_URL),
-        help="URL base da API (compatível com OpenAI). Padrão: Gemini.",
+        "--base-url", default=os.environ.get("CHANGELOG_IA_BASE_URL") or GEMINI_BASE_URL,
     )
     parser.add_argument(
         "--base-url-reserva",
-        default=os.environ.get("CHANGELOG_IA_BASE_URL_RESERVA", GROQ_BASE_URL),
-        help="URL base da API do modelo de reserva. Padrão: Groq.",
+        default=os.environ.get("CHANGELOG_IA_BASE_URL_RESERVA") or GROQ_BASE_URL,
     )
     parser.add_argument(
         "--limite-prompt",
@@ -1097,33 +1028,30 @@ def main() -> None:
 
     config: ConfigIA | None = None
     if not (args.sem_ia or args.resumido):
-        token = (
-            os.environ.get("GEMINI_API_KEY")
-            or os.environ.get("GROQ_API_KEY")
-            or os.environ.get("OPENAI_API_KEY")
-            or os.environ.get("GITHUB_TOKEN")
-            or os.environ.get("GH_TOKEN")
-        )
+        token = os.environ.get("GEMINI_API_KEY", "").strip()
+        token_reserva = os.environ.get("GROQ_API_KEY", "").strip()
+        modelo = args.modelo.strip() or MODELO_PADRAO
+        reserva = args.modelo_reserva.strip() or MODELO_RESERVA_PADRAO
+        if reserva.lower() == "nenhum":
+            reserva = None
         if token:
-            if not args.modelo.strip():
-                args.modelo = MODELO_PADRAO
-                _log(f"--modelo vazio; usando o padrão {MODELO_PADRAO}")
-            if not args.modelo_reserva.strip():
-                args.modelo_reserva = MODELO_RESERVA_PADRAO
-                _log(f"--modelo-reserva vazio; usando o padrão {MODELO_RESERVA_PADRAO}")
-            reserva = (
-                None if args.modelo_reserva.lower() == "nenhum" else args.modelo_reserva
-            )
+            if reserva and not token_reserva:
+                _log("GROQ_API_KEY ausente: reserva desabilitada")
+                reserva = None
             config = ConfigIA(
-                token=token,
-                modelo=args.modelo,
-                limite_prompt=args.limite_prompt,
-                modelo_reserva=reserva,
-                base_url=args.base_url,
+                token=token, modelo=modelo, limite_prompt=args.limite_prompt,
+                modelo_reserva=reserva, base_url=args.base_url,
                 base_url_reserva=args.base_url_reserva,
+                token_reserva=token_reserva or None,
+            )
+        elif token_reserva and reserva:
+            _log("GEMINI_API_KEY ausente: usando Groq como principal")
+            config = ConfigIA(
+                token=token_reserva, modelo=reserva,
+                limite_prompt=args.limite_prompt, base_url=args.base_url_reserva,
             )
         else:
-            _log("sem GITHUB_TOKEN/GH_TOKEN: usando só os títulos dos commits")
+            _log("sem chave de IA configurada: usando os títulos dos commits")
     if args.exigir_ia and config is None:
         print(
             "--exigir-ia: a IA está desligada (--sem-ia/--resumido) ou falta o token.",
