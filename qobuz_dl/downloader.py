@@ -1492,6 +1492,47 @@ class Download:
 
         return bool(success)
 
+    async def _com_lista_completa_de_faixas(self, track_metadata: dict) -> dict:
+        """Faixa avulsa/playlist de álbum multi-disco: completa a lista de faixas.
+
+        A API da faixa (`track/get`) não traz a lista de faixas do álbum, e sem
+        ela não dá para numerar 1..N. Busca o álbum uma vez (cache por id) e
+        devolve uma CÓPIA de `track_metadata` com `album.tracks` preenchido. Em
+        qualquer falha devolve o original e a faixa segue com a numeração por
+        disco (comportamento anterior).
+        """
+        album = track_metadata.get("album") or {}
+        total = album.get("tracks_count") or 0
+        itens = (album.get("tracks") or {}).get("items") or []
+        album_id = album.get("id")
+        if (album.get("media_count") or 1) <= 1 or not total or not album_id:
+            return track_metadata
+        if len(itens) == total:
+            return track_metadata
+
+        cache = self.__dict__.setdefault("_cache_faixas_album", {})
+        travas = self.__dict__.setdefault("_travas_faixas_album", {})
+        chave = str(album_id)
+        trava = travas.setdefault(chave, asyncio.Lock())
+        async with trava:
+            if chave not in cache:
+                try:
+                    meta = await self.client.get_album_meta(album_id)
+                    cache[chave] = (meta.get("tracks") or {}).get("items") or []
+                except Exception:
+                    # Sem a lista, a faixa mantém a numeração por disco.
+                    logger.debug(
+                        "Falha ao buscar a lista de faixas do álbum %s",
+                        album_id,
+                        exc_info=True,
+                    )
+                    cache[chave] = []
+        itens_completos = cache[chave]
+        if len(itens_completos) != total:
+            return track_metadata
+        novo_album = {**album, "tracks": {"items": itens_completos}}
+        return {**track_metadata, "album": novo_album}
+
     async def _download_and_tag(self, *args, **kwargs) -> bool:
         """Apply tags and present a final status only after all processing."""
         claimed_paths: list[str] = []
@@ -1880,6 +1921,21 @@ class Download:
         extension = ".mp3" if is_mp3 else ".flac"
 
         tag_function = metadata.tag_mp3 if is_mp3 else metadata.tag_flac
+        # Faixa avulsa/playlist: busca a lista de faixas do álbum para a
+        # numeração contínua (1..N) das tags em álbuns com vários discos.
+        tag_track_metadata = track_metadata
+        tag_album_metadata = album_or_track_metadata
+        if is_track:
+            tag_track_metadata = await self._com_lista_completa_de_faixas(
+                track_metadata
+            )
+        else:
+            # Álbum com lista de faixas incompleta: mesma busca, sobre o álbum.
+            tag_album_metadata = (
+                await self._com_lista_completa_de_faixas(
+                    {"album": album_or_track_metadata}
+                )
+            )["album"]
         mb_ids = await mb_task if mb_task is not None else None
         # So' passa o argumento quando há IDs confirmados: sem --musicbrainz a
         # chamada continua idêntica à de antes.
@@ -1891,8 +1947,8 @@ class Download:
                     filename,
                     root_dir,
                     final_file,
-                    track_metadata,
-                    album_or_track_metadata,
+                    tag_track_metadata,
+                    tag_album_metadata,
                     is_track,
                     self.embed_art,
                     settings=self.settings,

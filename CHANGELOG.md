@@ -30,6 +30,13 @@ publicar, renomeie a seção para a nova versão e a data.
 - Workflow `mypy-baseline.yml` para gerar o `mypy-baseline.txt` uma única vez.
 
 ### Alterado
+- Álbuns com vários discos: `TRACKNUMBER`/`TRCK` passam a ir de 1 a N e `TRACKTOTAL`
+  é o total do álbum (ex.: 11), para o player mostrar 1 a 11. `DISCNUMBER`, `DISCTOTAL`
+  e `TPOS` continuam gravados, então o player ainda divide por disco. Vale para álbum,
+  faixa avulsa, playlist e para o `tags`: faixa avulsa e playlist buscam a lista de
+  faixas do álbum (uma vez por álbum); se a busca falhar, a faixa fica com a numeração
+  por disco. As pastas `CD 01`/`CD 02` e o nome dos arquivos (por disco) continuam
+  iguais. Substitui o `TRACKTOTAL` por disco.
 - `inspect` sem pasta no comando abre na `directory` do `config.ini` (se existir);
   sem ela, mantém a detecção pela pasta de música do dispositivo. Os demais comandos
   com pasta (`tags`, `lyrics`, `scan`, `library reconcile`, `--sync-db`,

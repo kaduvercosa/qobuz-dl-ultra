@@ -342,6 +342,55 @@ def _tracktotal_do_disco(qobuz_album: dict, qobuz_item: dict) -> str:
     return str(total)
 
 
+def _numeracao_continua(qobuz_album: dict, qobuz_item: dict):
+    """Numeração contínua (1..N) das faixas de um álbum com vários discos.
+
+    Retorna (numero, total) quando o álbum tem mais de um disco E a lista de
+    faixas está completa (len(items) == tracks_count) E a faixa atual está
+    nessa lista. Nos demais casos (disco único, faixa avulsa, playlist, lista
+    parcial) retorna None e o chamador mantém o comportamento anterior.
+
+    Só afeta TRACKNUMBER/TRACKTOTAL/TRCK. DISCNUMBER/DISCTOTAL/TPOS continuam
+    sendo gravados (é por eles que o player divide a lista por disco) e o nome
+    do arquivo continua usando o número por disco.
+    """
+    total = qobuz_album.get("tracks_count") or 0
+    items = (qobuz_album.get("tracks") or {}).get("items") or []
+    if (qobuz_album.get("media_count") or 1) <= 1 or not total:
+        return None
+    if len(items) != total:
+        return None
+
+    def _ordem(t):
+        try:
+            disco = int(t.get("media_number") or 1)
+        except (TypeError, ValueError):
+            disco = 1
+        try:
+            faixa = int(t.get("track_number") or 0)
+        except (TypeError, ValueError):
+            faixa = 0
+        return (disco, faixa)
+
+    ordenadas = sorted(items, key=_ordem)
+    atual = qobuz_item.get("id")
+    posicao = None
+    if atual is not None:
+        for i, t in enumerate(ordenadas, 1):
+            if t.get("id") == atual:
+                posicao = i
+                break
+    if posicao is None:
+        chave = _ordem(qobuz_item)
+        for i, t in enumerate(ordenadas, 1):
+            if _ordem(t) == chave:
+                posicao = i
+                break
+    if posicao is None:
+        return None
+    return posicao, total
+
+
 # # Remove caminhos/setas de gênero e elimina gêneros repetidos.
 def _format_genres(genres: list) -> str:
     """Format genre list for tags."""
@@ -972,10 +1021,23 @@ def tag_flac(
 
     # Numeracao so e' gravada quando a API informou o valor: um "1" inventado
     # seria um dado errado, pior que tag ausente.
-    if not settings.no_track_number_tag and _tem_valor(qobuz_item.get("track_number")):
-        tags["TRACKNUMBER"] = str(qobuz_item["track_number"])
-    if not settings.no_track_total_tag and _tem_valor(qobuz_album.get("tracks_count")):
-        tags["TRACKTOTAL"] = _tracktotal_do_disco(qobuz_album, qobuz_item)
+    # Álbum com vários discos e lista completa: o player mostra 1..N, e
+    # DISCNUMBER/DISCTOTAL (abaixo) continuam dividindo a lista por disco.
+    continua = _numeracao_continua(qobuz_album, qobuz_item)
+    if continua:
+        if not settings.no_track_number_tag:
+            tags["TRACKNUMBER"] = str(continua[0])
+        if not settings.no_track_total_tag:
+            tags["TRACKTOTAL"] = str(continua[1])
+    else:
+        if not settings.no_track_number_tag and _tem_valor(
+            qobuz_item.get("track_number")
+        ):
+            tags["TRACKNUMBER"] = str(qobuz_item["track_number"])
+        if not settings.no_track_total_tag and _tem_valor(
+            qobuz_album.get("tracks_count")
+        ):
+            tags["TRACKTOTAL"] = _tracktotal_do_disco(qobuz_album, qobuz_item)
     if not settings.no_disc_number_tag and _tem_valor(qobuz_item.get("media_number")):
         tags["DISCNUMBER"] = str(qobuz_item["media_number"])
     if not settings.no_disc_total_tag and _tem_valor(qobuz_album.get("media_count")):
@@ -1260,9 +1322,18 @@ def tag_mp3(
 
     # # TRCK/TPOS usam o formato número/total reconhecido por players. Sem o
     # # número da faixa/disco, o frame não é gravado; sem o total, vai só o número.
-    track = str(qobuz_item.get("track_number", "1"))
-    if not settings.no_track_total_tag and _tem_valor(qobuz_album.get("media_count")):
-        track += f"/{_tracktotal_do_disco(qobuz_album, qobuz_item)}"
+    continua = _numeracao_continua(qobuz_album, qobuz_item)
+    if continua:
+        # Multi-disco completo: TRCK 1..N; o TPOS (abaixo) segue dividindo por disco.
+        track = str(continua[0])
+        if not settings.no_track_total_tag:
+            track += f"/{continua[1]}"
+    else:
+        track = str(qobuz_item.get("track_number", "1"))
+        if not settings.no_track_total_tag and _tem_valor(
+            qobuz_album.get("media_count")
+        ):
+            track += f"/{_tracktotal_do_disco(qobuz_album, qobuz_item)}"
     audio["TRCK"] = id3.TRCK(encoding=3, text=track)
 
     _tpos = _numero_de_total(
