@@ -44,6 +44,7 @@ _RS = "\x1e"
 
 API_URL = "https://models.github.ai/inference/chat/completions"
 MODELO_PADRAO = "openai/gpt-4.1"
+MODELO_RESERVA_PADRAO = "openai/gpt-4.1-mini"
 
 # Limite de caracteres de contexto (metadados + diff) por requisição. O plano
 # gratuito do GitHub Models limita os tokens de entrada, então o diff é enxugado
@@ -57,6 +58,9 @@ LIMITE_ARQUIVOS_NA_LISTA = 80
 AVISO_CORTE = 40  # espaço reservado para o aviso "[... N linhas omitidas ...]"
 
 MAX_TENTATIVAS = 3
+# Pausas (s) após uma resposta 200 que não é JSON (ex.: "OK" de gateway/instabilidade).
+# Mais longas que o backoff comum, porque esse tipo de falha costuma ser temporária.
+PAUSAS_NAO_JSON = (5.0, 20.0, 45.0)
 PAUSA_ENTRE_LOTES = 4.0  # segundos; o plano gratuito limita requisições por minuto
 
 # Arquivos que só atrapalham a leitura (gerados, caches, o próprio changelog).
@@ -228,6 +232,7 @@ class ConfigIA(NamedTuple):
     token: str
     modelo: str = MODELO_PADRAO
     limite_prompt: int = LIMITE_PROMPT
+    modelo_reserva: str | None = None
 
 
 def _log(mensagem: str) -> None:
@@ -369,8 +374,8 @@ def _diff_do_commit(commit_hash: str) -> str:
 
 def _e_teste(caminho: str) -> bool:
     nome = caminho.rsplit("/", 1)[-1]
-    return caminho.startswith("tests/") or "/tests/" in caminho or nome.startswith(
-        "test_"
+    return (
+        caminho.startswith("tests/") or "/tests/" in caminho or nome.startswith("test_")
     )
 
 
@@ -497,8 +502,25 @@ def _espera_retry_after(erro: urllib.error.HTTPError) -> float:
 def _chamar_modelo(
     mensagens: list[dict[str, str]], config: ConfigIA, timeout: float = 120.0
 ) -> str:
+    """Chama o modelo principal; se falhar (sem ser erro fatal), tenta o de reserva."""
+    try:
+        return _chamar_modelo_unico(mensagens, config, config.modelo, timeout)
+    except ErroIA as erro:
+        reserva = config.modelo_reserva
+        if erro.fatal or erro.codigo == 413 or not reserva or reserva == config.modelo:
+            raise
+        _log(f"modelo {config.modelo} falhou ({erro}); tentando {reserva}")
+        return _chamar_modelo_unico(mensagens, config, reserva, timeout)
+
+
+def _chamar_modelo_unico(
+    mensagens: list[dict[str, str]],
+    config: ConfigIA,
+    modelo: str,
+    timeout: float = 120.0,
+) -> str:
     corpo: dict[str, object] = {
-        "model": config.modelo,
+        "model": modelo,
         "messages": mensagens,
         "temperature": 0.2,
         "max_tokens": 2500,
@@ -537,7 +559,9 @@ def _chamar_modelo(
                 if ultima:
                     raise ErroIA(None, detalhe) from erro
                 _log(f"{detalhe}; tentativa {tentativa}/{MAX_TENTATIVAS}")
-                time.sleep(2.0 * tentativa)
+                # Resposta estranha: o modo JSON pode ser o problema; tira na próxima.
+                corpo.pop("response_format", None)
+                time.sleep(PAUSAS_NAO_JSON[min(tentativa, len(PAUSAS_NAO_JSON)) - 1])
                 continue
             return str(dados["choices"][0]["message"]["content"])
         except urllib.error.HTTPError as erro:
@@ -547,7 +571,11 @@ def _chamar_modelo(
                 _log(f"limite de requisições da IA; aguardando {espera:.0f}s")
                 time.sleep(espera)
                 continue
-            if erro.code == 400 and "response_format" in detalhe and "response_format" in corpo:
+            if (
+                erro.code == 400
+                and "response_format" in detalhe
+                and "response_format" in corpo
+            ):
                 # Nem todo modelo aceita o modo JSON; tenta de novo sem ele.
                 corpo.pop("response_format")
                 continue
@@ -706,14 +734,18 @@ def _descrever_com_ia(
                 raise
             falhas += 1
             ultimo_erro = str(erro)
-            _log(f"IA falhou no lote {numero}: {erro}; usando os títulos desses commits")
+            _log(
+                f"IA falhou no lote {numero}: {erro}; usando os títulos desses commits"
+            )
             continue
         if resumo:
             resumos.append(resumo)
         itens.extend(novos)
 
     if falhas == len(lotes):
-        raise ErroIA(None, f"a IA falhou em todos os lotes (último erro: {ultimo_erro})")
+        raise ErroIA(
+            None, f"a IA falhou em todos os lotes (último erro: {ultimo_erro})"
+        )
 
     resumo_final = " ".join(resumos)
     if len(lotes) > 1 and itens:
@@ -750,9 +782,7 @@ def _linhas_por_titulo(
         linhas.append(f"### {categoria}")
         linhas.append("")
         for item in itens:
-            linhas.append(
-                f"- {item['titulo']} ({_referencia(item['hash'], url_base)})"
-            )
+            linhas.append(f"- {item['titulo']} ({_referencia(item['hash'], url_base)})")
 
             if detalhado and item["corpo"]:
                 for texto in item["corpo"].splitlines():
@@ -823,11 +853,16 @@ def _secao_arquivos(ref_de: str, ref_para: str, url_base: str | None) -> list[st
         else:
             linhas.append(f"- `{caminho}` (+{adicionadas} −{removidas})")
     if len(arquivos) > LIMITE_ARQUIVOS_NA_LISTA:
-        linhas.append(f"- … e mais {len(arquivos) - LIMITE_ARQUIVOS_NA_LISTA} arquivo(s)")
+        linhas.append(
+            f"- … e mais {len(arquivos) - LIMITE_ARQUIVOS_NA_LISTA} arquivo(s)"
+        )
     linhas.extend(["", "</details>", ""])
     if url_base:
         linhas.extend(
-            [f"[Comparar `{ref_de}...{ref_para}`]({url_base}/compare/{ref_de}...{ref_para})", ""]
+            [
+                f"[Comparar `{ref_de}...{ref_para}`]({url_base}/compare/{ref_de}...{ref_para})",
+                "",
+            ]
         )
     return linhas
 
@@ -962,6 +997,13 @@ def main() -> None:
         "(ou a variável CHANGELOG_MODELO).",
     )
     parser.add_argument(
+        "--modelo-reserva",
+        default=os.environ.get("CHANGELOG_MODELO_RESERVA", MODELO_RESERVA_PADRAO),
+        help="Modelo usado se o principal falhar (ex.: resposta que não é JSON). "
+        f"Padrão: {MODELO_RESERVA_PADRAO} (ou CHANGELOG_MODELO_RESERVA). "
+        "Use 'nenhum' para desligar.",
+    )
+    parser.add_argument(
         "--limite-prompt",
         type=int,
         default=LIMITE_PROMPT,
@@ -982,8 +1024,14 @@ def main() -> None:
     if not (args.sem_ia or args.resumido):
         token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
         if token:
+            reserva = (
+                None if args.modelo_reserva.lower() == "nenhum" else args.modelo_reserva
+            )
             config = ConfigIA(
-                token=token, modelo=args.modelo, limite_prompt=args.limite_prompt
+                token=token,
+                modelo=args.modelo,
+                limite_prompt=args.limite_prompt,
+                modelo_reserva=reserva,
             )
         else:
             _log("sem GITHUB_TOKEN/GH_TOKEN: usando só os títulos dos commits")

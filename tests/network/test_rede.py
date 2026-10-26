@@ -55,9 +55,7 @@ class TestCheckForUpdates:
     ):
         import qobuz_dl
 
-        httpx_mock.add_response(
-            url=URL_RELEASES, json=_pypi(qobuz_dl.__version__)
-        )
+        httpx_mock.add_response(url=URL_RELEASES, json=_pypi(qobuz_dl.__version__))
 
         check_updates()
 

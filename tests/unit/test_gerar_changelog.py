@@ -182,7 +182,9 @@ class TestGerarComIA:
             )
 
         monkeypatch.setattr(gc, "_chamar_modelo", falso)
-        saida = gc.gerar_changelog("v1", "v2", ia=_config(), data_lancamento="2026-01-01")
+        saida = gc.gerar_changelog(
+            "v1", "v2", ia=_config(), data_lancamento="2026-01-01"
+        )
 
         assert saida.startswith("## [v2] - 2026-01-01")
         assert "> Versão pequena." in saida
@@ -197,7 +199,13 @@ class TestGerarComIA:
             gc,
             "_chamar_modelo",
             lambda m, c, timeout=120.0: _resposta(
-                [{"categoria": "Adicionado", "texto": "Só a flag.", "commits": ["aaa1111"]}]
+                [
+                    {
+                        "categoria": "Adicionado",
+                        "texto": "Só a flag.",
+                        "commits": ["aaa1111"],
+                    }
+                ]
             ),
         )
         saida = gc.gerar_changelog("v1", "v2", ia=_config())
@@ -291,7 +299,13 @@ class TestLotes:
         def falso(mensagens, config, timeout=120.0):
             if mensagens[0]["content"] == gc.PROMPT_CONSOLIDAR:
                 return _resposta(
-                    [{"categoria": "Adicionado", "texto": "Só um.", "commits": ["aaa1111"]}],
+                    [
+                        {
+                            "categoria": "Adicionado",
+                            "texto": "Só um.",
+                            "commits": ["aaa1111"],
+                        }
+                    ],
                     resumo="Resumo.",
                 )
             hashes = re.findall(r"### Commit (\w+)", mensagens[-1]["content"])
@@ -431,6 +445,103 @@ class TestChamarModelo:
         monkeypatch.setattr(gc.time, "sleep", esperas.append)
         assert gc._chamar_modelo([], gc.ConfigIA(token="t")) == "ok"
         assert len(tentativas) == 2 and esperas == [2.0]
+
+    def test_resposta_ok_sem_json_tira_response_format_e_espera_mais(self, monkeypatch):
+        corpos = []
+
+        def falso(pedido, timeout=0):
+            corpos.append(json.loads(pedido.data))
+            return _RespostaHTTP(b"OK\r\n")
+
+        esperas = []
+        monkeypatch.setattr(gc.urllib.request, "urlopen", falso)
+        monkeypatch.setattr(gc.time, "sleep", esperas.append)
+        with pytest.raises(gc.ErroIA) as info:
+            gc._chamar_modelo([], gc.ConfigIA(token="t"))
+        assert "não é JSON" in info.value.detalhe
+        assert "4 bytes" in info.value.detalhe
+        assert len(corpos) == gc.MAX_TENTATIVAS
+        assert "response_format" in corpos[0]
+        assert all("response_format" not in c for c in corpos[1:])
+        assert esperas == [gc.PAUSAS_NAO_JSON[0], gc.PAUSAS_NAO_JSON[1]]
+
+    def test_modelo_reserva_assume_depois_de_resposta_nao_json(self, monkeypatch):
+        modelos = []
+
+        def falso(pedido, timeout=0):
+            modelo = json.loads(pedido.data)["model"]
+            modelos.append(modelo)
+            if modelo == "m/principal":
+                return _RespostaHTTP(b"OK\r\n")
+            return _RespostaHTTP({"choices": [{"message": {"content": "{}"}}]})
+
+        monkeypatch.setattr(gc.urllib.request, "urlopen", falso)
+        monkeypatch.setattr(gc.time, "sleep", lambda s: None)
+        config = gc.ConfigIA(
+            token="t", modelo="m/principal", modelo_reserva="m/reserva"
+        )
+        assert gc._chamar_modelo([], config) == "{}"
+        assert modelos == ["m/principal"] * gc.MAX_TENTATIVAS + ["m/reserva"]
+
+    def test_sem_modelo_reserva_nao_troca_de_modelo(self, monkeypatch):
+        modelos = []
+
+        def falso(pedido, timeout=0):
+            modelos.append(json.loads(pedido.data)["model"])
+            return _RespostaHTTP(b"OK")
+
+        monkeypatch.setattr(gc.urllib.request, "urlopen", falso)
+        monkeypatch.setattr(gc.time, "sleep", lambda s: None)
+        with pytest.raises(gc.ErroIA):
+            gc._chamar_modelo([], gc.ConfigIA(token="t", modelo="m/x"))
+        assert set(modelos) == {"m/x"}
+
+    def test_erro_fatal_nao_tenta_o_modelo_reserva(self, monkeypatch):
+        import io
+        import urllib.error
+
+        modelos = []
+
+        def falso(pedido, timeout=0):
+            modelos.append(json.loads(pedido.data)["model"])
+            raise urllib.error.HTTPError(
+                gc.API_URL, 401, "Unauthorized", {}, io.BytesIO(b"sem token")
+            )
+
+        monkeypatch.setattr(gc.urllib.request, "urlopen", falso)
+        config = gc.ConfigIA(token="t", modelo="m/a", modelo_reserva="m/b")
+        with pytest.raises(gc.ErroIA) as info:
+            gc._chamar_modelo([], config)
+        assert info.value.fatal
+        assert modelos == ["m/a"]
+
+    def test_reserva_igual_ao_principal_e_ignorada(self, monkeypatch):
+        modelos = []
+
+        def falso(pedido, timeout=0):
+            modelos.append(json.loads(pedido.data)["model"])
+            return _RespostaHTTP(b"OK")
+
+        monkeypatch.setattr(gc.urllib.request, "urlopen", falso)
+        monkeypatch.setattr(gc.time, "sleep", lambda s: None)
+        config = gc.ConfigIA(token="t", modelo="m/a", modelo_reserva="m/a")
+        with pytest.raises(gc.ErroIA):
+            gc._chamar_modelo([], config)
+        assert len(modelos) == gc.MAX_TENTATIVAS
+
+    def test_ok_em_tudo_cai_nos_titulos_no_changelog(self, monkeypatch):
+        monkeypatch.setattr(
+            gc.urllib.request,
+            "urlopen",
+            lambda pedido, timeout=0: _RespostaHTTP(b"OK\r\n"),
+        )
+        monkeypatch.setattr(gc.time, "sleep", lambda s: None)
+        config = gc.ConfigIA(token="t", modelo_reserva="m/reserva")
+        saida = gc.gerar_changelog(
+            "v1", "v2", ia=config, versao="2", data_lancamento="2026-01-01"
+        )
+        assert "feat: nova flag --x" in saida
+        assert "IA indisponível" in saida
 
 
 # --- git de verdade ----------------------------------------------------------

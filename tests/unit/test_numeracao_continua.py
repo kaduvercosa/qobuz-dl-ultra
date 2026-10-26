@@ -274,5 +274,7 @@ def test_flag_continuous_track_numbers_nos_comandos(comando):
     sem_flag = parser.parse_args(comando)
     assert not hasattr(sem_flag, "continuous_track_numbers")  # cai no config.ini
 
-    com_flag = parser.parse_args([comando[0], "--continuous-track-numbers", *comando[1:]])
+    com_flag = parser.parse_args(
+        [comando[0], "--continuous-track-numbers", *comando[1:]]
+    )
     assert com_flag.continuous_track_numbers is True
