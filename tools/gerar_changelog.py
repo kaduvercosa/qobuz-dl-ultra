@@ -51,7 +51,7 @@ API_URL = "https://models.github.ai/inference/chat/completions"
 GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 GROQ_BASE_URL = "https://api.groq.com/openai/v1/"
 
-MODELO_PADRAO = "gemini-2.5-flash"
+MODELO_PADRAO = "gemini-3.8-flash"
 MODELO_RESERVA_PADRAO = "openai/gpt-oss-120b"
 
 # Limite de caracteres de contexto (metadados + diff) por requisição. O plano
@@ -537,10 +537,18 @@ def _chamar_modelo(
         )
     except ErroIA as erro:
         reserva = config.modelo_reserva
-        if erro.fatal or erro.codigo == 413 or not reserva or reserva == config.modelo:
+        modelo_indisponivel = (
+            erro.codigo == 404 and "no longer available" in erro.detalhe
+        )
+        if (
+            (erro.fatal and not modelo_indisponivel)
+            or erro.codigo == 413
+            or not reserva
+            or reserva == config.modelo
+        ):
             raise
         _log(
-            f"modelo principal '{config.modelo}' ({config.base_url}) falhou após {MAX_TENTATIVAS} tentativas ({erro}); tentando reserva '{reserva}' ({config.base_url_reserva})"
+            f"modelo principal '{config.modelo}' ({config.base_url}) falhou ({erro}); tentando reserva '{reserva}' ({config.base_url_reserva})"
         )
         return _chamar_modelo_unico(
             mensagens, config, reserva, config.base_url_reserva, timeout
@@ -1041,7 +1049,7 @@ def main() -> None:
     parser.add_argument(
         "--modelo-reserva",
         default=os.environ.get("CHANGELOG_MODELO_RESERVA", MODELO_RESERVA_PADRAO),
-        help="Modelo usado se o principal falhar (ex.: resposta que não é JSON). "
+        help="Modelo usado se o principal falhar (ex.: modelo indisponível). "
         f"Padrão: {MODELO_RESERVA_PADRAO} (ou CHANGELOG_MODELO_RESERVA). "
         "Use 'nenhum' para desligar.",
     )
