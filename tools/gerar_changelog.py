@@ -54,6 +54,10 @@ GROQ_BASE_URL = "https://api.groq.com/openai/v1/"
 MODELO_PADRAO = "gemini-3.8-flash"
 MODELO_RESERVA_PADRAO = "openai/gpt-oss-120b"
 
+# User-Agent normal: a Groq usa Cloudflare e bloqueia o User-Agent padrão do
+# urllib ("Python-urllib/3.x") com o erro 1010 ("browser's signature").
+USER_AGENT = "qobuz-dl-ultra-changelog/1.0"
+
 # Limite de caracteres de contexto (metadados + diff) por requisição. O plano
 # gratuito do GitHub Models limita os tokens de entrada, então o diff é enxugado
 # e os commits são agrupados em lotes que cabem nesse limite.
@@ -575,6 +579,7 @@ def _chamar_modelo_unico(
         "Authorization": f"Bearer {config.token}",
         "X-GitHub-Api-Version": "2022-11-28",
         "Content-Type": "application/json",
+        "User-Agent": USER_AGENT,
     }
 
     for tentativa in range(1, MAX_TENTATIVAS + 1):

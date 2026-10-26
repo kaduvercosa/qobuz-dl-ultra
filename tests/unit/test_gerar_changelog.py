@@ -374,6 +374,7 @@ class TestChamarModelo:
         def falso(pedido, timeout=0):
             vistos["url"] = pedido.full_url
             vistos["auth"] = pedido.get_header("Authorization")
+            vistos["ua"] = pedido.get_header("User-agent")
             vistos["corpo"] = json.loads(pedido.data)
             return _RespostaHTTP({"choices": [{"message": {"content": "{}"}}]})
 
@@ -383,6 +384,7 @@ class TestChamarModelo:
         )
         assert texto == "{}"
         assert vistos["url"] == gc.GEMINI_BASE_URL.rstrip("/") + "/chat/completions"
+        assert vistos["ua"] == gc.USER_AGENT
         assert vistos["auth"] == "Bearer abc"
         assert vistos["corpo"]["model"] == "m/x"
 
