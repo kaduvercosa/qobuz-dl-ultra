@@ -1039,6 +1039,13 @@ def main() -> None:
         "(ou a variável CHANGELOG_MODELO).",
     )
     parser.add_argument(
+        "--modelo-reserva",
+        default=os.environ.get("CHANGELOG_MODELO_RESERVA", MODELO_RESERVA_PADRAO),
+        help="Modelo usado se o principal falhar (ex.: resposta que não é JSON). "
+        f"Padrão: {MODELO_RESERVA_PADRAO} (ou CHANGELOG_MODELO_RESERVA). "
+        "Use 'nenhum' para desligar.",
+    )
+    parser.add_argument(
         "--base-url",
         default=os.environ.get("CHANGELOG_IA_BASE_URL", GEMINI_BASE_URL),
         help="URL base da API (compatível com OpenAI). Padrão: Gemini.",
