@@ -504,7 +504,7 @@ def _diagnostico_resposta(bruto: bytes, status: int | None, tipo: str) -> str:
     amostra = bruto[:300].decode("utf-8", "replace").strip()
     baixo = amostra.lower()
 
-    if amostra in ("ok", "ok\r\n", "ok\n"):
+    if baixo in ("ok", "ok\r\n", "ok\n"):
         return (
             "o endpoint do GitHub Models respondeu 'OK' em vez de uma resposta "
             "de chat; isso indica instabilidade do serviço, manutenção ou algo "
@@ -1041,6 +1041,10 @@ def main() -> None:
         f"Padrão: {LIMITE_PROMPT}.",
     )
     args = parser.parse_args()
+
+    if not args.modelo.strip():
+        args.modelo = MODELO_PADRAO
+        _log(f"--modelo vazio; usando o padrão {MODELO_PADRAO}")
 
     ref_de = args.de or _tag_anterior(args.para)
     if ref_de is None:
