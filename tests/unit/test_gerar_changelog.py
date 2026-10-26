@@ -244,6 +244,7 @@ class TestGerarComIA:
         saida = gc.gerar_changelog("v1", "v2", ia=_config())
         assert "- feat: nova flag --x" in saida
         assert "IA indisponível" in saida
+        assert "último erro: a IA não devolveu um JSON válido" in saida
 
     def test_comentario_html_do_rodape_nao_quebra_com_dois_hifens(self, monkeypatch):
         def negado(*a, **k):
@@ -335,8 +336,12 @@ class TestLotes:
 
 
 class _RespostaHTTP:
+    status = 200
+    headers = {"Content-Type": "application/json"}
+    url = "https://models.github.ai/inference/chat/completions"
+
     def __init__(self, dados):
-        self._bruto = json.dumps(dados).encode()
+        self._bruto = dados if isinstance(dados, bytes) else json.dumps(dados).encode()
 
     def __enter__(self):
         return self
@@ -380,6 +385,32 @@ class TestChamarModelo:
         with pytest.raises(gc.ErroIA) as info:
             gc._chamar_modelo([], gc.ConfigIA(token="t"))
         assert info.value.codigo == 403 and info.value.fatal
+
+    def test_corpo_vazio_mostra_o_que_veio_e_tenta_de_novo(self, monkeypatch):
+        tentativas = []
+
+        def falso(pedido, timeout=0):
+            tentativas.append(1)
+            return _RespostaHTTP(b"")
+
+        monkeypatch.setattr(gc.urllib.request, "urlopen", falso)
+        monkeypatch.setattr(gc.time, "sleep", lambda s: None)
+        with pytest.raises(gc.ErroIA) as info:
+            gc._chamar_modelo([], gc.ConfigIA(token="t"))
+        assert len(tentativas) == gc.MAX_TENTATIVAS
+        assert "não é JSON" in info.value.detalhe
+        assert "status 200" in info.value.detalhe and "0 bytes" in info.value.detalhe
+
+    def test_corpo_html_aparece_na_mensagem(self, monkeypatch):
+        monkeypatch.setattr(
+            gc.urllib.request,
+            "urlopen",
+            lambda pedido, timeout=0: _RespostaHTTP(b"<html>Not Found</html>"),
+        )
+        monkeypatch.setattr(gc.time, "sleep", lambda s: None)
+        with pytest.raises(gc.ErroIA) as info:
+            gc._chamar_modelo([], gc.ConfigIA(token="t"))
+        assert "<html>Not Found</html>" in info.value.detalhe
 
     def test_429_espera_e_tenta_de_novo(self, monkeypatch):
         import io

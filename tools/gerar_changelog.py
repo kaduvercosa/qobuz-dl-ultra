@@ -521,7 +521,24 @@ def _chamar_modelo(
         ultima = tentativa == MAX_TENTATIVAS
         try:
             with urllib.request.urlopen(pedido, timeout=timeout) as resposta:
-                dados = json.load(resposta)
+                bruto = resposta.read()
+                status = getattr(resposta, "status", None)
+                tipo = getattr(resposta, "headers", {}).get("Content-Type", "")
+                url_final = getattr(resposta, "url", API_URL)
+            try:
+                dados = json.loads(bruto)
+            except json.JSONDecodeError as erro:
+                # Mostra o que o GitHub realmente devolveu (vazio, HTML, texto...).
+                amostra = bruto[:300].decode("utf-8", "replace")
+                detalhe = (
+                    f"resposta que não é JSON (status {status}, tipo {tipo!r}, "
+                    f"url {url_final}, {len(bruto)} bytes): {amostra!r}"
+                )
+                if ultima:
+                    raise ErroIA(None, detalhe) from erro
+                _log(f"{detalhe}; tentativa {tentativa}/{MAX_TENTATIVAS}")
+                time.sleep(2.0 * tentativa)
+                continue
             return str(dados["choices"][0]["message"]["content"])
         except urllib.error.HTTPError as erro:
             detalhe = erro.read().decode("utf-8", "replace")[:300]
@@ -677,6 +694,7 @@ def _descrever_com_ia(
     itens: list[Item] = []
     resumos: list[str] = []
     falhas = 0
+    ultimo_erro = ""
     for numero, lote in enumerate(lotes, start=1):
         if numero > 1:
             time.sleep(PAUSA_ENTRE_LOTES)
@@ -687,6 +705,7 @@ def _descrever_com_ia(
             if erro.fatal:
                 raise
             falhas += 1
+            ultimo_erro = str(erro)
             _log(f"IA falhou no lote {numero}: {erro}; usando os títulos desses commits")
             continue
         if resumo:
@@ -694,7 +713,7 @@ def _descrever_com_ia(
         itens.extend(novos)
 
     if falhas == len(lotes):
-        raise ErroIA(None, "a IA falhou em todos os lotes")
+        raise ErroIA(None, f"a IA falhou em todos os lotes (último erro: {ultimo_erro})")
 
     resumo_final = " ".join(resumos)
     if len(lotes) > 1 and itens:
@@ -875,7 +894,8 @@ def gerar_changelog(
 
     total = len(commits)
     listados = total - ignorados
-    modo_seguro = " ".join(modo.split()).replace("--", "--")[:200]
+    # Dentro de um comentário HTML, "-->" (ou "--!>") fecharia o comentário antes da hora.
+    modo_seguro = re.sub(r"--(?=!?>)", "- -", " ".join(modo.split()))[:400]
     linhas.extend(
         [
             "<!--",
