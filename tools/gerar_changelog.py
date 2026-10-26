@@ -374,8 +374,8 @@ def _diff_do_commit(commit_hash: str) -> str:
 
 def _e_teste(caminho: str) -> bool:
     nome = caminho.rsplit("/", 1)[-1]
-    return (
-        caminho.startswith("tests/") or "/tests/" in caminho or nome.startswith("test_")
+    return caminho.startswith("tests/") or "/tests/" in caminho or nome.startswith(
+        "test_"
     )
 
 
@@ -499,6 +499,33 @@ def _espera_retry_after(erro: urllib.error.HTTPError) -> float:
         return 15.0
 
 
+def _diagnostico_resposta(bruto: bytes, status: int | None, tipo: str) -> str:
+    """Explica por que uma resposta 200 sem JSON impede o uso da IA."""
+    amostra = bruto[:300].decode("utf-8", "replace").strip()
+    baixo = amostra.lower()
+
+    if amostra in ("ok", "ok\r\n", "ok\n"):
+        return (
+            "o endpoint do GitHub Models respondeu 'OK' em vez de uma resposta "
+            "de chat; isso indica instabilidade do serviço, manutenção ou algo "
+            "(proxy/rede) interceptando a requisição -- não é um problema do "
+            "prompt, do modelo nem do response_format"
+        )
+    if "<html" in baixo or "<!doctype html" in baixo:
+        return (
+            "o endpoint devolveu uma página HTML em vez de JSON; provável "
+            "página de erro, manutenção ou bloqueio de rede/proxy"
+        )
+    if not amostra:
+        return "o endpoint devolveu uma resposta vazia; falha do serviço ou da rede"
+    if "rate limit" in baixo or "quota" in baixo:
+        return "o endpoint indicou limite de uso/cota atingido"
+    return (
+        "o endpoint devolveu um corpo que não é JSON; não dá para extrair a "
+        "resposta do modelo"
+    )
+
+
 def _chamar_modelo(
     mensagens: list[dict[str, str]], config: ConfigIA, timeout: float = 120.0
 ) -> str:
@@ -509,7 +536,10 @@ def _chamar_modelo(
         reserva = config.modelo_reserva
         if erro.fatal or erro.codigo == 413 or not reserva or reserva == config.modelo:
             raise
-        _log(f"modelo {config.modelo} falhou ({erro}); tentando {reserva}")
+        _log(
+            f"modelo principal '{config.modelo}' falhou após "
+            f"{MAX_TENTATIVAS} tentativas ({erro}); tentando reserva '{reserva}'"
+        )
         return _chamar_modelo_unico(mensagens, config, reserva, timeout)
 
 
@@ -550,16 +580,16 @@ def _chamar_modelo_unico(
             try:
                 dados = json.loads(bruto)
             except json.JSONDecodeError as erro:
-                # Mostra o que o GitHub realmente devolveu (vazio, HTML, texto...).
-                amostra = bruto[:300].decode("utf-8", "replace")
+                motivo = _diagnostico_resposta(bruto, status, tipo)
                 detalhe = (
-                    f"resposta que não é JSON (status {status}, tipo {tipo!r}, "
-                    f"url {url_final}, {len(bruto)} bytes): {amostra!r}"
+                    f"modelo {modelo}: resposta que não é JSON "
+                    f"(status {status}, tipo {tipo!r}, url {url_final}, "
+                    f"{len(bruto)} bytes): "
+                    f"{bruto[:300].decode('utf-8', 'replace')!r}; motivo: {motivo}"
                 )
                 if ultima:
                     raise ErroIA(None, detalhe) from erro
                 _log(f"{detalhe}; tentativa {tentativa}/{MAX_TENTATIVAS}")
-                # Resposta estranha: o modo JSON pode ser o problema; tira na próxima.
                 corpo.pop("response_format", None)
                 time.sleep(PAUSAS_NAO_JSON[min(tentativa, len(PAUSAS_NAO_JSON)) - 1])
                 continue
@@ -571,11 +601,7 @@ def _chamar_modelo_unico(
                 _log(f"limite de requisições da IA; aguardando {espera:.0f}s")
                 time.sleep(espera)
                 continue
-            if (
-                erro.code == 400
-                and "response_format" in detalhe
-                and "response_format" in corpo
-            ):
+            if erro.code == 400 and "response_format" in detalhe and "response_format" in corpo:
                 # Nem todo modelo aceita o modo JSON; tenta de novo sem ele.
                 corpo.pop("response_format")
                 continue
@@ -735,7 +761,10 @@ def _descrever_com_ia(
             falhas += 1
             ultimo_erro = str(erro)
             _log(
-                f"IA falhou no lote {numero}: {erro}; usando os títulos desses commits"
+                f"IA falhou no lote {numero} após tentar o modelo principal "
+                f"'{config.modelo}' e a reserva "
+                f"'{config.modelo_reserva or 'nenhuma'}': {erro}; "
+                "usando os títulos desses commits"
             )
             continue
         if resumo:
@@ -744,7 +773,11 @@ def _descrever_com_ia(
 
     if falhas == len(lotes):
         raise ErroIA(
-            None, f"a IA falhou em todos os lotes (último erro: {ultimo_erro})"
+            None,
+            f"a IA falhou em todos os lotes; modelos tentados: "
+            f"'{config.modelo}' e reserva "
+            f"'{config.modelo_reserva or 'nenhuma'}'; "
+            f"último erro: {ultimo_erro}",
         )
 
     resumo_final = " ".join(resumos)
@@ -782,7 +815,9 @@ def _linhas_por_titulo(
         linhas.append(f"### {categoria}")
         linhas.append("")
         for item in itens:
-            linhas.append(f"- {item['titulo']} ({_referencia(item['hash'], url_base)})")
+            linhas.append(
+                f"- {item['titulo']} ({_referencia(item['hash'], url_base)})"
+            )
 
             if detalhado and item["corpo"]:
                 for texto in item["corpo"].splitlines():
@@ -853,16 +888,11 @@ def _secao_arquivos(ref_de: str, ref_para: str, url_base: str | None) -> list[st
         else:
             linhas.append(f"- `{caminho}` (+{adicionadas} −{removidas})")
     if len(arquivos) > LIMITE_ARQUIVOS_NA_LISTA:
-        linhas.append(
-            f"- … e mais {len(arquivos) - LIMITE_ARQUIVOS_NA_LISTA} arquivo(s)"
-        )
+        linhas.append(f"- … e mais {len(arquivos) - LIMITE_ARQUIVOS_NA_LISTA} arquivo(s)")
     linhas.extend(["", "</details>", ""])
     if url_base:
         linhas.extend(
-            [
-                f"[Comparar `{ref_de}...{ref_para}`]({url_base}/compare/{ref_de}...{ref_para})",
-                "",
-            ]
+            [f"[Comparar `{ref_de}...{ref_para}`]({url_base}/compare/{ref_de}...{ref_para})", ""]
         )
     return linhas
 
@@ -1025,7 +1055,9 @@ def main() -> None:
         token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
         if token:
             reserva = (
-                None if args.modelo_reserva.lower() == "nenhum" else args.modelo_reserva
+                None
+                if args.modelo_reserva.lower() == "nenhum"
+                else args.modelo_reserva
             )
             config = ConfigIA(
                 token=token,
