@@ -992,15 +992,18 @@ async def process_retroactive_lyrics_async(
         # Os blocos saem SEMPRE na ordem dos arquivos, mesmo que, em modo
         # paralelo, terminem fora de ordem: cada faixa pronta espera sua vez.
         prontos: dict[int, tuple[str, list]] = {}
-        fila_saida = {"proximo": 1, "pasta": None}
+        proximo: int = 1
+        pasta_atual: str | None = None
         trava_saida = asyncio.Lock()
 
         async def _liberar():
+            nonlocal proximo, pasta_atual
+
             async with trava_saida:
-                while fila_saida["proximo"] in prontos:
-                    caminho, linhas = prontos.pop(fila_saida["proximo"])
+                while proximo in prontos:
+                    caminho, linhas = prontos.pop(proximo)
                     pasta = os.path.dirname(caminho)
-                    if pasta != fila_saida["pasta"]:
+                    if pasta != pasta_atual:
                         cabecalho = await asyncio.to_thread(
                             _cabecalho_album, caminho, por_pasta[pasta], largura
                         )
@@ -1008,11 +1011,11 @@ async def process_retroactive_lyrics_async(
                             ui.emit("")
                             for linha in cabecalho:
                                 ui.emit(linha)
-                        fila_saida["pasta"] = pasta
+                        pasta_atual = pasta
                     ui.emit("")
                     for linha in linhas:
                         ui.emit(linha)
-                    fila_saida["proximo"] += 1
+                    proximo += 1
 
         async def _uma(index, file_path):
             prontos[index] = (file_path, await _processar_arquivo(index, file_path))
