@@ -148,6 +148,10 @@ class FakeID3:
     def delall(self, desc):
         self.deleted.append(desc)
 
+    def getall(self, key):
+        # Arquivo sem frames anteriores (o ID3 real também devolve lista vazia).
+        return []
+
     def save(self, file_path=None):
         self.saved = True
 
@@ -191,6 +195,10 @@ def test_inject_metadata_mp3(engine, tmp_path, monkeypatch):
     assert ok is True
     assert len(fake_id3.added) > 0
     assert fake_id3.saved is True
+    # A letra antiga (outra fonte) é apagada e a origem vai para o comentário.
+    assert "USLT" in fake_id3.deleted
+    comentarios = [f for f in fake_id3.added if type(f).__name__ == "COMM"]
+    assert [c.text for c in comentarios] == [["Letra: LRCLIB (sincronizada, EN)"]]
 
 
 def test_inject_metadata_exception(engine, tmp_path, monkeypatch):

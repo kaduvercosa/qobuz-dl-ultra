@@ -680,70 +680,217 @@ async def _reset_config(config_file: str):
     else:
         config["qobuz"]["auth_token"] = auth_token
 
+    #### MUDANÇAS COMEÇAM AQUI
+    # ------------------------------------------------------------------
+    # Credenciais da API: precisam existir antes de criar o cliente.
+    # ------------------------------------------------------------------
+    logging.info(
+        f"\n{C_ACCENT}Obtendo credenciais da API via [bundle.js]. "
+        f"Por favor, aguarde...{OFF}"
+    )
+
+    bundle = await Bundle.create()
+    fetched_app_id = str(bundle.get_app_id())
+    fetched_secrets = [s for s in bundle.get_secrets().values() if s]
+
+    config["qobuz"]["app_id"] = fetched_app_id
+    config["qobuz"]["secrets"] = ",".join(fetched_secrets)
+
+    logging.info(f"{GREEN}[+] app_id e secrets obtidos com sucesso.{OFF}")
+
+    # ------------------------------------------------------------------
+    # Login e idioma padrão da conta.
+    # ------------------------------------------------------------------
+    account_language = "pt"
+    account_language_detected = False
+
+    logging.info(
+        f"\n{C_ACCENT}Testando login com o e-mail e o token informados...{OFF}"
+    )
+
+    from qobuz_dl.qopy import Client as _Client
+
+    try:
+        _test_client = await _Client.create(
+            email,
+            "",
+            fetched_app_id,
+            fetched_secrets,
+            user_auth_token=auth_token,
+        )
+
+        try:
+            # O login normalmente já consulta e armazena o perfil.
+            account_info = getattr(_test_client, "user_info", {}) or {}
+
+            if isinstance(account_info, dict):
+                account_info = account_info.get("user", account_info)
+
+            if not isinstance(account_info, dict):
+                account_info = {}
+
+            language_code = account_info.get("language_code")
+
+            # Só repete a consulta se o perfil carregado não trouxe idioma.
+            if not isinstance(language_code, str) or not language_code.strip():
+                try:
+                    raw_account_info = await _test_client.api_call(
+                        "user/get",
+                        _request_timeout=httpx.Timeout(8.0, connect=3.0),
+                        _max_attempts=1,
+                    )
+
+                    if isinstance(raw_account_info, dict):
+                        account_info = raw_account_info.get("user", raw_account_info)
+                        if isinstance(account_info, dict):
+                            language_code = account_info.get("language_code")
+                except Exception:
+                    # A detecção de idioma não deve impedir a configuração.
+                    language_code = None
+
+            if isinstance(language_code, str) and language_code.strip():
+                account_language = language_code.strip().lower()
+                account_language_detected = True
+
+        finally:
+            await _test_client.close()
+
+        logging.info(
+            f"{GREEN}[+] Login realizado com sucesso! "
+            f"Suas credenciais estão corretas.{OFF}"
+        )
+
+    except Exception as exc:
+        logging.info(
+            f"{RED}[!] Falha ao logar com este e-mail/token: {exc}{OFF}\n"
+            f"{YELLOW}[!] A configuração foi salva mesmo assim -- "
+            f"confira seu e-mail/token e rode 'qdl -r' de novo "
+            f"(ou 'qdl auth -l') se precisar corrigi-los.{OFF}"
+        )
+
+    if account_language_detected:
+        ui.emit(f"\n{GREEN}[+] Idioma padrão da conta Qobuz: {account_language}{OFF}")
+    else:
+        ui.emit(
+            f"\n{YELLOW}[!] Não foi possível detectar o idioma da conta. "
+            f"Usando o padrão: {account_language}{OFF}"
+        )
+
+    # Guarda o idioma da conta separado de uma possível escolha manual.
+    config["qobuz"]["account_language"] = account_language
+
+    # ------------------------------------------------------------------
+    # Letras nos arquivos de áudio.
+    # ------------------------------------------------------------------
     fetch_lyrics = (
         input(
-            "\nBaixar e embutir letras/traduções automaticamente? (yes/no) [Padrão: yes]\n- "
+            "\nBaixar e embutir letras nos arquivos de áudio? (s/n) [Padrão: sim]\n- "
         )
         .strip()
         .lower()
     )
-    config["qobuz"]["fetch_lyrics"] = (
-        "false" if fetch_lyrics in ["no", "n", "false"] else "true"
-    )
+    want_lyrics = fetch_lyrics not in {"n", "nao", "não", "no", "false", "0"}
 
-    genius_token = ""
-    if config["qobuz"]["fetch_lyrics"] == "true":
-        ui.emit(f"\n{C_ACCENT}[?] Idioma de Tradução de Letras:{OFF}")
-        ui.emit(
-            " Opções: pt (Português), en (Inglês), es (Espanhol), fr (Francês), original (Manter nativo)"
+    config["qobuz"]["fetch_lyrics"] = "true" if want_lyrics else "false"
+    config["qobuz"]["embed_lyrics"] = "true" if want_lyrics else "false"
+
+    # Mantém a possibilidade de salvar arquivos externos separadamente.
+    save_lrc = False
+
+    if want_lyrics:
+        lrc_choice = (
+            input(
+                "\nSalvar também arquivos externos de letras (.lrc/.txt)? "
+                "(s/n) [Padrão: não]\n- "
+            )
+            .strip()
+            .lower()
         )
-        lang_choice = input(" Idioma [Padrão: pt]:\n- ").strip().lower()
-        if lang_choice in ["original", "orig"]:
-            config["qobuz"]["lyrics_translation_lang"] = ""
-        elif lang_choice in ["pt", "en", "es", "fr", "de", "it"]:
-            config["qobuz"]["lyrics_translation_lang"] = lang_choice
-        else:
-            config["qobuz"]["lyrics_translation_lang"] = "pt"
+        save_lrc = lrc_choice in {"s", "sim", "y", "yes", "true", "1"}
 
+    config["qobuz"]["no_lrc_files"] = "false" if save_lrc else "true"
+
+    # ------------------------------------------------------------------
+    # Traduções: pergunta separada, usando o idioma da conta como padrão.
+    # ------------------------------------------------------------------
+    # Traduções usam automaticamente o idioma da conta Qobuz.
+    want_translations = False
+
+    if want_lyrics:
+        translation_choice = (
+            input(
+                "\nDeseja também incluir traduções das letras "
+                f"em {account_language}? "
+                "(s/n) [Padrão: sim]\n- "
+            )
+            .strip()
+            .lower()
+        )
+
+        want_translations = translation_choice not in {
+            "n",
+            "nao",
+            "não",
+            "no",
+            "false",
+            "0",
+        }
+
+    config["qobuz"]["fetch_translation"] = "true" if want_translations else "false"
+    config["qobuz"]["lyrics_translation_lang"] = account_language
+
+    # ------------------------------------------------------------------
+    # Genius como fallback de letras.
+    # ------------------------------------------------------------------
+    genius_token = ""
+
+    if want_lyrics:
         ui.emit(
-            f"\n{C_ACCENT}[!] Para usar o Genius como fallback, insira seu API Token (Enter para pular e usar apenas LRCLIB):{OFF}"
+            f"\n{C_ACCENT}[!] Para usar o Genius como fallback, "
+            f"insira seu API Token "
+            f"(Enter para pular):{OFF}"
         )
         genius_token = input("Genius API Token:\n- ").strip()
-    else:
-        config["qobuz"]["lyrics_translation_lang"] = "pt"
 
     if use_keyring and _keyring_save("genius_token", genius_token):
         config["qobuz"]["genius_token"] = ""
     else:
         config["qobuz"]["genius_token"] = genius_token
 
+    # ------------------------------------------------------------------
+    # Pasta, formato e qualidade.
+    # ------------------------------------------------------------------
     while True:
         directory_input = (
             input("\nPasta de download (pressione Enter para 'Qobuz Downloads')\n- ")
             or "Qobuz Downloads"
         )
+
         try:
-            # Testa (e cria, se preciso) a pasta de verdade agora, não só
-            # na hora de baixar -- ver qobuz_dl/paths.py. Guarda o texto
-            # original (não o caminho resolvido) no config.ini: caminhos
-            # relativos e o `~` continuam sendo expandidos em tempo de
-            # uso, o que mantém o config.ini portátil entre máquinas.
             ensure_directory_ready(directory_input)
         except DirectoryNotUsable as error:
             ui.warn(str(error))
             continue
+
         break
+
     config["qobuz"]["directory"] = directory_input
+
     config["qobuz"]["folder_format"] = (
         input(f"\nFormato da pasta (pressione Enter para '{DEFAULT_FOLDER}')\n- ")
         or DEFAULT_FOLDER
     )
+
     config["qobuz"]["default_quality"] = (
         input(
-            "\nQualidade (5:MP3 320k, 6:FLAC 16-bit, 7:Hi-Res 24b<=96kHz, 27:Hi-Res Max) [Padrão 27]\n- "
+            "\nQualidade "
+            "(5:MP3 320k, 6:FLAC 16-bit, "
+            "7:Hi-Res 24b<=96kHz, 27:Hi-Res Max) "
+            "[Padrão 27]\n- "
         )
         or "27"
     )
+
     config["qobuz"]["default_limit"] = "500"
     config["qobuz"]["no_m3u"] = "false"
     config["qobuz"]["albums_only"] = "false"
@@ -752,43 +899,14 @@ async def _reset_config(config_file: str):
     config["qobuz"]["embed_art"] = "true"
     config["qobuz"]["no_cover"] = "false"
     config["qobuz"]["no_database"] = "false"
-    config["qobuz"]["no_lrc_files"] = "true"
-    config["qobuz"]["embed_lyrics"] = "true"
+
+    # no_lrc_files e embed_lyrics já foram definidos pelas respostas acima.
+    # Não os sobrescreva aqui com valores fixos.
+
     config["qobuz"]["multi_value_tags"] = "false"
     config["qobuz"]["continuous_track_numbers"] = "false"
     config["qobuz"]["legacy_charmap"] = "false"
     config["qobuz"]["blacklist"] = "blacklist.txt"
-
-    logging.info(
-        f"\n{C_ACCENT}Obtendo credenciais da API via [bundle.js]. Por favor, aguarde...{OFF}"
-    )
-    bundle = await Bundle.create()
-    fetched_app_id = str(bundle.get_app_id())
-    fetched_secrets = [s for s in bundle.get_secrets().values() if s]
-    config["qobuz"]["app_id"] = fetched_app_id
-    config["qobuz"]["secrets"] = ",".join(fetched_secrets)
-    logging.info(f"{GREEN}[+] app_id e secrets obtidos com sucesso.{OFF}")
-
-    logging.info(
-        f"\n{C_ACCENT}Testando login com o e-mail e o token informados...{OFF}"
-    )
-    from qobuz_dl.qopy import Client as _Client
-
-    try:
-        _test_client = await _Client.create(
-            email, "", fetched_app_id, fetched_secrets, user_auth_token=auth_token
-        )
-        await _test_client.close()
-        logging.info(
-            f"{GREEN}[+] Login realizado com sucesso! Suas credenciais estão corretas.{OFF}"
-        )
-    except Exception as e:
-        logging.info(
-            f"{RED}[!] Falha ao logar com este e-mail/token: {e}{OFF}\n"
-            f"{YELLOW}[!] A configuração foi salva mesmo assim -- confira seu e-mail/token "
-            f"e rode 'qdl -r' de novo (ou 'qdl auth -l') se precisar corrigi-los.{OFF}"
-        )
-
     config["qobuz"]["track_format"] = "{track_number} - {track_title}"
     config["qobuz"]["fallback_folder_format"] = "{album_artist} - {album_title}"
     config["qobuz"]["smart_discography"] = "false"

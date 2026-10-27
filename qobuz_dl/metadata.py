@@ -17,6 +17,7 @@ import mutagen.id3 as id3
 from mutagen.flac import FLAC, Picture, VCFLACDict
 from mutagen.id3 import ID3NoHeaderError
 
+from qobuz_dl import lyrics_comment
 from qobuz_dl.settings import QobuzDLSettings
 from qobuz_dl.utils import (
     classify_release_type,
@@ -1124,6 +1125,11 @@ def tag_flac(
         for line in _extract_flac_cover_comment_lines(audio.get("COMMENT")):
             if line not in comment_lines:
                 comment_lines.append(line)
+    # A origem da letra ("Letra: Qobuz (...)") e' gravada pelo motor de letras,
+    # nao por este modulo: sempre preservada ao reescrever o COMMENT.
+    for line in lyrics_comment.extract_flac_lines(audio.get("COMMENT")):
+        if line not in comment_lines:
+            comment_lines.append(line)
     tags["COMMENT"] = "\n".join(comment_lines)
 
     # # Só grava valores preenchidos. Com multi_value_tags, ARTIST/COMPOSER/
@@ -1267,6 +1273,9 @@ def tag_mp3(
     elif preserve_cover_info:
         for segment in _extract_mp3_cover_comment_segments(_id3_comment_text(audio)):
             base_comment += f" | {segment}"
+    # Origem da letra: sempre preservada (ver tag_flac).
+    for segment in lyrics_comment.extract_mp3_segments(_id3_comment_text(audio)):
+        base_comment += f" | {segment}"
 
     tags["COMMENT"] = base_comment
 

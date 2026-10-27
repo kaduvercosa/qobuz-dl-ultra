@@ -27,6 +27,7 @@ import httpx
 
 from qobuz_dl import __version__
 from qobuz_dl.http_download import make_client
+from qobuz_dl.resilient_http import request_async
 
 logger = logging.getLogger(__name__)
 
@@ -98,7 +99,9 @@ async def lookup_by_isrc(
             )
 
             try:
-                resp = await client.get(
+                resp = await request_async(
+                    client,
+                    "GET",
                     f"{_MB_BASE}/recording/",
                     params={"query": f"isrc:{isrc}", "fmt": "json", "limit": 1},
                 )
@@ -390,7 +393,9 @@ async def lookup_matching(
                 max_keepalive_connections=1,
             )
             try:
-                resp = await client.get(
+                resp = await request_async(
+                    client,
+                    "GET",
                     f"{_MB_BASE}/recording/",
                     params={"query": f"isrc:{isrc}", "fmt": "json", "limit": 100},
                 )

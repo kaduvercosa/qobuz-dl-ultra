@@ -30,7 +30,7 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 
-from qobuz_dl import musicbrainz
+from qobuz_dl import musicbrainz, resilient_http
 
 # Capturado aqui, na importação do módulo -- ANTES de qualquer fixture
 # rodar -- porque sem_throttle_de_verdade (autouse) substitui
@@ -49,9 +49,11 @@ def mb():
     reusar o Semaphore entre event loops de testes diferentes explode."""
     musicbrainz._MB_CACHE.clear()
     musicbrainz._MB_SEM = None
+    resilient_http._reset_state_for_tests()
     yield
     musicbrainz._MB_CACHE.clear()
     musicbrainz._MB_SEM = None
+    resilient_http._reset_state_for_tests()
 
 
 @pytest.fixture(autouse=True)
@@ -223,7 +225,11 @@ class TestFalhasNaoSaoCacheadasPermanentemente:
     novo, não devolver direto do cache."""
 
     async def test_erro_http_nao_e_cacheado(self, httpx_mock):
-        httpx_mock.add_response(status_code=503)
+        # request_async repete GETs transitórios até quatro tentativas.
+        # Esgotar as tentativas antes da resposta saudável verifica que o
+        # erro final não é cacheado e que a próxima chamada tenta novamente.
+        for _ in range(4):
+            httpx_mock.add_response(status_code=503)
         httpx_mock.add_response(json=_resposta_com_recording())
 
         primeira = await musicbrainz.lookup_by_isrc("GBAYE0000006")
@@ -237,7 +243,9 @@ class TestFalhasNaoSaoCacheadasPermanentemente:
         assert segunda == ("track-mbid-123", "album-mbid-456", "artist-mbid-789")
 
     async def test_excecao_generica_nao_e_cacheada(self, httpx_mock):
-        httpx_mock.add_exception(httpx.ConnectTimeout("timeout simulado"))
+        # GETs repetem falhas de transporte até quatro tentativas.
+        for _ in range(4):
+            httpx_mock.add_exception(httpx.ConnectTimeout("timeout simulado"))
         httpx_mock.add_response(json=_resposta_com_recording())
 
         primeira = await musicbrainz.lookup_by_isrc("GBAYE0000007")

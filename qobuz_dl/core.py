@@ -41,9 +41,9 @@ from qobuz_dl import downloader, qopy, ui
 from qobuz_dl.artist_role import funcao_do_artista
 from qobuz_dl.bundle import Bundle
 from qobuz_dl.color import ANSI_BOLD, ANSI_CLEAR_SCREEN, GREEN, OFF, RED, RESET
-from qobuz_dl.concurrency import run_bounded
 from qobuz_dl.color import INFO as CYAN
 from qobuz_dl.color import WARNING as YELLOW
+from qobuz_dl.concurrency import run_bounded
 from qobuz_dl.db import create_db, handle_download_id
 from qobuz_dl.exceptions import NonStreamable
 from qobuz_dl.playlist_links import link_existing_track, playlist_root

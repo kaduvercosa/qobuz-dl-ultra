@@ -338,6 +338,71 @@ def test_track_number_prefixa_saida(monkeypatch):
     assert saidas and all("[7]" in s for s in saidas)
 
 
+def test_quiet_omite_progresso_e_sucesso(monkeypatch):
+    saidas = []
+    monkeypatch.setattr(le.tqdm, "write", lambda m: saidas.append(m))
+    eng = _engine()
+    eng.extract_qobuz_lyrics.return_value = _qobuz()
+    r = _run(eng, quiet=True)
+    assert r["success"] is True
+    assert saidas == []
+
+
+def test_quiet_nao_esconde_erros(monkeypatch):
+    saidas = []
+    monkeypatch.setattr(le.tqdm, "write", lambda m: saidas.append(m))
+    eng = _engine()
+    eng.session.get.side_effect = RuntimeError("boom")
+    r = _run(eng, quiet=True)
+    assert r["error"] == "boom"
+    assert any("boom" in s for s in saidas)
+
+
+def _fontes_mockadas(eng):
+    nomes = [
+        "_provider_qobuz",
+        "_provider_binilyrics",
+        "_provider_musixmatch",
+        "_provider_lrclib",
+    ]
+    for nome in nomes:
+        setattr(eng, nome, MagicMock(return_value=None))
+    return {nome: getattr(eng, nome) for nome in nomes}
+
+
+def test_sem_better_than_consulta_todas_as_fontes():
+    eng = _engine()
+    fontes = _fontes_mockadas(eng)
+    _run(eng)
+    assert all(f.called for f in fontes.values())
+
+
+def test_better_than_so_consulta_fontes_de_prioridade_melhor():
+    eng = _engine()
+    fontes = _fontes_mockadas(eng)
+    _run(eng, better_than=4)  # melhor que o Musixmatch: Qobuz e BiniLyrics
+    assert fontes["_provider_qobuz"].called
+    assert fontes["_provider_binilyrics"].called
+    assert not fontes["_provider_musixmatch"].called
+    assert not fontes["_provider_lrclib"].called
+
+
+def test_better_than_3_so_deixa_o_qobuz():
+    eng = _engine()
+    fontes = _fontes_mockadas(eng)
+    _run(eng, better_than=3)
+    assert [n for n, f in fontes.items() if f.called] == ["_provider_qobuz"]
+
+
+def test_better_than_sem_resultado_nao_grava_nada():
+    eng = _engine()
+    _fontes_mockadas(eng)
+    r = _run(eng, better_than=5)
+    assert r["success"] is False
+    eng._inject_metadata.assert_not_called()
+    eng._save_lrc_file.assert_not_called()
+
+
 # ---------------------------------------------------------------------------
 # Registro de fontes (LyricsEngine.PROVIDERS)
 # ---------------------------------------------------------------------------

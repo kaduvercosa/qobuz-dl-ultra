@@ -1,13 +1,13 @@
 """Letras retroativas: sequencial por padrão, paralelo com `max_workers`.
 
-O número de arquivos processados ao mesmo tempo vem de `settings.max_workers`
-(o mesmo dos downloads), limitado a `_MAX_LYRICS_WORKERS` porque os provedores
-de letra limitam requisições. O relatório final tem que sair sempre na ordem
-dos arquivos, mesmo que eles terminem fora de ordem.
+O número de arquivos processados ao mesmo tempo vem de `settings.max_workers`,
+o mesmo limite usado nos downloads. O relatório final mantém a ordem dos
+arquivos mesmo quando as operações terminam fora de ordem.
 """
 
 import asyncio
 import os
+import re
 import threading
 import time
 from types import SimpleNamespace
@@ -64,6 +64,7 @@ def rodar(tmp_path, monkeypatch):
         lambda p: {
             "has_lyrics": False,
             "is_bilingual": False,
+            "is_synced": False,
             "content": "",
             "lrc_exists": False,
             "language": None,
@@ -98,11 +99,14 @@ def rodar(tmp_path, monkeypatch):
         _rodar.duracao = time.perf_counter() - inicio
 
     _rodar.saida = saida
+    # Cada faixa sai num bloco "[NN/total] Artista - nome": devolve os nomes na
+    # ordem em que os blocos foram impressos.
     _rodar.nomes_no_relatorio = lambda: [
-        linha.split("A - ")[1].split()[0]
+        m.group(1)
         for linha in "\n".join(saida).splitlines()
-        if "[✓] A - " in linha
+        if (m := re.match(r"\[\d+/\d+\] A - (\S+)", linha))
     ]
+    _rodar.indices = lambda: re.findall(r"^\[(\d+)/\d+\]", "\n".join(saida), re.M)
     return _rodar
 
 
@@ -112,6 +116,7 @@ async def test_padrao_e_sequencial_e_em_ordem(rodar):
     assert engine.pico == 1
     assert engine.ordem == NOMES
     assert rodar.nomes_no_relatorio() == [n[:-5] for n in NOMES]
+    assert rodar.indices() == [str(n) for n in range(1, len(NOMES) + 1)]
     assert engine.fechada
 
 
@@ -137,12 +142,13 @@ async def test_relatorio_sai_na_ordem_dos_arquivos_mesmo_com_conclusao_trocada(
     engine = _Invertido()
     await rodar(engine, max_workers=4)
     assert rodar.nomes_no_relatorio() == [n[:-5] for n in NOMES]
+    assert rodar.indices() == [str(n) for n in range(1, len(NOMES) + 1)]
 
 
 async def test_numero_de_workers_tem_teto(rodar):
     engine = _Engine()
     await rodar(engine, max_workers=16)
-    assert engine.pico <= rt._MAX_LYRICS_WORKERS
+    assert engine.pico <= 16
 
 
 async def test_falha_em_um_arquivo_cancela_o_resto_e_fecha_a_engine(rodar):
@@ -157,7 +163,7 @@ async def test_falha_em_um_arquivo_cancela_o_resto_e_fecha_a_engine(rodar):
 
 @pytest.mark.parametrize(
     "valor, esperado",
-    [(None, 1), ("x", 1), (0, 1), (-3, 1), (1, 1), (2, 2), ("3", 3), (99, 4)],
+    [(None, 1), ("x", 1), (0, 1), (-3, 1), (1, 1), (2, 2), ("3", 3), (99, 16)],
 )
 def test_lyrics_workers(valor, esperado):
     assert rt._lyrics_workers(SimpleNamespace(max_workers=valor)) == esperado
@@ -178,7 +184,7 @@ def test_comando_lyrics_aceita_max_workers():
     assert parser.parse_args(["lyrics", "--max-workers", "3", "/m"]).max_workers == 3
 
 
-@pytest.mark.parametrize("valor, esperado", [("1", 1), ("3", 3), (16, 4), ("lixo", 1)])
+@pytest.mark.parametrize("valor, esperado", [("1", 1), ("3", 3), (16, 16), ("lixo", 1)])
 def test_max_workers_das_configuracoes_chega_ao_limite_das_letras(valor, esperado):
     from qobuz_dl.settings import QobuzDLSettings
 

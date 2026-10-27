@@ -117,3 +117,39 @@ async def test_run_bounded_cancelamento_aguarda_todos_os_workers():
 
     assert started == 2
     assert finalized == 2
+
+
+async def test_run_bounded_compartilha_limite_entre_chamadas_concorrentes():
+    limit = 2
+    active = 0
+    peak = 0
+    started = 0
+    enough_started = asyncio.Event()
+    liberar = asyncio.Event()
+
+    async def worker(index: int, item: int) -> int:
+        nonlocal active, peak, started
+        active += 1
+        started += 1
+        peak = max(peak, active)
+        if started >= limit:
+            enough_started.set()
+        try:
+            await liberar.wait()
+            return item
+        finally:
+            active -= 1
+
+    first = asyncio.create_task(run_bounded([1, 2, 3], worker, limit=limit))
+    second = asyncio.create_task(run_bounded([4, 5, 6], worker, limit=limit))
+    await enough_started.wait()
+    await asyncio.sleep(0)
+    assert active == limit
+    assert peak == limit
+
+    liberar.set()
+    first_results, second_results = await asyncio.gather(first, second)
+    assert first_results == [1, 2, 3]
+    assert second_results == [4, 5, 6]
+    assert peak == limit
+    assert active == 0

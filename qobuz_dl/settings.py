@@ -452,6 +452,13 @@ class QobuzDLSettings:
                 if getattr(arguments, "no_embed_lyrics", False)
                 else config.getboolean(section, "embed_lyrics", fallback=True)
             ),
+            # Prioridade: idioma da conta > preferência antiga > pt
+            "lyrics_translation_lang": (
+                config.get(section, "account_language", fallback="").strip().lower()
+                or config.get(section, "lyrics_translation_lang", fallback="pt")
+                .strip()
+                .lower()
+            ),
             "fetch_translation": config.getboolean(
                 section, "fetch_translation", fallback=True
             ),

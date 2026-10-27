@@ -32,7 +32,6 @@ from tqdm import tqdm
 import qobuz_dl.metadata as metadata
 import qobuz_dl.postprocess as postprocess
 from qobuz_dl import musicbrainz, ui
-from qobuz_dl.concurrency import run_bounded
 from qobuz_dl.color import (
     OFF,
     RED,
@@ -41,6 +40,7 @@ from qobuz_dl.color import (
 from qobuz_dl.color import (
     WARNING as YELLOW,
 )
+from qobuz_dl.concurrency import run_bounded
 from qobuz_dl.constants import (
     DEFAULT_FOLDER,
     DEFAULT_MULTIPLE_DISC_TRACK,
@@ -63,6 +63,7 @@ from qobuz_dl.playlist_links import (
     absorb_playlist_copies,
     scan_dest_folder,
 )
+from qobuz_dl.resilient_http import request_async
 from qobuz_dl.settings import QobuzDLSettings
 from qobuz_dl.storage import (
     InsufficientStorageError,
@@ -1701,7 +1702,8 @@ class Download:
         if os.path.exists(final_file):
             if getattr(self.settings, "verify_after_download", False):
                 ok, message = await loop.run_in_executor(
-                    heavy_executor(), lambda: verify_audio_integrity(final_file)
+                    heavy_executor(getattr(self.settings, "max_workers", 1)),
+                    lambda: verify_audio_integrity(final_file),
                 )
                 if ok is False:
                     try:
@@ -1946,7 +1948,7 @@ class Download:
         _mb_kwargs = {"musicbrainz_ids": mb_ids} if mb_ids else {}
         try:
             await loop.run_in_executor(
-                heavy_executor(),
+                heavy_executor(getattr(self.settings, "max_workers", 1)),
                 lambda: tag_function(
                     filename,
                     root_dir,
@@ -2046,7 +2048,9 @@ class Download:
                     return resultado_letras
 
             resultado_letras = await ui.run_in_executor(
-                loop, heavy_executor(), _inject_lyrics_and_print
+                loop,
+                heavy_executor(getattr(self.settings, "max_workers", 1)),
+                _inject_lyrics_and_print,
             )
             if letras_out is not None:
                 letras_out.update(
@@ -2065,7 +2069,7 @@ class Download:
                 return verify_audio_integrity(final_file)
 
             ok, verify_message = await loop.run_in_executor(
-                heavy_executor(), _run_verify
+                heavy_executor(getattr(self.settings, "max_workers", 1)), _run_verify
             )
             if ok is False:
                 with print_lock:
@@ -2723,8 +2727,8 @@ async def fetch_qobuz_lyrics_json(client, http_session, track_id, language=None)
             "track/lyricsUrl", params, client.sec
         )
 
-        r = await client.session.request(
-            "get", client.base + "track/lyricsUrl", params=params
+        r = await request_async(
+            client.session, "GET", client.base + "track/lyricsUrl", params=params
         )
         if r.status_code != 200:
             return None
@@ -2744,7 +2748,7 @@ async def fetch_qobuz_lyrics_json(client, http_session, track_id, language=None)
         if not lyrics_json_url:
             return None
 
-        resp = await http_session.get(lyrics_json_url, timeout=12)
+        resp = await request_async(http_session, "GET", lyrics_json_url, timeout=12)
         if resp.status_code in (403, 404):
             return None
         resp.raise_for_status()

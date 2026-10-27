@@ -1,23 +1,16 @@
-"""Pool de threads dedicado ao trabalho bloqueante e demorado.
+"""Pool único de threads para trabalho bloqueante e demorado.
 
-POR QUE EXISTE
---------------
-`loop.run_in_executor(None, ...)` e `asyncio.to_thread(...)` usam o pool padrão
-do asyncio, que tem poucas threads (min(32, CPUs + 4); em aparelho com 2
-núcleos, 6). Esse mesmo pool também grava os chunks dos downloads. Tarefas
-longas (ffmpeg de verificação de integridade, com até 180 s; gravação de tags;
-busca de letras por HTTP síncrono) ocupavam as threads e atrasavam a gravação
-dos chunks dos outros downloads em paralelo.
+O tamanho é definido pela primeira chamada usando ``max_workers``. O pool não
+é substituído durante a execução: trocar o executor enquanto existem tarefas
+em andamento permitiria que o pool antigo e o novo trabalhassem juntos e
+ultrapassassem o limite configurado.
 
-Com este pool separado, o trabalho pesado nunca disputa thread com a gravação
-de chunks. Uso:
+Uso::
 
-    from qobuz_dl.executors import heavy_executor
+    await loop.run_in_executor(heavy_executor(settings.max_workers), func, *args)
 
-    await loop.run_in_executor(heavy_executor(), funcao, *args)
-
-NÃO usar para `shutil.rmtree`: dentro de thread ele trava no a-Shell/iOS (ver
-tests/regression/test_sem_bloqueio_pesado_no_loop.py).
+Não usar para ``shutil.rmtree``: em alguns ambientes iOS/a-Shell isso bloqueia
+(veja ``tests/regression/test_sem_bloqueio_pesado_no_loop.py``).
 """
 
 from __future__ import annotations
@@ -28,22 +21,39 @@ from concurrent.futures import ThreadPoolExecutor
 
 _lock = threading.Lock()
 _heavy: ThreadPoolExecutor | None = None
+_heavy_workers: int | None = None
 
 
 def _default_workers() -> int:
-    # As tarefas são quase todas espera (subprocesso, rede), então mais threads
-    # que núcleos é barato; o teto evita exagero em máquinas grandes.
-    return max(4, min(16, (os.cpu_count() or 2) * 2))
+    """Limite conservador quando o chamador ainda não tem configuração."""
+    return max(1, min(16, (os.cpu_count() or 2) * 2))
 
 
-def heavy_executor() -> ThreadPoolExecutor:
-    """Devolve o pool dedicado, criando-o na primeira chamada."""
-    global _heavy
+def heavy_executor(max_workers: int | None = None) -> ThreadPoolExecutor:
+    """Devolve o pool global sem criar pools concorrentes de tamanhos distintos.
+
+    ``max_workers`` deve ser o valor de ``settings.max_workers``. Como as
+    configurações são carregadas antes do trabalho, a primeira chamada fixa o
+    tamanho durante a vida do processo. Chamadas posteriores devolvem o mesmo
+    pool, mesmo que algum chamador passe um valor diferente; não se troca um
+    pool ativo por outro, pois isso permitiria concorrência agregada acima do
+    limite.
+    """
+    global _heavy, _heavy_workers
+    requested = (
+        max(1, int(max_workers)) if max_workers is not None else _default_workers()
+    )
     if _heavy is None:
         with _lock:
             if _heavy is None:
                 _heavy = ThreadPoolExecutor(
-                    max_workers=_default_workers(),
+                    max_workers=requested,
                     thread_name_prefix="qobuz-heavy",
                 )
+                _heavy_workers = requested
     return _heavy
+
+
+def heavy_executor_workers() -> int | None:
+    """Retorna o tamanho efetivo do pool (principalmente útil para testes)."""
+    return _heavy_workers

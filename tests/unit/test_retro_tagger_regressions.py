@@ -33,6 +33,7 @@ async def test_status_sem_alteracao_usa_prefixo_neutro(tmp_path, monkeypatch):
         lambda p: {
             "has_lyrics": True,
             "is_bilingual": False,
+            "is_synced": True,
             "content": "x",
             "lrc_exists": True,
             "language": "pt",
@@ -42,8 +43,9 @@ async def test_status_sem_alteracao_usa_prefixo_neutro(tmp_path, monkeypatch):
         str(tmp_path), None, settings=SimpleNamespace()
     )
     texto = "\n".join(saida)
-    assert "SEM ALTERAÇÃO" in texto
-    assert "[-]" in texto
+    assert "Sem alterações" in texto
+    # Sem alteração é neutro (cinza): não pode aparecer como atenção/aviso.
+    assert "Atenção" not in texto
     assert "[!]" not in texto
 
 

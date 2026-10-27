@@ -16,9 +16,6 @@ from typing import Any, Optional
 
 import platformdirs
 
-from qobuz_dl.color import INFO as CYAN
-from qobuz_dl.color import OFF, RED
-from qobuz_dl.color import WARNING as YELLOW
 from qobuz_dl.apple_cover import (  # noqa: F401  (reexporta o que foi movido)
     _APPLE_FALLBACK_COUNTRIES,
     _APPLE_SINGLE,
@@ -44,6 +41,9 @@ from qobuz_dl.apple_cover import (  # noqa: F401  (reexporta o que foi movido)
     termo_de_busca,
     titulo_album_comparavel,
 )
+from qobuz_dl.color import INFO as CYAN
+from qobuz_dl.color import OFF, RED
+from qobuz_dl.color import WARNING as YELLOW
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)

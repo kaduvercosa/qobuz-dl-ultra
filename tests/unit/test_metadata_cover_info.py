@@ -425,3 +425,73 @@ class TestTagMp3PreservaInfoDeCapa:
         self, monkeypatch, tmp_path
     ):
         assert "Capa:" not in self._gravar(monkeypatch, tmp_path)
+
+
+# ---------------------------------------------------------------------------
+# A origem da letra ("Letra: ...") sobrevive ao `tags`, com ou sem
+# preserve_cover_info (quem grava essa linha é o motor de letras)
+# ---------------------------------------------------------------------------
+class TestTagFlacPreservaOrigemDaLetra:
+    LINHA = "Letra: Qobuz (sincronizada, bilíngue EN+PT)"
+
+    @pytest.mark.parametrize("preservar", [False, True])
+    def test_mantem_a_linha_da_letra(self, monkeypatch, tmp_path, preservar):
+        fake = FakeFLAC()
+        fake["COMMENT"] = ["Fonte: Qobuz\n" + self.LINHA]
+        monkeypatch.setattr(metadata, "FLAC", lambda path: fake)
+        origem = tmp_path / "a.flac"
+        origem.write_bytes(b"x")
+        metadata.tag_flac(
+            str(origem),
+            str(tmp_path),
+            str(origem),
+            _item(),
+            _album(),
+            istrack=False,
+            settings=QobuzDLSettings(),
+            preserve_cover_info=preservar,
+        )
+        assert fake["COMMENT"].splitlines().count(self.LINHA) == 1
+
+    def test_nao_inventa_linha_quando_nao_havia(self, monkeypatch, tmp_path):
+        fake = FakeFLAC()
+        monkeypatch.setattr(metadata, "FLAC", lambda path: fake)
+        origem = tmp_path / "a.flac"
+        origem.write_bytes(b"x")
+        metadata.tag_flac(
+            str(origem),
+            str(tmp_path),
+            str(origem),
+            _item(),
+            _album(),
+            istrack=False,
+            settings=QobuzDLSettings(),
+        )
+        assert "Letra:" not in fake["COMMENT"]
+
+
+class TestTagMp3PreservaOrigemDaLetra:
+    ANTIGO = "Qobuz | 24b/96kHz | Trk ID: 1 | Letra: BiniLyrics (sincronizada, EN)"
+
+    def test_mantem_o_trecho_da_letra_sem_preserve_cover_info(
+        self, monkeypatch, tmp_path
+    ):
+        import mutagen.id3 as id3_real
+
+        audio_id3 = FakeID3()
+        audio_id3["COMM::eng"] = SimpleNamespace(text=[self.ANTIGO])
+        monkeypatch.setattr(metadata.id3, "ID3", lambda path: audio_id3)
+        origem = tmp_path / "a.mp3"
+        origem.write_bytes(b"x")
+        metadata.tag_mp3(
+            str(origem),
+            str(tmp_path),
+            str(origem),
+            _item(),
+            _album(),
+            istrack=False,
+            em_image=False,
+            settings=QobuzDLSettings(),
+        )
+        novos = [f for f in audio_id3.values() if isinstance(f, id3_real.COMM)]
+        assert novos[-1].text[0].endswith(" | Letra: BiniLyrics (sincronizada, EN)")

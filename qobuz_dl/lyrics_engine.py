@@ -21,11 +21,12 @@ from dataclasses import dataclass
 from typing import TypedDict
 
 from mutagen.flac import FLAC
-from mutagen.id3 import ID3, TXXX, USLT, ID3NoHeaderError
+from mutagen.id3 import COMM, ID3, TXXX, USLT, ID3NoHeaderError
 from tqdm import tqdm
 
-from qobuz_dl import __version__, binilyrics, ui
+from qobuz_dl import __version__, binilyrics, lyrics_comment, ui
 from qobuz_dl.http_download import make_sync_client
+from qobuz_dl.resilient_http import request_sync
 from qobuz_dl.settings import QobuzDLSettings
 
 logger = logging.getLogger(__name__)
@@ -38,6 +39,42 @@ _LRC_TIMESTAMP_RE = re.compile(r"\[\d{2,}:\d{2}(?:\.\d+)?\]")
 def has_lrc_timestamps(text) -> bool:
     """True se `text` tem pelo menos uma marca de tempo LRC."""
     return bool(text) and bool(_LRC_TIMESTAMP_RE.search(text))
+
+
+# ---------------------------------------------------------------------------
+# Prioridade das letras (1 = melhor). Vale no download e no comando `lyrics`.
+# So letra SINCRONIZADA e' aceita, em qualquer posicao.
+#   1. Qobuz bilingue (original + traducao sincronizadas)
+#   2. Qobuz sincronizada
+#   3. BiniLyrics sincronizada
+#   4. Musixmatch sincronizada
+#   5. LRCLIB sincronizada
+# ---------------------------------------------------------------------------
+RANK_QOBUZ_BILINGUAL = 1
+RANK_QOBUZ_SYNCED = 2
+RANK_BINILYRICS = 3
+RANK_MUSIXMATCH = 4
+RANK_LRCLIB = 5
+RANK_PLAIN = 99  # letra sem marcas de tempo: pior que qualquer sincronizada
+
+
+def lyrics_source_rank(source, bilingual: bool = False):
+    """Prioridade (1 a 5) de uma letra sincronizada, pelo nome da fonte.
+
+    None quando a fonte e' desconhecida/nao registrada (arquivos antigos).
+    """
+    nome = str(source or "").strip().lower()
+    if not nome:
+        return None
+    if "qobuz" in nome:
+        return RANK_QOBUZ_BILINGUAL if bilingual else RANK_QOBUZ_SYNCED
+    if "binilyrics" in nome:
+        return RANK_BINILYRICS
+    if "musixmatch" in nome or "musicmatch" in nome:
+        return RANK_MUSIXMATCH
+    if "lrclib" in nome:
+        return RANK_LRCLIB
+    return None
 
 
 # Separadores de artistas (so servem para achar o artista principal).
@@ -180,6 +217,14 @@ class LyricsEngine:
         "_provider_musixmatch",
         "_provider_lrclib",
     )
+    # Prioridade de cada fonte (a mesma ordem de PROVIDERS). Fonte nova sem
+    # entrada aqui conta como a pior e fica de fora quando `better_than` e' usado.
+    PROVIDER_RANKS = {
+        "_provider_qobuz": RANK_QOBUZ_SYNCED,
+        "_provider_binilyrics": RANK_BINILYRICS,
+        "_provider_musixmatch": RANK_MUSIXMATCH,
+        "_provider_lrclib": RANK_LRCLIB,
+    }
 
     def __init__(self, genius_token=None, session=None, settings=None):
         """Initialize lyrics engine with optional Genius token and HTTP session."""
@@ -449,7 +494,9 @@ class LyricsEngine:
 
         try:
             if not self._mxm_token:
-                resp_token = self.session.get(
+                resp_token = request_sync(
+                    self.session,
+                    "GET",
                     "https://apic-appmobile.musixmatch.com/ws/1.1/token.get?app_id=mac-ios-v2.0",
                     headers=headers,
                     timeout=8,
@@ -481,7 +528,9 @@ class LyricsEngine:
                 if isrc:
                     params["track_isrc"] = isrc
 
-                resp_lyric = self.session.get(
+                resp_lyric = request_sync(
+                    self.session,
+                    "GET",
                     "https://apic-appmobile.musixmatch.com/ws/1.1/macro.subtitles.get",
                     params=params,
                     headers=headers,
@@ -583,8 +632,13 @@ class LyricsEngine:
             "duration": duration,
             "album": query.album or "",
         }
-        response = self.session.get(
-            binilyrics.API_URL, params=params, headers=headers, timeout=10
+        response = request_sync(
+            self.session,
+            "GET",
+            binilyrics.API_URL,
+            params=params,
+            headers=headers,
+            timeout=10,
         )
         if response.status_code != 200:
             return None
@@ -600,7 +654,9 @@ class LyricsEngine:
         if not chosen:
             return None
 
-        ttml = self.session.get(chosen["lyricsUrl"], headers=headers, timeout=15)
+        ttml = request_sync(
+            self.session, "GET", chosen["lyricsUrl"], headers=headers, timeout=15
+        )
         if ttml.status_code != 200:
             return None
         doc = binilyrics.parse_ttml(ttml.text)
@@ -681,11 +737,13 @@ class LyricsEngine:
                 params["album_name"] = query.album
             if duration:
                 params["duration"] = duration
-            response = self.session.get(url, params=params, headers=headers, timeout=12)
+            response = request_sync(
+                self.session, "GET", url, params=params, headers=headers, timeout=12
+            )
             if response.status_code != 200 and "album_name" in params:
                 params = {k: v for k, v in params.items() if k != "album_name"}
-                response = self.session.get(
-                    url, params=params, headers=headers, timeout=12
+                response = request_sync(
+                    self.session, "GET", url, params=params, headers=headers, timeout=12
                 )
             if response.status_code != 200:
                 continue
@@ -786,6 +844,8 @@ class LyricsEngine:
         track_number=None,
         isrc=None,
         duration=None,
+        quiet=False,
+        better_than=None,
     ):
         """
         Percorre as fontes de LyricsEngine.PROVIDERS (Qobuz -> BiniLyrics ->
@@ -804,6 +864,14 @@ class LyricsEngine:
 
         `isrc` e `duration` (segundos) sao opcionais; sem a duracao a fonte
         BiniLyrics e' ignorada.
+
+        `quiet=True` omite as linhas de progresso/sucesso/aviso (quem chama,
+        como o comando `lyrics`, monta a propria saida a partir do retorno).
+        Linhas de ERRO continuam sendo impressas.
+
+        `better_than` (prioridade, 1 a 5): so consulta fontes MELHORES que ela.
+        Usado pelo comando `lyrics` para trocar uma letra de fonte inferior sem
+        nunca gravar uma pior; sem resultado, o arquivo nao e' tocado.
         """
         # "[NN] título": identifica a faixa em cada linha (modo paralelo).
         _ident = f"[{track_number}] {track}" if track_number else f"{track}"
@@ -815,6 +883,8 @@ class LyricsEngine:
             função roda dentro do `print_lock` (não reentrante), então não
             pode chamar `ui.ok()`/`ui.step()`, que o pegariam de novo.
             """
+            if quiet and kind != "error":
+                return
             for linha in ui.tagged_lines(kind, msg):
                 tqdm.write(linha)
 
@@ -846,6 +916,11 @@ class LyricsEngine:
         last_error = None
 
         for provider_name in self.PROVIDERS:
+            if (
+                better_than is not None
+                and self.PROVIDER_RANKS.get(provider_name, RANK_PLAIN) >= better_than
+            ):
+                continue
             try:
                 candidate = getattr(self, provider_name)(query)
                 # Barreira final: so letra sincronizada passa, qualquer que
@@ -959,6 +1034,14 @@ class LyricsEngine:
                 if language:
                     audio["LYRICS_LANG"] = language
                 audio["LYRICS_BILINGUAL"] = "1" if bilingual else "0"
+                if source:
+                    # Origem tambem no COMMENT (junto do Trk ID e da capa).
+                    audio["COMMENT"] = lyrics_comment.merge_flac(
+                        audio.get("COMMENT"),
+                        lyrics_comment.build_line(
+                            source, bilingual=bilingual, language=language
+                        ),
+                    )
                 audio.save()
             elif ext == ".mp3":
                 try:
@@ -966,6 +1049,10 @@ class LyricsEngine:
                 except ID3NoHeaderError:
                     audio_id3 = ID3()
                 desc = source if source else ""
+                # O frame USLT e' identificado por (descricao, idioma): sem apagar
+                # os antigos, uma letra de outra fonte (descricao diferente) ficava
+                # ao lado da nova e podia ser lida no lugar dela.
+                audio_id3.delall("USLT")
                 audio_id3.add(USLT(encoding=3, lang="eng", desc=desc, text=lyrics))
                 if language:
                     audio_id3.delall("TXXX:LYRICS_LANG")
@@ -978,6 +1065,25 @@ class LyricsEngine:
                         text="1" if bilingual else "0",
                     )
                 )
+                if source:
+                    linha_letra = lyrics_comment.build_line(
+                        source, bilingual=bilingual, language=language
+                    )
+                    comm = next(
+                        (
+                            f
+                            for f in audio_id3.getall("COMM")
+                            if any(str(t).strip() for t in (f.text or []))
+                        ),
+                        None,
+                    )
+                    if comm is not None:
+                        atual = next((str(t) for t in comm.text if str(t).strip()), "")
+                        comm.text = [lyrics_comment.merge_mp3(atual, linha_letra)]
+                    else:
+                        audio_id3.add(
+                            COMM(encoding=3, lang="eng", desc="", text=[linha_letra])
+                        )
                 audio_id3.save(file_path)
             else:
                 return False

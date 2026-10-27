@@ -196,10 +196,119 @@ class TestInspectExistingLyricsFlac:
         assert resultado == {
             "has_lyrics": False,
             "is_bilingual": False,
+            "is_synced": False,
+            "source": None,
             "content": "",
             "lrc_exists": False,
             "language": None,
         }
+
+
+class TestInspectExistingLyricsIsSynced:
+    """`is_synced` olha o CONTEÚDO da letra, não a existência de um .lrc."""
+
+    _SYNC = "[00:01.00]Linha de teste um\n[00:05.00]Linha de teste dois"
+
+    def test_embutida_com_marcas_de_tempo_e_sem_lrc_ao_lado(
+        self, monkeypatch, tmp_path
+    ):
+        monkeypatch.setattr(
+            retro_tagger, "FLAC", lambda path: _FakeFLAC(LYRICS=[self._SYNC])
+        )
+        resultado = inspect_existing_lyrics(str(tmp_path / "faixa.flac"))
+        assert resultado["is_synced"] is True
+        assert resultado["lrc_exists"] is False
+
+    def test_embutida_em_texto_simples(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(
+            retro_tagger, "FLAC", lambda path: _FakeFLAC(LYRICS=[_PLACEHOLDER])
+        )
+        resultado = inspect_existing_lyrics(str(tmp_path / "faixa.flac"))
+        assert resultado["is_synced"] is False
+
+    def test_lrc_ao_lado_nao_torna_sincronizada_uma_letra_embutida_simples(
+        self, monkeypatch, tmp_path
+    ):
+        monkeypatch.setattr(
+            retro_tagger, "FLAC", lambda path: _FakeFLAC(LYRICS=[_PLACEHOLDER])
+        )
+        caminho = tmp_path / "faixa.flac"
+        caminho.write_bytes(b"")
+        (tmp_path / "faixa.lrc").write_text(self._SYNC, encoding="utf-8")
+        resultado = inspect_existing_lyrics(str(caminho))
+        assert resultado["lrc_exists"] is True
+        assert resultado["is_synced"] is False
+
+    def test_so_arquivo_lrc_com_marcas_de_tempo(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(retro_tagger, "FLAC", lambda path: _FakeFLAC())
+        caminho = tmp_path / "faixa.flac"
+        caminho.write_bytes(b"")
+        (tmp_path / "faixa.lrc").write_text(self._SYNC, encoding="utf-8")
+        resultado = inspect_existing_lyrics(str(caminho))
+        assert resultado["is_synced"] is True
+
+    def test_arquivo_txt_de_letra_simples(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(retro_tagger, "FLAC", lambda path: _FakeFLAC())
+        caminho = tmp_path / "faixa.flac"
+        caminho.write_bytes(b"")
+        (tmp_path / "faixa.txt").write_text(_PLACEHOLDER, encoding="utf-8")
+        resultado = inspect_existing_lyrics(str(caminho))
+        assert resultado["has_lyrics"] is True
+        assert resultado["is_synced"] is False
+
+
+class TestInspectExistingLyricsOrigem:
+    """`source`: de onde veio a letra atual (campo próprio, comentário ou .lrc)."""
+
+    _SYNC = "[00:01.00]Linha de teste um\n[00:05.00]Linha de teste dois"
+
+    def test_flac_le_lyrics_source(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(
+            retro_tagger,
+            "FLAC",
+            lambda path: _FakeFLAC(LYRICS=[self._SYNC], LYRICS_SOURCE=["Musixmatch"]),
+        )
+        resultado = inspect_existing_lyrics(str(tmp_path / "faixa.flac"))
+        assert resultado["source"] == "Musixmatch"
+
+    def test_flac_sem_campo_usa_a_linha_letra_do_comentario(
+        self, monkeypatch, tmp_path
+    ):
+        monkeypatch.setattr(
+            retro_tagger,
+            "FLAC",
+            lambda path: _FakeFLAC(
+                LYRICS=[self._SYNC],
+                COMMENT=["Fonte: Qobuz\nLetra: BiniLyrics (sincronizada, EN)"],
+            ),
+        )
+        resultado = inspect_existing_lyrics(str(tmp_path / "faixa.flac"))
+        assert resultado["source"] == "BiniLyrics"
+
+    def test_arquivo_antigo_sem_origem_registrada(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(
+            retro_tagger, "FLAC", lambda path: _FakeFLAC(LYRICS=[self._SYNC])
+        )
+        resultado = inspect_existing_lyrics(str(tmp_path / "faixa.flac"))
+        assert resultado["source"] is None
+
+    def test_sem_letra_nao_tem_origem(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(
+            retro_tagger, "FLAC", lambda path: _FakeFLAC(LYRICS_SOURCE=["Qobuz"])
+        )
+        resultado = inspect_existing_lyrics(str(tmp_path / "faixa.flac"))
+        assert resultado["has_lyrics"] is False
+        assert resultado["source"] is None
+
+    def test_letra_so_no_lrc_usa_o_by_do_cabecalho(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(retro_tagger, "FLAC", lambda path: _FakeFLAC())
+        caminho = tmp_path / "faixa.flac"
+        caminho.write_bytes(b"")
+        (tmp_path / "faixa.lrc").write_text(
+            "[by:LRCLIB]\n" + self._SYNC, encoding="utf-8"
+        )
+        resultado = inspect_existing_lyrics(str(caminho))
+        assert resultado["source"] == "LRCLIB"
 
 
 class TestInspectExistingLyricsArquivosExternos:
