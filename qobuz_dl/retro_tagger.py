@@ -4,6 +4,7 @@
 # ============================================================================
 import asyncio
 import collections
+import contextvars
 import logging
 import os
 import re
@@ -252,10 +253,46 @@ def inspect_existing_lyrics(file_path: str) -> dict:
     }
 
 
+# Falhas do Qobuz da faixa em processamento: "limite" (429) e "indisponivel"
+# (408/425/5xx ou rede) que SOBRARAM depois dos retries de `request_async`. Fica
+# num ContextVar para não mudar a assinatura de `fetch_qobuz_lyrics_raw`.
+_QOBUZ_FALHAS: contextvars.ContextVar = contextvars.ContextVar(
+    "qobuz_lyrics_falhas", default=None
+)
+
+
+def _registrar_qobuz(chave: str) -> None:
+    contador = _QOBUZ_FALHAS.get()
+    if contador is not None:
+        contador[chave] += 1
+
+
+def _registrar_falha_http(status) -> None:
+    """Anota uma resposta que ficou 429/408/425/5xx mesmo após os retries."""
+    if status == 429:
+        _registrar_qobuz("limite")
+    elif isinstance(status, int) and (status in {408, 425} or status >= 500):
+        _registrar_qobuz("indisponivel")
+
+
+def _erro_de_rede(exc: BaseException) -> bool:
+    """Erro de conexão/tempo esgotado (sem importar o httpx aqui)."""
+    if isinstance(exc, (asyncio.TimeoutError, OSError)):
+        return True
+    return any(
+        cls.__name__ in {"TransportError", "TimeoutException", "NetworkError"}
+        for cls in type(exc).__mro__
+    )
+
+
 async def fetch_qobuz_lyrics_raw(client, track_id, language=None):
     """
     Consulta diretamente o endpoint de letras do Qobuz usando assinatura do cliente.
     [FIX] Corrigido de r.status para r.status_code.
+
+    Devolve None quando não há letra OU quando o Qobuz continuou recusando /
+    indisponível depois dos retries; só no segundo caso a falha é registrada
+    (`_QOBUZ_FALHAS`) e o `lyrics` adia a faixa em vez de decidir sem o Qobuz.
     """
     try:
         params = {"track_id": track_id}
@@ -271,6 +308,7 @@ async def fetch_qobuz_lyrics_raw(client, track_id, language=None):
         )
 
         if r.status_code != 200:
+            _registrar_falha_http(r.status_code)
             return None
         meta = r.json()
 
@@ -289,9 +327,12 @@ async def fetch_qobuz_lyrics_raw(client, track_id, language=None):
         if resp.status_code == 200:
             return resp.json()
 
+        _registrar_falha_http(resp.status_code)
         return None
 
     except Exception as e:
+        if _erro_de_rede(e):
+            _registrar_qobuz("indisponivel")
         logger.debug(f"Falha ao baixar/assinar JSON de letra: {e}")
         return None
 
@@ -359,6 +400,7 @@ _STATUS_TEXTO = {
     "CORRIGIDO": "letra trocada pela nativa do Qobuz",
     "CORRIGIDO -> BILINGUE": "letra trocada pela versão bilíngue do Qobuz",
     "PRIORIDADE": "origem trocada por uma de maior prioridade",
+    "ADIADO": "Qobuz indisponível; faixa adiada",
     "FALHA": "não foi possível gravar a letra",
     "NÃO ENCONTRADO": "nenhuma letra encontrada",
 }
@@ -683,6 +725,7 @@ async def process_retroactive_lyrics_async(
             "corrected_wrong_language": 0,
             "upgraded_to_sync": 0,
             "priority_swaps": 0,
+            "deferred": 0,
         }
         # Quantas faixas terminaram em cada status (alimenta o resumo final).
         status_counts: collections.Counter = collections.Counter()
@@ -780,17 +823,48 @@ async def process_retroactive_lyrics_async(
             qobuz_orig_json = None
             qobuz_trans_block = None
 
-            if client and track_id:
-                qobuz_orig_json = await fetch_qobuz_lyrics_raw(
-                    client, track_id, language=None
-                )
-
-                if target_lang:
-                    trans_full = await fetch_qobuz_lyrics_raw(
-                        client, track_id, language=target_lang
+            # Falhas do Qobuz DESTA faixa (limite/indisponibilidade que sobraram
+            # depois dos retries): sem a resposta dele não dá para decidir pela
+            # prioridade.
+            falhas_qobuz: collections.Counter = collections.Counter()
+            token_falhas = _QOBUZ_FALHAS.set(falhas_qobuz)
+            try:
+                if client and track_id:
+                    qobuz_orig_json = await fetch_qobuz_lyrics_raw(
+                        client, track_id, language=None
                     )
-                    if isinstance(trans_full, dict):
-                        qobuz_trans_block = trans_full.get("translation")
+
+                    if target_lang:
+                        trans_full = await fetch_qobuz_lyrics_raw(
+                            client, track_id, language=target_lang
+                        )
+                        if isinstance(trans_full, dict):
+                            qobuz_trans_block = trans_full.get("translation")
+            finally:
+                _QOBUZ_FALHAS.reset(token_falhas)
+
+            if falhas_qobuz["limite"] or falhas_qobuz["indisponivel"]:
+                # Não mexe no arquivo: gravar agora uma letra de fonte inferior
+                # (ou trocar uma letra boa) só porque o Qobuz não respondeu.
+                stats["deferred"] += 1
+                status_counts["ADIADO"] += 1
+                motivo_falha = (
+                    "recusou a consulta por limite de requisições"
+                    if falhas_qobuz["limite"]
+                    else "ficou indisponível"
+                )
+                return _bloco_faixa(
+                    rotulo,
+                    display_name,
+                    "ADIADO",
+                    f"O Qobuz {motivo_falha} mesmo após as novas tentativas; a "
+                    "faixa não foi alterada. Rode o lyrics de novo mais tarde "
+                    "(ou use menos --max-workers).",
+                    antes,
+                    "",
+                    nota_id,
+                    largura,
+                )
 
             resultado: dict = {}
 
@@ -1079,6 +1153,12 @@ async def process_retroactive_lyrics_async(
                 YELLOW,
                 "nenhuma fonte tinha letra ou a gravação falhou",
             ),
+            (
+                "Adiadas (Qobuz)",
+                stats["deferred"],
+                YELLOW,
+                "o Qobuz recusou ou não respondeu; rode de novo",
+            ),
         ):
             cor_valor = cor_ativa if (cor_ativa and valor) else MUTED
             ui.emit(
@@ -1098,6 +1178,14 @@ async def process_retroactive_lyrics_async(
                     ui.emit(
                         f"{CYAN} • {rotulo_status.ljust(36)}:{RESET} {GREEN}{qtd}{OFF}"
                     )
+
+        if stats["deferred"]:
+            ui.emit("")
+            ui.emit(
+                f"{YELLOW}[!] {stats['deferred']} faixa(s) adiada(s): o Qobuz recusou "
+                "as consultas. Rode o lyrics de novo mais tarde ou reduza "
+                f"--max-workers.{OFF}"
+            )
 
         return stats
 

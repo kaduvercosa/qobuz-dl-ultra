@@ -169,7 +169,7 @@ def main() -> None:
         options.append((idx, f"{filename} ({os.path.dirname(rel_path)})"))
 
     try:
-        selected_idx = radiolist_dialog(
+        selected_idx: int | None = radiolist_dialog(
             title="Selecione a música para inspecionar",
             text="Use as setas para mover e ENTER para escolher:",
             values=options,

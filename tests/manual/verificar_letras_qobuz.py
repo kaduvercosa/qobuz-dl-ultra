@@ -4,13 +4,12 @@ import configparser
 import os
 import re
 import time
+import urllib.parse
+import urllib.request
 
 from qobuz_dl.qopy import Client
+from qobuz_dl.resilient_http import request_async
 from qobuz_dl.utils import get_url_info
-
-# =====================================================================
-# FUNÇÕES DE BUSCA (Extraídas do Source 11)
-# =====================================================================
 
 
 def _find_url_field(data):
@@ -25,9 +24,18 @@ def _find_url_field(data):
     return None
 
 
-# =====================================================================
-# FUNÇÕES DE CONVERSÃO LRC E MESCLAGEM BILINGUE
-# =====================================================================
+def _encurtar(url):
+    """Encurta a URL para o clique do terminal nao quebrar a assinatura."""
+    if not url:
+        return url
+    try:
+        api = "https://tinyurl.com/api-create.php?url="
+        com_requests = urllib.parse.quote(url, safe="")
+        with urllib.request.urlopen(api + com_requests, timeout=10) as resposta:
+            curto = resposta.read().decode("utf-8").strip()
+            return curto or url
+    except Exception:
+        return url
 
 
 def _ms_to_lrc_timestamp(ms):
@@ -47,18 +55,15 @@ def _qobuz_lines_to_lrc(lines):
 
         text = (entry.get("line") or "").strip()
 
-        if not intro_added:
-            if start > 0:
-                lrc_rows.append("[00:00.000]  ~ ~ ~ ")
-
-            if text:
-                lrc_rows.append(f"{_ms_to_lrc_timestamp(start)} {text}")
-            else:
-                if start == 0:
-                    lrc_rows.append("[00:00.000]  ~ ~ ~ ")
+        if not intro_added and start > 0:
+            lrc_rows.append("[00:00.000] ~ ~ ~ ")
             intro_added = True
-        else:
+
+        if text:
             lrc_rows.append(f"{_ms_to_lrc_timestamp(start)} {text}")
+        elif start == 0 and not intro_added:
+            lrc_rows.append("[00:00.000] ~ ~ ~ ")
+            intro_added = True
 
     return "\n".join(lrc_rows) if lrc_rows else None
 
@@ -70,8 +75,8 @@ def _build_bilingual_lrc(original_lrc, translated_lrc):
     def parse_lrc(lrc_text, is_translation):
         parsed = []
         for line in lrc_text.splitlines():
-            tags = re.findall(r"\[\d{2,}:\d{2}\.\d{2,3}\]", line)
-            text = re.sub(r"\[\d{2,}:\d{2}\.\d{2,3}\]", "", line).strip()
+            tags = re.findall(r"\\[\\d{2,}:\\d{2}\\.\\d{2,3}\\]", line)
+            text = re.sub(r"\\[\\d{2,}:\\d{2}\\.\\d{2,3}\\]", "", line).strip()
             if not text:
                 continue
             for tag in tags:
@@ -94,20 +99,15 @@ def _build_bilingual_lrc(original_lrc, translated_lrc):
     for item in combined:
         tag, text, is_trans = item[1], item[2], item[3]
         if is_trans:
-            final_lrc.append(f"{tag}  ~| {text}")
+            final_lrc.append(f"{tag} ~| {text}")
         else:
             final_lrc.append(f"{tag} {text}")
 
     return "\n".join(final_lrc)
 
 
-# =====================================================================
-# FLUXO PRINCIPAL DO TESTE
-# =====================================================================
-
-
 async def main():
-    print("\n--- 🎧 LABORATÓRIO INTERATIVO DE LETRAS (QOBUZ) ---")
+    print("\n--- LABORATORIO INTERATIVO DE LETRAS (QOBUZ) ---")
     url = input("Cole o link da faixa do Qobuz (Track): ").strip()
     if not url:
         return
@@ -117,7 +117,7 @@ async def main():
     try:
         url_type, item_id = get_url_info(url)
     except Exception:
-        print("⚠️ Erro: Link inválido.")
+        print("Erro: Link invalido.")
         return
 
     home_dir = os.environ.get("HOME", "")
@@ -137,23 +137,20 @@ async def main():
     client = await Client.create(email, pwd, app_id, secrets, user_auth_token=token)
 
     try:
-        print("\n[1/3] Obtendo informações originais da faixa...")
+        print("\n[1/3] Obtendo informacoes originais da faixa...")
 
-        # Requisição ORIGINAL com assinatura manual forte
-        params_orig = {"track_id": item_id}
-        params_orig["request_ts"] = int(time.time())
-        params_orig["request_sig"] = client._modern_sig(
-            "track/lyricsUrl", params_orig, client.sec
+        meta_orig = await client.api_call(
+            "track/lyricsUrl",
+            track_id=item_id,
         )
-
-        r_meta_orig = await client.session.request(
-            "get", client.base + "track/lyricsUrl", params=params_orig
-        )
-        meta_orig = r_meta_orig.json()
 
         orig_url = _find_url_field(meta_orig)
+
+        print("\nLink das letras originais (clique):")
+        print(_encurtar(orig_url))
+
         if not orig_url:
-            print("\n⚠️ A API não retornou o link de letras originais para esta faixa.")
+            print("\nA API nao retornou o link de letras originais para esta faixa.")
             return
 
         r_orig = await client.session.request("get", orig_url)
@@ -166,12 +163,11 @@ async def main():
         lrc_translation = None
 
         if not available_langs:
-            print("\n[!] Nenhuma tradução disponível no servidor para esta música.")
+            print("\nNenhuma traducao disponivel no servidor para esta musica.")
             print("Seguindo apenas com a letra original.")
         else:
-            print(
-                f"\n🌍 Traduções disponíveis encontradas: {', '.join(available_langs)}"
-            )
+            print(f"\nTraducoes disponiveis encontradas: {', '.join(available_langs)}")
+
             escolha = (
                 input("Digite a sigla (ex: pt, es, en) ou 'N' para nenhuma: ")
                 .strip()
@@ -180,22 +176,30 @@ async def main():
 
             if escolha and escolha != "n":
                 print(
-                    f"\n[2/3] Baixando pacote de tradução para '{escolha.upper()}'..."
+                    f"\n[2/3] Baixando pacote de traducao para '{escolha.upper()}'..."
                 )
 
-                # Requisição TRADUÇÃO com assinatura manual forte (A Chave do Sucesso)
-                params_trans = {"track_id": item_id, "language": escolha}
+                params_trans = {
+                    "track_id": item_id,
+                    "language": escolha,
+                }
                 params_trans["request_ts"] = int(time.time())
                 params_trans["request_sig"] = client._modern_sig(
                     "track/lyricsUrl", params_trans, client.sec
                 )
 
-                r_meta_trans = await client.session.request(
-                    "get", client.base + "track/lyricsUrl", params=params_trans
+                r_meta_trans = await request_async(
+                    client.session,
+                    "GET",
+                    client.base + "track/lyricsUrl",
+                    params=params_trans,
                 )
                 meta_trans = r_meta_trans.json()
 
                 trans_url = _find_url_field(meta_trans)
+
+                print("\nLink da traducao (clique):")
+                print(_encurtar(trans_url))
 
                 if trans_url:
                     r_trans = await client.session.request("get", trans_url)
@@ -204,16 +208,16 @@ async def main():
 
                     if trans_lines:
                         lrc_translation = _qobuz_lines_to_lrc(trans_lines)
-                        print("✅ Tradução obtida com sucesso!")
+                        print("Traducao obtida com sucesso!")
                     else:
                         print(
-                            "⚠️ O servidor retornou a requisição, mas o bloco 'translation' veio vazio."
+                            "O servidor retornou a requisicao, mas o bloco 'translation' veio vazio."
                         )
                 else:
-                    print("⚠️ A API não retornou URL para essa tradução específica.")
+                    print("A API nao retornou URL para essa traducao especifica.")
 
         print("\n" + "=" * 60)
-        print("🎵 RESULTADO: ARQUIVO LRC FINAL")
+        print("RESULTADO: ARQUIVO LRC FINAL")
         print("=" * 60)
 
         if lrc_original:
@@ -223,7 +227,7 @@ async def main():
             print("(Letra original vazia ou com falha)")
 
     except Exception as e:
-        print(f"\n❌ Erro durante a execução: {e}")
+        print(f"\nErro durante a execucao: {e}")
 
     finally:
         await client.close()

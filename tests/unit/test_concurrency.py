@@ -153,3 +153,29 @@ async def test_run_bounded_compartilha_limite_entre_chamadas_concorrentes():
     assert second_results == [4, 5, 6]
     assert peak == limit
     assert active == 0
+
+
+async def test_run_bounded_aninhado_com_mesmo_limite_nao_trava():
+    # O worker de fora segura um slot; o run_bounded de dentro, com o mesmo
+    # limite, esperaria um slot que so' o de fora liberaria (espera circular).
+    limit = 2
+    ativos = 0
+    pico = 0
+
+    async def interno(index: int, item: int) -> int:
+        nonlocal ativos, pico
+        ativos += 1
+        pico = max(pico, ativos)
+        await asyncio.sleep(0)
+        ativos -= 1
+        return item * 2
+
+    async def externo(index: int, item: int) -> list:
+        return await run_bounded([item, item + 10], interno, limit=limit)
+
+    resultados = await asyncio.wait_for(
+        run_bounded([1, 2, 3, 4], externo, limit=limit), timeout=2
+    )
+
+    assert resultados == [[2, 22], [4, 24], [6, 26], [8, 28]]
+    assert pico <= limit  # o teto total continua respeitado

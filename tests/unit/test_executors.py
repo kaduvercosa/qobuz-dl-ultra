@@ -38,3 +38,33 @@ def test_heavy_executor_nao_cria_outro_pool_ao_mudar_o_limite(monkeypatch):
         primeiro.shutdown(wait=True)
         monkeypatch.setattr(executors, "_heavy", None)
         monkeypatch.setattr(executors, "_heavy_workers", None)
+
+
+def test_lyrics_executor_tem_teto_proprio_e_nao_e_o_pool_pesado(monkeypatch):
+    monkeypatch.setattr(executors, "_lyrics", None)
+    monkeypatch.setattr(executors, "_lyrics_workers", None)
+
+    pool = executors.lyrics_executor(5)
+    try:
+        assert isinstance(pool, ThreadPoolExecutor)
+        assert pool._max_workers == executors.MAX_LYRICS_WORKERS == 3
+        assert executors.lyrics_executor_workers() == 3
+        assert pool is not executors.heavy_executor(5)
+    finally:
+        pool.shutdown(wait=True)
+        monkeypatch.setattr(executors, "_lyrics", None)
+        monkeypatch.setattr(executors, "_lyrics_workers", None)
+
+
+def test_lyrics_executor_respeita_max_workers_menor_que_o_teto(monkeypatch):
+    monkeypatch.setattr(executors, "_lyrics", None)
+    monkeypatch.setattr(executors, "_lyrics_workers", None)
+
+    pool = executors.lyrics_executor(1)
+    try:
+        assert pool._max_workers == 1
+        assert executors.lyrics_executor(8) is pool
+    finally:
+        pool.shutdown(wait=True)
+        monkeypatch.setattr(executors, "_lyrics", None)
+        monkeypatch.setattr(executors, "_lyrics_workers", None)

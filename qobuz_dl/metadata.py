@@ -1653,25 +1653,16 @@ def _get_tags_to_add(
             else None
         )
 
-        # Copia: a lista pertence ao dicionario da API e nao deve ser alterada.
-        raw_genres = list(qobuz_album.get("genres_list") or [])
+        # Fallback: usa o último nome do primeiro caminho de genres.list
+        if not main_genre:
+            lista = qobuz_item.get("genres_list") or []
+            primeiro = str(lista[0]).strip() if lista else ""
+            primeiro = primeiro.split("\u2192")[-1].strip()
+            main_genre = LOCAL_GENRE_MAP.get(primeiro, primeiro) or None
+
         if main_genre:
-            if raw_genres:
-                raw_genres[0] = main_genre
-            else:
-                raw_genres = [main_genre]
-
-        extracted_genres = re.findall(r"([^\u2192]+)", " \u2192 ".join(raw_genres))
-
-        final_genres = []
-        for g in extracted_genres:
-            clean_g = g.strip()
-            translated = LOCAL_GENRE_MAP.get(clean_g, clean_g)
-            if translated not in final_genres:
-                final_genres.append(translated)
-
-        tags["GENRE"] = ", ".join(final_genres)
-        multi_out["GENRE"] = list(final_genres)
+            tags["GENRE"] = main_genre
+            multi_out["GENRE"] = [main_genre]
     if not settings.no_copyright_tag:
         tags["COPYRIGHT"] = _format_copyright(qobuz_album.get("copyright", "n/a"))
     if not settings.no_label_tag:

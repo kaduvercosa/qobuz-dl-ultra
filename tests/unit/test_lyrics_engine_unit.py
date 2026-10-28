@@ -105,10 +105,25 @@ def test_build_bilingual_lrc(engine):
     assert bilingual.index("Hello") < bilingual.index("Olá")
 
 
+def test_build_bilingual_lrc_deduplicates_same_pause_timestamp(engine):
+    orig = "[00:19.500]♪ ♪ ♪\n[00:20.000]Bye"
+    trans = "[00:19.500]♪ ♪ ♪\n[00:20.000]Tchau"
+
+    bilingual = engine._build_bilingual_lrc(orig, trans)
+
+    assert bilingual.splitlines() == [
+        "[00:19.500]♪ ♪ ♪",
+        "[00:20.000]Bye",
+        "[00:20.000]Tchau",
+    ]
+
+
 def test_inject_instrumental_pauses(engine):
     lrc = "[00:01.000] Linha 1\n[00:20.000] Linha 2"
     with_pauses = engine._inject_instrumental_pauses(lrc)
-    assert "• • •" in with_pauses
+
+    # A injeção por intervalo foi desativada; pausas explícitas vêm do Qobuz.
+    assert with_pauses == lrc
 
 
 def test_save_lrc_file(engine, tmp_path):
@@ -255,10 +270,7 @@ def test_fetch_and_inject_qobuz_plain_failure(engine, tmp_path, monkeypatch):
         engine, "_fetch_musixmatch_lyrics", lambda *args, **kwargs: None
     )
     monkeypatch.setattr(
-        engine.session,
-        "get",
-        lambda *a, **k: MagicMock(status_code=404),
-        raising=False,
+        engine.session, "get", lambda *a, **k: MagicMock(status_code=404)
     )
 
     result = engine.fetch_and_inject(

@@ -43,36 +43,31 @@ def test_bilingual_lrc_uses_same_timestamp_without_translation_marker():
     assert "»" not in result
 
 
-def test_instrumental_pause_is_half_second_before_next_line():
+def test_inject_instrumental_pauses_is_noop_for_explicit_qobuz_pauses():
     e = engine()
-    result = e._inject_instrumental_pauses("[00:05.000]Primeiro\n[00:20.000]Segundo")
+    lrc = "[00:05.000]Primeiro\n[00:12.000]♪ ♪ ♪\n[00:20.000]Segundo"
 
-    # Os pontos entram 0.5s ANTES da proxima linha, nao logo depois da anterior
-    # (senao o player pula para eles antes de a linha ser cantada).
-    assert result == ("[00:05.000]Primeiro\n[00:19.500]• • •\n[00:20.000]Segundo")
+    # A detecção de pausas por intervalo foi desativada. O método não deve
+    # adicionar outro marcador quando o LRC já contém uma pausa explícita.
+    assert e._inject_instrumental_pauses(lrc) == lrc
 
 
-def test_instrumental_pause_goes_before_bilingual_pair():
+def test_bilingual_lrc_deduplicates_pause_at_same_timestamp():
     e = engine()
-    result = e._inject_instrumental_pauses(
-        "[00:05.000]Hello\n[00:20.000]Bye\n[00:20.000]Tchau"
-    )
+    original = "[00:19.500]♪ ♪ ♪\n[00:20.000]Bye"
+    translated = "[00:19.500]♪ ♪ ♪\n[00:20.000]Tchau"
 
-    # Original e traducao compartilham o timestamp: os pontos vem antes do par.
-    assert result == (
-        "[00:05.000]Hello\n[00:19.500]• • •\n[00:20.000]Bye\n[00:20.000]Tchau"
-    )
+    result = e._build_bilingual_lrc(original, translated)
+
+    assert result.splitlines() == [
+        "[00:19.500]♪ ♪ ♪",
+        "[00:20.000]Bye",
+        "[00:20.000]Tchau",
+    ]
 
 
-def test_instrumental_pause_is_not_added_for_gap_of_exactly_10s():
+def test_inject_instrumental_pauses_does_not_infer_pause_from_gap():
     e = engine()
-    result = e._inject_instrumental_pauses("[00:05.000]Primeiro\n[00:15.000]Segundo")
+    lrc = "[00:05.000]Primeiro\n[00:20.000]Segundo"
 
-    assert "• • •" not in result
-
-
-def test_instrumental_pause_does_not_change_short_gaps():
-    e = engine()
-    result = e._inject_instrumental_pauses("[00:05.000]Primeiro\n[00:15.000]Segundo")
-
-    assert result == "[00:05.000]Primeiro\n[00:15.000]Segundo"
+    assert e._inject_instrumental_pauses(lrc) == lrc

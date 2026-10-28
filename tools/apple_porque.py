@@ -44,6 +44,7 @@ import sys
 import textwrap
 import time
 import unicodedata
+from typing import Any
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -479,7 +480,7 @@ async def diagnosticar(
     lojas_extras=False,
 ) -> dict:
     sessao._apple_json_cache = {}  # cache interno POR FAIXA (ver ClienteComPausa)
-    trace = []
+    trace: list[dict[str, Any]] = []
     try:
         url, _fonte, motivo = await get_apple_hq_cover(
             sessao,
@@ -747,7 +748,8 @@ async def executar(args) -> int:
         itens = itens[: args.limite]
     destino = caminho_relatorio(args.saida)
     paises = [p.strip() for p in args.paises.split(",") if p.strip()]
-    contagem, linhas_csv = {}, []
+    contagem: dict[str, int] = {}
+    linhas_csv: list[list[str]] = []
     with open(destino, "w", encoding="utf-8") as arquivo:
         saida = Saida(arquivo)
         saida.linha(
@@ -767,6 +769,7 @@ async def executar(args) -> int:
                     if len(alvo) == 3
                     else tipo_do_lancamento(tags["album"], tags["total"])
                 )
+                diag: dict[str, Any]
                 try:
                     diag = await diagnosticar(
                         cliente,
@@ -808,9 +811,9 @@ async def executar(args) -> int:
             await cliente.aclose()
 
         saida.linha("RESUMO")
-        for chave, (nome, descricao) in VEREDITOS.items():
-            if contagem.get(chave):
-                saida.linha(f"  {contagem[chave]:>4}  {nome:<13} {descricao}")
+        for chave_veredito, (nome, descricao) in VEREDITOS.items():
+            if contagem.get(chave_veredito):
+                saida.linha(f"  {contagem[chave_veredito]:>4}  {nome:<13} {descricao}")
         saida.linha(
             f"\nRelatório completo (com o 'O que fazer' e os resultados da Apple): {destino}"
         )

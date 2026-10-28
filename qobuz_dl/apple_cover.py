@@ -25,7 +25,6 @@ from typing import Optional
 
 from qobuz_dl.http_download import make_client
 
-
 _TRANSLITERACAO: dict[str, str | int | None] = {
     "ø": "o",
     "Ø": "O",

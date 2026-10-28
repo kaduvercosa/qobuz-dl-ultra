@@ -3,6 +3,7 @@
 # # Reúne valores da CLI e do config.ini para serem consumidos pelo restante do projeto.
 # # ============================================================================
 import os
+from collections.abc import Sequence
 from typing import Any, Optional
 
 from qobuz_dl.constants import (
@@ -12,7 +13,6 @@ from qobuz_dl.constants import (
     DEFAULT_VARIOUS_ARTISTS_ALIASES,
 )
 from qobuz_dl.utils import normalize_label_filter
-from collections.abc import Sequence
 
 _MISSING = object()
 MAX_DOWNLOAD_WORKERS = 16

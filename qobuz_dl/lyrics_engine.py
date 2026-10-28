@@ -14,9 +14,11 @@
 #      e a prioridade. Pronto: pausas instrumentais, gravacao, mensagens e
 #      tratamento de erro sao feitos por fetch_and_inject().
 # ============================================================================
+import contextlib
 import logging
 import os
 import re
+import threading
 from dataclasses import dataclass
 from typing import TypedDict
 
@@ -26,10 +28,16 @@ from tqdm import tqdm
 
 from qobuz_dl import __version__, binilyrics, lyrics_comment, ui
 from qobuz_dl.http_download import make_sync_client
-from qobuz_dl.resilient_http import request_sync
+from qobuz_dl.resilient_http import HttpBudgetExceeded, http_budget, request_sync
 from qobuz_dl.settings import QobuzDLSettings
 
 logger = logging.getLogger(__name__)
+
+# Orcamento de espera por fonte de letra durante o DOWNLOAD (ver `network_budget`
+# em fetch_and_inject): ate' quanto uma fonte pode esperar cooldown/retries antes
+# de ser pulada, e a maior pausa de cooldown (429) que vale a pena esperar.
+LYRICS_NETWORK_BUDGET = 15.0
+LYRICS_MAX_COOLDOWN_WAIT = 5.0
 
 # Marca de tempo LRC ([mm:ss.xx] / [mm:ss.mmm]). Sem ao menos uma, o texto e'
 # letra plana e nunca pode ser salvo nem injetado.
@@ -225,6 +233,19 @@ class LyricsEngine:
         "_provider_musixmatch": RANK_MUSIXMATCH,
         "_provider_lrclib": RANK_LRCLIB,
     }
+    # Varias faixas buscam letra ao mesmo tempo (modo paralelo): sem este lock,
+    # cada thread pediria o seu proprio token ao Musixmatch de uma so' vez. Fica
+    # na classe (e nao em __init__) para valer tambem em instancias criadas sem
+    # __init__; so' serializa a obtencao do token, que acontece uma vez.
+    _mxm_lock = threading.Lock()
+
+    # Nome mostrado ao usuario quando uma fonte e' pulada por limite de requisicoes.
+    PROVIDER_LABELS = {
+        "_provider_qobuz": "Qobuz",
+        "_provider_binilyrics": "BiniLyrics",
+        "_provider_musixmatch": "Musixmatch",
+        "_provider_lrclib": "LRCLIB",
+    }
 
     def __init__(self, genius_token=None, session=None, settings=None):
         """Initialize lyrics engine with optional Genius token and HTTP session."""
@@ -266,18 +287,47 @@ class LyricsEngine:
         return f"[{minutes:02d}:{seconds:06.3f}]"
 
     def _qobuz_lines_to_lrc(self, lines, inject_intro=False):
-        """Converte linhas sincronizadas do Qobuz para LRC canonico."""
+        """Converte linhas sincronizadas do Qobuz para LRC canonico.
+
+        Linhas vazias ({"line": ""}) sao marcadores de pausa enviados pela
+        propria Qobuz: viram "♪ ♪ ♪" no meio do intervalo entre a linha
+        anterior e a seguinte.
+        """
         lrc_rows = []
+        prev_end = None
+        pausa_pendente = False
 
         for entry in lines:
             start = entry.get("start")
+            text = (entry.get("line") or "").strip()
+            end = entry.get("end")
+
+            # Linha vazia = marcador de pausa da Qobuz
+            if start is None and not text:
+                if prev_end is not None:
+                    pausa_pendente = True
+                continue
+
             if start is None:
                 continue
 
-            text = (entry.get("line") or "").strip()
+            if pausa_pendente:
+                # Só insere a pausa quando existe um intervalo real
+                # Se prev_end == start, o marcador ficaria sobre a próxima
+                # letra; se start < prev_end, os tempos são inconsistentes
+                if prev_end is not None and start > prev_end:
+                    meio_ms = prev_end + (start - prev_end) // 2
+                    lrc_rows.append(f"{self._ms_to_lrc_timestamp(meio_ms)} ♪ ♪ ♪")
+
+                pausa_pendente = False
+
             if text:
-                # LRC canonico: nenhum espaco artificial entre timestamp e texto.
                 lrc_rows.append(f"{self._ms_to_lrc_timestamp(start)}{text}")
+
+            if end is not None:
+                prev_end = end
+            elif text:
+                prev_end = start
 
         return "\n".join(lrc_rows) if lrc_rows else None
 
@@ -408,76 +458,36 @@ class LyricsEngine:
         for tag, text, is_trans in orig_lines + trans_lines:
             combined.append((tag_to_ms(tag), tag, text, is_trans))
 
-        # Ordena por timestamp (x[0]) e usa is_translation (x[3]) como desempate
-        # garante que a linha original vem sempre imediatamente antes da traduzida
+        # Ordena por timestamp e mantém a linha original antes da tradução.
         combined.sort(key=lambda x: (x[0], x[3]))
 
         result = []
-        for _ms, tag, text, _is_trans in combined:
-            if tag:
-                # Original e tradução saem iguais, sem marcador: o que as
-                # distingue é a ordem (original primeiro) no mesmo timestamp.
-                result.append(f"{tag}{text}")
-            else:
-                if text:
-                    result.append(text)
+        pausas_emitidas = set()
+        for timestamp_ms, tag, text, _is_trans in combined:
+            if not tag or not text:
+                continue
+
+            # A Qobuz pode enviar a linha vazia de pausa tanto na letra original
+            # quanto na tradução. Como ambas são convertidas para LRC antes da
+            # combinação, isso gera dois marcadores no mesmo instante. A pausa
+            # é um evento único: conserva apenas a primeira ocorrência por tempo.
+            if text == "♪ ♪ ♪":
+                if timestamp_ms in pausas_emitidas:
+                    continue
+                pausas_emitidas.add(timestamp_ms)
+
+            result.append(f"{tag}{text}")
 
         return "\n".join(result)
 
     def _inject_instrumental_pauses(self, lrc_text):
+        """Pausas instrumentais agora vem das linhas vazias do proprio Qobuz.
+
+        A antiga regra de intervalo > 10s foi desativada para não duplicar
+        marcadores: as pausas explícitas vêm das linhas vazias do Qobuz e são
+        convertidas por _qobuz_lines_to_lrc().
         """
-        - Adiciona marcador de pausa instrumental '• • •' 0.5s ANTES da proxima
-        linha se houver um intervalo maior que 10 segundos na sincronizacao.
-          (Antes ficava 0.5s depois do INICIO da linha anterior: o player pulava
-          para os pontos antes de a linha ser cantada. O LRC por linha so tem o
-          inicio de cada linha, nao o fim, entao ancorar na proxima linha e' a
-          unica forma de nao cortar a linha anterior.)
-        - Ignora a injecao no inicio da musica (se a linha anterior estiver em 00:00.000).
-        """
-        if not lrc_text:
-            return lrc_text
-
-        lines = lrc_text.splitlines()
-        parsed_lines = []
-        time_tag_re = re.compile(r"\[(\d{2,}):(\d{2})\.(\d{2,3})\]")
-
-        # 1. Extrai o timestamp (ms) de cada linha
-        for line in lines:
-            tags = time_tag_re.findall(line)
-            if not tags:
-                parsed_lines.append({"time": None, "raw": line})
-                continue
-
-            m, s, ms = tags[0]
-            time_ms = int(m) * 60000 + int(s) * 1000 + int(ms.ljust(3, "0")[:3])
-            parsed_lines.append({"time": time_ms, "raw": line})
-
-        new_lines = []
-        last_time = None
-
-        # 2. Percorre as linhas para calcular os saltos de tempo
-        for item in parsed_lines:
-            curr_time = item["time"]
-
-            if last_time is not None and curr_time is not None:
-                gap = curr_time - last_time
-
-                # Se a diferenca for > 10s e o tempo anterior for maior que zero
-                if gap > 10000 and last_time > 0:
-                    inst_time = curr_time - 500
-                    pause_line = f"{self._ms_to_lrc_timestamp(inst_time)}• • •"
-
-                    # Evita duplicar marcadores no mesmo instante
-                    if not new_lines or new_lines[-1] != pause_line:
-                        new_lines.append(pause_line)
-
-            new_lines.append(item["raw"])
-
-            # Atualiza o ultimo tempo validado
-            if curr_time is not None:
-                last_time = curr_time
-
-        return "\n".join(new_lines)
+        return lrc_text
 
     def _fetch_musixmatch_lyrics(
         self, artist, title, album=None, duration=None, isrc=None
@@ -493,24 +503,26 @@ class LyricsEngine:
         }
 
         try:
-            if not self._mxm_token:
-                resp_token = request_sync(
-                    self.session,
-                    "GET",
-                    "https://apic-appmobile.musixmatch.com/ws/1.1/token.get?app_id=mac-ios-v2.0",
-                    headers=headers,
-                    timeout=8,
-                )
+            with self._mxm_lock:
+                if not self._mxm_token:
+                    resp_token = request_sync(
+                        self.session,
+                        "GET",
+                        "https://apic-appmobile.musixmatch.com/ws/1.1/token.get?app_id=mac-ios-v2.0",
+                        headers=headers,
+                        timeout=8,
+                    )
 
-                if resp_token.status_code == 200:
-                    data_token = resp_token.json()
-                    if (
-                        data_token.get("message", {})
-                        .get("header", {})
-                        .get("status_code")
-                        == 200
-                    ):
-                        self._mxm_token = data_token["message"]["body"]["user_token"]
+                    if resp_token.status_code == 200:
+                        data_token = resp_token.json()
+                        if (
+                            data_token.get("message", {})
+                            .get("header", {})
+                            .get("status_code")
+                            == 200
+                        ):
+                            corpo = data_token["message"]["body"]
+                            self._mxm_token = corpo["user_token"]
 
             if self._mxm_token:
                 params = {
@@ -559,6 +571,10 @@ class LyricsEngine:
                                 subtitle_list = sub_msg["body"]["subtitle_list"]
                                 if subtitle_list:
                                     return subtitle_list[0]["subtitle"]["subtitle_body"]
+        except HttpBudgetExceeded:
+            # Limite de requisições/prazo: quem chama (fetch_and_inject) pula
+            # esta fonte em vez de repetir a mesma consulta com outras dicas.
+            raise
         except Exception as e:
             logger.debug(f"Erro ao buscar no Musixmatch: {e}")
         return None
@@ -846,6 +862,8 @@ class LyricsEngine:
         duration=None,
         quiet=False,
         better_than=None,
+        buffer_output=False,
+        network_budget=None,
     ):
         """
         Percorre as fontes de LyricsEngine.PROVIDERS (Qobuz -> BiniLyrics ->
@@ -872,21 +890,84 @@ class LyricsEngine:
         `better_than` (prioridade, 1 a 5): so consulta fontes MELHORES que ela.
         Usado pelo comando `lyrics` para trocar uma letra de fonte inferior sem
         nunca gravar uma pior; sem resultado, o arquivo nao e' tocado.
+
+        `buffer_output=True` (modo paralelo): guarda as linhas desta faixa e as
+        escreve juntas, de uma vez, no fim -- sem ficar segurando o
+        `print_lock` durante a rede, o que travava as outras faixas e o loop.
+
+        `network_budget` (segundos, por fonte): limita quanto cada fonte pode
+        ESPERAR (cooldown de 429, novas tentativas). Passando do combinado, a
+        fonte e' pulada e a proxima e' tentada, em vez de dormir ate 60 s.
+        `None` (padrao) mantem o comportamento de esperar o cooldown inteiro.
         """
+        saida = []
+
+        def _escrever(linhas):
+            if buffer_output:
+                saida.extend(linhas)
+                return
+            for linha in linhas:
+                tqdm.write(linha)
+
+        try:
+            return self._fetch_and_inject(
+                _escrever,
+                network_budget,
+                file_path,
+                artist,
+                track,
+                album,
+                save_lrc=save_lrc,
+                embed_lyrics=embed_lyrics,
+                qobuz_lyrics_response=qobuz_lyrics_response,
+                qobuz_translation_response=qobuz_translation_response,
+                track_number=track_number,
+                isrc=isrc,
+                duration=duration,
+                quiet=quiet,
+                better_than=better_than,
+            )
+        finally:
+            if saida:
+                # Um bloco so' por faixa: o lock e' tomado por um instante, so'
+                # para as linhas nao se misturarem com as de outras faixas.
+                with ui.print_lock:
+                    for linha in saida:
+                        tqdm.write(linha)
+
+    def _fetch_and_inject(
+        self,
+        _escrever,
+        network_budget,
+        file_path,
+        artist,
+        track,
+        album,
+        save_lrc=True,
+        embed_lyrics=True,
+        qobuz_lyrics_response=None,
+        qobuz_translation_response=None,
+        track_number=None,
+        isrc=None,
+        duration=None,
+        quiet=False,
+        better_than=None,
+    ):
+        """Corpo de `fetch_and_inject`; `_escrever(linhas)` e' o destino das linhas."""
         # "[NN] título": identifica a faixa em cada linha (modo paralelo).
         _ident = f"[{track_number}] {track}" if track_number else f"{track}"
 
         def _tw(kind, msg):
             """Escreve a mensagem no estilo unificado (tag + árvore + cinza).
 
-            Formata com `ui.tagged_lines` e escreve por `tqdm.write`: esta
-            função roda dentro do `print_lock` (não reentrante), então não
-            pode chamar `ui.ok()`/`ui.step()`, que o pegariam de novo.
+            Formata com `ui.tagged_lines` (sem escrever) e entrega ao destino:
+            direto no `tqdm.write` ou guardada até o fim (`buffer_output`).
+            Nunca toma o `print_lock` aqui (não reentrante), então também não
+            pode chamar `ui.ok()`/`ui.step()`.
             """
             if quiet and kind != "error":
                 return
-            for linha in ui.tagged_lines(kind, msg):
-                tqdm.write(linha)
+            _escrever(ui.tagged_lines(kind, msg))
 
         result: LyricsResult = {
             "success": False,
@@ -914,6 +995,8 @@ class LyricsEngine:
 
         _tw("search", f"Procurando letras: {_ident}")
         last_error = None
+        # Fontes puladas por limite de requisicoes/prazo (nomes para o aviso).
+        limitadas: list[str] = []
 
         for provider_name in self.PROVIDERS:
             if (
@@ -922,7 +1005,18 @@ class LyricsEngine:
             ):
                 continue
             try:
-                candidate = getattr(self, provider_name)(query)
+                # Cada fonte tem o proprio orcamento de espera: uma fonte
+                # limitada nao consome o tempo das seguintes.
+                orcamento = (
+                    http_budget(
+                        network_budget,
+                        max_cooldown_wait=min(LYRICS_MAX_COOLDOWN_WAIT, network_budget),
+                    )
+                    if network_budget
+                    else contextlib.nullcontext()
+                )
+                with orcamento:
+                    candidate = getattr(self, provider_name)(query)
                 # Barreira final: so letra sincronizada passa, qualquer que
                 # seja a fonte (inclusive as adicionadas no futuro).
                 if candidate is not None and not (
@@ -931,6 +1025,14 @@ class LyricsEngine:
                     candidate = None
                 if candidate is not None:
                     candidate.text = self._inject_instrumental_pauses(candidate.text)
+            except HttpBudgetExceeded as e:
+                # Fonte em cooldown (429) ou sem prazo: pula para a proxima em
+                # vez de esperar. Nao conta como erro da faixa.
+                rotulo = self.PROVIDER_LABELS.get(provider_name, provider_name)
+                if rotulo not in limitadas:
+                    limitadas.append(rotulo)
+                logger.debug(f"fonte {provider_name} pulada para {track}: {e}")
+                continue
             except Exception as e:
                 # Uma fonte com problema nao pode impedir as seguintes.
                 last_error = e
@@ -943,6 +1045,17 @@ class LyricsEngine:
                 continue
 
             # Achou: grava e encerra (nao tenta as fontes seguintes).
+            if limitadas:
+                _tw(
+                    "warn",
+                    ui.tail(
+                        f" {ui.tree_mid()} Letras: {_ident}",
+                        ui.join_meta(
+                            f"limite de requisições em {', '.join(limitadas)}",
+                            "usando outra fonte",
+                        ),
+                    ),
+                )
             try:
                 ok = self._deliver(file_path, candidate, result, embed_lyrics, save_lrc)
                 _tw(
@@ -971,6 +1084,16 @@ class LyricsEngine:
                 ),
             )
             result["error"] = str(last_error)
+        elif limitadas:
+            # Nao achou E houve fonte pulada: pode existir letra la. Avisa para
+            # rodar de novo depois (o comando `lyrics` refaz so' as faltantes).
+            _tw(
+                "warn",
+                ui.tail(
+                    f" {ui.tree_last()} Nenhuma letra encontrada: {_ident}",
+                    f"limite de requisições em {', '.join(limitadas)}",
+                ),
+            )
         else:
             _tw("warn", f" {ui.tree_last()} Nenhuma letra encontrada: {_ident}")
         return result

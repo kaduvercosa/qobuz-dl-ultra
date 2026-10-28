@@ -22,6 +22,12 @@ from concurrent.futures import ThreadPoolExecutor
 _lock = threading.Lock()
 _heavy: ThreadPoolExecutor | None = None
 _heavy_workers: int | None = None
+_lyrics: ThreadPoolExecutor | None = None
+_lyrics_workers: int | None = None
+
+# Os provedores de letra limitam requisições (429): mais de 3 buscas ao mesmo
+# tempo só aumentam as recusas, sem baixar o tempo total.
+MAX_LYRICS_WORKERS = 3
 
 
 def _default_workers() -> int:
@@ -57,3 +63,33 @@ def heavy_executor(max_workers: int | None = None) -> ThreadPoolExecutor:
 def heavy_executor_workers() -> int | None:
     """Retorna o tamanho efetivo do pool (principalmente útil para testes)."""
     return _heavy_workers
+
+
+def lyrics_executor(max_workers: int | None = None) -> ThreadPoolExecutor:
+    """Pool próprio (e pequeno) para buscar/gravar letras.
+
+    Letras são trabalho de REDE com esperas (cooldown de 429, timeouts). Se
+    dividissem o pool de ``heavy_executor`` com tags e verificação de
+    integridade, algumas faixas lentas de letra ocupariam todas as threads e as
+    demais faixas ficariam sem vaga para gravar tags. Aqui o teto é
+    ``min(max_workers, MAX_LYRICS_WORKERS)``, fixado pela primeira chamada.
+    """
+    global _lyrics, _lyrics_workers
+    requested = (
+        max(1, int(max_workers)) if max_workers is not None else _default_workers()
+    )
+    workers = min(requested, MAX_LYRICS_WORKERS)
+    if _lyrics is None:
+        with _lock:
+            if _lyrics is None:
+                _lyrics = ThreadPoolExecutor(
+                    max_workers=workers,
+                    thread_name_prefix="qobuz-lyrics",
+                )
+                _lyrics_workers = workers
+    return _lyrics
+
+
+def lyrics_executor_workers() -> int | None:
+    """Retorna o tamanho efetivo do pool de letras (principalmente para testes)."""
+    return _lyrics_workers

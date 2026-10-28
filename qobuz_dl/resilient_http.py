@@ -3,19 +3,30 @@
 Somente GET/HEAD e falhas transitórias são repetidos. Um 429/503 publica um
 cooldown por host compartilhado entre threads; chamadas normais não recebem
 pausas artificiais. O módulo não cria clientes nem altera max_connections.
+
+Orçamento de tempo (``http_budget``): por padrão uma requisição espera o
+cooldown inteiro (até 60 s por tentativa). Isso é certo para quem não tem
+pressa, mas num download em paralelo uma única fonte de letras limitada seria
+capaz de segurar a faixa (e um worker) por minutos. Dentro de
+``with http_budget(segundos, max_cooldown_wait=...)`` a requisição, em vez de
+dormir além do combinado, levanta ``HttpBudgetExceeded`` na hora e quem chamou
+segue para outra fonte. Fora do ``with`` nada muda.
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import contextvars
 import email.utils
 import logging
 import random
 import threading
 import time
-from collections.abc import Mapping
-from urllib.parse import urlsplit
+from collections.abc import Iterator, Mapping
+from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -24,6 +35,65 @@ _MAX_ATTEMPTS = 4
 _MAX_RETRY_AFTER = 60.0
 _lock = threading.Lock()
 _cooldowns: dict[str, float] = {}
+
+
+class HttpBudgetExceeded(Exception):
+    """A espera necessária passaria do orçamento de tempo de ``http_budget``.
+
+    ``reason`` é ``"cooldown"`` (o host pediu uma pausa maior que a tolerada) ou
+    ``"tempo"`` (o prazo total acabou). ``wait`` é a pausa que seria preciso.
+    """
+
+    def __init__(self, host: str, wait: float = 0.0, reason: str = "cooldown"):
+        super().__init__(f"{host or 'host'}: {reason} ({wait:.0f}s)")
+        self.host = host
+        self.wait = wait
+        self.reason = reason
+
+
+@dataclass(frozen=True)
+class _Budget:
+    deadline: float  # time.monotonic() em que o orçamento acaba
+    max_cooldown_wait: float  # maior pausa de cooldown aceita (s)
+
+
+# ContextVar: vale para a thread/tarefa que abriu o ``with`` e é independente
+# entre faixas em paralelo. Em threads de pool só vale se o ``with`` for aberto
+# DENTRO da função que roda na thread (é o que lyrics_engine faz).
+_budget: contextvars.ContextVar[_Budget | None] = contextvars.ContextVar(
+    "resilient_http_budget", default=None
+)
+
+
+@contextlib.contextmanager
+def http_budget(seconds: float, *, max_cooldown_wait: float = 5.0) -> Iterator[None]:
+    """Limita quanto as requisições deste bloco podem ESPERAR (não o tempo de rede).
+
+    Combina com um orçamento já aberto pegando o mais restrito dos dois.
+    """
+    deadline = time.monotonic() + max(0.0, float(seconds))
+    cap = max(0.0, float(max_cooldown_wait))
+    atual = _budget.get()
+    if atual is not None:
+        deadline = min(deadline, atual.deadline)
+        cap = min(cap, atual.max_cooldown_wait)
+    token = _budget.set(_Budget(deadline, cap))
+    try:
+        yield
+    finally:
+        _budget.reset(token)
+
+
+def _check_budget(host: str, delay: float = 0.0) -> None:
+    """Levanta ``HttpBudgetExceeded`` se dormir ``delay`` s não cabe no orçamento."""
+    budget = _budget.get()
+    if budget is None:
+        return
+    restante = budget.deadline - time.monotonic()
+    if delay > budget.max_cooldown_wait:
+        raise HttpBudgetExceeded(host, delay, "cooldown")
+    if restante <= 0 or delay > restante:
+        raise HttpBudgetExceeded(host, delay, "tempo")
 
 
 def _host(url: str) -> str:
@@ -62,6 +132,7 @@ def _publish_cooldown(host: str, delay: float) -> None:
 def _wait_host(host: str) -> None:
     with _lock:
         delay = max(0.0, _cooldowns.get(host, 0.0) - time.monotonic())
+    _check_budget(host, delay)
     if delay:
         time.sleep(delay)
 
@@ -69,6 +140,7 @@ def _wait_host(host: str) -> None:
 async def _await_host(host: str) -> None:
     with _lock:
         delay = max(0.0, _cooldowns.get(host, 0.0) - time.monotonic())
+    _check_budget(host, delay)
     if delay:
         await asyncio.sleep(delay)
 
@@ -117,11 +189,13 @@ def request_sync(
                 delay,
             )
             if not shared_cooldown:
+                _check_budget(host, delay)
                 time.sleep(delay)
         except httpx.TransportError:
             if attempt == attempts:
                 raise
             delay = _delay(attempt, None)
+            _check_budget(host, delay)
             time.sleep(delay)
     raise RuntimeError("fluxo de retry HTTP inesperado")
 
@@ -175,11 +249,14 @@ async def request_async(
                 delay,
             )
             if not shared_cooldown:
+                _check_budget(host, delay)
                 await asyncio.sleep(delay)
         except httpx.TransportError:
             if attempt == attempts:
                 raise
-            await asyncio.sleep(_delay(attempt, None))
+            delay = _delay(attempt, None)
+            _check_budget(host, delay)
+            await asyncio.sleep(delay)
     raise RuntimeError("fluxo de retry HTTP inesperado")
 
 

@@ -58,6 +58,16 @@ publicar, renomeie a seção para a nova versão e a data.
   no `tests.yml` (antes: 75% nos dois primeiros e 60% no CI).
 
 ### Corrigido
+- Download em paralelo (a-Shell, `--max-workers 5`): o terminal não trava mais numa
+  faixa enquanto a pasta já mostra tudo baixado. A busca de letras rodava com o
+  `print_lock` preso e, com uma fonte em limite de requisições (429), dormia até 60 s por
+  tentativa; as outras faixas e o loop (que imprimem pelo mesmo lock) ficavam parados.
+  Agora a busca não segura o lock, cada fonte tem um orçamento de espera (15 s; cooldown
+  acima de 5 s é pulado e a próxima fonte é tentada, com aviso `limite de requisições em
+  X, usando outra fonte`), as letras usam um pool próprio de até 3 threads (não disputam
+  vaga com tags e verificação) e as linhas de cada faixa saem juntas. O token do
+  Musixmatch é pedido uma vez só. `run_bounded` aninhado com o mesmo limite não pode mais
+  travar. O comando `lyrics` mantém o comportamento de esperar o cooldown.
 - `test_cria_playlist_vazia_com_nome_em_maiusculas` falhava só na suíte inteira:
   o cliente falso não tinha `get_user_playlists` e um handler de log deixado por
   outro teste jogava o aviso na saída capturada. O cliente falso foi completado e

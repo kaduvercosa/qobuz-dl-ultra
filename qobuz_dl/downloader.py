@@ -48,7 +48,7 @@ from qobuz_dl.constants import (
 )
 from qobuz_dl.db import handle_download_id
 from qobuz_dl.exceptions import NonStreamable
-from qobuz_dl.executors import heavy_executor
+from qobuz_dl.executors import heavy_executor, lyrics_executor
 from qobuz_dl.fileio import replace_atomic
 from qobuz_dl.http_download import (
     DownloadAborted,
@@ -63,7 +63,7 @@ from qobuz_dl.playlist_links import (
     absorb_playlist_copies,
     scan_dest_folder,
 )
-from qobuz_dl.resilient_http import request_async
+from qobuz_dl.resilient_http import http_budget, request_async
 from qobuz_dl.settings import QobuzDLSettings
 from qobuz_dl.storage import (
     InsufficientStorageError,
@@ -88,7 +88,7 @@ from qobuz_dl.utils import (
     verify_audio_integrity,
 )
 
-from .lyrics_engine import LyricsEngine
+from .lyrics_engine import LYRICS_NETWORK_BUDGET, LyricsEngine
 
 # Ordem de fallback de qualidade quando o tier pedido falha por motivo de rede/servidor (NAO usado para faixas indisponiveis -- ver _PermanentDownloadError). 27=Hi-Res >96kHz | 7=Hi-Res 96kHz | 6=CD 16bit/44.1kHz | 5=MP3 320kbps
 FALLBACK_TIERS = [27, 7, 6, 5]
@@ -2024,24 +2024,34 @@ class Download:
                         )
 
             def _inject_lyrics_and_print():
-                """Inject lyrics into audio file and print status."""
-                with print_lock:
-                    resultado_letras = self.lyrics_engine.fetch_and_inject(
-                        file_path=final_file,
-                        artist=search_artist,
-                        track=track_title,
-                        album=search_album,
-                        save_lrc=not self.no_lrc_files,
-                        embed_lyrics=getattr(self.settings, "embed_lyrics", True),
-                        qobuz_lyrics_response=qobuz_lyrics_response,
-                        qobuz_translation_response=qobuz_translation_response,
-                        track_number=track_no,
-                        isrc=track_metadata.get("isrc"),
-                        duration=track_metadata.get("duration"),
-                    )
-                    if translation_note:
-                        # Dentro do print_lock (não reentrante): formata com o
-                        # ui e escreve por tqdm.write, como o motor de letras.
+                """Inject lyrics into audio file and print status.
+
+                A busca de letras e' rede com esperas (cooldown de 429). Ela
+                NAO roda mais dentro do `print_lock`: segurar o lock durante a
+                rede travava as outras faixas e o proprio loop (que imprime
+                pelo mesmo lock). O motor guarda as linhas da faixa e as
+                escreve juntas no fim; cada fonte tem um orcamento de espera
+                e e' pulada se passar dele.
+                """
+                resultado_letras = self.lyrics_engine.fetch_and_inject(
+                    file_path=final_file,
+                    artist=search_artist,
+                    track=track_title,
+                    album=search_album,
+                    save_lrc=not self.no_lrc_files,
+                    embed_lyrics=getattr(self.settings, "embed_lyrics", True),
+                    qobuz_lyrics_response=qobuz_lyrics_response,
+                    qobuz_translation_response=qobuz_translation_response,
+                    track_number=track_no,
+                    isrc=track_metadata.get("isrc"),
+                    duration=track_metadata.get("duration"),
+                    buffer_output=bool(is_parallel),
+                    network_budget=LYRICS_NETWORK_BUDGET,
+                )
+                if translation_note:
+                    # Dentro do print_lock (não reentrante): formata com o
+                    # ui e escreve por tqdm.write, como o motor de letras.
+                    with print_lock:
                         for linha in ui.tagged_lines(
                             "lyrics_note",
                             ui.tail(
@@ -2049,11 +2059,11 @@ class Download:
                             ),
                         ):
                             tqdm.write(linha)
-                    return resultado_letras
+                return resultado_letras
 
             resultado_letras = await ui.run_in_executor(
                 loop,
-                heavy_executor(getattr(self.settings, "max_workers", 1)),
+                lyrics_executor(getattr(self.settings, "max_workers", 1)),
                 _inject_lyrics_and_print,
             )
             if letras_out is not None:
@@ -2721,7 +2731,12 @@ async def tqdm_download(
 
 
 async def fetch_qobuz_lyrics_json(client, http_session, track_id, language=None):
-    """Fetch lyrics JSON from Qobuz API."""
+    """Fetch lyrics JSON from Qobuz API.
+
+    Letra e' um extra: se o Qobuz pedir uma pausa longa (429), o orcamento de
+    espera faz a busca desistir em vez de segurar o worker da faixa; sem a
+    letra do Qobuz o motor de letras tenta as outras fontes.
+    """
     try:
         params = {"track_id": track_id}
         if language:
@@ -2731,32 +2746,33 @@ async def fetch_qobuz_lyrics_json(client, http_session, track_id, language=None)
             "track/lyricsUrl", params, client.sec
         )
 
-        r = await request_async(
-            client.session, "GET", client.base + "track/lyricsUrl", params=params
-        )
-        if r.status_code != 200:
-            return None
-        lyrics_url_meta = r.json()
-
-        lyrics_json_url = None
-        if isinstance(lyrics_url_meta, dict):
-            lyrics_json_url = lyrics_url_meta.get("url") or lyrics_url_meta.get(
-                "lyrics_url"
+        with http_budget(20.0, max_cooldown_wait=8.0):
+            r = await request_async(
+                client.session, "GET", client.base + "track/lyricsUrl", params=params
             )
+            if r.status_code != 200:
+                return None
+            lyrics_url_meta = r.json()
+
+            lyrics_json_url = None
+            if isinstance(lyrics_url_meta, dict):
+                lyrics_json_url = lyrics_url_meta.get("url") or lyrics_url_meta.get(
+                    "lyrics_url"
+                )
+                if not lyrics_json_url:
+                    for k, v in lyrics_url_meta.items():
+                        if "url" in k.lower() and isinstance(v, str):
+                            lyrics_json_url = v
+                            break
+
             if not lyrics_json_url:
-                for k, v in lyrics_url_meta.items():
-                    if "url" in k.lower() and isinstance(v, str):
-                        lyrics_json_url = v
-                        break
+                return None
 
-        if not lyrics_json_url:
-            return None
-
-        resp = await request_async(http_session, "GET", lyrics_json_url, timeout=12)
-        if resp.status_code in (403, 404):
-            return None
-        resp.raise_for_status()
-        return resp.json()
+            resp = await request_async(http_session, "GET", lyrics_json_url, timeout=12)
+            if resp.status_code in (403, 404):
+                return None
+            resp.raise_for_status()
+            return resp.json()
     except Exception:
         return None
 

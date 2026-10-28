@@ -16,8 +16,11 @@ parsing/deteção (existe letra? em que campo? é bilíngue?), não o conteúdo
 em si.
 """
 
+import collections
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
+
+import pytest
 
 from qobuz_dl import retro_tagger
 from qobuz_dl.retro_tagger import (
@@ -474,6 +477,102 @@ class TestFetchQobuzLyricsRaw:
         await fetch_qobuz_lyrics_raw(client, "track123", language="en")
         params_enviados = client.session.request.call_args.kwargs["params"]
         assert params_enviados["language"] == "en"
+
+
+def _resp(status=200, dados=None):
+    return SimpleNamespace(status_code=status, json=lambda: dados or {})
+
+
+def _client_basico():
+    return SimpleNamespace(
+        session=object(),
+        base="https://exemplo.invalido/api/",
+        sec="segredo-falso",
+        _modern_sig=lambda endpoint, params, sec: "assinatura-falsa",
+    )
+
+
+def _respostas(monkeypatch, *seq):
+    """Troca `request_async` (que já faz os retries) por respostas fixas, em ordem.
+
+    Um item que seja exceção é levantado, como o httpx faz quando a rede cai.
+    """
+    fila = list(seq)
+
+    async def _falso(client, method, url, **kwargs):
+        item = fila.pop(0)
+        if isinstance(item, BaseException):
+            raise item
+        return item
+
+    monkeypatch.setattr(retro_tagger, "request_async", _falso)
+
+
+async def _com_contador():
+    """Consulta com um contador de falhas ativo; devolve (resultado, contador)."""
+    contador = collections.Counter()
+    token = retro_tagger._QOBUZ_FALHAS.set(contador)
+    try:
+        resultado = await fetch_qobuz_lyrics_raw(_client_basico(), "t1")
+        return resultado, contador
+    finally:
+        retro_tagger._QOBUZ_FALHAS.reset(token)
+
+
+_META_OK = {"url": "https://exemplo.invalido/letra.json"}
+
+
+class TestFetchQobuzLyricsRawFalhasQueSobram:
+    """Resposta que continua 429/5xx DEPOIS dos retries não é "sem letra"."""
+
+    async def test_429_persistente_registra_limite(self, monkeypatch):
+        _respostas(monkeypatch, _resp(429))
+        resultado, falhas = await _com_contador()
+        assert resultado is None
+        assert falhas["limite"] == 1 and not falhas["indisponivel"]
+
+    @pytest.mark.parametrize("status", [408, 425, 500, 503])
+    async def test_5xx_e_timeouts_registram_indisponivel(self, monkeypatch, status):
+        _respostas(monkeypatch, _resp(status))
+        _, falhas = await _com_contador()
+        assert falhas["indisponivel"] == 1 and not falhas["limite"]
+
+    async def test_segunda_requisicao_tambem_conta(self, monkeypatch):
+        _respostas(monkeypatch, _resp(200, _META_OK), _resp(429))
+        resultado, falhas = await _com_contador()
+        assert resultado is None
+        assert falhas["limite"] == 1
+
+    async def test_404_e_so_sem_letra_e_nao_conta_como_falha(self, monkeypatch):
+        _respostas(monkeypatch, _resp(404))
+        resultado, falhas = await _com_contador()
+        assert resultado is None
+        assert not falhas
+
+    async def test_erro_de_rede_registra_indisponivel(self, monkeypatch):
+        class TransportError(Exception):
+            pass
+
+        _respostas(monkeypatch, TransportError("caiu"))
+        resultado, falhas = await _com_contador()
+        assert resultado is None
+        assert falhas["indisponivel"] == 1
+
+    async def test_erro_que_nao_e_de_rede_nao_conta(self, monkeypatch):
+        _respostas(monkeypatch, RuntimeError("bug"))
+        resultado, falhas = await _com_contador()
+        assert resultado is None
+        assert not falhas
+
+    async def test_sucesso_nao_registra_nada(self, monkeypatch):
+        _respostas(monkeypatch, _resp(200, _META_OK), _resp(200, {"ok": 1}))
+        resultado, falhas = await _com_contador()
+        assert resultado == {"ok": 1}
+        assert not falhas
+
+    async def test_sem_contador_ativo_nao_quebra(self, monkeypatch):
+        _respostas(monkeypatch, _resp(429))
+        assert await fetch_qobuz_lyrics_raw(_client_basico(), "t1") is None
 
 
 class TestDeteccaoDeTraducaoSemMarcador:

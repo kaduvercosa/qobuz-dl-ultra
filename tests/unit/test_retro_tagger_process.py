@@ -101,6 +101,7 @@ def ambiente(tmp_path, monkeypatch):
         client="padrao",
         arquivo="Artista - Faixa.flac",
         tags=None,
+        falhas_qobuz=None,
     ):
         caminho = tmp_path / arquivo
         caminho.write_bytes(b"x")
@@ -110,6 +111,11 @@ def ambiente(tmp_path, monkeypatch):
             return fila.pop(0) if len(fila) > 1 else fila[0]
 
         async def buscar_letra(cli, tid, language=None):
+            # `falhas_qobuz`: o que a consulta real registraria ao continuar
+            # recusada depois dos retries ("limite" ou "indisponivel").
+            for chave, quantas in (falhas_qobuz or {}).items():
+                for _ in range(quantas):
+                    rt._registrar_qobuz(chave)
             return resposta_trad if language else resposta_orig
 
         monkeypatch.setattr(rt, "extract_track_id", lambda p: track_id)
@@ -868,3 +874,38 @@ async def test_cabecalho_mostra_a_ordem_de_prioridade(ambiente):
     assert (
         "Qobuz bilíngue > Qobuz > BiniLyrics > Musixmatch > LRCLIB" in ambiente.texto()
     )
+
+
+# --------------------------------------------------------------------------
+# Qobuz recusando consultas (sobrou limite/indisponibilidade após os retries)
+# --------------------------------------------------------------------------
+async def test_qobuz_recusou_por_limite_adia_a_faixa_sem_mexer_no_arquivo(ambiente):
+    await ambiente(
+        resposta_orig=_orig("pt"),
+        falhas_qobuz={"limite": 1},
+        estados=[_estado(has=True, lang="unknown", sync=True, source="LRCLIB")],
+    )
+    texto = ambiente.texto()
+    assert _engine().chamadas == []  # nada é gravado
+    assert "Atenção -- Qobuz indisponível; faixa adiada" in texto
+    assert "limite de requisições" in texto
+    assert re.search(r"Adiadas \(Qobuz\)\s*: 1\b", texto)
+    assert "1 faixa(s) adiada(s)" in texto
+
+
+async def test_qobuz_indisponivel_tambem_adia(ambiente):
+    await ambiente(
+        resposta_orig=None,
+        falhas_qobuz={"indisponivel": 1},
+        estados=[_estado()],  # sem letra: sem o Qobuz, não cai nas outras fontes
+    )
+    assert _engine().chamadas == []
+    assert "ficou indisponível" in ambiente.texto()
+
+
+async def test_sem_falhas_o_resumo_mostra_zero_adiadas(ambiente):
+    await ambiente(resposta_orig=_orig("pt"))
+    texto = ambiente.texto()
+    assert len(_engine().chamadas) == 1
+    assert re.search(r"Adiadas \(Qobuz\)\s*: 0\b", texto)
+    assert "adiada(s)" not in texto

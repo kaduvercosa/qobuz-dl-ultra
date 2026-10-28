@@ -29,6 +29,7 @@ import argparse
 import asyncio
 import os
 import sys
+from typing import Any
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -154,7 +155,7 @@ def main(argv=None) -> int:
     )
     args = parser.parse_args(argv)
 
-    trace = [] if args.all else None
+    trace: list[dict[str, Any]] | None = [] if args.all else None
     countries = (
         [c.strip() for c in args.countries.split(",") if c.strip()]
         if args.countries

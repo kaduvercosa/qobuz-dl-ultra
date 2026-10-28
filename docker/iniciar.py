@@ -17,7 +17,6 @@ Pode rodar a cada comando: se está tudo certo, não imprime nada.
 """
 
 from __future__ import annotations
-from typing import NoReturn
 
 import configparser
 import os
@@ -25,6 +24,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from typing import NoReturn
 
 # Pasta de downloads DENTRO do container; o docker-compose.yml monta a pasta
 # do host exatamente aqui.

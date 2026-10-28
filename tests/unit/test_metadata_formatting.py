@@ -388,7 +388,7 @@ class TestGetTagsToAdd:
         tags = _get_tags_to_add(album, _item(), settings)
 
         # genre principal (traduzido) substitui o primeiro item da lista
-        assert tags["GENRE"] == "Electronic, Ambient"
+        assert tags["GENRE"] == "Electronic"
 
     def test_copyright_formatado_e_label_com_espacos_colapsados(self):
         settings = QobuzDLSettings()

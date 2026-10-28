@@ -8,6 +8,7 @@ Uso:
 
 import argparse
 import sys
+
 try:
     import tomllib
 except ModuleNotFoundError:
