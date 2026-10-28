@@ -270,7 +270,7 @@ def test_fetch_and_inject_qobuz_plain_failure(engine, tmp_path, monkeypatch):
         engine, "_fetch_musixmatch_lyrics", lambda *args, **kwargs: None
     )
     monkeypatch.setattr(
-        engine.session, "get", lambda *a, **k: MagicMock(status_code=404)
+        engine.session, "get", lambda *a, **k: MagicMock(status_code=404), raising=False,
     )
 
     result = engine.fetch_and_inject(
