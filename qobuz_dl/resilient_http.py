@@ -73,7 +73,12 @@ async def _await_host(host: str) -> None:
         await asyncio.sleep(delay)
 
 
-def request_sync(client: httpx.Client, method: str, url: str, **kwargs: Any,) -> httpx.Response:
+def request_sync(
+    client: httpx.Client,
+    method: str,
+    url: str,
+    **kwargs: Any,
+) -> httpx.Response:
     """Executa request síncrona resiliente; falhas finais são propagadas."""
     method = method.upper()
     host = _host(url)
@@ -121,7 +126,12 @@ def request_sync(client: httpx.Client, method: str, url: str, **kwargs: Any,) ->
     raise RuntimeError("fluxo de retry HTTP inesperado")
 
 
-async def request_async(client: httpx.AsyncClient, method: str, url: str, **kwargs: Any,) -> httpx.Response:
+async def request_async(
+    client: httpx.AsyncClient,
+    method: str,
+    url: str,
+    **kwargs: Any,
+) -> httpx.Response:
     """Executa request assíncrona resiliente sem bloquear o event loop."""
     method = method.upper()
     host = _host(url)

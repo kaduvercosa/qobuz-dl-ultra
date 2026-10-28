@@ -1110,8 +1110,7 @@ async def _auth_command(
 
         if user_info is None or sub_info is None:
             ui.error(
-                "A consulta não retornou os dados necessários da conta "
-                "e da assinatura."
+                "A consulta não retornou os dados necessários da conta e da assinatura."
             )
             return False
 

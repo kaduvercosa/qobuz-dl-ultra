@@ -285,7 +285,12 @@ def test_fetch_and_inject_lrclib_only_save_lrc(engine, tmp_path, monkeypatch):
         "syncedLyrics": "[00:01.000] Synced LRCLIB",
         "plainLyrics": "Plain LRCLIB",
     }
-    monkeypatch.setattr(engine.session, "get", lambda *args, **kwargs: mock_response)
+    monkeypatch.setattr(
+        engine.session,
+        "get",
+        lambda *args, **kwargs: mock_response,
+        raising=False,
+    )
 
     # Impede que o Musixmatch processe o mock do LRCLIB e quebre o teste
     monkeypatch.setattr(

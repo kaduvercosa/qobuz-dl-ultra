@@ -146,10 +146,7 @@ def _alfabeto(texto: str) -> str:
 def explicar_diferenca(a: str, b: str) -> str:
     """Lista, caractere a caractere, o que muda entre os dois textos brutos."""
     if difflib.SequenceMatcher(None, a, b).ratio() < 0.5 and a and b:
-        return (
-            f"textos muito diferentes "
-            f"(alfabetos: {_alfabeto(a)} ↔ {_alfabeto(b)})"
-        )
+        return f"textos muito diferentes (alfabetos: {_alfabeto(a)} ↔ {_alfabeto(b)})"
 
     partes: list[str] = []
     for op, i1, i2, j1, j2 in difflib.SequenceMatcher(None, a, b).get_opcodes():
@@ -209,9 +206,7 @@ def comparar_campo(
         limite = THRESH["album"]
 
         if not nq:
-            avisos.append(
-                "Qobuz normaliza para VAZIO: álbum aprovado automaticamente"
-            )
+            avisos.append("Qobuz normaliza para VAZIO: álbum aprovado automaticamente")
 
     elif campo == "album_full":
         nq = titulo_album_comparavel(qobuz)
@@ -251,7 +246,6 @@ def comparar_campo(
 
     ok = score >= limite and not any("REJEITA" in aviso for aviso in avisos)
 
-
     for lado, texto in (("Qobuz", qobuz), ("Apple", apple)):
         for suspeito in caracteres_suspeitos(texto):
             avisos.append(f"{lado}: {suspeito}")
@@ -290,10 +284,7 @@ def imprimir_comparacao(
         f"{qobuz!r} ↔ {apple!r}  "
         f"{res['score']:.2f} {sinal} {res['limite']:.2f}"
     )
-    print(
-        f"{prefixo}         norm: "
-        f"{res['norm'][0]!r} ↔ {res['norm'][1]!r}"
-    )
+    print(f"{prefixo}         norm: {res['norm'][0]!r} ↔ {res['norm'][1]!r}")
 
     if qobuz != apple:
         print(f"{prefixo}         dif : {explicar_diferenca(qobuz, apple)}")
@@ -412,14 +403,8 @@ def cmd_selftest(args: argparse.Namespace) -> int:
         f"  BUG rejeita o par certo : {bugs_rejeita}  "
         "(capa certa deixaria de ser trocada)"
     )
-    ambos(
-        f"  BUG aprova o par errado : {bugs_aprova}  "
-        "(risco de capa errada)"
-    )
-    ambos(
-        f"  texto virou VAZIO       : {vazios}  "
-        "(comparação anulada)"
-    )
+    ambos(f"  BUG aprova o par errado : {bugs_aprova}  (risco de capa errada)")
+    ambos(f"  texto virou VAZIO       : {vazios}  (comparação anulada)")
     return 0
 
 
@@ -591,10 +576,7 @@ def cmd_live(args: argparse.Namespace) -> int:
         return 1
 
     if erros:
-        ambos(
-            f"ATENÇÃO: {erros} consulta(s) falharam; "
-            "a lista pode estar incompleta."
-        )
+        ambos(f"ATENÇÃO: {erros} consulta(s) falharam; a lista pode estar incompleta.")
 
     avaliados: list[tuple[ComparacaoCandidato, ResultadoApple]] = [
         (
@@ -663,11 +645,7 @@ def _contar_audios(pasta: str, profundidade: int = 5) -> int:
             subdirs[:] = []
 
         subdirs[:] = [d for d in subdirs if not d.startswith(".")]
-        total += sum(
-            1
-            for nome in nomes
-            if nome.lower().endswith((".flac", ".mp3"))
-        )
+        total += sum(1 for nome in nomes if nome.lower().endswith((".flac", ".mp3")))
 
     return total
 
@@ -689,8 +667,7 @@ def pastas_com_audio(
             filhos = [
                 os.path.join(raiz, nome)
                 for nome in sorted(os.listdir(raiz))
-                if not nome.startswith(".")
-                and os.path.isdir(os.path.join(raiz, nome))
+                if not nome.startswith(".") and os.path.isdir(os.path.join(raiz, nome))
             ]
         except OSError:
             continue
@@ -716,8 +693,7 @@ def pastas_com_audio(
         caminho: total
         for caminho, total in achadas.items()
         if not any(
-            outra != caminho and outra.startswith(caminho + os.sep)
-            for outra in achadas
+            outra != caminho and outra.startswith(caminho + os.sep) for outra in achadas
         )
     }
 
@@ -740,10 +716,7 @@ def cmd_onde(args: argparse.Namespace) -> int:
     home = os.path.expanduser("~")
     raizes = [home, os.path.join(home, "Documents"), os.getcwd()]
 
-    print(
-        "\nPastas com .flac/.mp3 encontradas "
-        "(HOME, Documents e pasta atual):"
-    )
+    print("\nPastas com .flac/.mp3 encontradas (HOME, Documents e pasta atual):")
     achadas = pastas_com_audio(raizes)
 
     if not achadas:
@@ -818,10 +791,7 @@ def cmd_scan(args: argparse.Namespace) -> int:
         try:
             pasta, _ = pasta_padrao()
         except Exception as exc:
-            ambos(
-                f"Não consegui descobrir a pasta padrão ({exc}). "
-                "Rode: ... onde"
-            )
+            ambos(f"Não consegui descobrir a pasta padrão ({exc}). Rode: ... onde")
             return 1
 
         ambos(f"Usando a pasta de downloads do config.ini: {pasta}")
@@ -859,8 +829,7 @@ def cmd_scan(args: argparse.Namespace) -> int:
 
         if analisados >= args.limite:
             ambos(
-                f"\n(limite de {args.limite} faixas atingido; "
-                "use --limite para mais)"
+                f"\n(limite de {args.limite} faixas atingido; use --limite para mais)"
             )
             break
 
@@ -921,10 +890,7 @@ def cmd_scan(args: argparse.Namespace) -> int:
                     "",
                 ]
             )
-            resumo(
-                f"[{analisados}] {veredito.upper():<14} "
-                f"{artista} - {titulo}"
-            )
+            resumo(f"[{analisados}] {veredito.upper():<14} {artista} - {titulo}")
             continue
 
         a_art, a_alb, a_trk = melhor["apple"]
@@ -943,8 +909,7 @@ def cmd_scan(args: argparse.Namespace) -> int:
 
             if not comparacao["ok"]:
                 problemas.append(
-                    f"{campo} {comparacao['score']:.2f}"
-                    f"<{comparacao['limite']:.2f}"
+                    f"{campo} {comparacao['score']:.2f}<{comparacao['limite']:.2f}"
                 )
 
         if melhor["ok"]:

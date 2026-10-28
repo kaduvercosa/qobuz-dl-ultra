@@ -26,7 +26,12 @@ _SEPARATOR = " | "
 _SOURCE_RE = re.compile(r"Letra:\s*([^(|\n]+?)\s*(?:\(|\||$)")
 
 
-def build_line(source: object, *, bilingual: bool = False, language: object = None,) -> str:
+def build_line(
+    source: object,
+    *,
+    bilingual: bool = False,
+    language: object = None,
+) -> str:
     """'Letra: Qobuz (sincronizada, bilíngue EN+PT)'."""
     idioma = str(language or "").strip()
     if idioma.lower() == "unknown":
@@ -39,7 +44,9 @@ def build_line(source: object, *, bilingual: bool = False, language: object = No
     return f"{PREFIX} {str(source).strip()} ({', '.join(detalhes)})"
 
 
-def source_from_comment(text: str | Iterable[object] | None,) -> str | None:
+def source_from_comment(
+    text: str | Iterable[object] | None,
+) -> str | None:
     """Origem escrita numa linha/comentário 'Letra: X (...)'; None se não houver."""
     if not text:
         return None
@@ -49,7 +56,9 @@ def source_from_comment(text: str | Iterable[object] | None,) -> str | None:
     return match.group(1).strip() if match else None
 
 
-def extract_flac_lines(values: str | Iterable[object] | None,) -> list[str]:
+def extract_flac_lines(
+    values: str | Iterable[object] | None,
+) -> list[str]:
     """Linhas de origem da letra de um COMMENT Vorbis (str ou lista de str)."""
     if not values:
         return []
@@ -64,7 +73,9 @@ def extract_flac_lines(values: str | Iterable[object] | None,) -> list[str]:
     return lines
 
 
-def extract_mp3_segments(text: str | Iterable[object] | None,) -> list[str]:
+def extract_mp3_segments(
+    text: str | Iterable[object] | None,
+) -> list[str]:
     """Trechos de origem da letra de um COMM ID3 (linha única separada por ' | ')."""
     if not text:
         return []
@@ -78,7 +89,10 @@ def extract_mp3_segments(text: str | Iterable[object] | None,) -> list[str]:
     return segments
 
 
-def merge_flac(values: str | Iterable[object] | None, line: str,) -> str:
+def merge_flac(
+    values: str | Iterable[object] | None,
+    line: str,
+) -> str:
     """COMMENT Vorbis com a linha de letra atualizada (as demais linhas ficam)."""
     if not values:
         values = []

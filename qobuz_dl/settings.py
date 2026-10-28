@@ -41,9 +41,7 @@ def _parse_names_with_comma(value) -> tuple:
     else:
         itens = list(value)
     return tuple(
-        item.strip()
-        for item in itens
-        if isinstance(item, str) and "," in item
+        item.strip() for item in itens if isinstance(item, str) and "," in item
     )
 
 

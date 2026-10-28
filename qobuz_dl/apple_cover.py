@@ -39,6 +39,8 @@ _TRANSLITERACAO: dict[str, str | int | None] = {
     "ł": "l",
     "Ł": "L",
 }
+
+
 def extrair_essencia(texto: str) -> str:
     """Extract the essence of a text for fuzzy matching."""
     if not texto:
@@ -71,11 +73,7 @@ def extrair_titulo_completo(texto: str) -> str:
     )
 
     texto = texto.replace("&", " and ")
-    texto = (
-        texto.replace("'", "")
-        .replace("\u2019", "")
-        .replace("\u2018", "")
-    )
+    texto = texto.replace("'", "").replace("\u2019", "").replace("\u2018", "")
     texto = re.sub(
         r"\s*[-\u2013\u2014]\s*(ao vivo|en vivo|en directo|live)\b",
         r" (\1)",
@@ -152,6 +150,7 @@ def titulo_album_comparavel(texto: str) -> str:
             break
         t = novo
     return t
+
 
 def album_titulo_completo(album: dict) -> str:
     """Título do álbum JUNTO com a versão ("Rare" + "Deluxe" -> "Rare (Deluxe)").

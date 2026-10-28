@@ -56,9 +56,7 @@ def main() -> int:
 
     if args.check:
         atual = (
-            REQUIREMENTS.read_text(encoding="utf-8")
-            if REQUIREMENTS.exists()
-            else ""
+            REQUIREMENTS.read_text(encoding="utf-8") if REQUIREMENTS.exists() else ""
         )
 
         if atual != esperado:
