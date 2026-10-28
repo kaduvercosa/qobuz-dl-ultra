@@ -252,9 +252,12 @@ def _parse_json(path: str) -> list[dict[str, str]]:
             # chance de tratar o caso. O `str(artist).strip()" no fim da
             # função já cobre a normalização de string, então a chamada
             # aqui era redundante além de quebrada.
-            artist = item.get("artist") or item.get("artists") or ""
-            if isinstance(artist, list):
-                artist = artist[0] if artist else ""
+            raw_artist = item.get("artist") or item.get("artists") or ""
+
+            if isinstance(raw_artist, list):
+                artist = str(raw_artist[0]) if raw_artist else ""
+            else:
+                artist = str(raw_artist)
 
         title = str(title).strip()
         artist = str(artist).strip()

@@ -17,6 +17,7 @@ Pode rodar a cada comando: se está tudo certo, não imprime nada.
 """
 
 from __future__ import annotations
+from typing import NoReturn
 
 import configparser
 import os
@@ -41,7 +42,7 @@ def log(msg: str) -> None:
     print(msg, flush=True)
 
 
-def erro(msg: str) -> None:
+def erro(msg: str) -> NoReturn:
     print(f"\n[ERRO] {msg}\n", file=sys.stderr, flush=True)
     sys.exit(1)
 

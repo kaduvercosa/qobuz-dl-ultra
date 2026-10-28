@@ -12,6 +12,7 @@ from qobuz_dl.constants import (
     DEFAULT_VARIOUS_ARTISTS_ALIASES,
 )
 from qobuz_dl.utils import normalize_label_filter
+from collections.abc import Sequence
 
 _MISSING = object()
 MAX_DOWNLOAD_WORKERS = 16
@@ -34,9 +35,15 @@ def _parse_names_with_comma(value) -> tuple:
     """Normaliza a lista de nomes com vírgula (config.ini usa ";" como separador)."""
     if not value:
         return ()
-    itens = value.split(";") if isinstance(value, str) else list(value)
+    itens: Sequence[object]
+    if isinstance(value, str):
+        itens = value.split(";")
+    else:
+        itens = list(value)
     return tuple(
-        item.strip() for item in itens if isinstance(item, str) and "," in item
+        item.strip()
+        for item in itens
+        if isinstance(item, str) and "," in item
     )
 
 

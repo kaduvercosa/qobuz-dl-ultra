@@ -1049,6 +1049,7 @@ async def retag_directory(
                 extract_album_id,
                 file_path,
             )
+            resolved: tuple | None = None
 
             try:
                 resolved = await _resolve_metadata(
@@ -1237,6 +1238,8 @@ async def retag_directory(
             before = await loop.run_in_executor(None, snapshot_tags, file_path)
 
             work_path = file_path  # arquivo que de fato recebe a gravação
+            after: dict | None = None
+
             try:
                 if dry_run:
                     # Simulação: grava numa cópia e compara com o original.
@@ -1323,7 +1326,6 @@ async def retag_directory(
                             cover_path,
                             exc,
                         )
-
             if cover_source:
                 stats["apple_embedded"] += 1
                 cover_outcome = "replaced"

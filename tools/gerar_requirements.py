@@ -1,32 +1,15 @@
 #!/usr/bin/env python3
 """Gera o requirements.txt a partir do pyproject.toml.
 
-POR QUE ISTO EXISTE
--------------------
-O projeto tinha tres fontes de verdade de dependencia (pyproject.toml,
-setup.py e requirements.txt) e elas JA' divergiram na pratica: o Pillow
-estava como ``>10.0.0`` num arquivo e ``>=10.0.0`` nos outros -- o primeiro
-EXCLUI a propria 10.0.0.
-
-O setup.py virou um shim que le' o pyproject. Este script fecha o ultimo
-buraco: o requirements.txt passa a ser gerado, nao mantido a mao.
-
 Uso:
     python tools/gerar_requirements.py          # escreve o arquivo
-    python tools/gerar_requirements.py --check  # so' verifica (CI/pre-commit)
-
-O modo --check sai com codigo 1 se o arquivo estiver fora de sincronia, e e'
-exatamente o que tests/test_dependencias.py chama.
+    python tools/gerar_requirements.py --check  # só verifica (CI/pre-commit)
 """
 
 import argparse
 import sys
+import tomllib
 from pathlib import Path
-
-try:
-    import tomllib  # Python 3.11+
-except ModuleNotFoundError:  # pragma: no cover - Python 3.10
-    import tomli as tomllib  # type: ignore
 
 RAIZ = Path(__file__).resolve().parent.parent
 PYPROJECT = RAIZ / "pyproject.toml"
@@ -51,29 +34,33 @@ CABECALHO = """\
 
 
 def gerar() -> str:
-    """Generate requirements.txt from imports."""
-    with PYPROJECT.open("rb") as f:
-        dados = tomllib.load(f)
-    deps = dados["project"]["dependencies"]
-    return CABECALHO + "\n".join(deps) + "\n"
+    """Gera o conteúdo do requirements.txt a partir do pyproject.toml."""
+    with PYPROJECT.open("rb") as arquivo:
+        dados = tomllib.load(arquivo)
+
+    dependencias: list[str] = dados["project"]["dependencies"]
+    return CABECALHO + "\n".join(dependencias) + "\n"
 
 
 def main() -> int:
-    """Main entry point for report viewer."""
-    p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument(
+    """Executa a geração ou a verificação do requirements.txt."""
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
         "--check",
         action="store_true",
         help="nao escreve; falha se estiver fora de sincronia",
     )
-    args = p.parse_args()
+    args = parser.parse_args()
 
     esperado = gerar()
 
     if args.check:
         atual = (
-            REQUIREMENTS.read_text(encoding="utf-8") if REQUIREMENTS.exists() else ""
+            REQUIREMENTS.read_text(encoding="utf-8")
+            if REQUIREMENTS.exists()
+            else ""
         )
+
         if atual != esperado:
             print(
                 "requirements.txt esta fora de sincronia com o pyproject.toml.\n"
@@ -81,12 +68,13 @@ def main() -> int:
                 file=sys.stderr,
             )
             return 1
+
         print("requirements.txt em sincronia com o pyproject.toml.")
         return 0
 
     REQUIREMENTS.write_text(esperado, encoding="utf-8")
-    n = len(esperado.strip().splitlines()) - len(CABECALHO.strip().splitlines())
-    print(f"requirements.txt gerado com {n} dependencias de nucleo.")
+    total = len(esperado.strip().splitlines()) - len(CABECALHO.strip().splitlines())
+    print(f"requirements.txt gerado com {total} dependencias de nucleo.")
     return 0
 
 

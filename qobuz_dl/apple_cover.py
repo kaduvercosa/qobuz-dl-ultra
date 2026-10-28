@@ -6,15 +6,6 @@
 # ``monkeypatch.setattr("qobuz_dl.utils.get_apple_hq_cover", ...)``) continuam
 # funcionando.
 
-import difflib
-import re
-import unicodedata
-import urllib.parse
-from typing import Optional
-
-from qobuz_dl.http_download import make_client
-
-
 # ------------------------------------------------------------------------
 # Capa em alta resolucao via Apple/iTunes.
 #
@@ -25,20 +16,41 @@ from qobuz_dl.http_download import make_client
 # de que e' realmente a MESMA capa (mesmo artista/album/faixa), pra nunca
 # arriscar colar a capa errada num album.
 # ------------------------------------------------------------------------
+
+import difflib
+import re
+import unicodedata
+import urllib.parse
+from typing import Optional
+
+from qobuz_dl.http_download import make_client
+
+
+_TRANSLITERACAO: dict[str, str | int | None] = {
+    "ø": "o",
+    "Ø": "O",
+    "æ": "ae",
+    "Æ": "AE",
+    "œ": "oe",
+    "Œ": "OE",
+    "ß": "ss",
+    "đ": "d",
+    "Đ": "D",
+    "ł": "l",
+    "Ł": "L",
+}
 def extrair_essencia(texto: str) -> str:
-    # Limpa acentos, pontuacao e qualquer coisa entre parenteses/colchetes,
-    # pra uma comparacao "larga": acha candidatos com o mesmo
-    # artista/album base, ignorando qual edicao especifica e' essa.
     """Extract the essence of a text for fuzzy matching."""
     if not texto:
         return ""
+
+    texto = texto.translate(str.maketrans(_TRANSLITERACAO))
     texto = (
         unicodedata.normalize("NFKD", texto)
         .encode("ASCII", "ignore")
         .decode("utf-8")
         .lower()
     )
-    # A Apple acrescenta " - Single"/" - EP" ao titulo do album; a Qobuz nao.
     texto = re.sub(r"\s+-\s+(?:single|ep)\s*$", "", texto)
     texto = re.sub(r"[\(\[].*?[\)\]]", "", texto)
     texto = re.sub(r"[^\w\s]", " ", texto)
@@ -46,42 +58,54 @@ def extrair_essencia(texto: str) -> str:
 
 
 def extrair_titulo_completo(texto: str) -> str:
-    # Normaliza o texto SEM remover o conteudo de parenteses/colchetes --
-    # preserva a info de versao (Deluxe, Live, Remaster, Tour Edition
-    # etc.). Usado como trava final: comparar o titulo INTEIRO por
-    # similaridade derruba sozinho qualquer edicao diferente da que foi
-    # pedida, sem precisar manter uma lista fixa de palavras-chave.
     """Extract full title including version/parenthetical info."""
     if not texto:
         return ""
+
+    texto = texto.translate(str.maketrans(_TRANSLITERACAO))
     texto = (
         unicodedata.normalize("NFKD", texto)
         .encode("ASCII", "ignore")
         .decode("utf-8")
         .lower()
     )
+
+    texto = texto.replace("&", " and ")
+    texto = (
+        texto.replace("'", "")
+        .replace("\u2019", "")
+        .replace("\u2018", "")
+    )
+    texto = re.sub(
+        r"\s*[-\u2013\u2014]\s*(ao vivo|en vivo|en directo|live)\b",
+        r" (\1)",
+        texto,
+        flags=re.IGNORECASE,
+    )
+    texto = re.sub(
+        r"\b(\d{4})\s+remaster(?:ed)?\b",
+        r"remastered \1",
+        texto,
+        flags=re.IGNORECASE,
+    )
+    texto = re.sub(r"\bpt\.(?=\s|$)", "part", texto)
+    texto = re.sub(r"\bvol\.(?=\s|$)", "volume", texto)
+    texto = re.sub(r"\bno\.(?=\s|$)", "number", texto)
+
     texto = texto.replace("[", "(").replace("]", ")")
-    # Participacoes ("feat."/"with") nao mudam a edicao da musica, e Apple e
-    # Qobuz nem sempre concordam em coloca-las no titulo.
-    texto = re.sub(r"\s*\((?:feat|ft|featuring|with|com)\b[^)]*\)", " ", texto)
-    texto = re.sub(r"[^\w\s\(\)]", " ", texto)
+    texto = re.sub(
+        "[(][ ]*(?:featuring|feat|ft|with|com)[^)]*[)]",
+        " ",
+        texto,
+    )
+    texto = re.sub(r"[^\w\s\\(\\)]", " ", texto)
     texto = re.sub(r"\s+", " ", texto).strip()
 
-    # Sufixos editorial frequente no Apple Music. Ele identifica o formato
-    # do release, não uma edição artística diferente da música.
     texto = re.sub(r"[-\s]*single\s*$", "", texto).strip()
 
     return texto
 
 
-# --------------------------------------------------------------------------
-# EDIÇÃO DO ÁLBUM (Deluxe x padrão etc.)
-#
-# A capa do Deluxe costuma ser outra, então a edição pedida TEM que ser a
-# mesma do candidato da Apple. Isso é conferido por CONJUNTO de palavras de
-# edição, e não por similaridade de texto (que deixa "Rare" casar com
-# "Rare (Deluxe)"). "Explicit"/"Clean" não mudam a capa: são neutros.
-# --------------------------------------------------------------------------
 _EDICOES_ALBUM = {
     "deluxe": re.compile(r"\bdeluxe\b"),
     "super": re.compile(r"\bsuper\b"),
@@ -112,6 +136,12 @@ def titulo_album_comparavel(texto: str) -> str:
     sem parênteses repetidos ("Rare (Deluxe - Explicit) (Deluxe)" vira
     "rare (deluxe)"). A edição em si é conferida em edicao_album()."""
     t = _PALAVRAS_NEUTRAS_ALBUM.sub(" ", extrair_titulo_completo(texto))
+    t = re.sub(
+        r"\(\s*(?:version|versao|versão)\s*\)",
+        " ",
+        t,
+        flags=re.IGNORECASE,
+    )
     t = re.sub(r"\(\s+", "(", t)
     t = re.sub(r"\s+\)", ")", t)
     t = re.sub(r"\(\s*\)", " ", t)
@@ -122,7 +152,6 @@ def titulo_album_comparavel(texto: str) -> str:
             break
         t = novo
     return t
-
 
 def album_titulo_completo(album: dict) -> str:
     """Título do álbum JUNTO com a versão ("Rare" + "Deluxe" -> "Rare (Deluxe)").
@@ -295,7 +324,15 @@ def score_artista(pedido: str, candidato: str) -> float:
     melhor = 0.0
     for q in _partes_artista(pedido):
         for c in _partes_artista(candidato):
-            melhor = max(melhor, difflib.SequenceMatcher(None, q, c).ratio())
+            melhor = max(
+                melhor,
+                difflib.SequenceMatcher(None, q, c).ratio(),
+                difflib.SequenceMatcher(
+                    None,
+                    q.replace(" ", ""),
+                    c.replace(" ", ""),
+                ).ratio(),
+            )
     return melhor
 
 

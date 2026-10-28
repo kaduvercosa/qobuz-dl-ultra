@@ -395,10 +395,15 @@ def _status(artist: dict) -> str:
     return "[ ] NÃO VERIFICADO"
 
 
+def _is_ios_runtime() -> bool:
+    """Indica se o programa está executando no IOS"""
+    return sys.platform == "ios"
+
+
 def _open_profile_url(url: str) -> bool:
     """Abre um perfil; no a-Shell, delega ao comando nativo ``open``."""
     try:
-        if sys.platform == "ios":
+        if _is_ios_runtime():
             return os.system(f"open {shlex.quote(url)}") == 0
         return bool(webbrowser.open(url))
     except Exception:

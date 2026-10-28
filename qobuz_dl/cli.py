@@ -1081,6 +1081,9 @@ async def _auth_command(
             ui.error("As alterações NÃO foram salvas.")
         return False
 
+    user_info: dict | None = None
+    sub_info: dict | None = None
+
     try:
         try:
             user_info = await client.get_user_profile()
@@ -1103,6 +1106,13 @@ async def _auth_command(
             ui.detail(auth_failure_hint(exc))
             if update_credentials:
                 ui.error("As alterações NÃO foram salvas.")
+            return False
+
+        if user_info is None or sub_info is None:
+            ui.error(
+                "A consulta não retornou os dados necessários da conta "
+                "e da assinatura."
+            )
             return False
 
         if update_credentials and token:

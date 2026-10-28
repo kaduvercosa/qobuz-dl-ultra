@@ -517,11 +517,15 @@ def _extrair_tudo(caminho):
         dados["_duracao_s"] = info.length
 
         if generic_audio.tags:
-            for chave, valor in generic_audio.tags.items():
-                if isinstance(valor, list):
-                    valor = ", ".join(str(v) for v in valor)
-                dados["tags"][str(chave)] = str(valor)
+            valor_tag: object
 
+            for chave_tag, valor_tag in generic_audio.tags.items():
+                if isinstance(valor_tag, list):
+                    texto_tag = ", ".join(str(item) for item in valor_tag)
+                else:
+                    texto_tag = str(valor_tag)
+
+                dados["tags"][str(chave_tag)] = texto_tag
     return dados
 
 

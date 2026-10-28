@@ -59,6 +59,7 @@ async def checar() -> list[str]:
         ]
 
     try:
+        resultado: dict = {}
         try:
             resultado = await client.search_albums("The Beatles", limit=5)
         except Exception as e:
@@ -81,6 +82,7 @@ async def checar() -> list[str]:
             )
             return problemas
 
+        meta: dict = {}
         try:
             meta = await client.get_album_meta(album_id)
         except Exception as e:

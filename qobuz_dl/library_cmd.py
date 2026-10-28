@@ -56,9 +56,11 @@ def _interactive() -> bool:
 
 async def _ask(prompt: str) -> str:
     """Read a response through the async terminal UI, returning ``q`` on cancel."""
+    session: PromptSession[str] = PromptSession()
 
     try:
-        return (await PromptSession().prompt_async(prompt)).strip().lower()
+        response = await session.prompt_async(prompt)
+        return response.strip().lower()
     except (EOFError, KeyboardInterrupt):
         return "q"
 

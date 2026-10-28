@@ -1204,7 +1204,7 @@ class Download:
                             "Qualidade",
                             (
                                 f"{file_format} ({bit_depth}bit/{float(sampling_rate):g}kHz)"
-                                if bit_depth
+                                if bit_depth and sampling_rate is not None
                                 else file_format
                             ),
                         ),
@@ -1256,6 +1256,10 @@ class Download:
                     self.path,
                     legacy_charmap=legacy_flag,
                 )
+                if dirn is None:
+                    raise ValueError(
+                        "Não foi possivel determinar a pasta de destino da faixa."
+                    )
                 os.makedirs(dirn, exist_ok=True)
 
                 # Em playlist/lote várias faixas rodam juntas: a capa não ganha

@@ -19,13 +19,14 @@ motor de letras, pelo leitor de letras do `lyrics` e pelo gravador de tags
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 
 PREFIX = "Letra:"
 _SEPARATOR = " | "
 _SOURCE_RE = re.compile(r"Letra:\s*([^(|\n]+?)\s*(?:\(|\||$)")
 
 
-def build_line(source, *, bilingual: bool = False, language=None) -> str:
+def build_line(source: object, *, bilingual: bool = False, language: object = None,) -> str:
     """'Letra: Qobuz (sincronizada, bilíngue EN+PT)'."""
     idioma = str(language or "").strip()
     if idioma.lower() == "unknown":
@@ -38,7 +39,7 @@ def build_line(source, *, bilingual: bool = False, language=None) -> str:
     return f"{PREFIX} {str(source).strip()} ({', '.join(detalhes)})"
 
 
-def source_from_comment(text) -> str | None:
+def source_from_comment(text: str | Iterable[object] | None,) -> str | None:
     """Origem escrita numa linha/comentário 'Letra: X (...)'; None se não houver."""
     if not text:
         return None
@@ -48,13 +49,13 @@ def source_from_comment(text) -> str | None:
     return match.group(1).strip() if match else None
 
 
-def extract_flac_lines(values) -> list:
+def extract_flac_lines(values: str | Iterable[object] | None,) -> list[str]:
     """Linhas de origem da letra de um COMMENT Vorbis (str ou lista de str)."""
     if not values:
         return []
     if isinstance(values, str):
         values = [values]
-    lines: list = []
+    lines: list[str] = []
     for value in values:
         for line in str(value).splitlines():
             line = line.strip()
@@ -63,13 +64,13 @@ def extract_flac_lines(values) -> list:
     return lines
 
 
-def extract_mp3_segments(text) -> list:
+def extract_mp3_segments(text: str | Iterable[object] | None,) -> list[str]:
     """Trechos de origem da letra de um COMM ID3 (linha única separada por ' | ')."""
     if not text:
         return []
     if not isinstance(text, str):
         text = _SEPARATOR.join(str(part) for part in text)
-    segments: list = []
+    segments: list[str] = []
     for segment in text.split(_SEPARATOR):
         segment = segment.strip()
         if segment.startswith(PREFIX) and segment not in segments:
@@ -77,7 +78,7 @@ def extract_mp3_segments(text) -> list:
     return segments
 
 
-def merge_flac(values, line: str) -> str:
+def merge_flac(values: str | Iterable[object] | None, line: str,) -> str:
     """COMMENT Vorbis com a linha de letra atualizada (as demais linhas ficam)."""
     if not values:
         values = []
@@ -93,7 +94,7 @@ def merge_flac(values, line: str) -> str:
     return "\n".join(lines)
 
 
-def merge_mp3(text, line: str) -> str:
+def merge_mp3(text: str | Iterable[object] | None, line: str) -> str:
     """COMM ID3 com o trecho de letra atualizado (os demais trechos ficam)."""
     if not text:
         text = ""

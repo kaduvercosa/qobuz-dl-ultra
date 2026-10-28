@@ -15,6 +15,7 @@ import threading
 import time
 from collections.abc import Mapping
 from urllib.parse import urlsplit
+from typing import Any
 
 import httpx
 
@@ -72,7 +73,7 @@ async def _await_host(host: str) -> None:
         await asyncio.sleep(delay)
 
 
-def request_sync(client: httpx.Client, method: str, url: str, **kwargs):
+def request_sync(client: httpx.Client, method: str, url: str, **kwargs: Any,) -> httpx.Response:
     """Executa request síncrona resiliente; falhas finais são propagadas."""
     method = method.upper()
     host = _host(url)
@@ -120,7 +121,7 @@ def request_sync(client: httpx.Client, method: str, url: str, **kwargs):
     raise RuntimeError("fluxo de retry HTTP inesperado")
 
 
-async def request_async(client: httpx.AsyncClient, method: str, url: str, **kwargs):
+async def request_async(client: httpx.AsyncClient, method: str, url: str, **kwargs: Any,) -> httpx.Response:
     """Executa request assíncrona resiliente sem bloquear o event loop."""
     method = method.upper()
     host = _host(url)
@@ -178,7 +179,7 @@ def _reset_state_for_tests() -> None:
         _cooldowns.clear()
 
 
-def bounded_worker_count(value, *, maximum: int = 16) -> int:
+def bounded_worker_count(value: str | int | float | None, *, maximum: int = 16) -> int:
     """Normaliza max_workers sem o antigo teto artificial de quatro letras."""
     try:
         workers = int(value or 1)

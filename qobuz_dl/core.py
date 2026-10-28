@@ -2733,18 +2733,22 @@ class QobuzDL:
                         sub_filter = None
                         continue
 
+                    favorite_subtype: str
+
                     if selected_fav_raw == "Singles":
-                        selected_fav = "albums"
+                        favorite_subtype = "albums"
                         sub_filter = ["single"]
                         display_name = "Singles"
                     elif selected_fav_raw == "Albums":
-                        selected_fav = "albums"
+                        favorite_subtype = "albums"
                         sub_filter = ["album", "ep", "compilation", "live"]
                         display_name = "Albums"
                     else:
-                        selected_fav = selected_fav_raw.lower()
+                        favorite_subtype = selected_fav_raw.lower()
                         sub_filter = None
                         display_name = selected_fav_raw
+
+                    selected_fav = favorite_subtype
 
                     logger.info(
                         f"{YELLOW}Buscando seus favoritos ({display_name})...{RESET}"
@@ -2753,11 +2757,11 @@ class QobuzDL:
                         None,
                         selected_type,
                         limit=self.interactive_limit,
-                        fav_subtype=selected_fav,
+                        fav_subtype=favorite_subtype,
                         sub_filter=sub_filter,
                     )
                     query_title = f"Meus Favoritos ({display_name})"
-                    display_cat = selected_fav[:-1]
+                    display_cat = favorite_subtype[:-1]
                 else:
                     sys.stdout.write(ANSI_CLEAR_SCREEN)
                     sys.stdout.flush()
