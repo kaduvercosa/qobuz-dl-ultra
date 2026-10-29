@@ -100,6 +100,7 @@ dev-full = [
     # Fixado na versão que roda no a-Shell, para o baseline e o CI concordarem
     # com o que aparece no celular.
     "mypy==1.15.0",
+    "types-aiofiles",
     "mypy-baseline>=0.7",
     "respx>=0.23,<0.24",
 ]
