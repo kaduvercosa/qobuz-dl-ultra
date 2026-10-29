@@ -642,7 +642,7 @@ def test_mensagem_de_sucesso_padrao_nao_repete_o_destino(monkeypatch):
         le.LyricsEngine._delivery_message(_Cand(), True, True, True, "[01] Tempo")
     )
     assert kind == "ok"
-    assert "Letras prontas: [01] Tempo" in linhas[0]
+    assert "Letras: [01] Tempo" in linhas[0]
     assert "sincronizadas" in linhas[0] and "via Qobuz" in linhas[0]
     assert "metadata" not in linhas[0] and ".lrc" not in linhas[0]
 

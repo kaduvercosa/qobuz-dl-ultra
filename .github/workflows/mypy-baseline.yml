@@ -46,7 +46,7 @@ jobs:
         if: steps.existe.outputs.pular == 'false'
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[all]" mypy mypy-baseline
+          python -m pip install -e ".[all]" "mypy==1.15.0" mypy-baseline
 
       - name: Roda o mypy
         if: steps.existe.outputs.pular == 'false'

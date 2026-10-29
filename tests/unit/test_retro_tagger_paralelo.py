@@ -148,7 +148,7 @@ async def test_relatorio_sai_na_ordem_dos_arquivos_mesmo_com_conclusao_trocada(
 async def test_numero_de_workers_tem_teto(rodar):
     engine = _Engine()
     await rodar(engine, max_workers=16)
-    assert engine.pico <= 16
+    assert engine.pico <= 3
 
 
 async def test_falha_em_um_arquivo_cancela_o_resto_e_fecha_a_engine(rodar):
@@ -163,7 +163,7 @@ async def test_falha_em_um_arquivo_cancela_o_resto_e_fecha_a_engine(rodar):
 
 @pytest.mark.parametrize(
     "valor, esperado",
-    [(None, 1), ("x", 1), (0, 1), (-3, 1), (1, 1), (2, 2), ("3", 3), (99, 16)],
+    [(None, 1), ("x", 1), (0, 1), (-3, 1), (1, 1), (2, 2), ("3", 3), (4, 3), (99, 3)],
 )
 def test_lyrics_workers(valor, esperado):
     assert rt._lyrics_workers(SimpleNamespace(max_workers=valor)) == esperado
@@ -184,7 +184,7 @@ def test_comando_lyrics_aceita_max_workers():
     assert parser.parse_args(["lyrics", "--max-workers", "3", "/m"]).max_workers == 3
 
 
-@pytest.mark.parametrize("valor, esperado", [("1", 1), ("3", 3), (16, 16), ("lixo", 1)])
+@pytest.mark.parametrize("valor, esperado", [("1", 1), ("3", 3), (16, 3), ("lixo", 1)])
 def test_max_workers_das_configuracoes_chega_ao_limite_das_letras(valor, esperado):
     from qobuz_dl.settings import QobuzDLSettings
 

@@ -66,7 +66,43 @@ def test_qobuz_lines_to_lrc(engine):
 
     lrc_no_intro = engine._qobuz_lines_to_lrc(lines, inject_intro=False)
     assert "[00:00.000]" not in lrc_no_intro
-    assert "[00:01.000]Primeira linha" in lrc_no_intro
+    assert "[00:05.000]Segunda linha" in lrc_no_intro
+
+
+@pytest.mark.parametrize("gap_ms", [0, 249, 250, 499])
+def test_qobuz_short_explicit_pauses_do_not_get_a_symbol(engine, gap_ms):
+    lines = [
+        {"start": 1000, "end": 1500, "line": "Antes"},
+        {"line": ""},
+        {"start": 1500 + gap_ms, "line": "Depois"},
+    ]
+
+    lrc = engine._qobuz_lines_to_lrc(lines)
+
+    assert "♪ ♪ ♪" not in lrc
+
+
+def test_qobuz_explicit_pause_at_500ms_is_inserted_at_midpoint(engine):
+    lines = [
+        {"start": 1000, "end": 1500, "line": "Antes"},
+        {"line": ""},
+        {"start": 2000, "line": "Depois"},
+    ]
+
+    lrc = engine._qobuz_lines_to_lrc(lines)
+
+    assert "[00:01.750] ♪ ♪ ♪" in lrc
+
+
+def test_long_gap_without_qobuz_blank_line_does_not_get_a_symbol(engine):
+    lines = [
+        {"start": 1000, "end": 1500, "line": "Antes"},
+        {"start": 8000, "line": "Depois"},
+    ]
+
+    lrc = engine._qobuz_lines_to_lrc(lines)
+
+    assert "♪ ♪ ♪" not in lrc
 
 
 def test_qobuz_lines_to_plain(engine):
@@ -270,7 +306,10 @@ def test_fetch_and_inject_qobuz_plain_failure(engine, tmp_path, monkeypatch):
         engine, "_fetch_musixmatch_lyrics", lambda *args, **kwargs: None
     )
     monkeypatch.setattr(
-        engine.session, "get", lambda *a, **k: MagicMock(status_code=404), raising=False,
+        engine.session,
+        "get",
+        lambda *a, **k: MagicMock(status_code=404),
+        raising=False,
     )
 
     result = engine.fetch_and_inject(

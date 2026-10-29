@@ -97,7 +97,9 @@ dev = [
 dev-full = [
     "qobuz-dl-ultra[dev]",
     "ruff>=0.6",
-    "mypy>=1.11",
+    # Fixado na versão que roda no a-Shell, para o baseline e o CI concordarem
+    # com o que aparece no celular.
+    "mypy==1.15.0",
     "mypy-baseline>=0.7",
     "respx>=0.23,<0.24",
 ]
@@ -230,12 +232,15 @@ module = [
     "qobuz_dl.exceptions",
     "qobuz_dl.executors",
     "qobuz_dl.favorites_sync",
+    "qobuz_dl.fdlimit",
     "qobuz_dl.fileio",
     "qobuz_dl.fuzzy",
     "qobuz_dl.http_download",
     "qobuz_dl.library_db",
     "qobuz_dl.library_scan",
     "qobuz_dl.lyrics_comment",
+    "qobuz_dl.lyrics_journal",
+    "qobuz_dl.lyrics_progress",
     "qobuz_dl.metadata_cache",
     "qobuz_dl.name_suggest",
     "qobuz_dl.paths",

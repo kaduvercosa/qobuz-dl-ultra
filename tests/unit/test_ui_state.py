@@ -1012,7 +1012,7 @@ class TestTaggedLinesEJoinMeta:
         linhas = ui.tagged_lines(
             "ok",
             ui.tail(
-                "Letras prontas: [04] Une seule vie",
+                "Letras: [04] Une seule vie",
                 "BILINGUAL · sincronizadas · só no metadata · via Qobuz",
             ),
         )

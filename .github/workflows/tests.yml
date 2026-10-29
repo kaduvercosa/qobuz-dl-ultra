@@ -262,7 +262,7 @@ jobs:
       - name: Instala o projeto, mypy e mypy-baseline
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[all]" mypy mypy-baseline
+          python -m pip install -e ".[all]" "mypy==1.15.0" mypy-baseline
 
       - name: Roda o mypy
         shell: bash

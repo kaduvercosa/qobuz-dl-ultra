@@ -23,7 +23,7 @@ import tempfile
 import threading
 import time
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
 import httpx
 import keyring
@@ -601,6 +601,94 @@ def _handle_tags_undo(arguments, base_dir: str) -> int:
     ui.emit(f"  não encontrados    : {result['missing']}")
     ui.emit(f"  falhas             : {result['errors'] + result['verify_failed']}")
     return 1 if (result["errors"] or result["verify_failed"]) else 0
+
+
+_LYRICS_UNDO_STATUS_TEXT = {
+    "restored": ("restaurado", None),
+    "would_restore": ("seria restaurado", None),
+    "changed_since": (
+        "pulado: foi alterado depois do lyrics (use --undo-force para restaurar)",
+        "warn",
+    ),
+    "missing": ("pulado: o arquivo não existe mais", "warn"),
+    "verify_failed": ("restaurado, mas a conferência final não bateu", "error"),
+    "error": ("erro ao restaurar", "error"),
+}
+
+
+def _handle_lyrics_undo(arguments, base_dir: str) -> int:
+    """`lyrics --undo [ID]` e `lyrics --undo-list`. Não consulta o Qobuz."""
+    from qobuz_dl import lyrics_journal
+
+    runs = lyrics_journal.list_runs(base_dir)
+
+    if getattr(arguments, "undo_list", False):
+        if not runs:
+            ui.warn("Nenhuma execução do lyrics guardada para desfazer.")
+            return 0
+        ui.step("Execuções do lyrics que podem ser desfeitas (da mais recente):")
+        for run in runs:
+            note = " (interrompida no meio da gravação)" if run["pending"] else ""
+            ui.emit(
+                f"  {run['id']}  {run['files']} arquivo(s) de áudio + "
+                f"{run['lrc']} .lrc  pasta={run['root']}{note}"
+            )
+        ui.emit(
+            "  Para desfazer: qobuz-dl lyrics --undo [ID]   (sem ID = a mais recente)"
+        )
+        return 0
+
+    run_id = getattr(arguments, "undo", None)
+    dry_run = bool(getattr(arguments, "dry_run", False))
+    force = bool(getattr(arguments, "undo_force", False))
+
+    def on_file(status: str, path: str) -> None:
+        text, level = _LYRICS_UNDO_STATUS_TEXT.get(status, (status, None))
+        line = f"{os.path.basename(path)}: {text}"
+        if level == "warn":
+            ui.warn(line)
+        elif level == "error":
+            ui.error(line)
+        else:
+            ui.emit(f"  {line}")
+
+    if not runs:
+        ui.error("Nenhuma execução do lyrics guardada: não há o que desfazer.")
+        return 1
+    ui.step(
+        "Simulando o desfazer (nada será gravado)..."
+        if dry_run
+        else "Desfazendo a execução do lyrics..."
+    )
+    result = lyrics_journal.undo(
+        base_dir, run_id=run_id, force=force, dry_run=dry_run, on_file=on_file
+    )
+    if result is None:
+        ui.error(
+            f"Execução '{run_id}' não encontrada. Veja as disponíveis com: "
+            "qobuz-dl lyrics --undo-list"
+        )
+        return 1
+
+    ui.emit("")
+    ui.emit(f"Execução {result['run']}:")
+    if dry_run:
+        ui.emit(
+            f"  seriam restaurados : {result['would_restore']} áudio(s), "
+            f"{result['lrc_would_restore']} .lrc"
+        )
+    else:
+        ui.emit(
+            f"  restaurados        : {result['restored']} áudio(s), "
+            f"{result['lrc_restored']} .lrc"
+        )
+    ui.emit(
+        f"  alterados depois   : {result['changed_since'] + result['lrc_changed_since']}"
+    )
+    ui.emit(f"  não encontrados    : {result['missing'] + result['lrc_missing']}")
+    falhas = result["errors"] + result["verify_failed"] + result["lrc_errors"]
+    ui.emit(f"  falhas             : {falhas}")
+    return 1 if falhas else 0
 
 
 def _purge_databases(config_path: str, downloads_db: str) -> list[str]:
@@ -1503,12 +1591,12 @@ _COMMAND_DESCRIPTIONS_PT = {
     "artists": "Lista artistas seguidos em ordem alfabética ou sorteia um para você conferir no Qobuz e marcar como revisado.",
     "scan": "Casa sua pasta de música com o catálogo (tag de ID, UPC, nome, fuzzy) e grava sentinelas.",
     "library": "Status e manutenção do catálogo local (missing, history, reconcile, reset-stuck).",
+    "organize": "Reaplica folder_format/track_format aos arquivos existentes, sem rede; use --dry-run para revisar e --undo para restaurar a organização anterior.",
     "doctor": "Diagnostica ambiente, config, bancos e sentinelas (somente leitura).",
     "import-playlist": "Importa um arquivo de playlist (TXT, CSV, JSON) de qualquer plataforma para download.",
     "stats": "Mostra estatísticas detalhadas sobre sua biblioteca e downloads efetuados.",
     "inspect": "Mostra tudo de uma faixa local: dados técnicos, tags por assunto, capas, letras, diagnóstico e autenticidade (ou resume uma pasta).",
-    "auth": "Exibe status da conta/assinatura ou atualiza credenciais de login e token.",
-    "user": "Exibe informações da conta, status da assinatura e dados do perfil.",
+    "auth": "Mostra a conta e a assinatura (perfil, plano, limites; --json traz o bruto) ou atualiza e-mail e token com -l. Também responde por user, account, profile, me e info.",
 }
 
 _FLAG_DESCRIPTIONS_PT = {
@@ -1865,9 +1953,18 @@ async def async_main():
             )
         )
 
-    # Comandos que NÃO precisam de login: doctor, scan e library. Rodam mesmo
-    # com token expirado ou config.ini quebrado (justamente quando se usa o doctor).
-    if offline_command in ("doctor", "check", "scan", "library-scan", "library", "lib"):
+    # Comandos locais: doctor, scan, library e organize. Não exigem login; o
+    # organize precisa apenas dos formatos salvos no config.ini.
+    if offline_command in (
+        "doctor",
+        "check",
+        "scan",
+        "library-scan",
+        "library",
+        "lib",
+        "organize",
+        "rename",
+    ):
         from qobuz_dl import doctor
         from qobuz_dl.library_cmd import cmd_library, cmd_scan, library_db_path
 
@@ -1890,8 +1987,56 @@ async def async_main():
             sys.exit(doctor.render(results))
 
         _cfg = configparser.ConfigParser(interpolation=None)
-        _cfg.read(CONFIG_FILE, encoding="utf-8")
+        try:
+            _cfg.read(CONFIG_FILE, encoding="utf-8")
+        except configparser.Error as exc:
+            if offline_command not in ("organize", "rename"):
+                raise
+            ui.warn(f"Configuração inválida ({exc}); usando formatos padrão.")
+            _cfg = configparser.ConfigParser(interpolation=None)
         _sec = "qobuz" if _cfg.has_section("qobuz") else "DEFAULT"
+
+        if offline_command in ("organize", "rename"):
+            from qobuz_dl.constants import DEFAULT_MULTIPLE_DISC_TRACK
+            from qobuz_dl.library_organizer import cmd_organize
+            from qobuz_dl.retro_tags import resolve_library_dir
+
+            configured_dir = _cfg.get(_sec, "directory", fallback=None)
+            if configured_dir is None:
+                configured_dir = _cfg.get(
+                    _sec, "default_folder", fallback="Qobuz Downloads"
+                )
+            if IOS_HOME and not os.path.isabs(configured_dir):
+                configured_dir = os.path.join(IOS_HOME, configured_dir)
+            target_dir = resolve_library_dir(offline_args.DIR or configured_dir)
+
+            def _config_bool(key: str, fallback: bool = False) -> bool:
+                try:
+                    return _cfg.getboolean(_sec, key, fallback=fallback)
+                except (ValueError, configparser.Error):
+                    return fallback
+
+            sys.exit(
+                cmd_organize(
+                    offline_args,
+                    directory=target_dir,
+                    journal_base=CONFIG_PATH,
+                    folder_format=offline_args.folder_format
+                    or _cfg.get(_sec, "folder_format", fallback=DEFAULT_FOLDER),
+                    track_format=offline_args.track_format
+                    or _cfg.get(_sec, "track_format", fallback=DEFAULT_TRACK),
+                    multiple_disc_track_format=_cfg.get(
+                        _sec,
+                        "multiple_disc_track_format",
+                        fallback=DEFAULT_MULTIPLE_DISC_TRACK,
+                    ),
+                    legacy_charmap=_config_bool("legacy_charmap", False),
+                    multiple_disc_prefix=_cfg.get(
+                        _sec, "multiple_disc_prefix", fallback="CD"
+                    ),
+                    multiple_disc_one_dir=_config_bool("multiple_disc_one_dir", False),
+                )
+            )
         if not _cfg.getboolean(_sec, "write_sentinel", fallback=True):
             offline_args.no_sentinel = True
         try:
@@ -2077,7 +2222,8 @@ async def async_main():
         await find_duplicate_tracks(dup_dir)
         sys.exit(0)
 
-    if getattr(arguments, "watch", None):
+    watch_target = _watch_target(arguments)
+    if watch_target:
         try:
             from qobuz_dl.watcher import watch_directory
         except ImportError as e:
@@ -2086,7 +2232,7 @@ async def async_main():
             )
         from qobuz_dl.qopy import Client
 
-        watch_dir = default_folder if arguments.watch == "DEFAULT" else arguments.watch
+        watch_dir = default_folder if watch_target == "DEFAULT" else watch_target
         watch_dir = os.path.expanduser(watch_dir)
         if os.name == "nt":
             watch_dir = os.path.abspath(watch_dir)
@@ -2097,6 +2243,9 @@ async def async_main():
         trans_lang = config.get(section, "lyrics_translation_lang", fallback="pt")
         watch_settings = QobuzDLSettings(lrc_files=lrc_pref, embed_lyrics=embed_pref)
         watch_settings.lyrics_translation_lang = trans_lang
+        watch_settings.fetch_translation = config.getboolean(
+            section, "fetch_translation", fallback=True
+        )
         watch_settings.default_folder = watch_dir
         watch_client = None
         try:
@@ -2125,6 +2274,10 @@ async def async_main():
         sys.exit(0)
 
     if arguments.command == "lyrics":
+        # Desfazer não precisa do Qobuz: resolve antes de autenticar.
+        if getattr(arguments, "undo", None) or getattr(arguments, "undo_list", False):
+            sys.exit(_handle_lyrics_undo(arguments, CONFIG_PATH))
+
         from qobuz_dl.qopy import Client
         from qobuz_dl.retro_tagger import inject_lyrics_retroactively
 
@@ -2152,7 +2305,47 @@ async def async_main():
             lrc_files=lrc_pref, embed_lyrics=embed_pref, max_workers=lyrics_workers
         )
         local_settings.lyrics_translation_lang = trans_lang
+        local_settings.fetch_translation = config.getboolean(
+            section, "fetch_translation", fallback=True
+        )
         local_settings.default_folder = target_dir
+        lyrics_dry_run = bool(getattr(arguments, "dry_run", False))
+        lyrics_journal_run = None
+        if not lyrics_dry_run and not getattr(arguments, "no_undo", False):
+            from qobuz_dl import lyrics_journal
+
+            try:
+                lyrics_journal_run = lyrics_journal.LyricsJournal.create(
+                    CONFIG_PATH, target_dir
+                )
+            except OSError as e:
+                ui.error(
+                    f"Não foi possível criar o registro para desfazer ({e}). "
+                    "Nada foi alterado. Use --no-undo para rodar sem backup."
+                )
+                sys.exit(1)
+        from qobuz_dl.lyrics_progress import LyricsProgress
+
+        lyrics_progress = LyricsProgress.open(CONFIG_PATH, target_dir)
+        if getattr(arguments, "incremental", False):
+            lyrics_progress.enable_skip()
+        elif getattr(arguments, "resume", False):
+            lyrics_progress.enable_skip()
+            if lyrics_progress.interrupted or lyrics_progress.pending_count():
+                ui.step(
+                    "Retomando: pulando o que já foi feito e refazendo o que ficou "
+                    "pendente (adiado ou com falha)..."
+                )
+            else:
+                ui.warn(
+                    "Não há execução interrompida nem faixa pendente nesta pasta: "
+                    "só o que for novo ou alterado será processado."
+                )
+        elif lyrics_progress.interrupted and not lyrics_dry_run:
+            ui.warn(
+                "A última execução do lyrics nesta pasta foi interrompida. Para "
+                "continuar de onde parou, rode de novo com --resume."
+            )
         lyrics_client = None
         try:
             lyrics_client = await Client.create(
@@ -2166,11 +2359,18 @@ async def async_main():
         except Exception as e:
             logging.debug(f"Aviso de autenticação para o cliente de letras: {e}")
         try:
+            retro_extra: dict[str, Any] = {}
+            if lyrics_dry_run:
+                retro_extra["dry_run"] = True
+            if lyrics_journal_run is not None:
+                retro_extra["journal"] = lyrics_journal_run
+            retro_extra["progress"] = lyrics_progress
             await inject_lyrics_retroactively(
                 target_dir,
                 client=lyrics_client,
                 genius_token=genius_token,
                 settings=local_settings,
+                **retro_extra,
             )
         except KeyboardInterrupt:
             ui.error("Operação interrompida manualmente pelo usuário (CTRL+C).")
@@ -2424,6 +2624,18 @@ async def async_main():
     await update_task
 
 
+def _watch_target(arguments) -> str | None:
+    """Pasta a observar: `--watch [PASTA]` (global) ou `lyrics --watch [PASTA]`.
+
+    "DEFAULT" = a pasta do config.ini. None = não é para observar nada.
+    """
+    if getattr(arguments, "command", None) == "lyrics" and getattr(
+        arguments, "lyrics_watch", False
+    ):
+        return getattr(arguments, "DIR", None) or "DEFAULT"
+    return getattr(arguments, "watch", None) or None
+
+
 def _is_local_checklist_sync(arguments) -> bool:
     """True quando ``artists --sincronizar-checklist`` só precisa do banco local."""
     return (
@@ -2455,6 +2667,9 @@ def _extract_checklist_json(captured: str) -> dict | None:
 
 
 def main():
+    from qobuz_dl.fdlimit import raise_open_file_limit
+
+    raise_open_file_limit()
     # Atalhos do iOS precisa receber um único JSON válido, sem banners de login,
     # assinatura, qualidade ou mensagens do logger. O comportamento dos demais
     # comandos permanece inalterado.

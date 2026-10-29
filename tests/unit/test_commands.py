@@ -94,6 +94,7 @@ class TestParserPrincipal:
             "import-playlist": ["/caminho/playlist.m3u"],
             "lyrics": [],
             "tags": [],
+            "organize": [],
             "sync-playlist": ["https://play.qobuz.com/playlist/12345"],
             "stats": [],
             "inspect": [],
@@ -167,6 +168,50 @@ class TestParserPrincipal:
     def test_tags_undo_e_undo_list_sao_excludentes(self, parser):
         with pytest.raises(SystemExit):
             parser.parse_args(["tags", "--undo", "--undo-list"])
+
+    def test_organize_dry_run_formatos_e_undo(self, parser):
+        padrao = parser.parse_args(["organize"])
+        assert padrao.DIR is None
+        assert padrao.dry_run is False
+        assert padrao.show_files is False
+        assert padrao.undo is None and padrao.undo_list is False
+        assert padrao.include_playlists is False and padrao.no_undo is False
+
+        simulado = parser.parse_args(
+            [
+                "organize",
+                "--dry-run",
+                "-ff",
+                "{album_artist}/{album_title}",
+                "-tf",
+                "{track_number} - {track_title}",
+                "/music",
+            ]
+        )
+        assert simulado.dry_run is True and simulado.DIR == "/music"
+        assert simulado.folder_format == "{album_artist}/{album_title}"
+        assert simulado.track_format == "{track_number} - {track_title}"
+        assert parser.parse_args(["organize", "--dry-run", "--show-files"]).show_files
+        assert parser.parse_args(["rename", "--undo"]).undo == "last"
+        assert (
+            parser.parse_args(["organize", "--undo", "20261028_211500"]).undo
+            == "20261028_211500"
+        )
+        assert parser.parse_args(["organize", "--undo-list"]).undo_list is True
+        with pytest.raises(SystemExit):
+            parser.parse_args(["organize", "--undo", "--undo-list"])
+
+    def test_organize_help_explica_previa_backup_e_playlists(self, parser, capsys):
+        with pytest.raises(SystemExit) as raised:
+            parser.parse_args(["organize", "--help"])
+
+        assert raised.value.code == 0
+        output = " ".join(capsys.readouterr().out.replace("│", " ").split())
+        assert "--show-files" in output
+        assert "--include-playlists" in output
+        assert "cópia independente" in output
+        assert "não é backup dos arquivos" in output
+        assert "Destinos já existentes não são sobrescritos" in output
 
     def test_flags_de_nivel_superior_existem(self, parser):
         args = parser.parse_args(["--reset", "dl", "URL"])

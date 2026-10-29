@@ -237,6 +237,28 @@ class Journal:
         self._clear_pending()
         return changed
 
+    def snapshot(self, path: str) -> Optional[Head]:
+        """Estado atual dos metadados de ``path`` (para ``record_change`` depois).
+
+        Não mexe no estado interno do registro: pode ser chamado de várias threads
+        ao mesmo tempo (o `lyrics` em paralelo), ao contrário de ``begin``/``finish``,
+        que guardam um arquivo por vez.
+        """
+        head = read_head(path)
+        if head is None:
+            self.unbacked += 1
+        return head
+
+    def record_change(self, path: str, pre: Optional[Head]) -> bool:
+        """Registra ``path`` se os metadados mudaram desde ``pre`` (de ``snapshot``)."""
+        if pre is None:
+            return False
+        current = read_head(path)
+        if current is not None and current.digest == pre.digest:
+            return False
+        self._commit(os.path.abspath(path), pre, current.digest if current else "")
+        return True
+
     def _clear_pending(self) -> None:
         try:
             os.remove(self.pending_path)

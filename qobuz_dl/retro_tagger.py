@@ -20,6 +20,7 @@ from qobuz_dl.color import GREEN, MUTED, OFF, RED, RESET
 from qobuz_dl.color import INFO as CYAN
 from qobuz_dl.color import WARNING as YELLOW
 from qobuz_dl.concurrency import run_bounded
+from qobuz_dl.executors import MAX_LYRICS_WORKERS
 from qobuz_dl.lyrics_engine import (
     RANK_BINILYRICS,
     RANK_PLAIN,
@@ -338,12 +339,16 @@ async def fetch_qobuz_lyrics_raw(client, track_id, language=None):
 
 
 def _lyrics_workers(settings):
-    """Usa o mesmo teto configurado para os demais trabalhos paralelos."""
+    """Faixas de letra em paralelo: `max_workers`, no máximo MAX_LYRICS_WORKERS (3).
+
+    Acima disso o Qobuz responde 429 e as faixas ficam ADIADAS, sem baixar o
+    tempo total. É o mesmo teto do pool de letras do download.
+    """
     try:
         workers = int(getattr(settings, "max_workers", 1))
     except (TypeError, ValueError):
         workers = 1
-    return min(MAX_DOWNLOAD_WORKERS, max(1, workers))
+    return min(MAX_LYRICS_WORKERS, MAX_DOWNLOAD_WORKERS, max(1, workers))
 
 
 def _collect_audio_files(directory_path):
@@ -588,11 +593,13 @@ def _bloco_faixa(
     depois: str,
     nota_id: str | None,
     largura: int,
+    simulado: bool = False,
 ) -> list:
     """Linhas do bloco de uma faixa (cor: verde / cinza / amarelo)."""
     if status.startswith(_STATUS_ALTERADOS):
         tipo, cor = "alterada", GREEN
-        estado = f"Alterada -- {_STATUS_TEXTO.get(status, status.lower())}"
+        prefixo = "Seria alterada" if simulado else "Alterada"
+        estado = f"{prefixo} -- {_STATUS_TEXTO.get(status, status.lower())}"
     elif status == "SEM ALTERAÇÃO":
         tipo, cor = "igual", MUTED
         estado = "Sem alterações"
@@ -649,7 +656,14 @@ def _cabecalho_album(file_path: str, quantidade: int, largura: int) -> list:
 
 
 async def process_retroactive_lyrics_async(
-    directory_path, client, genius_token=None, settings=None
+    directory_path,
+    client,
+    genius_token=None,
+    settings=None,
+    *,
+    dry_run=False,
+    journal=None,
+    progress=None,
 ):
     """
     Varre a biblioteca e decide se cada faixa precisa de letra, traducao ou correcao.
@@ -696,6 +710,11 @@ async def process_retroactive_lyrics_async(
     )
     if n_workers > 1:
         ui.emit(f"{CYAN} • Em paralelo :{RESET} {n_workers} faixas por vez")
+    if dry_run:
+        ui.emit(
+            f"{YELLOW} • SIMULAÇÃO   :{RESET} nada será gravado (nem letra, nem "
+            ".lrc, nem progresso); as fontes de letra são consultadas normalmente"
+        )
     ui.emit("")
     for linha_legenda in _legenda_lyrics():
         ui.emit(linha_legenda)
@@ -708,6 +727,11 @@ async def process_retroactive_lyrics_async(
         # Varredura e leitura de tags rodam em thread: com o loop parado, o
         # cliente HTTP do Qobuz não conseguia nem manter a conexão viva.
         files_to_check = await asyncio.to_thread(_collect_audio_files, directory_path)
+        pulados = 0
+        if progress is not None and progress.skipping:
+            files_to_check, pulados = await asyncio.to_thread(
+                progress.filter_pending, files_to_check
+            )
         total = len(files_to_check)
 
         # Contadores usados no resumo final; cada caminho de decisao incrementa um deles.
@@ -731,16 +755,30 @@ async def process_retroactive_lyrics_async(
         status_counts: collections.Counter = collections.Counter()
 
         if not files_to_check:
-            ui.emit(
-                f"\n{YELLOW}[!] Nenhum arquivo .flac/.mp3 encontrado na pasta.{OFF}"
-            )
+            if pulados:
+                ui.emit(
+                    f"\n{GREEN}[+] Nada a fazer: os {pulados} arquivo(s) já estavam "
+                    f"em dia. Rode sem --resume/--incremental para refazer tudo.{OFF}"
+                )
+                if progress is not None and not dry_run:
+                    await asyncio.to_thread(progress.finish)
+            else:
+                ui.emit(
+                    f"\n{YELLOW}[!] Nenhum arquivo .flac/.mp3 encontrado na pasta.{OFF}"
+                )
             return stats
 
-        ui.emit(f"\n{CYAN}[i] {total} arquivo(s) para verificar.{OFF}")
+        nota_pulados = f" ({pulados} já em dia, pulados)" if pulados else ""
+        ui.emit(f"\n{CYAN}[i] {total} arquivo(s) para verificar{nota_pulados}.{OFF}")
 
         largura = _largura_terminal()
         digitos = len(str(total))
         por_pasta = collections.Counter(os.path.dirname(f) for f in files_to_check)
+
+        async def _registrar_progresso(file_path, status):
+            """Anota o resultado da faixa (base do --resume/--incremental)."""
+            if progress is not None and not dry_run:
+                await asyncio.to_thread(progress.record, file_path, status)
 
         async def _processar_arquivo(index, file_path):
             """Decide e aplica a letra de UM arquivo; devolve as linhas do bloco."""
@@ -848,6 +886,7 @@ async def process_retroactive_lyrics_async(
                 # (ou trocar uma letra boa) só porque o Qobuz não respondeu.
                 stats["deferred"] += 1
                 status_counts["ADIADO"] += 1
+                await _registrar_progresso(file_path, "ADIADO")
                 motivo_falha = (
                     "recusou a consulta por limite de requisições"
                     if falhas_qobuz["limite"]
@@ -874,21 +913,33 @@ async def process_retroactive_lyrics_async(
                 `melhor_que`: so aceita fontes de prioridade melhor que esta.
                 """
                 nonlocal resultado
-                resultado = await asyncio.to_thread(
-                    engine.fetch_and_inject,
-                    **lookup_hints,
-                    file_path=file_path,
-                    artist=artist,
-                    track=title,
-                    album=album,
-                    save_lrc=save_lrc,
-                    embed_lyrics=embed_lyrics,
-                    qobuz_lyrics_response=orig,
-                    qobuz_translation_response=trans,
-                    track_number=index,
-                    quiet=True,
-                    better_than=melhor_que,
-                )
+                # Simulação: o motor só procura; nada é gravado nem registrado.
+                extra = {"dry_run": True} if dry_run else {}
+                diario = None if dry_run else journal
+
+                def _gravar():
+                    snap = diario.snapshot(file_path) if diario else None
+                    try:
+                        return engine.fetch_and_inject(
+                            **lookup_hints,
+                            file_path=file_path,
+                            artist=artist,
+                            track=title,
+                            album=album,
+                            save_lrc=save_lrc,
+                            embed_lyrics=embed_lyrics,
+                            qobuz_lyrics_response=orig,
+                            qobuz_translation_response=trans,
+                            track_number=index,
+                            quiet=True,
+                            better_than=melhor_que,
+                            **extra,
+                        )
+                    finally:
+                        if diario and snap is not None:
+                            diario.record(file_path, snap)
+
+                resultado = await asyncio.to_thread(_gravar)
                 return resultado
 
             status, desc = "SEM ALTERAÇÃO", ""
@@ -1015,7 +1066,7 @@ async def process_retroactive_lyrics_async(
                     check_again = await asyncio.to_thread(
                         inspect_existing_lyrics, file_path
                     )
-                    if check_again["has_lyrics"] and res.get("success"):
+                    if res.get("success") and (dry_run or check_again["has_lyrics"]):
                         stats["updated_fallback"] += 1
                         status = "ATUALIZADO (FALLBACK)"
                         desc = "Letra inserida via BiniLyrics/Musixmatch/LRCLIB (não disponível no Qobuz)"
@@ -1050,6 +1101,7 @@ async def process_retroactive_lyrics_async(
                     stats["unchanged_no_trans_yet"] += 1
                     desc = "Já possui letra; o Qobuz não tem letra sincronizada para esta faixa"
 
+            await _registrar_progresso(file_path, status)
             status_counts[status] += 1
             stats["upgraded_to_sync"] += status.startswith("UPGRADE")
             stats["priority_swaps"] += status == "PRIORIDADE"
@@ -1060,7 +1112,15 @@ async def process_retroactive_lyrics_async(
                 else ""
             )
             return _bloco_faixa(
-                rotulo, display_name, status, desc, antes, depois, nota_id, largura
+                rotulo,
+                display_name,
+                status,
+                desc,
+                antes,
+                depois,
+                nota_id,
+                largura,
+                simulado=dry_run,
             )
 
         # Os blocos saem SEMPRE na ordem dos arquivos, mesmo que, em modo
@@ -1109,6 +1169,8 @@ async def process_retroactive_lyrics_async(
         for resultado in resultados:
             if isinstance(resultado, BaseException):
                 raise resultado
+        if progress is not None and not dry_run:
+            await asyncio.to_thread(progress.finish)
 
         # Soma somente operacoes que alteraram ou inseriram letras.
         total_updates = (
@@ -1125,7 +1187,10 @@ async def process_retroactive_lyrics_async(
         )
 
         ui.emit("")
-        ui.emit(f"{GREEN}[+] Verificação de letras concluída.{OFF}")
+        if dry_run:
+            ui.emit(f"{GREEN}[+] Simulação concluída: nada foi gravado.{OFF}")
+        else:
+            ui.emit(f"{GREEN}[+] Verificação de letras concluída.{OFF}")
         ui.emit("")
         ui.emit(f"{CYAN} Resumo:{RESET}")
         for texto, valor, cor_ativa, explicacao in (
@@ -1192,10 +1257,19 @@ async def process_retroactive_lyrics_async(
     finally:
         # [FIX] Fecha a engine no finally para liberar a sessao HTTP.
         engine.close()
+        if progress is not None and not dry_run:
+            await asyncio.to_thread(progress.save)
 
 
 async def inject_lyrics_retroactively(
-    directory_path=None, client=None, genius_token=None, settings=None
+    directory_path=None,
+    client=None,
+    genius_token=None,
+    settings=None,
+    *,
+    dry_run=False,
+    journal=None,
+    progress=None,
 ):
     """
     Entrada publica: resolve a pasta configurada e inicia o processamento retroativo.
@@ -1231,11 +1305,19 @@ async def inject_lyrics_retroactively(
         return
 
     try:
+        extra = {}
+        if dry_run:
+            extra["dry_run"] = True
+        if journal is not None:
+            extra["journal"] = journal
+        if progress is not None:
+            extra["progress"] = progress
         await process_retroactive_lyrics_async(
             directory_path=directory_path,
             client=client,
             genius_token=genius_token,
             settings=settings,
+            **extra,
         )
     except Exception as e:
         logger.error(

@@ -17,6 +17,25 @@ from qobuz_dl.utils import normalize_label_filter
 _MISSING = object()
 MAX_DOWNLOAD_WORKERS = 16
 MAX_SEGMENT_WORKERS = 16
+# Conexões de segmento que o programa pode manter abertas AO MESMO TEMPO, somando
+# todas as faixas em paralelo (o cliente HTTP aceita 32 no total).
+SEGMENT_CONNECTION_BUDGET = 16
+
+
+def segment_workers_default(max_workers, cpu_count=None) -> int:
+    """segment_workers padrão por faixa, dividindo o orçamento de conexões.
+
+    Sem paralelismo (max_workers = 1) é o valor de sempre: min(8, 2xCPUs), no
+    mínimo 2. Com várias faixas ao mesmo tempo, cada uma recebe uma fatia do
+    orçamento (16 // max_workers), nunca menos que 2: o total de conexões fica
+    estável em vez de crescer com max_workers.
+    """
+    try:
+        paralelas = max(1, int(max_workers))
+    except (TypeError, ValueError):
+        paralelas = 1
+    base = min(8, max(2, (cpu_count or os.cpu_count() or 4) * 2))
+    return max(2, min(base, SEGMENT_CONNECTION_BUDGET // paralelas))
 
 
 def _bounded_workers(value, default, maximum):
@@ -160,7 +179,7 @@ class QobuzDLSettings:
     # Letras
     lrc_files: bool
     embed_lyrics: bool
-    lyrics_translation_lang: str
+    _lyrics_translation_lang: str  # use a propriedade lyrics_translation_lang
     fetch_translation: bool
     only_synced_lyrics: bool
     lyrics_word_sync: bool
@@ -285,8 +304,9 @@ class QobuzDLSettings:
             kwargs.get("max_workers", 1), 1, MAX_DOWNLOAD_WORKERS
         )
 
-        # # Define workers de segmentos; sem valor explícito usa até 2x os CPUs, limitado a 2–8.
-        default_segment_workers = min(8, max(2, (os.cpu_count() or 4) * 2))
+        # # Workers de segmentos por faixa; sem valor explícito, divide o orçamento
+        # # de conexões entre as faixas em paralelo (ver segment_workers_default).
+        default_segment_workers = segment_workers_default(self.max_workers)
         self.segment_workers = _bounded_workers(
             kwargs.get("segment_workers", 0),
             default_segment_workers,
@@ -297,6 +317,22 @@ class QobuzDLSettings:
 
         # # Sentinela .streamrip.json por álbum (dedup pelo disco; ver sentinel.py).
         self.write_sentinel = kwargs.get("write_sentinel", True)
+
+    @property
+    def lyrics_translation_lang(self) -> str:
+        """Idioma da tradução das letras; vazio = NÃO procurar tradução.
+
+        Só há idioma quando o usuário escolheu tradução no `qobuz-dl -r`
+        (``fetch_translation``). Download, BiniLyrics e o comando `lyrics` leem
+        este valor: vazio, ninguém pede nem monta letra traduzida/bilíngue.
+        """
+        if not self.fetch_translation:
+            return ""
+        return self._lyrics_translation_lang
+
+    @lyrics_translation_lang.setter
+    def lyrics_translation_lang(self, value) -> None:
+        self._lyrics_translation_lang = value or ""
 
     # # Converte argparse + ConfigParser em kwargs normalizados para QobuzDLSettings.
     @staticmethod

@@ -490,7 +490,6 @@ def _tagged(color, tag, message):
         "Concluído:",
         "Concluída:",
         "Áudio transferido",
-        "Letras prontas:",
         "Nenhuma letra encontrada:",
         "Falha ao gravar letras",
         "Erro na pesquisa de letras",
@@ -506,7 +505,6 @@ def _tagged(color, tag, message):
     if plain_label.startswith(
         (
             "Procurando letras:",
-            "Letras prontas:",
             "Letras:",
             "Nenhuma letra encontrada:",
         )

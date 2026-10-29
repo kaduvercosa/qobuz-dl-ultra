@@ -325,10 +325,14 @@ def auth_args(subparsers):
     """Define the 'auth' subcommand and its arguments."""
     auth = subparsers.add_parser(
         "auth",
-        usage="qobuz-dl auth",
-        description="Atualiza suas credenciais de acesso (email e token) sem precisar redefinir toda a configuração.",
-        help="atualiza credenciais de login",
-        aliases=["login"],
+        usage="qobuz-dl auth [opções]",
+        description=(
+            "Mostra o perfil, a assinatura, os limites e os dados da conta; com "
+            "-l/--login atualiza e-mail e token sem redefinir toda a configuração. "
+            "Também responde por user, account, profile, me e info."
+        ),
+        help="exibe a conta e a assinatura, ou atualiza as credenciais de login",
+        aliases=["login", "user", "account", "profile", "me", "info"],
     )
     auth.add_argument(
         "-l",
@@ -336,28 +340,19 @@ def auth_args(subparsers):
         action="store_true",
         help="Atualizar e-mail e token de autenticação.",
     )
-    return auth
-
-
-# ----------------------------------------------------------------------------
-# Subcomando: "user" (aliases: "account", "profile", "me", "info")
-# ----------------------------------------------------------------------------
-def user_args(subparsers):
-    """Define the 'user' subcommand and its arguments."""
-    user = subparsers.add_parser(
-        "user",
-        usage="qobuz-dl user [opções]",
-        description="Mostra o perfil do usuário, status da assinatura, limites e dados da conta.",
-        help="exibe informações do usuário e status da assinatura",
-        aliases=["account", "profile", "me", "info"],
-    )
-    user.add_argument(
+    auth.add_argument(
         "--json",
         action="store_true",
         default=False,
         help="Exibe o JSON bruto retornado pelo endpoint user/get",
     )
-    return user
+    return auth
+
+
+# ----------------------------------------------------------------------------
+# Apelidos de "auth": "user", "account", "profile", "me", "info"
+# ----------------------------------------------------------------------------
+# O antigo subcomando separado "user" foi unificado ao "auth" (veja auth_args).
 
 
 # ----------------------------------------------------------------------------
@@ -384,9 +379,89 @@ def lyrics_args(subparsers, default_folder=None):
         metavar="N",
         help=(
             "arquivos processados ao mesmo tempo (padrão: 1 -- sequencial; "
-            "também lê max_workers do config.ini). O máximo efetivo é 4, "
+            "também lê max_workers do config.ini). O máximo efetivo é 3, "
             "porque os provedores de letra limitam requisições"
         ),
+    )
+    lyrics.add_argument(
+        "--watch",
+        dest="lyrics_watch",
+        action="store_true",
+        default=False,
+        help=(
+            "fica observando a PASTA e injeta letras nos arquivos de áudio novos "
+            "que aparecerem (precisa do extra: pip install 'qobuz-dl-ultra[watch]'); "
+            "é o mesmo que a flag global --watch"
+        ),
+    )
+    # Salvaguardas iguais às do tags: simular, continuar e desfazer.
+    lyrics.add_argument(
+        "--dry-run",
+        dest="dry_run",
+        action="store_true",
+        default=False,
+        help=(
+            "SIMULA: consulta as fontes e mostra o que seria feito em cada faixa, "
+            "sem gravar letra, .lrc nem progresso (também vale para --undo)"
+        ),
+    )
+    skip = lyrics.add_mutually_exclusive_group()
+    skip.add_argument(
+        "--resume",
+        dest="resume",
+        action="store_true",
+        default=False,
+        help=(
+            "continua uma execução interrompida (CTRL+C, queda de rede) e refaz "
+            "as faixas adiadas ou com falha: pula as que já foram feitas"
+        ),
+    )
+    skip.add_argument(
+        "--incremental",
+        dest="incremental",
+        action="store_true",
+        default=False,
+        help=(
+            "só processa arquivos novos ou alterados desde a última execução do "
+            "lyrics nesta pasta (mais as adiadas ou com falha)"
+        ),
+    )
+    lyrics.add_argument(
+        "--no-undo",
+        dest="no_undo",
+        action="store_true",
+        default=False,
+        help=(
+            "não guarda o estado anterior das letras; sem isso cada execução cria "
+            "um registro para desfazer (são mantidas as 5 últimas)"
+        ),
+    )
+    undo = lyrics.add_mutually_exclusive_group()
+    undo.add_argument(
+        "--undo",
+        dest="undo",
+        nargs="?",
+        const="last",
+        default=None,
+        metavar="ID",
+        help=(
+            "desfaz uma execução do lyrics (letras embutidas e .lrc; a mais "
+            "recente, ou a do ID dado; veja --undo-list) e não consulta o Qobuz"
+        ),
+    )
+    undo.add_argument(
+        "--undo-list",
+        dest="undo_list",
+        action="store_true",
+        default=False,
+        help="lista as execuções do lyrics que podem ser desfeitas",
+    )
+    lyrics.add_argument(
+        "--undo-force",
+        dest="undo_force",
+        action="store_true",
+        default=False,
+        help="com --undo: restaura mesmo arquivos alterados depois do lyrics",
     )
     return lyrics
 
@@ -1422,6 +1497,93 @@ def library_args(subparsers):
 
 
 # ----------------------------------------------------------------------------
+# Subcomando: "organize" (alias: "rename")
+# ----------------------------------------------------------------------------
+def organize_args(subparsers):
+    """Define a reorganização local de arquivos já baixados."""
+    organize = subparsers.add_parser(
+        "organize",
+        aliases=["rename"],
+        usage="qobuz-dl organize [opções] [PASTA]",
+        description=(
+            "Reaplica os formatos de pasta e faixa aos arquivos locais, sem "
+            "consultar o Qobuz nem alterar áudio ou tags. Use --dry-run para "
+            "uma prévia somente leitura e --show-files para ver cada caminho. "
+            "Destinos já existentes não são sobrescritos. A pasta Playlist é "
+            "preservada por padrão; --include-playlists a inclui. Ao mudar a "
+            "pasta de um álbum, os demais arquivos dela, inclusive ocultos, "
+            "acompanham as faixas. O journal permite --undo, mas não é backup "
+            "dos arquivos: faça uma cópia independente antes da execução real."
+        ),
+        help="reaplica os formatos na biblioteca local (com prévia e undo)",
+    )
+    organize.add_argument(
+        "DIR",
+        metavar="PASTA",
+        nargs="?",
+        default=None,
+        help="biblioteca a reorganizar (padrão: directory do config.ini)",
+    )
+    organize.add_argument(
+        "-ff",
+        "--folder-format",
+        dest="folder_format",
+        default=None,
+        metavar="FORMATO",
+        help="formato de pasta a aplicar (padrão: folder_format do config.ini)",
+    )
+    organize.add_argument(
+        "-tf",
+        "--track-format",
+        dest="track_format",
+        default=None,
+        metavar="FORMATO",
+        help="formato de faixa a aplicar (padrão: track_format do config.ini)",
+    )
+    organize.add_argument(
+        "--dry-run",
+        action="store_true",
+        default=False,
+        help="prévia somente leitura; não move arquivos nem cria journal",
+    )
+    organize.add_argument(
+        "--show-files",
+        action="store_true",
+        default=False,
+        help="com --dry-run, lista cada arquivo e os caminhos relativos",
+    )
+    organize.add_argument(
+        "--include-playlists",
+        action="store_true",
+        default=False,
+        help="inclui a pasta Playlist (por padrão, ela é preservada)",
+    )
+    organize.add_argument(
+        "--no-undo",
+        action="store_true",
+        default=False,
+        help="não registra movimentos para --undo (não recomendado)",
+    )
+    undo = organize.add_mutually_exclusive_group()
+    undo.add_argument(
+        "--undo",
+        nargs="?",
+        const="last",
+        metavar="ID",
+        default=None,
+        help="restaura a última execução ou a execução informada no journal",
+    )
+    undo.add_argument(
+        "--undo-list",
+        dest="undo_list",
+        action="store_true",
+        default=False,
+        help="lista as execuções registradas disponíveis para desfazer",
+    )
+    return organize
+
+
+# ----------------------------------------------------------------------------
 # Subcomando: "doctor" (alias: "check")  -- diagnóstico (ideia do libsync)
 # ----------------------------------------------------------------------------
 def doctor_args(subparsers):
@@ -1518,11 +1680,11 @@ def qobuz_dl_args(default_quality=6, default_limit=20, default_folder=None):
     stats = stats_args(subparsers)
     inspect_cmd = inspect_args(subparsers)
     auth_cmd = auth_args(subparsers)
-    user_cmd = user_args(subparsers)
     sync_fav_cmd = sync_favorites_args(subparsers)
     artists_cmd = artist_review_args(subparsers)
     scan_cmd = scan_args(subparsers)
     library_cmd = library_args(subparsers)
+    organize_cmd = organize_args(subparsers)
     doctor_cmd = doctor_args(subparsers)
 
     for subparser in (interactive, download, lucky, sync_pl_cmd, sync_fav_cmd):
@@ -1539,11 +1701,11 @@ def qobuz_dl_args(default_quality=6, default_limit=20, default_folder=None):
         stats,
         inspect_cmd,
         auth_cmd,
-        user_cmd,
         sync_fav_cmd,
         artists_cmd,
         scan_cmd,
         library_cmd,
+        organize_cmd,
         doctor_cmd,
     ):
         add_output_args(subparser, suppress=True)

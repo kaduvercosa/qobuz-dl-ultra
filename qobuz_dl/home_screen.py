@@ -41,6 +41,10 @@ EXEMPLOS = {
         "tags [--tags-only | --covers-only] [--dry-run] [--resume | --incremental] [DIR]",
         "tags --report ~/Music",
     ),
+    "organize": (
+        "organize [--dry-run] [--show-files] [--undo [ID]] [DIR]",
+        "organize --dry-run --show-files ~/Music",
+    ),
     "sync-playlist": (
         "sync-playlist [-y] [-d PASTA] <URL>",
         'sp "https://play.qobuz.com/playlist/12345" -d ~/Music/Mix',

@@ -38,6 +38,9 @@ logger = logging.getLogger(__name__)
 # de ser pulada, e a maior pausa de cooldown (429) que vale a pena esperar.
 LYRICS_NETWORK_BUDGET = 15.0
 LYRICS_MAX_COOLDOWN_WAIT = 5.0
+# Uma pausa explícita do Qobuz só vira símbolo visível se o intervalo real
+# entre o fim de um verso e o início do próximo tiver ao menos meio segundo.
+MIN_PAUSE_DURATION_MS = 500
 
 # Marca de tempo LRC ([mm:ss.xx] / [mm:ss.mmm]). Sem ao menos uma, o texto e'
 # letra plana e nunca pode ser salvo nem injetado.
@@ -290,8 +293,9 @@ class LyricsEngine:
         """Converte linhas sincronizadas do Qobuz para LRC canonico.
 
         Linhas vazias ({"line": ""}) sao marcadores de pausa enviados pela
-        propria Qobuz: viram "♪ ♪ ♪" no meio do intervalo entre a linha
-        anterior e a seguinte.
+        propria Qobuz. O simbolo "♪ ♪ ♪" so e' emitido no meio do intervalo
+        quando a duracao real entre o fim da linha anterior e o inicio da
+        seguinte e' de pelo menos MIN_PAUSE_DURATION_MS.
         """
         lrc_rows = []
         prev_end = None
@@ -312,12 +316,13 @@ class LyricsEngine:
                 continue
 
             if pausa_pendente:
-                # Só insere a pausa quando existe um intervalo real
-                # Se prev_end == start, o marcador ficaria sobre a próxima
-                # letra; se start < prev_end, os tempos são inconsistentes
-                if prev_end is not None and start > prev_end:
-                    meio_ms = prev_end + (start - prev_end) // 2
-                    lrc_rows.append(f"{self._ms_to_lrc_timestamp(meio_ms)} ♪ ♪ ♪")
+                # A linha vazia do Qobuz é necessária, mas não suficiente:
+                # pausas curtas demais não justificam um símbolo no player.
+                if prev_end is not None:
+                    intervalo_ms = start - prev_end
+                    if intervalo_ms >= MIN_PAUSE_DURATION_MS:
+                        meio_ms = prev_end + intervalo_ms // 2
+                        lrc_rows.append(f"{self._ms_to_lrc_timestamp(meio_ms)} ♪ ♪ ♪")
 
                 pausa_pendente = False
 
@@ -811,7 +816,7 @@ class LyricsEngine:
         else:
             destino = "só no metadata"
         return ("ok" if embed_lyrics and save_lrc else "lyrics"), ui.tail(
-            f"{ramo}Letras prontas:{nome}",
+            f"{ramo}Letras:{nome}",
             ui.join_meta(
                 "BILINGUAL" if candidate.bilingual else "",
                 "sincronizadas",
@@ -820,11 +825,24 @@ class LyricsEngine:
             ),
         )
 
-    def _deliver(self, file_path, candidate, result, embed_lyrics, save_lrc):
-        """Grava a letra (metadata e/ou arquivo) e preenche `result`."""
+    def _deliver(
+        self, file_path, candidate, result, embed_lyrics, save_lrc, dry_run=False
+    ):
+        """Grava a letra (metadata e/ou arquivo) e preenche `result`.
+
+        `dry_run=True` só preenche `result`, como se tivesse gravado: nada vai ao
+        disco (usado pelo `lyrics --dry-run`).
+        """
         result["synchronized"] = candidate.synchronized
         result["bilingual"] = candidate.bilingual
         result["language"] = candidate.language
+
+        if dry_run:
+            result["embedded"] = bool(embed_lyrics)
+            result["saved_external"] = bool(save_lrc)
+            result["success"] = True
+            result["source"] = candidate.source
+            return True
 
         if embed_lyrics:
             result["embedded"] = self._inject_metadata(
@@ -864,6 +882,7 @@ class LyricsEngine:
         better_than=None,
         buffer_output=False,
         network_budget=None,
+        dry_run=False,
     ):
         """
         Percorre as fontes de LyricsEngine.PROVIDERS (Qobuz -> BiniLyrics ->
@@ -926,6 +945,7 @@ class LyricsEngine:
                 duration=duration,
                 quiet=quiet,
                 better_than=better_than,
+                dry_run=dry_run,
             )
         finally:
             if saida:
@@ -952,6 +972,7 @@ class LyricsEngine:
         duration=None,
         quiet=False,
         better_than=None,
+        dry_run=False,
     ):
         """Corpo de `fetch_and_inject`; `_escrever(linhas)` e' o destino das linhas."""
         # "[NN] título": identifica a faixa em cada linha (modo paralelo).
@@ -1057,7 +1078,9 @@ class LyricsEngine:
                     ),
                 )
             try:
-                ok = self._deliver(file_path, candidate, result, embed_lyrics, save_lrc)
+                ok = self._deliver(
+                    file_path, candidate, result, embed_lyrics, save_lrc, dry_run
+                )
                 _tw(
                     *self._delivery_message(
                         candidate, embed_lyrics, save_lrc, ok, _ident

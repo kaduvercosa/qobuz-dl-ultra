@@ -638,6 +638,27 @@ A Edição Ultra inclui poderosos gerenciadores de biblioteca local para acompan
   python -m qobuz_dl lyrics --max-workers 3 "/caminho/para/sua/pasta/local/de/musica"
   ```
 
+* **Reorganização local da biblioteca (`organize`, alias `rename`):**
+  Reaplica `folder_format` e `track_format` do `config.ini` aos arquivos já existentes, usando as tags locais e sem consultar o Qobuz ou alterar o áudio/tags. Se `PASTA` for omitida, usa `directory` do `config.ini`. Quando a pasta de um álbum muda, os arquivos acompanhantes daquela pasta (por exemplo, `.lrc`, capas e JSONs ocultos) também são levados; a pasta `Playlist` fica de fora por padrão e só entra com `--include-playlists`. Destinos que já existem não são sobrescritos: aparecem como conflito/pulado no resumo.
+
+  **Faça a prévia primeiro.** `--dry-run` só lê e mostra o plano; `--show-files` detalha os caminhos relativos de cada arquivo:
+
+  ```bash
+  python -m qobuz_dl organize --dry-run "/caminho/para/sua/biblioteca"
+  python -m qobuz_dl organize --dry-run --show-files "/caminho/para/sua/biblioteca"
+  ```
+
+  Confira os destinos e conflitos antes de executar. Faça uma **cópia independente da biblioteca**, fora da pasta que será reorganizada (em macOS/Linux, por exemplo: `cp -a "/caminho/Music" "/caminho/Music-backup-before-organize"`). O journal criado pela execução real serve para desfazer movimentações, mas **não é uma cópia de backup** dos arquivos.
+
+  ```bash
+  python -m qobuz_dl organize "/caminho/para/sua/biblioteca"  # executar após conferir a prévia e o backup
+  python -m qobuz_dl organize --undo-list                            # listar execuções reversíveis
+  python -m qobuz_dl organize --undo                                 # desfazer a mais recente
+  python -m qobuz_dl organize --undo 20261028_211500                  # desfazer uma execução específica
+  ```
+
+  A reversão usa o journal da execução e restaura os arquivos; diretórios de destino que fiquem vazios podem permanecer. Arquivos em conflito não são sobrescritos. `--no-undo` desativa o journal e não é recomendado. `--include-playlists` opta por processar também a pasta `Playlist`.
+
 * **Correção Retroativa de Tags (`tags`):**
   Arquivos já baixados com tags erradas, incompletas ou no formato antigo? O comando `tags` varre a pasta **no dispositivo** (o banco de dados não é consultado), lê o ID Qobuz gravado em cada arquivo FLAC/MP3 e regrava as tags de metadados (artista, álbum, compositor, gênero, data, faixa/disco, ISRC, IDs, comentário técnico) exatamente como um download novo faria, respeitando as opções `no_*_tag` do `config.ini`. Letras (`.lrc`) não são alteradas. Você escolhe o formato dos campos multivalorados em cada execução; sem flag, vale o `multi_value_tags` do `config.ini`. Se nenhuma pasta for informada, o comando usa a pasta padrão do `config.ini` (a mesma dos downloads).
 
