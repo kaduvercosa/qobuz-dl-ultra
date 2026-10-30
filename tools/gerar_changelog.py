@@ -3,10 +3,11 @@
 
 Dois modos:
 
-* **Com IA** (padrão quando existe `GEMINI_API_KEY` ou `GROQ_API_KEY` no ambiente): lê o
-  diff de cada commit e pede ao Gemini (com Groq como reserva) para descrever
-  **o que realmente mudou**, agrupado em Adicionado / Modificado / Corrigido etc.
-  Também lista os arquivos alterados entre as duas versões.
+* **Com IA** (padrão quando existe a chave de pelo menos um provedor no ambiente): lê o
+  diff de cada commit e pede a uma IA para descrever **o que realmente mudou**, agrupado
+  em Adicionado / Modificado / Corrigido etc. Vários provedores gratuitos formam uma
+  cadeia: se um falha (limite, fora do ar, chave inválida), o próximo assume. Também
+  lista os arquivos alterados entre as duas versões.
 * **Sem IA** (`--sem-ia`, sem token, ou se a IA falhar): usa só os títulos e corpos
   dos commits, como antes. A geração nunca quebra por causa da IA.
 
@@ -18,8 +19,23 @@ Exemplos:
     python tools/gerar_changelog.py --para v2.6.0 --sem-ia
     python tools/gerar_changelog.py --para v2.6.0 --exigir-ia --modelo openai/gpt-4.1
 
-Localmente, use GEMINI_API_KEY e, opcionalmente, GROQ_API_KEY:
-    GEMINI_API_KEY=... python tools/gerar_changelog.py --para v2.6.0
+Provedores (todos com API compatível com OpenAI; a ordem padrão é a da tabela):
+
+    provedor     chave                modelo padrão (troque com CHANGELOG_MODELO_<NOME>)
+    gemini       GEMINI_API_KEY       gemini-3.8-flash   (--modelo / CHANGELOG_MODELO)
+    groq         GROQ_API_KEY         openai/gpt-oss-120b (--modelo-reserva)
+    openrouter   OPENROUTER_API_KEY   openai/gpt-oss-120b:free
+    mistral      MISTRAL_API_KEY      mistral-small-latest
+    cerebras     CEREBRAS_API_KEY     gpt-oss-120b
+    github       GITHUB_TOKEN         openai/gpt-4.1-mini
+    ollama       OLLAMA_MODEL         (local, sem chave: o nome do modelo já ativa)
+
+    GEMINI_API_KEY=... GROQ_API_KEY=... python tools/gerar_changelog.py --para v2.6.0
+    python tools/gerar_changelog.py --provedores mistral,groq   # ordem e escolha
+    CHANGELOG_PROVEDORES=groq,openrouter python tools/gerar_changelog.py
+
+Só entram na cadeia os provedores que têm chave. Os planos gratuitos mudam com
+frequência: confira os limites de cada um antes de depender dele.
 """
 
 from __future__ import annotations
@@ -41,9 +57,9 @@ from typing import NamedTuple, TypedDict
 _FS = "\x1f"
 _RS = "\x1e"
 
-# --- IA (GitHub Models) -----------------------------------------------------
+# --- IA (cadeia de provedores compatíveis com OpenAI) -----------------------
 
-API_URL = "https://models.github.ai/inference/chat/completions"
+API_URL = "https://models.github.ai/inference/chat/completions"  # legado
 GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 GROQ_BASE_URL = "https://api.groq.com/openai/v1/"
 MODELO_PADRAO = "gemini-3.8-flash"
@@ -51,8 +67,64 @@ MODELO_RESERVA_PADRAO = "openai/gpt-oss-120b"
 USER_AGENT = "qobuz-dl-ultra-changelog/1.0"
 PAUSAS_NAO_JSON = (5.0, 20.0)
 
-# Limite de caracteres de contexto (metadados + diff) por requisição. O plano
-# gratuito do GitHub Models limita os tokens de entrada, então o diff é enxugado
+
+class EspecProvedor(NamedTuple):
+    """Como falar com um provedor: endereço, variável da chave e modelo padrão."""
+
+    nome: str
+    rotulo: str
+    base_url: str
+    chave_env: str
+    modelo: str
+    # Teto da resposta. Planos gratuitos com janela pequena (8K) pedem menos.
+    max_tokens: int = 5000
+
+
+# A ordem aqui é a ordem padrão da cadeia. Gemini e Groq vêm primeiro (são os que o
+# projeto já usava); os de janela pequena no plano gratuito ficam para o fim.
+PROVEDORES: dict[str, EspecProvedor] = {
+    "gemini": EspecProvedor(
+        "gemini", "Gemini", GEMINI_BASE_URL, "GEMINI_API_KEY", MODELO_PADRAO
+    ),
+    "groq": EspecProvedor(
+        "groq", "Groq", GROQ_BASE_URL, "GROQ_API_KEY", MODELO_RESERVA_PADRAO
+    ),
+    "openrouter": EspecProvedor(
+        "openrouter",
+        "OpenRouter",
+        "https://openrouter.ai/api/v1",
+        "OPENROUTER_API_KEY",
+        "openai/gpt-oss-120b:free",
+    ),
+    "mistral": EspecProvedor(
+        "mistral",
+        "Mistral",
+        "https://api.mistral.ai/v1",
+        "MISTRAL_API_KEY",
+        "mistral-small-latest",
+    ),
+    "cerebras": EspecProvedor(
+        "cerebras",
+        "Cerebras",
+        "https://api.cerebras.ai/v1",
+        "CEREBRAS_API_KEY",
+        "gpt-oss-120b",
+        max_tokens=3000,
+    ),
+    "github": EspecProvedor(
+        "github",
+        "GitHub Models",
+        "https://models.github.ai/inference",
+        "GITHUB_TOKEN",
+        "openai/gpt-4.1-mini",
+        max_tokens=3500,
+    ),
+}
+ORDEM_PADRAO = tuple(PROVEDORES)
+OLLAMA_URL_PADRAO = "http://localhost:11434/v1"
+
+# Limite de caracteres de contexto (metadados + diff) por requisição. Os planos
+# gratuitos limitam os tokens de entrada, então o diff é enxugado
 # e os commits são agrupados em lotes que cabem nesse limite.
 LIMITE_PROMPT = 14000
 LIMITE_ARQUIVO = 3000
@@ -224,7 +296,7 @@ class Item(TypedDict):
 
 
 class ErroIA(Exception):
-    """Falha ao falar com o GitHub Models ou ao entender a resposta."""
+    """Falha ao falar com o provedor de IA ou ao entender a resposta."""
 
     def __init__(self, codigo: int | None, detalhe: str) -> None:
         super().__init__(f"HTTP {codigo}: {detalhe}" if codigo else detalhe)
@@ -237,6 +309,16 @@ class ErroIA(Exception):
         return self.codigo in (401, 403, 404)
 
 
+class Provedor(NamedTuple):
+    """Um provedor pronto para uso: já com a chave e o modelo escolhidos."""
+
+    nome: str
+    base_url: str
+    modelo: str
+    token: str
+    max_tokens: int = 5000
+
+
 class ConfigIA(NamedTuple):
     """Configuração da IA (NamedTuple: carrega sem registrar o módulo, como nos testes)."""
 
@@ -247,6 +329,9 @@ class ConfigIA(NamedTuple):
     base_url: str = GEMINI_BASE_URL
     base_url_reserva: str = GROQ_BASE_URL
     token_reserva: str | None = None
+    max_tokens: int = 5000
+    # Demais provedores da cadeia, tentados em ordem depois do principal/reserva.
+    adicionais: tuple[Provedor, ...] = ()
 
 
 def _log(mensagem: str) -> None:
@@ -503,7 +588,7 @@ def _montar_lotes(
     return lotes
 
 
-# --- chamada ao GitHub Models -----------------------------------------------
+# --- chamada ao provedor de IA -----------------------------------------------
 
 
 def _espera_retry_after(erro: urllib.error.HTTPError) -> float:
@@ -517,18 +602,34 @@ class SessaoIA:
     """Estado isolado por geração; nunca persiste entre releases."""
 
     def __init__(self) -> None:
-        self.reserva_ativa = False
+        # Posição na cadeia a partir da qual se tenta: depois que um provedor falha,
+        # os próximos lotes já começam no que funcionou.
+        self.indice = 0
         self.usados: list[str] = []
+
+    @property
+    def reserva_ativa(self) -> bool:
+        return self.indice > 0
 
 
 _SESSAO_IA: ContextVar[SessaoIA | None] = ContextVar("sessao_changelog", default=None)
 
+_ROTULOS_POR_ENDERECO = {
+    "api.groq.com": "Groq",
+    "generativelanguage.googleapis.com": "Gemini",
+    "openrouter.ai": "OpenRouter",
+    "api.mistral.ai": "Mistral",
+    "api.cerebras.ai": "Cerebras",
+    "models.github.ai": "GitHub Models",
+    "localhost": "Ollama",
+    "127.0.0.1": "Ollama",
+}
+
 
 def _rotulo_modelo(config: ConfigIA) -> str:
-    if "api.groq.com" in config.base_url:
-        return f"Groq: {config.modelo}"
-    if "generativelanguage.googleapis.com" in config.base_url:
-        return f"Gemini: {config.modelo}"
+    for endereco, rotulo in _ROTULOS_POR_ENDERECO.items():
+        if endereco in config.base_url:
+            return f"{rotulo}: {config.modelo}"
     return f"{config.base_url}: {config.modelo}"
 
 
@@ -540,52 +641,92 @@ def _registrar_sucesso(config: ConfigIA) -> None:
     _log(f"IA: resposta recebida de {rotulo}")
 
 
+def _cadeia(config: ConfigIA) -> list[tuple[str, ConfigIA]]:
+    """Provedores na ordem de tentativa: principal, reserva e adicionais."""
+    principal = config._replace(
+        modelo=config.modelo.strip() or MODELO_PADRAO, adicionais=()
+    )
+    cadeia = [("principal", principal)]
+    reserva = (config.modelo_reserva or "").strip()
+    if reserva and reserva.lower() != "nenhum" and config.token_reserva:
+        cadeia.append(
+            (
+                "reserva",
+                principal._replace(
+                    token=config.token_reserva.strip(),
+                    modelo=reserva,
+                    base_url=config.base_url_reserva,
+                    modelo_reserva=None,
+                    token_reserva=None,
+                ),
+            )
+        )
+    for extra in config.adicionais:
+        cadeia.append(
+            (
+                "reserva",
+                principal._replace(
+                    token=extra.token.strip(),
+                    modelo=extra.modelo,
+                    base_url=extra.base_url,
+                    max_tokens=extra.max_tokens,
+                    modelo_reserva=None,
+                    token_reserva=None,
+                ),
+            )
+        )
+    return cadeia
+
+
 def _chamar_modelo(
     mensagens: list[dict[str, str]], config: ConfigIA, timeout: float = 120.0
 ) -> str:
-    principal = config._replace(modelo=config.modelo.strip() or MODELO_PADRAO)
-    reserva = (config.modelo_reserva or "").strip()
-    secundaria = None
-    if reserva and reserva.lower() != "nenhum" and config.token_reserva:
-        secundaria = config._replace(
-            token=config.token_reserva.strip(),
-            modelo=reserva,
-            base_url=config.base_url_reserva,
-            modelo_reserva=None,
-            token_reserva=None,
-        )
+    cadeia = _cadeia(config)
     sessao = _SESSAO_IA.get()
-    if sessao is not None and sessao.reserva_ativa and secundaria is not None:
-        texto = _chamar_modelo_unico(mensagens, secundaria, timeout)
-        _registrar_sucesso(secundaria)
-        return texto
-    try:
-        texto = _chamar_modelo_unico(mensagens, principal, timeout)
-    except ErroIA as erro:
-        if erro.codigo == 413 or secundaria is None:
-            raise
-        if (
-            secundaria.modelo == principal.modelo
-            and secundaria.base_url == principal.base_url
+    inicio = min(sessao.indice, len(cadeia) - 1) if sessao is not None else 0
+
+    tentados: list[ConfigIA] = []
+    erros: list[ErroIA] = []
+    descricoes: list[str] = []
+    for posicao in range(inicio, len(cadeia)):
+        papel, atual = cadeia[posicao]
+        if any(
+            t.modelo == atual.modelo and t.base_url == atual.base_url for t in tentados
         ):
-            raise
-        _log(f"modelo {principal.modelo} falhou ({erro}); tentando reserva {reserva}")
+            continue  # mesmo modelo no mesmo endereço: repetir não adianta
+        tentados.append(atual)
         try:
-            texto = _chamar_modelo_unico(mensagens, secundaria, timeout)
-        except ErroIA as falha:
-            raise ErroIA(
-                falha.codigo,
-                f"principal {principal.modelo}: {erro}; reserva {reserva}: {falha}",
-            ) from falha
-        if sessao is not None:
-            sessao.reserva_ativa = True
+            texto = _chamar_modelo_unico(mensagens, atual, timeout)
+        except ErroIA as erro:
+            if erro.codigo == 413:
+                raise  # entrada grande demais: quem chamou divide o lote
+            erros.append(erro)
+            descricoes.append(f"{papel} {atual.modelo}: {erro}")
+            proximos = [
+                c
+                for _, c in cadeia[posicao + 1 :]
+                if not any(
+                    t.modelo == c.modelo and t.base_url == c.base_url for t in tentados
+                )
+            ]
+            if proximos:
+                _log(
+                    f"modelo {atual.modelo} falhou ({erro}); "
+                    f"tentando reserva {proximos[0].modelo}"
+                )
+            continue
+        if sessao is not None and posicao > sessao.indice:
+            sessao.indice = posicao
             _log(
-                f"IA: mantendo {reserva} nos próximos lotes e na consolidação desta geração"
+                f"IA: mantendo {atual.modelo} nos próximos lotes e na consolidação "
+                "desta geração"
             )
-        _registrar_sucesso(secundaria)
+        _registrar_sucesso(atual)
         return texto
-    _registrar_sucesso(principal)
-    return texto
+
+    if len(erros) == 1:
+        raise erros[0]
+    raise ErroIA(erros[-1].codigo, "; ".join(descricoes))
 
 
 def _chamar_modelo_unico(
@@ -597,7 +738,7 @@ def _chamar_modelo_unico(
         "model": config.modelo,
         "messages": mensagens,
         "temperature": 0.2,
-        "max_tokens": 5000,
+        "max_tokens": config.max_tokens,
         "response_format": {"type": "json_object"},
     }
     url = config.base_url.rstrip("/") + "/chat/completions"
@@ -1049,6 +1190,57 @@ def _gerar_changelog_impl(
     return "\n".join(linhas).rstrip() + "\n"
 
 
+def _nome_ordem(texto: str) -> list[str]:
+    """Lê uma lista de provedores separada por vírgula (ou espaço)."""
+    return [parte.lower() for parte in re.split(r"[,\s]+", texto) if parte]
+
+
+def _montar_provedores(
+    ambiente: dict[str, str] | os._Environ[str],
+    ordem: list[str],
+    *,
+    modelo_gemini: str = MODELO_PADRAO,
+    modelo_groq: str = MODELO_RESERVA_PADRAO,
+    base_gemini: str = GEMINI_BASE_URL,
+    base_groq: str = GROQ_BASE_URL,
+) -> list[Provedor]:
+    """Provedores da cadeia, na ordem pedida, só os que têm chave no ambiente.
+
+    O modelo de cada um vem de `CHANGELOG_MODELO_<NOME>`; o do Gemini e o do Groq
+    também aceitam `--modelo` e `--modelo-reserva` (como antes dos outros provedores).
+    """
+    desconhecidos = [n for n in ordem if n not in PROVEDORES and n != "ollama"]
+    if desconhecidos:
+        validos = ", ".join([*PROVEDORES, "ollama"])
+        raise ValueError(
+            f"provedor desconhecido: {', '.join(desconhecidos)} (válidos: {validos})"
+        )
+    cadeia: list[Provedor] = []
+    for nome in dict.fromkeys(ordem):  # sem repetir, mantendo a ordem
+        if nome == "ollama":
+            modelo = ambiente.get("OLLAMA_MODEL", "").strip()
+            if modelo:
+                url = ambiente.get("OLLAMA_BASE_URL", "").strip() or OLLAMA_URL_PADRAO
+                cadeia.append(Provedor("ollama", url, modelo, "ollama", 4000))
+            continue
+        espec = PROVEDORES[nome]
+        chave = ambiente.get(espec.chave_env, "").strip()
+        if not chave:
+            continue
+        modelo = ambiente.get(f"CHANGELOG_MODELO_{nome.upper()}", "").strip()
+        base = espec.base_url
+        if nome == "gemini":
+            modelo = modelo or modelo_gemini
+            base = base_gemini
+        elif nome == "groq":
+            modelo = modelo or modelo_groq
+            base = base_groq
+        cadeia.append(
+            Provedor(nome, base, modelo or espec.modelo, chave, espec.max_tokens)
+        )
+    return cadeia
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -1088,7 +1280,7 @@ def main() -> None:
     parser.add_argument(
         "--sem-ia",
         action="store_true",
-        help="Não usa IA, mesmo com GITHUB_TOKEN definido.",
+        help="Não usa IA, mesmo com chaves de provedores definidas.",
     )
     parser.add_argument(
         "--exigir-ia",
@@ -1104,7 +1296,7 @@ def main() -> None:
     parser.add_argument(
         "--modelo-reserva",
         default=os.environ.get("CHANGELOG_MODELO_RESERVA") or MODELO_RESERVA_PADRAO,
-        help="Modelo de reserva; use nenhum para desligar.",
+        help="Modelo do Groq (o segundo da cadeia padrão); use nenhum para tirar o Groq da cadeia.",
     )
     parser.add_argument(
         "--base-url",
@@ -1113,6 +1305,13 @@ def main() -> None:
     parser.add_argument(
         "--base-url-reserva",
         default=os.environ.get("CHANGELOG_IA_BASE_URL_RESERVA") or GROQ_BASE_URL,
+    )
+    parser.add_argument(
+        "--provedores",
+        default=os.environ.get("CHANGELOG_PROVEDORES", ""),
+        help="Provedores de IA, em ordem, separados por vírgula "
+        f"({', '.join([*PROVEDORES, 'ollama'])}). Padrão: todos os que têm chave, "
+        "na ordem dessa lista (ou a variável CHANGELOG_PROVEDORES).",
     )
     parser.add_argument(
         "--limite-prompt",
@@ -1133,38 +1332,40 @@ def main() -> None:
 
     config: ConfigIA | None = None
     if not (args.sem_ia or args.resumido):
-        token = os.environ.get("GEMINI_API_KEY", "").strip()
-        token_reserva = os.environ.get("GROQ_API_KEY", "").strip()
-        modelo = args.modelo.strip() or MODELO_PADRAO
-        reserva = args.modelo_reserva.strip() or MODELO_RESERVA_PADRAO
-        if reserva.lower() == "nenhum":
-            reserva = None
-        if token:
-            if reserva and not token_reserva:
-                _log("GROQ_API_KEY ausente: reserva desabilitada")
-                reserva = None
-            config = ConfigIA(
-                token=token,
-                modelo=modelo,
-                limite_prompt=args.limite_prompt,
-                modelo_reserva=reserva,
-                base_url=args.base_url,
-                base_url_reserva=args.base_url_reserva,
-                token_reserva=token_reserva or None,
+        ordem = _nome_ordem(args.provedores) or [*ORDEM_PADRAO, "ollama"]
+        if args.modelo_reserva.strip().lower() == "nenhum":
+            ordem = [nome for nome in ordem if nome != "groq"]
+        try:
+            provedores = _montar_provedores(
+                os.environ,
+                ordem,
+                modelo_gemini=args.modelo.strip() or MODELO_PADRAO,
+                modelo_groq=args.modelo_reserva.strip() or MODELO_RESERVA_PADRAO,
+                base_gemini=args.base_url,
+                base_groq=args.base_url_reserva,
             )
-        elif token_reserva and reserva:
-            _log("GEMINI_API_KEY ausente: usando Groq como principal")
+        except ValueError as erro:
+            print(f"--provedores: {erro}", file=sys.stderr)
+            raise SystemExit(1) from erro
+        if provedores:
+            primeiro, *demais = provedores
+            _log(
+                "IA: cadeia de provedores: "
+                + " → ".join(f"{p.nome} ({p.modelo})" for p in provedores)
+            )
             config = ConfigIA(
-                token=token_reserva,
-                modelo=reserva,
+                token=primeiro.token,
+                modelo=primeiro.modelo,
                 limite_prompt=args.limite_prompt,
-                base_url=args.base_url_reserva,
+                base_url=primeiro.base_url,
+                max_tokens=primeiro.max_tokens,
+                adicionais=tuple(demais),
             )
         else:
             _log("sem chave de IA configurada: usando os títulos dos commits")
     if args.exigir_ia and config is None:
         print(
-            "--exigir-ia: a IA está desligada (--sem-ia/--resumido) ou falta o token.",
+            "--exigir-ia: a IA está desligada (--sem-ia/--resumido) ou falta a chave.",
             file=sys.stderr,
         )
         raise SystemExit(2)

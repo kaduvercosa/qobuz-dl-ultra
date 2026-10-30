@@ -1,4 +1,4 @@
-"""Testa `tools/gerar_changelog.py` (changelog com IA do GitHub Models).
+"""Testa `tools/gerar_changelog.py` (changelog com IA, com cadeia de provedores).
 
 Nenhum teste toca a rede: `_chamar_modelo` é trocada por uma função falsa. O teste
 com git de verdade só roda se o `git` existir (ex.: não existe no a-Shell).
@@ -566,3 +566,121 @@ class TestSessaoReserva:
     def test_prompts_preservam_mudancas_independentes(self):
         assert "Uma mudança funcional por item" in gc.PROMPT_SISTEMA
         assert "NÃO agrupe assuntos independentes" in gc.PROMPT_CONSOLIDAR
+
+
+class TestCadeiaDeProvedores:
+    CHAVES = {
+        "GEMINI_API_KEY": "g",
+        "GROQ_API_KEY": "r",
+        "MISTRAL_API_KEY": "m",
+        "GITHUB_TOKEN": "gh",
+    }
+
+    def test_so_entram_provedores_com_chave_na_ordem_padrao(self):
+        provedores = gc._montar_provedores(self.CHAVES, list(gc.ORDEM_PADRAO))
+        assert [p.nome for p in provedores] == ["gemini", "groq", "mistral", "github"]
+
+    def test_ordem_pedida_e_respeitada_sem_repetir(self):
+        provedores = gc._montar_provedores(
+            self.CHAVES, ["mistral", "groq", "mistral", "cerebras"]
+        )
+        assert [p.nome for p in provedores] == ["mistral", "groq"]
+
+    def test_modelo_por_variavel_e_padrao_do_provedor(self):
+        ambiente = {**self.CHAVES, "CHANGELOG_MODELO_MISTRAL": "mistral-large-latest"}
+        por_nome = {
+            p.nome: p for p in gc._montar_provedores(ambiente, list(gc.ORDEM_PADRAO))
+        }
+        assert por_nome["mistral"].modelo == "mistral-large-latest"
+        assert por_nome["github"].modelo == gc.PROVEDORES["github"].modelo
+        assert por_nome["gemini"].modelo == gc.MODELO_PADRAO
+        assert por_nome["groq"].modelo == gc.MODELO_RESERVA_PADRAO
+
+    def test_ollama_so_com_modelo_e_sem_chave(self):
+        assert gc._montar_provedores({}, ["ollama"]) == []
+        (ollama,) = gc._montar_provedores({"OLLAMA_MODEL": "qwen"}, ["ollama"])
+        assert ollama.modelo == "qwen" and ollama.token
+        assert ollama.base_url == gc.OLLAMA_URL_PADRAO
+
+    def test_provedor_desconhecido_e_erro(self):
+        with pytest.raises(ValueError, match="foo"):
+            gc._montar_provedores(self.CHAVES, ["gemini", "foo"])
+
+    def _config(self):
+        gemini, *demais = gc._montar_provedores(self.CHAVES, list(gc.ORDEM_PADRAO))
+        return gc.ConfigIA(
+            token=gemini.token,
+            modelo=gemini.modelo,
+            base_url=gemini.base_url,
+            adicionais=tuple(demais),
+        )
+
+    def test_cai_para_o_proximo_e_fica_nele_na_sessao(self, monkeypatch):
+        chamadas = []
+
+        def falso(mensagens, config, timeout=120):
+            chamadas.append(config.modelo)
+            if config.modelo in (gc.MODELO_PADRAO, gc.MODELO_RESERVA_PADRAO):
+                raise gc.ErroIA(429, "limite")
+            return "ok"
+
+        monkeypatch.setattr(gc, "_chamar_modelo_unico", falso)
+        sessao = gc.SessaoIA()
+        marca = gc._SESSAO_IA.set(sessao)
+        try:
+            assert gc._chamar_modelo([], self._config()) == "ok"
+            assert chamadas == [
+                gc.MODELO_PADRAO,
+                gc.MODELO_RESERVA_PADRAO,
+                gc.PROVEDORES["mistral"].modelo,
+            ]
+            chamadas.clear()
+            assert gc._chamar_modelo([], self._config()) == "ok"
+            assert chamadas == [gc.PROVEDORES["mistral"].modelo]
+            assert sessao.usados == [f"Mistral: {gc.PROVEDORES['mistral'].modelo}"]
+        finally:
+            gc._SESSAO_IA.reset(marca)
+
+    def test_todos_falham_junta_os_erros(self, monkeypatch):
+        def falso(mensagens, config, timeout=120):
+            raise gc.ErroIA(503, "fora do ar")
+
+        monkeypatch.setattr(gc, "_chamar_modelo_unico", falso)
+        with pytest.raises(gc.ErroIA) as info:
+            gc._chamar_modelo([], self._config())
+        assert info.value.codigo == 503
+        for nome in ("gemini", "gpt-oss-120b", "mistral-small", "gpt-4.1-mini"):
+            assert nome in str(info.value)
+
+    def test_413_nao_tenta_outro_provedor(self, monkeypatch):
+        chamadas = []
+
+        def falso(mensagens, config, timeout=120):
+            chamadas.append(config.modelo)
+            raise gc.ErroIA(413, "grande demais")
+
+        monkeypatch.setattr(gc, "_chamar_modelo_unico", falso)
+        with pytest.raises(gc.ErroIA) as info:
+            gc._chamar_modelo([], self._config())
+        assert info.value.codigo == 413 and len(chamadas) == 1
+
+    def test_max_tokens_do_provedor_vai_na_chamada(self):
+        cadeia = gc._cadeia(self._config())
+        por_modelo = {c.modelo: c for _, c in cadeia}
+        assert por_modelo[gc.PROVEDORES["github"].modelo].max_tokens == (
+            gc.PROVEDORES["github"].max_tokens
+        )
+        assert por_modelo[gc.MODELO_PADRAO].max_tokens == 5000
+
+    def test_rotulos_dos_provedores(self):
+        for nome, rotulo in (
+            ("openrouter", "OpenRouter"),
+            ("mistral", "Mistral"),
+            ("cerebras", "Cerebras"),
+            ("github", "GitHub Models"),
+        ):
+            espec = gc.PROVEDORES[nome]
+            config = gc.ConfigIA(
+                token="t", modelo=espec.modelo, base_url=espec.base_url
+            )
+            assert gc._rotulo_modelo(config) == f"{rotulo}: {espec.modelo}"

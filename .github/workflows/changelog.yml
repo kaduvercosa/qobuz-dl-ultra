@@ -13,6 +13,7 @@ on:
 
 permissions:
   contents: write
+  models: read # GitHub Models (GITHUB_TOKEN) entra na cadeia de IAs sem secret extra
 
 env:
   PYTHON_VERSION: "3.12"
@@ -79,23 +80,34 @@ jobs:
         env:
           TAG: ${{ steps.release.outputs.tag }}
           TAG_PREVIOUS: ${{ steps.previous.outputs.tag }}
+          # Cada chave é opcional: só os provedores com chave entram na cadeia
+          # (ordem padrão: gemini, groq, openrouter, mistral, cerebras, github).
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
+          CEREBRAS_API_KEY: ${{ secrets.CEREBRAS_API_KEY }}
+          GITHUB_TOKEN: ${{ github.token }}
+          # Opcionais (Settings > Variables): ordem e modelos.
+          CHANGELOG_PROVEDORES: ${{ vars.CHANGELOG_PROVEDORES }}
           CHANGELOG_MODELO: ${{ vars.CHANGELOG_MODELO }}
           CHANGELOG_MODELO_RESERVA: ${{ vars.CHANGELOG_MODELO_RESERVA }}
         shell: bash
         run: |
           set -euo pipefail
 
-          if [[ -n "${GEMINI_API_KEY:-}" ]]; then
-            echo "GEMINI_API_KEY: configurada"
-          else
-            echo "::warning::GEMINI_API_KEY ausente"
-          fi
-          if [[ -n "${GROQ_API_KEY:-}" ]]; then
-            echo "GROQ_API_KEY: configurada"
-          else
-            echo "::warning::GROQ_API_KEY ausente"
+          ATIVOS=0
+          for NOME in GEMINI_API_KEY GROQ_API_KEY OPENROUTER_API_KEY \
+                      MISTRAL_API_KEY CEREBRAS_API_KEY GITHUB_TOKEN; do
+            if [[ -n "${!NOME:-}" ]]; then
+              echo "$NOME: configurada"
+              ATIVOS=$((ATIVOS + 1))
+            else
+              echo "$NOME: ausente"
+            fi
+          done
+          if [[ "$ATIVOS" -eq 0 ]]; then
+            echo "::warning::nenhuma chave de IA configurada; o changelog sairá pelos títulos dos commits"
           fi
 
           ARGS=(--de "$TAG_PREVIOUS" --para "$TAG" --versao "$TAG"

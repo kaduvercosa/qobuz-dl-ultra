@@ -65,6 +65,15 @@ publicar, renomeie a seção para a nova versão e a data.
 - Listagem de playlists do usuário envia `type` e `offset` (entram antes da assinatura da
   requisição) e pagina pelas linhas brutas, sem perder itens quando o filtro de dono
   descarta alguns.
+- Changelog automático com cadeia de IAs: além de Gemini e Groq, o
+  `tools/gerar_changelog.py` aceita OpenRouter, Mistral, Cerebras, GitHub Models
+  (`GITHUB_TOKEN`) e Ollama local. Só entram na cadeia os provedores com chave; se um
+  falha (limite, fora do ar, chave inválida), o próximo assume e os lotes seguintes já
+  começam nele. Novas opções: `--provedores` (ou `CHANGELOG_PROVEDORES`) para escolher e
+  ordenar, e `CHANGELOG_MODELO_<NOME>` para trocar o modelo de cada um. O workflow
+  `changelog.yml` passa as chaves `OPENROUTER_API_KEY`, `MISTRAL_API_KEY` e
+  `CEREBRAS_API_KEY` (todas opcionais) e ganhou `models: read`. A parte "GitHub Models"
+  da entrada abaixo está desatualizada: hoje a ordem padrão começa por Gemini e Groq.
 - Changelog automático (`tools/gerar_changelog.py` + workflow `changelog.yml`): em vez de
   só listar os títulos dos commits, a release agora descreve o que mudou, lendo o diff de
   cada commit com o **GitHub Models** (IA gratuita do GitHub, via `GITHUB_TOKEN` com
