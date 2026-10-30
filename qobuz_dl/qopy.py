@@ -221,12 +221,9 @@ class Client:
         {
             "album/get",
             "track/get",
-            "playlist/get",
             "artist/get",
             "label/get",
             "catalog/search",
-            "playlist/getUserPlaylists",
-            "playlist/getUserPlaylistIds",
         }
     )
 
@@ -758,7 +755,16 @@ class Client:
             "playlist/getUserPlaylists",
             "playlist/getUserPlaylistIds",
         ):
-            params = {"limit": kwargs.get("limit", 100)}
+            # Endpoints assinados. `type` e `offset` (usados pela separação
+            # entre playlists próprias e favoritadas) entram em `params`
+            # ANTES da assinatura, que cobre todos os parâmetros enviados.
+            # `limit` só vai quando informado: getUserPlaylistIds devolve a
+            # coleção inteira e é paginada localmente.
+            params = {
+                key: kwargs[key]
+                for key in ("limit", "type", "offset")
+                if kwargs.get(key) is not None
+            }
             user_id = kwargs.get("user_id") or getattr(self, "user_id", None)
             if user_id:
                 params["user_id"] = user_id
@@ -1242,39 +1248,126 @@ class Client:
                 )
         raise RuntimeError("paginação de favoritos excedeu o limite de segurança")
 
-    async def get_user_playlists(self, limit=100):
-        """List the authenticated user's playlists through public client APIs."""
+    def _playlist_user_id(self):
         user_id = getattr(self, "user_id", None)
         user = getattr(self, "user", None)
-        if not user_id and isinstance(user, dict):
+        if user_id is None and isinstance(user, dict):
             user_id = user.get("id")
-
-        try:
-            response = await self.api_call(
-                "playlist/getUserPlaylists", limit=limit, user_id=user_id
+        if user_id is None or str(user_id).strip() == "":
+            raise RuntimeError(
+                "Identidade da conta ausente; não é possível separar playlists"
             )
-            block = response.get("playlists") if isinstance(response, dict) else None
-            if isinstance(block, dict) and isinstance(block.get("items"), list):
-                return response
-        except Exception as exc:
-            logger.debug("Falha ao listar playlists diretamente: %s", exc)
+        return str(user_id)
 
+    @staticmethod
+    def _playlist_matches_user(item, user_id, playlist_type):
+        if not isinstance(item, dict) or item.get("id") is None:
+            return False
+        owner = item.get("owner")
+        owner_id = owner.get("id") if isinstance(owner, dict) else None
+        if owner_id is None:
+            logger.debug("Playlist %s sem owner.id; omitida", item.get("id"))
+            return False
+        own = str(owner_id) == user_id
+        return own if playlist_type == "owner" else not own
+
+    async def get_user_playlists(self, limit=100, playlist_type="owner", offset=0):
+        """Return a relationship-filtered page, retaining raw pagination counts."""
+        if playlist_type not in ("owner", "subscriber"):
+            raise ValueError("playlist_type deve ser 'owner' ou 'subscriber'")
+        if limit < 1 or offset < 0:
+            raise ValueError("limit deve ser positivo e offset não negativo")
+        user_id = self._playlist_user_id()
+        response = await self.api_call(
+            "playlist/getUserPlaylists",
+            type=playlist_type,
+            limit=limit,
+            offset=offset,
+            user_id=user_id,
+        )
+        block = response.get("playlists") if isinstance(response, dict) else None
+        if isinstance(block, dict) and isinstance(block.get("items"), list):
+            raw = block["items"]
+            filtered = [
+                item
+                for item in raw
+                if self._playlist_matches_user(item, user_id, playlist_type)
+            ]
+            return {
+                **response,
+                "playlists": {
+                    **block,
+                    "items": filtered,
+                    "_raw_count": len(raw),
+                },
+            }
+        if playlist_type == "subscriber":
+            raise RuntimeError("A API não retornou playlists favoritadas")
+
+        # Este endpoint fornece a coleção de IDs; paginar localmente uma só vez.
         id_response = await self.api_call(
-            "playlist/getUserPlaylistIds", limit=limit, user_id=user_id
+            "playlist/getUserPlaylistIds",
+            user_id=user_id,
         )
         playlist_ids = (
-            id_response.get("playlist_ids", []) if isinstance(id_response, dict) else []
+            id_response.get("playlist_ids") if isinstance(id_response, dict) else None
         )
+        if not isinstance(playlist_ids, list):
+            raise RuntimeError("A API não retornou IDs de playlists próprias")
+        raw_ids = playlist_ids[offset : offset + limit]
         items = []
-        for playlist_id in playlist_ids[:limit]:
+        for playlist_id in raw_ids:
             try:
                 playlist = await self.api_call("playlist/get", id=playlist_id)
             except Exception as exc:
                 logger.debug("Falha ao buscar playlist %s: %s", playlist_id, exc)
                 continue
-            if isinstance(playlist, dict) and playlist.get("id") is not None:
+            if self._playlist_matches_user(playlist, user_id, "owner"):
                 items.append(playlist)
-        return {"playlists": {"items": items, "total": len(items)}}
+        return {
+            "playlists": {
+                "items": items,
+                "total": len(playlist_ids),
+                "_raw_count": len(raw_ids),
+            }
+        }
+
+    async def get_all_user_playlists(
+        self, playlist_type="owner", *, page_size=50, max_pages=100
+    ):
+        """Advance by raw rows, not by the number surviving ownership filtering."""
+        if playlist_type not in ("owner", "subscriber"):
+            raise ValueError("playlist_type deve ser 'owner' ou 'subscriber'")
+        if page_size < 1 or max_pages < 1:
+            raise ValueError("page_size e max_pages devem ser positivos")
+        items = []
+        seen = set()
+        offset = 0
+        for _ in range(max_pages):
+            response = await self.get_user_playlists(
+                limit=page_size,
+                playlist_type=playlist_type,
+                offset=offset,
+            )
+            block = response.get("playlists", {})
+            page = block.get("items", [])
+            raw_count = block.get("_raw_count", len(page))
+            raw_total = block.get("total")
+            try:
+                raw_total = int(raw_total) if raw_total is not None else None
+            except (TypeError, ValueError):
+                raw_total = None
+            for item in page:
+                if not isinstance(item, dict) or item.get("id") is None:
+                    continue
+                key = str(item["id"])
+                if key not in seen:
+                    items.append(item)
+                    seen.add(key)
+            offset += raw_count
+            if not raw_count or (raw_total is not None and offset >= raw_total):
+                return items, len(items)
+        raise RuntimeError("paginação de playlists excedeu o limite de segurança")
 
     async def add_favorite_album(self, album_id):
         return await self.api_call(
@@ -1331,6 +1424,15 @@ class Client:
 
     def get_artist_meta(self, id):
         return self.multi_meta("artist/get", "albums_count", id, None)
+
+    async def get_artist_tracks(self, id, limit=20):
+        """Return the artist track collection, not the artist album pages."""
+        response = await self.api_call(
+            "artist/get", id=id, extra="tracks", limit=limit, offset=0
+        )
+        tracks = response.get("tracks", {}) if isinstance(response, dict) else {}
+        items = tracks.get("items", []) if isinstance(tracks, dict) else []
+        return items[:limit] if isinstance(items, list) else []
 
     def get_plist_meta(self, id):
         return self.multi_meta("playlist/get", "tracks_count", id, None)

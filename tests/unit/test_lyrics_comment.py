@@ -87,3 +87,37 @@ class TestMp3:
     def test_extract_so_devolve_trechos_de_letra(self):
         texto = "Qobuz | Trk ID: 1 | Letra: Qobuz (sincronizada, EN)"
         assert lc.extract_mp3_segments(texto) == ["Letra: Qobuz (sincronizada, EN)"]
+
+
+class TestComentarioMp3UmaLinhaPorItem:
+    """MP3 novo: um item por linha. O formato antigo (' | ') segue funcionando."""
+
+    NOVO = (
+        "Fonte: Qobuz\nQualidade: MP3 320 kbps / Estéreo\nTrk ID: 1\n"
+        "Capa: Apple/iTunes\nLetra: LRCLIB (sincronizada)"
+    )
+
+    def test_split_segments_aceita_os_dois_formatos(self):
+        assert lc.split_segments("a | b\nc") == ["a", "b", "c"]
+        assert lc.split_segments(["a | b", "c"]) == ["a", "b", "c"]
+        assert lc.split_segments(None) == []
+
+    def test_separator_of_mantem_o_formato_do_arquivo(self):
+        assert lc.separator_of(self.NOVO) == "\n"
+        assert lc.separator_of("Qobuz | Trk ID: 1") == " | "
+        assert lc.separator_of("") == " | "
+        assert lc.separator_of(None) == " | "
+
+    def test_extract_e_source_leem_o_formato_novo(self):
+        assert lc.extract_mp3_segments(self.NOVO) == ["Letra: LRCLIB (sincronizada)"]
+        assert lc.source_from_comment(self.NOVO) == "LRCLIB"
+
+    def test_merge_troca_a_letra_e_mantem_uma_linha_por_item(self):
+        novo = lc.merge_mp3(self.NOVO, "Letra: Qobuz (sincronizada, EN)")
+        assert novo.splitlines() == [
+            "Fonte: Qobuz",
+            "Qualidade: MP3 320 kbps / Estéreo",
+            "Trk ID: 1",
+            "Capa: Apple/iTunes",
+            "Letra: Qobuz (sincronizada, EN)",
+        ]

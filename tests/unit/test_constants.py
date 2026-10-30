@@ -9,8 +9,7 @@ def test_default_folder_contem_placeholders_essenciais():
         "{album_artist}",
         "{album_title}",
         "{year}",
-        "{format}",
-        "{bit_depth}",
+        "{quality_tag}",
     ):
         assert ph in constants.DEFAULT_FOLDER
 
@@ -62,6 +61,7 @@ def test_defaults_sao_interpolaveis():
         "album_artist": "Artista",
         "album_title": "Título",
         "year": "2024",
+        "quality_tag": "FLAC 24",
         "format": "FLAC",
         "bit_depth": "24",
     }

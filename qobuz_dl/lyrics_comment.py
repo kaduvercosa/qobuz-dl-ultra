@@ -8,8 +8,10 @@ com o Trk ID e a capa. Exemplos:
     Letra: Qobuz (sincronizada, bilíngue EN+PT)
     Letra: BiniLyrics (sincronizada, EN)
 
-No FLAC o COMMENT tem uma linha por item; no MP3 é uma linha única separada por
-" | ". Por isso o texto da linha nunca contém " | " nem quebra de linha.
+No FLAC o COMMENT tem uma linha por item. No MP3 também é uma linha por item
+(arquivos novos); os MP3 gravados antes dessa mudança têm uma linha única
+separada por " | ", e continuam sendo lidos e preservados nesse formato. Por
+isso o texto da linha nunca contém " | " nem quebra de linha.
 
 Este módulo não importa nada pesado (nem mutagen) de propósito: é usado pelo
 motor de letras, pelo leitor de letras do `lyrics` e pelo gravador de tags
@@ -22,7 +24,8 @@ import re
 from collections.abc import Iterable
 
 PREFIX = "Letra:"
-_SEPARATOR = " | "
+_SEPARATOR = " | "  # formato antigo do MP3: tudo numa linha só
+_SPLIT_RE = re.compile(r"\r?\n| \| ")
 _SOURCE_RE = re.compile(r"Letra:\s*([^(|\n]+?)\s*(?:\(|\||$)")
 
 
@@ -73,17 +76,32 @@ def extract_flac_lines(
     return lines
 
 
-def extract_mp3_segments(
-    text: str | Iterable[object] | None,
-) -> list[str]:
-    """Trechos de origem da letra de um COMM ID3 (linha única separada por ' | ')."""
+def split_segments(text: str | Iterable[object] | None) -> list[str]:
+    """Trechos de um COMM ID3, no formato novo (uma linha por item) ou no antigo
+    (linha única separada por ' | '). Devolve os trechos sem espaços nas pontas e
+    sem os vazios."""
     if not text:
         return []
     if not isinstance(text, str):
-        text = _SEPARATOR.join(str(part) for part in text)
+        text = "\n".join(str(part) for part in text)
+    return [part.strip() for part in _SPLIT_RE.split(text) if part.strip()]
+
+
+def separator_of(text: str | None) -> str:
+    """Separador a usar ao reescrever um COMM existente.
+
+    Mantém o formato que o arquivo já tem: quebra de linha no formato novo,
+    ' | ' no antigo (e em comentários de outros programas, de uma linha só).
+    """
+    return "\n" if text and "\n" in text else _SEPARATOR
+
+
+def extract_mp3_segments(
+    text: str | Iterable[object] | None,
+) -> list[str]:
+    """Trechos de origem da letra de um COMM ID3 (formato novo ou antigo)."""
     segments: list[str] = []
-    for segment in text.split(_SEPARATOR):
-        segment = segment.strip()
+    for segment in split_segments(text):
         if segment.startswith(PREFIX) and segment not in segments:
             segments.append(segment)
     return segments
@@ -109,15 +127,14 @@ def merge_flac(
 
 
 def merge_mp3(text: str | Iterable[object] | None, line: str) -> str:
-    """COMM ID3 com o trecho de letra atualizado (os demais trechos ficam)."""
+    """COMM ID3 com o trecho de letra atualizado (os demais trechos ficam).
+
+    Preserva o formato do comentário: uma linha por item (novo) ou ' | ' (antigo).
+    """
     if not text:
         text = ""
     if not isinstance(text, str):
-        text = _SEPARATOR.join(str(part) for part in text)
-    segments = [
-        part.strip()
-        for part in text.split(_SEPARATOR)
-        if part.strip() and not part.strip().startswith(PREFIX)
-    ]
+        text = "\n".join(str(part) for part in text)
+    segments = [part for part in split_segments(text) if not part.startswith(PREFIX)]
     segments.append(line)
-    return _SEPARATOR.join(segments)
+    return separator_of(text).join(segments)

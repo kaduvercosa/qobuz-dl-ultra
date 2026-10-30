@@ -38,9 +38,9 @@ def album_data(tracks):
     "outcomes, expected",
     [
         ([True, True], True),
-        ([True, "skipped"], False),
+        ([True, "skipped"], True),
         ([True, False], False),
-        (["skipped", "skipped"], False),
+        (["skipped", "skipped"], True),
     ],
 )
 async def test_download_release_consolida_resultados(

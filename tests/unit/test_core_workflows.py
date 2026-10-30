@@ -130,8 +130,7 @@ async def test_download_from_id_ja_baixado_pula(monkeypatch):
     result = await core.QobuzDL.download_from_id(app, "123", is_playlist=True)
 
     assert result is True
-    assert app.settings.pl_skipped == 1
-    assert app.settings.pl_failed == 0
+    assert app.settings.pl_existing == 1
 
 
 async def test_download_from_id_sucesso_repassa_album_vs_track(monkeypatch):

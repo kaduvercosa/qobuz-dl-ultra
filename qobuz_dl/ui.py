@@ -923,10 +923,13 @@ _TONES = {
 }
 
 
-def summary(title, rows, notes=(), cols=None, subtitle=""):
+def summary(title, rows, notes=(), cols=None, subtitle="", elapsed=None):
     # Painel de resumo (fim de álbum/faixa/playlist/lote). `rows` são tuplas
     # (rótulo, valor, tom) com tom em ok/warn/err/info; o valor sai alinhado
-    # à direita. `notes` são observações em cinza abaixo de uma divisória.
+    # à direita. `notes` aceita dois formatos: tupla (rótulo, valor, tom), que
+    # vira uma linha igual às demais (mesmo glifo e mesma cor do tom), ou
+    # texto simples, que sai em cinza abaixo de uma divisória (formato antigo).
+    # `elapsed` (segundos) acrescenta a linha "Tempo total" por último.
     """Print a closed summary box with status glyphs and right-aligned values."""
     inner = box_width(cols) - 4
     rst = c(RESET)
@@ -934,7 +937,14 @@ def summary(title, rows, notes=(), cols=None, subtitle=""):
     if subtitle:  # nome do álbum/playlist: quebra em vez de cortar o título
         lines.extend(f"{c(BG)}{part}{rst}" for part in _wrap_lines(subtitle, inner))
         lines.append(BOX_RULE)
-    for label, value, tone in rows:
+
+    row_notes = [n for n in notes if isinstance(n, (tuple, list)) and len(n) == 3]
+    text_notes = [n for n in notes if n and isinstance(n, str)]
+    all_rows = list(rows) + [tuple(n) for n in row_notes]
+    if elapsed is not None:
+        all_rows.append(elapsed_row(elapsed))
+
+    for label, value, tone in all_rows:
         fancy, plain, color = _TONES.get(tone, _TONES["info"])
         glyph = _glyph(fancy, plain)
         left = f"{c(color)}{glyph}{rst} {label}"
@@ -945,47 +955,33 @@ def summary(title, rows, notes=(), cols=None, subtitle=""):
         else:  # não cabe lado a lado: valor desce, recuado
             lines.append(left)
             lines.append("  " + right)
-    notes = [n for n in notes if n]
-    if notes:
+    if text_notes:
         lines.append(BOX_RULE)
-        for note in notes:
+        for note in text_notes:
             for part in _wrap_lines(note, inner):
                 lines.append(f"{c(GRAY)}{part}{rst}")
     emit_box(title, lines, cols=cols)
 
 
 def summary_downloads(
-    kind, name, success, total, skipped=0, failed=0, notes=(), existing=0
+    kind, name, success, total, skipped=0, failed=0, notes=(), existing=0, elapsed=0
 ):
-    """Resumo padrão de downloads (álbum, playlist, lote, playlist importada).
-
-    Linhas sem ocorrência (0 puladas, 0 falhas) não aparecem, como antes.
-    """
-    if existing:
-        completed = success + existing
-        completion_tone = (
-            "ok"
-            if completed == total and not skipped and not failed
-            else ("err" if failed else "warn")
-        )
-        rows = [("Concluídas", f"{completed}/{total}", completion_tone)]
-        if success:
-            rows.append(("Baixadas nesta execução", str(success), "info"))
-        rows.append(("Já existentes", str(existing), "warn"))
-        if skipped:
-            rows.append(("Puladas / indisponíveis", str(skipped), "warn"))
-        if failed:
-            rows.append(("Falhas", str(failed), "err"))
-        summary(f"RESUMO {kind}", rows, notes=notes, subtitle=name)
-        return
-
+    """Resumo consolidado dos resultados de download"""
     ok_tone = "ok" if success else ("err" if failed else "info")
     rows = [("Baixadas", f"{success}/{total}", ok_tone)]
+    if existing:
+        rows.append(("Já existentes", str(existing), "warn"))
     if skipped:
         rows.append(("Puladas / indisponíveis", str(skipped), "warn"))
     if failed:
         rows.append(("Falhas", str(failed), "err"))
-    summary(f"RESUMO {kind}", rows, notes=notes, subtitle=name)
+    summary(
+        f"RESUMO {kind}",
+        rows,
+        notes=notes,
+        subtitle=name,
+        elapsed=elapsed,
+    )
 
 
 # --------------------------------------------------------------------------
@@ -1039,6 +1035,39 @@ def stats_text(size_bytes, seconds):
     if seconds is not None and seconds >= 0:
         parts.append(f"{seconds:.1f} s")
     return join_meta(*parts)
+
+
+def format_elapsed(seconds):
+    """Duração para o resumo: ``8.4 s``, ``1 min 42 s``, ``1 h 02 min``."""
+    secs = max(0.0, float(seconds))
+    if secs < 59.95:
+        return f"{secs:.1f} s"
+    total = int(round(secs))
+    hours, rest = divmod(total, 3600)
+    minutes, sec = divmod(rest, 60)
+    if hours:
+        return f"{hours} h {minutes:02d} min"
+    return f"{minutes} min {sec:02d} s"
+
+
+def format_clock(seconds):
+    """Duração de uma faixa/álbum para o cabeçalho: ``06:09`` ou ``01:14:24``."""
+    try:
+        total = int(round(float(seconds)))
+    except (TypeError, ValueError):
+        return ""
+    if total <= 0:
+        return ""
+    hours, rest = divmod(total, 3600)
+    minutes, sec = divmod(rest, 60)
+    if hours:
+        return f"{hours:02d}:{minutes:02d}:{sec:02d}"
+    return f"{minutes:02d}:{sec:02d}"
+
+
+def elapsed_row(seconds):
+    """Linha ``Tempo total`` dos resumos, no mesmo formato das demais."""
+    return ("Tempo total", format_elapsed(seconds), "info")
 
 
 def tree_mid():

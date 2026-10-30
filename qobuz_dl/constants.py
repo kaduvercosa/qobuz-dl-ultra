@@ -10,10 +10,12 @@
 # Formato PADRÃO de nome de pasta (quando --folder-format / config.ini não
 # define nada). Usa os mesmos placeholders documentados em commands.py
 # (-ff/--folder-format): release_type, album_artist, album_title, year,
-# format, bit_depth, etc.
+# format, bit_depth, quality_tag, etc.
+# `quality_tag` vira "FLAC 24" para FLAC e apenas "MP3" para MP3: o Qobuz
+# informa 16 bits para MP3, e "[MP3 16]" na pasta enganaria.
 # Exemplo de resultado: "Album/Pink Floyd - The Wall (1979) [FLAC 24]"
 DEFAULT_FOLDER = (
-    "{release_type}/{album_artist} - {album_title} ({year}) [{format} {bit_depth}]"
+    "{release_type}/{album_artist} - {album_title} ({year}) [{quality_tag}]"
 )
 
 # Pasta-raiz das playlists dentro do diretório de downloads. Cada tipo de

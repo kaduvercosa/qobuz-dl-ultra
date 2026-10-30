@@ -417,9 +417,9 @@ class TestTagMp3PreservaInfoDeCapa:
 
     def test_mantem_os_trechos_de_capa_existentes(self, monkeypatch, tmp_path):
         comentario = self._gravar(monkeypatch, tmp_path, preserve_cover_info=True)
-        assert comentario.startswith("Qobuz |")
-        assert " | Cover: 10 KiB (Req: org, Org: YES)" in comentario
-        assert comentario.endswith(" | Capa: Apple/iTunes")
+        assert comentario.startswith("Fonte: Qobuz\n")
+        assert "\nCover: 10 KiB (Req: org, Org: YES)" in comentario
+        assert comentario.endswith("\nCapa: Apple/iTunes")
 
     def test_sem_o_parametro_o_comportamento_antigo_e_mantido(
         self, monkeypatch, tmp_path
@@ -494,4 +494,4 @@ class TestTagMp3PreservaOrigemDaLetra:
             settings=QobuzDLSettings(),
         )
         novos = [f for f in audio_id3.values() if isinstance(f, id3_real.COMM)]
-        assert novos[-1].text[0].endswith(" | Letra: BiniLyrics (sincronizada, EN)")
+        assert novos[-1].text[0].endswith("\nLetra: BiniLyrics (sincronizada, EN)")

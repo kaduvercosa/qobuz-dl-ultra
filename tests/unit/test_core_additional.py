@@ -192,15 +192,26 @@ async def test_initialize_client_fecha_cliente_anterior(monkeypatch):
     assert closed == [True]
 
 
-async def test_search_favoritos_playlists_consume_gateway_do_cliente():
+@pytest.mark.parametrize(
+    ("fav_subtype", "tipo_esperado"),
+    [
+        ("playlists", "subscriber"),
+        ("user_playlists", "owner"),
+    ],
+)
+async def test_search_favoritos_playlists_consume_gateway_do_cliente(
+    fav_subtype, tipo_esperado
+):
     """The controller consumes playlists already resolved by the API client."""
+
+    chamadas = []
 
     async def unused_method(*args, **kwargs):
         return None
 
-    async def get_user_playlists(limit):
+    async def get_user_playlists(limit=100, playlist_type="owner", offset=0):
         """Represent the client's direct-or-ID-fallback normalized response."""
-        assert limit == 10
+        chamadas.append({"limit": limit, "playlist_type": playlist_type})
         return {
             "playlists": {
                 "items": [{"id": "p1", "name": "P1", "owner": {}}],
@@ -231,8 +242,9 @@ async def test_search_favoritos_playlists_consume_gateway_do_cliente():
         app,
         "",
         "favorites",
-        fav_subtype="playlists",
+        fav_subtype=fav_subtype,
     )
 
+    assert chamadas == [{"limit": 10, "playlist_type": tipo_esperado}]
     assert len(result) == 1
     assert result[0]["url"].endswith("/playlist/p1")

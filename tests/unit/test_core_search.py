@@ -198,28 +198,65 @@ async def test_favoritos_com_subtype_generico_usa_get_favorites():
     assert result[0]["url"] == "https://play.qobuz.com/artist/1"
 
 
-async def test_favoritos_playlists_usa_api_publica_do_cliente():
-    """Keep transport and signature details out of the interactive controller."""
+async def test_favoritos_playlists_usa_tipo_subscriber():
+    async def get_all_user_playlists(playlist_type, *, page_size):
+        assert playlist_type == "subscriber"
+        assert page_size == 10
+        return ([{"id": "fav-77", "name": "Favoritada", "owner": {}}], 1)
 
-    async def get_user_playlists(limit):
-        """Return the public client response expected by the controller."""
-        assert limit == 10
-        return {
-            "playlists": {
-                "items": [
-                    {"id": "77", "name": "P", "owner": {}},
-                ],
-            }
-        }
+    async def get_all_favorites(**kwargs):
+        raise AssertionError(
+            "playlists não usam o endpoint de favoritos de álbuns/faixas"
+        )
 
-    app = _build_app(_client(get_user_playlists=get_user_playlists))
+    app = _build_app(
+        _client(
+            get_all_user_playlists=get_all_user_playlists,
+            get_all_favorites=get_all_favorites,
+        )
+    )
 
     result = await core.QobuzDL.search_by_type(
-        app,
-        "",
-        "favorites",
-        fav_subtype="playlists",
+        app, "", "favorites", fav_subtype="playlists"
     )
 
     assert len(result) == 1
-    assert result[0]["url"] == "https://play.qobuz.com/playlist/77"
+    assert result[0]["url"] == "https://play.qobuz.com/playlist/fav-77"
+
+
+async def test_minhas_playlists_usa_tipo_owner():
+    async def get_all_user_playlists(playlist_type, *, page_size):
+        assert playlist_type == "owner"
+        assert page_size == 10
+        return ([{"id": "own-88", "name": "Criada", "owner": {}}], 1)
+
+    app = _build_app(_client(get_all_user_playlists=get_all_user_playlists))
+
+    result = await core.QobuzDL.search_by_type(
+        app, "", "favorites", fav_subtype="user_playlists"
+    )
+
+    assert len(result) == 1
+    assert result[0]["url"] == "https://play.qobuz.com/playlist/own-88"
+
+
+async def test_favoritos_albums_normaliza_tipo_para_classificacao():
+    seen_types = []
+
+    def metadata(self, item, item_type, mode_dict, fav_subtype=None):
+        seen_types.append(item_type)
+        return {"id": item["id"], "title": item["title"], "type": "Album"}
+
+    async def get_all_favorites(fav_type, *, page_size):
+        assert fav_type == "albums"
+        return ([{"id": "a1", "title": "Album salvo"}], 1)
+
+    app = _build_app(_client(get_all_favorites=get_all_favorites))
+    app._extract_rich_metadata = metadata.__get__(app)
+
+    result = await core.QobuzDL.search_by_type(
+        app, "", "favorites", fav_subtype="albums", sub_filter=["album"]
+    )
+
+    assert len(result) == 1
+    assert seen_types == ["album"]

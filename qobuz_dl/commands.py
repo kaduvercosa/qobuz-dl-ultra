@@ -1125,6 +1125,28 @@ def add_common_arg(custom_parser, default_folder, default_quality):
         metavar="N",
         help="threads usadas internamente no fallback de download segmentado",
     )
+    parallel_group.add_argument(
+        "--no-pipeline",
+        dest="no_pipeline",
+        action="store_true",
+        default=False,
+        help=(
+            "desliga o pipeline de download (por padrão, com --max-workers > 1, a "
+            "vaga de rede é liberada assim que o arquivo baixa e as tags, letras e "
+            "verificação rodam em paralelo com os próximos downloads)"
+        ),
+    )
+    parallel_group.add_argument(
+        "--adaptive-workers",
+        dest="adaptive_workers",
+        action="store_true",
+        default=False,
+        help=(
+            "ajusta o número de downloads simultâneos: corta pela metade quando "
+            "há falha de rede ou bloqueio e sobe 1 a cada 4 downloads bons (nunca "
+            "passa de --max-workers)"
+        ),
+    )
 
 
 # ----------------------------------------------------------------------------

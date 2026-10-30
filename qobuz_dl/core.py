@@ -13,6 +13,7 @@ import os
 import re
 import shutil
 import sys
+import time
 from typing import Any, Optional
 
 import httpx
@@ -46,6 +47,7 @@ from qobuz_dl.color import WARNING as YELLOW
 from qobuz_dl.concurrency import run_bounded
 from qobuz_dl.db import create_db, handle_download_id
 from qobuz_dl.exceptions import NonStreamable
+from qobuz_dl.pipeline import build_slots, resolve_pending, run_in_pipeline
 from qobuz_dl.playlist_links import link_existing_track, playlist_root
 from qobuz_dl.settings import QobuzDLSettings
 from qobuz_dl.utils import classify_release_type as _classify_release_type
@@ -1566,6 +1568,7 @@ class QobuzDL:
         position_pool=None,
         suppress_header=False,
         title=None,
+        suppress_track_summary: bool = False,
     ):
         """Baixa UM item (álbum ou faixa) já sabendo o `item_id`. É o
         "menor" ponto de entrada de download -- handle_url(),
@@ -1598,7 +1601,7 @@ class QobuzDL:
                 "local; use --no-db para baixar de novo)"
             )
             if is_playlist:
-                self.settings.pl_skipped = getattr(self.settings, "pl_skipped", 0) + 1
+                self.settings.pl_existing = getattr(self.settings, "pl_existing", 0) + 1
             return True
         success = False
         try:
@@ -1631,6 +1634,7 @@ class QobuzDL:
                     is_parallel=is_parallel,
                     position_pool=position_pool,
                     suppress_header=suppress_header,
+                    suppress_track_summary=suppress_track_summary,
                 )
             )
         except httpx.HTTPStatusError as e:
@@ -1808,6 +1812,7 @@ class QobuzDL:
             is_playlist = url_type == "playlist"
             if is_playlist:
                 self.settings.pl_success = 0
+                self.settings.pl_existing = 0
                 self.settings.pl_skipped = 0
                 self.settings.pl_failed = 0
             resumable_ids = set()
@@ -1835,7 +1840,9 @@ class QobuzDL:
             position_pool = (
                 downloader._PositionPool(batch_workers) if can_parallelize else None
             )
-            semaphore = asyncio.Semaphore(batch_workers)
+            semaphore, pipeline_ctx = build_slots(
+                batch_workers, self.settings, parallel=can_parallelize
+            )
             pending_items = []
             outcomes: list[Any] = []
 
@@ -1845,6 +1852,7 @@ class QobuzDL:
                 else "Sequencial"
             )
 
+            _playlist_started = time.monotonic()  # relogio do "Tempo total"
             if is_playlist:
                 from qobuz_dl.downloader import print_download_header
                 from qobuz_dl.utils import format_duration
@@ -1867,6 +1875,10 @@ class QobuzDL:
                         ("Faixas", p_count),
                         ("Duração", p_dur),
                         ("Modo", mode_label),
+                        (
+                            "Destino",
+                            downloader.destination_label(new_path, self.directory),
+                        ),
                     ],
                 )
 
@@ -1942,7 +1954,7 @@ class QobuzDL:
                             continue
 
                     if is_playlist and str(item.get("id", "")) in resumable_ids:
-                        self.settings.pl_success += 1
+                        self.settings.pl_existing += 1
                         outcomes.append(True)
                         continue
 
@@ -1974,16 +1986,19 @@ class QobuzDL:
                                 await asyncio.sleep(
                                     stagger_index * HEADER_STAGGER_DELAY
                                 )
-                            return await self.download_from_id(
-                                item["id"],
-                                False,
-                                new_path,
-                                is_playlist=is_playlist,
-                                playlist_index=idx,
-                                is_parallel=True,
-                                position_pool=position_pool,
-                                suppress_header=is_playlist,
-                                title=item.get("title"),
+                            return await run_in_pipeline(
+                                pipeline_ctx,
+                                lambda: self.download_from_id(
+                                    item["id"],
+                                    False,
+                                    new_path,
+                                    is_playlist=is_playlist,
+                                    playlist_index=idx,
+                                    is_parallel=True,
+                                    position_pool=position_pool,
+                                    suppress_header=is_playlist,
+                                    title=item.get("title"),
+                                ),
                             )
 
                     bounded_results = await run_bounded(
@@ -1991,6 +2006,7 @@ class QobuzDL:
                         _bounded_track_download,
                         limit=max(1, batch_workers),
                     )
+                    bounded_results = await resolve_pending(bounded_results)
                     outcomes.extend(bounded_results)
                     for result in bounded_results:
                         if isinstance(result, Exception):
@@ -2007,6 +2023,7 @@ class QobuzDL:
 
             if is_playlist:
                 succ = getattr(self.settings, "pl_success", 0)
+                existing = getattr(self.settings, "pl_existing", 0)
                 skip = getattr(self.settings, "pl_skipped", 0)
                 fail = getattr(self.settings, "pl_failed", 0)
 
@@ -2025,8 +2042,10 @@ class QobuzDL:
                     content_name,
                     succ,
                     len(items),
+                    existing=existing,
                     skipped=skip,
                     failed=fail,
+                    elapsed=time.monotonic() - _playlist_started,
                 )
 
             return bool(outcomes) and all(outcome is True for outcome in outcomes)
@@ -2103,6 +2122,7 @@ class QobuzDL:
             f"Paralelo ({batch_workers} workers)" if use_parallel else "Sequencial"
         )
 
+        _batch_started = time.monotonic()  # relogio do "Tempo total"
         if total_track_urls > 1:
             from qobuz_dl.downloader import print_download_header
 
@@ -2111,15 +2131,22 @@ class QobuzDL:
                 [
                     ("Total de Faixas", str(total_track_urls)),
                     ("Modo", mode_label),
+                    (
+                        "Destino",
+                        downloader.destination_label(getattr(self, "directory", None)),
+                    ),
                 ],
             )
             self.settings.pl_success = 0
+            self.settings.pl_existing = 0
             self.settings.pl_skipped = 0
             self.settings.pl_failed = 0
 
         if track_urls:
             position_pool = downloader._PositionPool(batch_workers)
-            semaphore = asyncio.Semaphore(batch_workers)
+            semaphore, pipeline_ctx = build_slots(
+                batch_workers, self.settings, parallel=True
+            )
             resumable_ids = set()
             music_directory = getattr(self, "directory", None)
             if (
@@ -2135,7 +2162,7 @@ class QobuzDL:
             ):
                 if str(item_id) in resumable_ids:
                     self.mark_url_done_in_file(txt_file, original_url)
-                    self.settings.pl_success += 1
+                    self.settings.pl_existing += 1
                 else:
                     pending_track_urls.append((stagger_index, original_url, item_id))
 
@@ -2145,23 +2172,29 @@ class QobuzDL:
                 async with semaphore:
                     if stagger_index < batch_workers:
                         await asyncio.sleep(stagger_index * HEADER_STAGGER_DELAY)
-                    success = await self.download_from_id(
-                        item_id,
-                        False,
-                        is_parallel=True,
-                        position_pool=position_pool,
-                        suppress_header=(total_track_urls > 1),
-                        is_playlist=(total_track_urls > 1),
-                    )
-                if success:
-                    self.mark_url_done_in_file(txt_file, original_url)
-                return success
+
+                    async def _baixar():
+                        success = await self.download_from_id(
+                            item_id,
+                            False,
+                            is_parallel=True,
+                            position_pool=position_pool,
+                            suppress_header=(total_track_urls > 1),
+                            is_playlist=(total_track_urls > 1),
+                            suppress_track_summary=True,
+                        )
+                        if success:
+                            self.mark_url_done_in_file(txt_file, original_url)
+                        return success
+
+                    return await run_in_pipeline(pipeline_ctx, _baixar)
 
             download_results = await run_bounded(
                 pending_track_urls,
                 _bounded_track_url,
                 limit=max(1, batch_workers),
             )
+            download_results = await resolve_pending(download_results)
             for result in download_results:
                 if isinstance(result, Exception):
                     raise result
@@ -2176,8 +2209,10 @@ class QobuzDL:
                     "",
                     succ,
                     total_track_urls,
+                    existing=getattr(self.settings, "pl_existing", 0),
                     skipped=skip,
                     failed=fail,
+                    elapsed=time.monotonic() - _batch_started,
                 )
 
         for _, url in other_urls:
@@ -2270,10 +2305,26 @@ class QobuzDL:
         fmt_duration = format_duration(duration) if duration else "--:--"
 
         if mode_dict.get("requires_extra") or item_type in ["album", "track"]:
+            # A coluna ARTISTA deve refletir o contexto do item:
+            # faixas usam o performer da gravação; álbuns usam o artista
+            # creditado no próprio álbum. Não misturar os dois campos,
+            # especialmente em coletâneas (Various Artists).
+            artist_data = i.get("artist")
+            performer_data = i.get("performer")
+            artist_name = (
+                artist_data.get("name")
+                if isinstance(artist_data, dict)
+                else artist_data
+            )
+            performer_name = (
+                performer_data.get("name")
+                if isinstance(performer_data, dict)
+                else performer_data
+            )
             artist = (
-                i.get("artist", {}).get("name")
-                or i.get("performer", {}).get("name")
-                or "Unknown"
+                (performer_name or artist_name or "Unknown")
+                if item_type == "track"
+                else (artist_name or performer_name or "Unknown")
             )
             title = i.get("title") or i.get("name") or "Unknown"
             if i.get("version"):
@@ -2365,12 +2416,30 @@ class QobuzDL:
                 else i.get("tracks_count", 0)
             )
 
-            if item_type == "playlist" or fav_subtype == "playlists":
-                owner = i.get("owner", {}).get("name", "Unknown")
+            if item_type == "playlist" or fav_subtype in (
+                "playlists",
+                "user_playlists",
+            ):
+                owner_data = i.get("owner")
+                owner = (
+                    owner_data.get("name") or owner_data.get("username")
+                    if isinstance(owner_data, dict)
+                    else owner_data
+                ) or "Unknown"
+                # A API pode entregar o título como `title` (playlist/get)
+                # ou `name` (algumas respostas de listagem).
+                playlist_name = (
+                    i.get("name") or i.get("title") or i.get("description") or ""
+                )
+                playlist_count = (
+                    i.get("tracks_count") or i.get("tracks", {}).get("total", 0)
+                    if isinstance(i.get("tracks"), dict)
+                    else i.get("tracks_count", 0)
+                )
                 meta_data = {
-                    "name": name,
+                    "name": playlist_name,
                     "owner": owner,
-                    "count": count,
+                    "count": playlist_count,
                     "duration": fmt_duration,
                     "id": i.get("id"),
                 }
@@ -2437,27 +2506,43 @@ class QobuzDL:
             fetch_limit = min(limit * 3, 50) if sub_filter else limit
 
             if item_type == "favorites":
-                if fav_subtype == "playlists":
-                    results = await self.client.get_user_playlists(limit=fetch_limit)
-                    iterable = (
-                        results.get("playlists", {}).get("items", [])
-                        if isinstance(results, dict)
-                        else []
+                if fav_subtype in ("playlists", "user_playlists"):
+                    # Qobuz separa playlists próprias (owner) das seguidas/
+                    # favoritadas (subscriber) no mesmo endpoint.
+                    playlist_type = (
+                        "subscriber" if fav_subtype == "playlists" else "owner"
                     )
+                    if hasattr(self.client, "get_all_user_playlists"):
+                        iterable, _ = await self.client.get_all_user_playlists(
+                            playlist_type=playlist_type,
+                            page_size=min(max(fetch_limit, 1), 50),
+                        )
+                    else:
+                        results = await self.client.get_user_playlists(
+                            limit=fetch_limit, playlist_type=playlist_type
+                        )
+                        iterable = (
+                            results.get("playlists", {}).get("items", [])
+                            if isinstance(results, dict)
+                            else []
+                        )
                     mode_dict["requires_extra"] = False
                 else:
-                    results = await mode_dict["func"](
-                        fav_type=fav_subtype, limit=fetch_limit
-                    )
-                    iterable = (
-                        results.get(fav_subtype, {}).get("items", [])
-                        if isinstance(results, dict)
-                        else []
-                    )
-                    mode_dict["requires_extra"] = fav_subtype not in [
-                        "artists",
-                        "playlists",
-                    ]
+                    if hasattr(self.client, "get_all_favorites"):
+                        iterable, _ = await self.client.get_all_favorites(
+                            fav_type=fav_subtype,
+                            page_size=min(max(fetch_limit, 1), 50),
+                        )
+                    else:
+                        results = await mode_dict["func"](
+                            fav_type=fav_subtype, limit=fetch_limit
+                        )
+                        iterable = (
+                            results.get(fav_subtype, {}).get("items", [])
+                            if isinstance(results, dict)
+                            else []
+                        )
+                    mode_dict["requires_extra"] = fav_subtype in ("albums", "tracks")
             else:
                 results = await mode_dict["func"](query, limit=fetch_limit)
                 iterable = (
@@ -2491,10 +2576,22 @@ class QobuzDL:
                     extract_kwargs["ref_artist"] = ref_artist
                 if item_type == "album" and sub_filter == ["single"]:
                     extract_kwargs["show_role"] = True
+                metadata_item_type: str = item_type
                 try:
+                    metadata_item_type = (
+                        {
+                            "albums": "album",
+                            "tracks": "track",
+                            "artists": "artist",
+                            "playlists": "playlist",
+                            "user_playlists": "playlist",
+                        }.get(fav_subtype, item_type)
+                        if item_type == "favorites"
+                        else item_type
+                    )
                     meta_data = self._extract_rich_metadata(
                         i,
-                        item_type,
+                        metadata_item_type,
                         mode_dict,
                         fav_subtype,
                         **extract_kwargs,
@@ -2510,7 +2607,7 @@ class QobuzDL:
                     extract_kwargs.pop("show_role")
                     meta_data = self._extract_rich_metadata(
                         i,
-                        item_type,
+                        metadata_item_type,
                         mode_dict,
                         fav_subtype,
                         **extract_kwargs,
@@ -2522,8 +2619,11 @@ class QobuzDL:
                         continue
 
                 url_category = (
-                    fav_subtype[:-1]
-                    if (item_type == "favorites" and fav_subtype)
+                    "playlist"
+                    if item_type == "favorites"
+                    and fav_subtype in ("playlists", "user_playlists")
+                    else fav_subtype[:-1]
+                    if item_type == "favorites" and fav_subtype
                     else item_type
                 )
                 url = f"{WEB_URL}{url_category}/{i.get('id', '')}"
@@ -2569,6 +2669,7 @@ class QobuzDL:
                 "🎵 Tracks",
                 "💿 Albums",
                 "📀 Singles",
+                "💽 EPs",
                 "🎤 Artists",
                 "📋 Playlists",
                 "⭐ Favorites",
@@ -2596,10 +2697,12 @@ class QobuzDL:
                 raw = scelta_raw_visual.split(" ", 1)[1]
                 if raw == "Favorites":
                     return "favorites", None
+                if raw == "EPs":
+                    return "album", ["ep"]
                 if raw == "Singles":
                     return "album", ["single"]
                 if raw == "Albums":
-                    return "album", ["album", "ep", "compilation", "live"]
+                    return "album", ["album", "compilation", "live"]
                 return raw[:-1].lower(), None
 
             selected = await _select_main_type()
@@ -2703,9 +2806,10 @@ class QobuzDL:
                         "🎵 Tracks",
                         "💿 Albums",
                         "📀 Singles",
+                        "💽 EPs",
                         "🎤 Artists",
-                        "📋 Playlists",
-                        "↩ Voltar",
+                        "📋 Playlists favoritadas",
+                        "🧑‍💻 Minhas playlists (criadas)",
                         "🏠 Menu inicial",
                     ]
                     fav_res = await _tui_select(
@@ -2735,13 +2839,25 @@ class QobuzDL:
 
                     favorite_subtype: str
 
-                    if selected_fav_raw == "Singles":
+                    if selected_fav_raw == "Minhas playlists (criadas)":
+                        favorite_subtype = "user_playlists"
+                        sub_filter = None
+                        display_name = "Minhas playlists (criadas)"
+                    elif selected_fav_raw == "Playlists favoritadas":
+                        favorite_subtype = "playlists"
+                        sub_filter = None
+                        display_name = "Playlists favoritadas"
+                    elif selected_fav_raw == "EPs":
+                        favorite_subtype = "albums"
+                        sub_filter = ["ep"]
+                        display_name = "EPs"
+                    elif selected_fav_raw == "Singles":
                         favorite_subtype = "albums"
                         sub_filter = ["single"]
                         display_name = "Singles"
                     elif selected_fav_raw == "Albums":
                         favorite_subtype = "albums"
-                        sub_filter = ["album", "ep", "compilation", "live"]
+                        sub_filter = ["album", "compilation", "live"]
                         display_name = "Albums"
                     else:
                         favorite_subtype = selected_fav_raw.lower()
@@ -2761,7 +2877,11 @@ class QobuzDL:
                         sub_filter=sub_filter,
                     )
                     query_title = f"Meus Favoritos ({display_name})"
-                    display_cat = favorite_subtype[:-1]
+                    display_cat = (
+                        "playlist"
+                        if favorite_subtype in ("playlists", "user_playlists")
+                        else favorite_subtype[:-1]
+                    )
                 else:
                     sys.stdout.write(ANSI_CLEAR_SCREEN)
                     sys.stdout.flush()
@@ -2813,33 +2933,39 @@ class QobuzDL:
                     display_cat = selected_type
 
                 if not options:
-                    ui.emit(
-                        f"\n{RED}Nenhum resultado válido encontrado ou erro na busca.{RESET}"
-                    )
-                    if selected_type == "favorites":
-                        await session.prompt_async(
-                            FormattedText(
-                                [
-                                    (
-                                        "class:prompt_hint",
-                                        "Pressione [Enter] para voltar...",
-                                    )
-                                ]
-                            )
+                    if selected_type == "favorites" and selected_fav in (
+                        "playlists",
+                        "user_playlists",
+                    ):
+                        empty_label = (
+                            "playlists favoritadas"
+                            if selected_fav == "playlists"
+                            else "playlists criadas por você"
                         )
+                        empty_message = f"Não existem {empty_label} para exibir."
+                    else:
+                        empty_message = (
+                            "Nenhum resultado válido encontrado ou erro na busca."
+                        )
+                    ui.emit(f"\n{RED}{empty_message}{RESET}")
+                    retry_label = (
+                        "🔄 Atualizar lista"
+                        if selected_type == "favorites"
+                        else "🔎 Nova pesquisa"
+                    )
+                    empty_action = await _tui_select(
+                        empty_message,
+                        [retry_label, "🏠 Menu inicial"],
+                        is_multi=False,
+                        item_category="filter",
+                    )
+                    if not empty_action or empty_action[0] in (
+                        _NAV_HOME,
+                        "🏠 Menu inicial",
+                    ):
                         selected_type = None
                         sub_filter = None
-                        continue
-                    await session.prompt_async(
-                        FormattedText(
-                            [
-                                (
-                                    "class:prompt_hint",
-                                    "Pressione [Enter] para tentar novamente...",
-                                )
-                            ]
-                        )
-                    )
+                        selected_fav = None
                     continue
 
                 title = _search_results_title(query_title, display_cat, sub_filter)
@@ -2910,22 +3036,11 @@ class QobuzDL:
                                     logger.info(
                                         f"{YELLOW}Buscando faixas populares de {art_name}...{RESET}"
                                     )
-                                    top_tracks = []
-                                    async for chunk in self.client.get_artist_meta(
-                                        art_id
-                                    ):
-                                        tracks_data = chunk.get("tracks", {}).get(
-                                            "items", []
-                                        )
-                                        top_tracks.extend(tracks_data)
-
-                                    if not top_tracks:
-                                        res_tracks = await self.client.search_tracks(
-                                            art_name, limit=20
-                                        )
-                                        top_tracks = res_tracks.get("tracks", {}).get(
-                                            "items", []
-                                        )
+                                    # get_artist_meta() pagina álbuns; para faixas,
+                                    # usar explicitamente artist/get com extra=tracks.
+                                    top_tracks = await self.client.get_artist_tracks(
+                                        art_id, limit=20
+                                    )
 
                                     if not top_tracks:
                                         logger.info(
@@ -3374,8 +3489,11 @@ class QobuzDL:
         position_pool = (
             downloader._PositionPool(batch_workers) if can_parallelize else None
         )
-        semaphore = asyncio.Semaphore(batch_workers)
+        semaphore, pipeline_ctx = build_slots(
+            batch_workers, self.settings, parallel=can_parallelize
+        )
         self.settings.pl_success = 0
+        self.settings.pl_existing = 0
         self.settings.pl_skipped = 0
         self.settings.pl_failed = 0
         resumable_ids = set()
@@ -3389,19 +3507,24 @@ class QobuzDL:
         mode_label = (
             f"Paralelo ({batch_workers} workers)" if can_parallelize else "Sequencial"
         )
+        _import_started = time.monotonic()  # relogio do "Tempo total"
         print_download_header(
             "PLAYLIST IMPORTADA",
             [
                 ("Nome", playlist_name),
                 ("Faixas", str(len(track_ids))),
                 ("Modo", mode_label),
+                (
+                    "Destino",
+                    downloader.destination_label(pl_directory, self.directory),
+                ),
             ],
         )
 
         try:
             for idx, track_id in enumerate(track_ids, start=1):
                 if str(track_id) in resumable_ids:
-                    self.settings.pl_success += 1
+                    self.settings.pl_existing += 1
                     outcomes.append(True)
                     continue
                 if can_parallelize:
@@ -3428,15 +3551,18 @@ class QobuzDL:
                     async with semaphore:
                         if stagger_index < batch_workers:
                             await asyncio.sleep(stagger_index * HEADER_STAGGER_DELAY)
-                        return await self.download_from_id(
-                            track_id,
-                            album=False,
-                            alt_path=pl_directory,
-                            is_playlist=True,
-                            playlist_index=idx,
-                            is_parallel=True,
-                            position_pool=position_pool,
-                            suppress_header=True,
+                        return await run_in_pipeline(
+                            pipeline_ctx,
+                            lambda: self.download_from_id(
+                                track_id,
+                                album=False,
+                                alt_path=pl_directory,
+                                is_playlist=True,
+                                playlist_index=idx,
+                                is_parallel=True,
+                                position_pool=position_pool,
+                                suppress_header=True,
+                            ),
                         )
 
                 bounded_results = await run_bounded(
@@ -3444,6 +3570,7 @@ class QobuzDL:
                     _bounded_track_download,
                     limit=max(1, batch_workers),
                 )
+                bounded_results = await resolve_pending(bounded_results)
                 outcomes.extend(bounded_results)
                 for result in bounded_results:
                     if isinstance(result, Exception):
@@ -3453,6 +3580,7 @@ class QobuzDL:
             self.settings.multiple_disc_one_dir = original_multi_disc_setting
 
         succ = getattr(self.settings, "pl_success", 0)
+        exis = getattr(self.settings, "pl_existing", 0)
         skip = getattr(self.settings, "pl_skipped", 0)
         fail = getattr(self.settings, "pl_failed", 0)
 
@@ -3468,7 +3596,9 @@ class QobuzDL:
             playlist_name,
             succ,
             len(track_ids),
+            existing=exis,
             skipped=skip,
             failed=fail,
+            elapsed=time.monotonic() - _import_started,
         )
         return bool(outcomes) and all(outcome is True for outcome in outcomes)

@@ -696,9 +696,9 @@ def _extract_mp3_cover_comment_segments(text) -> list:
     if not text:
         return []
     if not isinstance(text, str):
-        text = " | ".join(str(part) for part in text)
+        text = "\n".join(str(part) for part in text)
     segments = []
-    for segment in text.split(" | "):
+    for segment in lyrics_comment.split_segments(text):
         segment = segment.strip()
         if segment.startswith(_MP3_COVER_COMMENT_PREFIXES) and segment not in segments:
             segments.append(segment)
@@ -977,6 +977,56 @@ def _embed_id3_img(root_dir, audio: id3.ID3, cover_override=None):
 
 
 # # Aplica tags Vorbis, comentário técnico, capa e salva o FLAC final.
+def _khz_label(rate) -> str:
+    """Taxa de amostragem em kHz sem casa decimal inutil: 96.0 -> '96'."""
+    try:
+        if float(rate).is_integer():
+            return str(int(float(rate)))
+    except (TypeError, ValueError):
+        # A taxa pode vir ausente ou em formato não numérico; nesse caso,
+        # preservamos sua representação original em vez de interromper as tags.
+        pass
+    return str(rate)
+
+
+def _flac_real_quality(audio) -> tuple[Optional[int], Optional[float]]:
+    """Retorna bits e taxa reais do FLAC, ou (None, None) sem dados confiáveis."""
+    info = getattr(audio, "info", None)
+    bits = getattr(info, "bits_per_sample", None)
+    rate = getattr(info, "sample_rate", None)
+    if not isinstance(bits, int) or not isinstance(rate, (int, float)):
+        return None, None
+    if not bits or not rate:
+        return None, None
+    return bits, rate / 1000
+
+
+def _mp3_real_bitrate_kbps(filename) -> Optional[int]:
+    """Bitrate real do MP3 no disco, em kbps."""
+    try:
+        from mutagen.mp3 import MP3
+
+        info = MP3(filename).info
+        bitrate = getattr(info, "bitrate", None)
+    except Exception:
+        return None
+
+    if not isinstance(bitrate, (int, float)) or not bitrate:
+        return None
+    return round(bitrate / 1000)
+
+
+def _same_quality(real_bit, real_rate, max_bit, max_rate) -> bool:
+    """True quando o arquivo baixado já está na qualidade máxima do catálogo."""
+    try:
+        return (
+            int(real_bit) == int(max_bit)
+            and abs(float(real_rate) - float(max_rate)) < 0.01
+        )
+    except (TypeError, ValueError):
+        return True
+
+
 def tag_flac(
     filename,
     root_dir,
@@ -1086,26 +1136,29 @@ def tag_flac(
 
     _trk_id = qobuz_item.get("id", "?")
 
-    _rate_text = (
-        str(int(_rate))
-        if isinstance(_rate, float) and _rate.is_integer()
-        else str(_rate)
-    )
+    _real_bit, _real_rate = _flac_real_quality(audio)
+    if _real_bit is not None and _real_rate is not None:
+        _quality = f"FLAC {_real_bit}-bit / {_khz_label(_real_rate)} kHz"
+        _same = _same_quality(_real_bit, _real_rate, _bit, _rate)
+    else:
+        _quality = f"FLAC {_bit}-bit / {_khz_label(_rate)} kHz"
+        _same = True
 
-    # # Comentário legível com qualidade, canais, duração, tipo, data e ID Qobuz.
     comment_lines = [
         "Fonte: Qobuz",
-        f"Qualidade: FLAC {_bit}-bit / {_rate_text} kHz / {_channels}",
-        f"Hi-res: {'Sim' if qobuz_item.get('hires_streamable') else 'Não'}",
-        f"Duração: {_duration}",
-        f"Tipo: {_rtype.capitalize()}",
-        f"Lançamento: {_rel_date}",
-        f"Faixa Qobuz: https://open.qobuz.com/track/{_trk_id}",
+        f"Qualidade: {_quality} / {_channels}",
     ]
-
-    _album_id = qobuz_album.get("id")
-    if _album_id:
-        comment_lines.append(f"Álbum Qobuz: https://open.qobuz.com/album/{_album_id}")
+    if not _same:
+        comment_lines.append(f"Máx. no Qobuz: {_bit}-bit / {_khz_label(_rate)} kHz")
+    comment_lines.extend(
+        [
+            f"Hi-res: {'Sim' if qobuz_item.get('hires_streamable') else 'Não'}",
+            f"Duração: {_duration}",
+            f"Tipo: {_rtype.capitalize()}",
+            f"Lançamento: {_rel_date}",
+            f"Trk ID: {_trk_id}",
+        ]
+    )
 
     if em_image:
         cover_path = _get_cover_path(root_dir, override=embed_cover_path)
@@ -1248,36 +1301,49 @@ def tag_mp3(
 
     _trk_id = qobuz_item.get("id", "?")
 
-    # # Comentário legível com qualidade, canais, duração, tipo, data e ID Qobuz.
-    base_comment = (
-        f"Qobuz | {_bit}b/{_rate}kHz | {_channels} | HiRes: {_hires}"
-        f" | Duração: {_duration} | Tipo: {_rtype}"
-        f" | Rel: {_rel_date} | Trk ID: {_trk_id}"
-    )
+    # Comentário técnico: uma linha por item, igual ao FLAC.
+    _mp3_kbps = _mp3_real_bitrate_kbps(filename)
+    if _mp3_kbps:
+        _quality_lines = [
+            f"Qualidade: MP3 {_mp3_kbps} kbps / {_channels}",
+            f"Máx. no Qobuz: {_bit}-bit / {_khz_label(_rate)} kHz",
+        ]
+    else:
+        _quality_lines = [
+            f"Qualidade: {_bit}b/{_rate}kHz / {_channels}",
+            f"HiRes: {_hires}",
+        ]
+    comment_lines = [
+        "Fonte: Qobuz",
+        *_quality_lines,
+        f"Duração: {_duration}",
+        f"Tipo: {str(_rtype).capitalize()}",
+        f"Lançamento: {_rel_date}",
+        f"Trk ID: {_trk_id}",
+    ]
 
     if em_image:
-        cover_path = _get_cover_path(
-            root_dir,
-            override=embed_cover_path,
-        )
+        cover_path = _get_cover_path(root_dir, override=embed_cover_path)
         if cover_path:
             img_size_bytes = os.path.getsize(cover_path)
             req_size = getattr(settings, "embedded_art_size", "unknown")
             is_org = "YES" if req_size == "org" else "NO"
-            base_comment += (
-                f" | Cover: {humanize.naturalsize(img_size_bytes, binary=True)}"
+            comment_lines.append(
+                f"Cover: {humanize.naturalsize(img_size_bytes, binary=True)}"
                 f" (Req: {req_size}, Org: {is_org})"
             )
         if cover_source:
-            base_comment += f" | Capa: {cover_source}"
-    elif preserve_cover_info:
-        for segment in _extract_mp3_cover_comment_segments(_id3_comment_text(audio)):
-            base_comment += f" | {segment}"
-    # Origem da letra: sempre preservada (ver tag_flac).
-    for segment in lyrics_comment.extract_mp3_segments(_id3_comment_text(audio)):
-        base_comment += f" | {segment}"
+            comment_lines.append(_cover_comment_line(cover_source))
+    else:
+        existing_comment = _id3_comment_text(audio)
+        if preserve_cover_info:
+            comment_lines.extend(_extract_mp3_cover_comment_segments(existing_comment))
+        # A origem da letra é gravada pelo motor de letras e deve sobreviver
+        # a qualquer retag, independentemente da preservação das informações
+        # de capa. merge_mp3 também evita duplicar a linha existente.
+        comment_lines.extend(lyrics_comment.extract_mp3_segments(existing_comment))
 
-    tags["COMMENT"] = base_comment
+    tags["COMMENT"] = "\n".join(comment_lines)
 
     # IDs do MusicBrainz não passam pelo ID3_LEGEND (descrições do Picard).
     _escrever_ids_musicbrainz_id3(
@@ -1415,15 +1481,16 @@ def replace_cover_only(
             return False
 
         is_org = "YES" if req_size == "org" else "NO"
+        comentario_atual = _id3_comment_text(audio)
         segments = [
             part
-            for part in _id3_comment_text(audio).split(" | ")
+            for part in lyrics_comment.split_segments(comentario_atual)
             if part.strip() and not part.strip().startswith(_MP3_COVER_COMMENT_PREFIXES)
         ]
         segments.append(f"Cover: {size_text} (Req: {req_size}, Org: {is_org})")
         if cover_source:
             segments.append(_cover_comment_line(cover_source))
-        new_comment = " | ".join(segments)
+        new_comment = lyrics_comment.separator_of(comentario_atual).join(segments)
 
         comm_frame = _id3_comment_frame(audio)
         if comm_frame is not None:

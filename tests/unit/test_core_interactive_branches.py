@@ -70,7 +70,7 @@ async def test_interactive_favoritos_playlists(monkeypatch):
     selections = iter(
         [
             ("⭐ Favorites", 0),
-            ("📋 Playlists", 4),
+            ("📋 Playlists favoritadas", 4),
             [(options[0], 0)],
             ("❌ Não", 1),
             ("🎚️ MP3", 0),

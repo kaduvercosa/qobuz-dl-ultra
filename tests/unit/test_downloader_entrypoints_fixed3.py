@@ -76,4 +76,5 @@ async def test_download_id_by_type_track_delega_para_download_track(
         "is_parallel": True,
         "position_pool": "pool",
         "suppress_header": True,
+        "suppress_track_summary": False,
     }

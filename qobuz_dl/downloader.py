@@ -59,6 +59,11 @@ from qobuz_dl.http_download import (
 from qobuz_dl.http_download import (
     PermanentDownloadError as HttpPermanentDownloadError,
 )
+from qobuz_dl.pipeline import (
+    build_slots,
+    current_handoff,
+    resolve_pending,
+)
 from qobuz_dl.playlist_links import (
     absorb_playlist_copies,
     scan_dest_folder,
@@ -167,12 +172,81 @@ def safe_print(*args, **kwargs):
     ui.emit(text, end=kwargs.get("end", "\n"))
 
 
+_QUALIDADE_PEDIDA = {
+    5: "MP3 320 kbps",
+    6: "FLAC (16bit/44.1kHz)",
+    7: "FLAC (até 24bit/96kHz)",
+    27: "FLAC (até 24bit/192kHz)",
+}
+
+# Rotulo mostrado no cabecalho para cada tipo de lancamento (a classificacao
+# interna e' em ingles e sem acento).
+_TIPO_LANCAMENTO_ROTULO = {
+    "Album": "Álbum",
+    "Live": "Ao vivo",
+    "Compilation": "Coletânea",
+}
+
+
+def quality_request_label(quality) -> str:
+    """Qualidade PEDIDA (1 a 27) em texto, para cabecalhos de playlist/lote."""
+    try:
+        return _QUALIDADE_PEDIDA.get(int(quality), "")
+    except (TypeError, ValueError):
+        return ""
+
+
+def release_type_label(tipo) -> str:
+    """Tipo do lancamento para o cabecalho ('Álbum', 'EP', 'Single'...)."""
+    tipo = str(tipo or "").strip()
+    if not tipo or tipo == "Desconhecido":
+        return ""
+    return _TIPO_LANCAMENTO_ROTULO.get(tipo, tipo)
+
+
+def clock_label(seconds) -> str:
+    """Duracao em ``MM:SS`` ou ``HH:MM:SS``; vazio quando nao ha dado."""
+    return ui.format_clock(seconds)
+
+
+def destination_label(path, base=None) -> str:
+    """Pasta de destino para o cabecalho: relativa a ``base`` quando couber."""
+    if not path:
+        return ""
+    path = str(path)
+    if base:
+        try:
+            rel = os.path.relpath(path, str(base))
+        except ValueError:  # outro drive no Windows
+            return path
+        if rel != "." and not rel.startswith(".."):
+            return rel
+    return path
+
+
+def _album_duration_seconds(album_meta) -> float:
+    """Duracao total do album: campo da API ou soma das faixas."""
+    try:
+        duration = album_meta.get("duration")
+        if duration:
+            return float(duration)
+        tracks = album_meta.get("tracks", {}).get("items", [])
+        return sum(float(track.get("duration") or 0) for track in tracks)
+    except (TypeError, ValueError, AttributeError):
+        return 0.0
+
+
 def print_download_header(kind: str, rows: list) -> None:
     """
     Cabecalho padronizado impresso uma unica vez no inicio de qualquer
     download (album, faixa unica, playlist ou lote de urls).
+
+    Linhas sem valor (None ou texto vazio) nao aparecem: assim os campos
+    novos que a API as vezes nao traz (gravadora, genero, ISRC...) somem em
+    vez de sair como uma linha em branco.
     """
-    ui.header(kind, rows)
+    shown = [(label, value) for label, value in rows if value not in (None, "")]
+    ui.header(kind, shown)
 
 
 def emit_progress_json(settings, event, **fields):
@@ -346,7 +420,6 @@ class Download:
         self.track_format = track_format or DEFAULT_TRACK
         self.no_credits = no_credits
         self.booklet_only = booklet_only
-
         self.http_session = make_client(
             follow_redirects=True,
             headers={
@@ -382,7 +455,12 @@ class Download:
         )
 
     async def download_id_by_type(
-        self, track=True, is_parallel=False, position_pool=None, suppress_header=False
+        self,
+        track: bool = True,
+        is_parallel: bool = False,
+        position_pool=None,
+        suppress_header: bool = False,
+        suppress_track_summary: bool = False,
     ):
         """Download an item by ID and type (album, track, artist, etc.)."""
         self.folder_format = self._original_folder_format
@@ -399,6 +477,7 @@ class Download:
                     is_parallel=is_parallel,
                     position_pool=position_pool,
                     suppress_header=suppress_header,
+                    suppress_track_summary=suppress_track_summary,
                 )
         finally:
             await self.close_session()
@@ -431,6 +510,7 @@ class Download:
         semaphore,
         report_track,
         cover_source=None,
+        pipeline=None,
     ):
         """Processa e baixa UMA faixa do álbum.
 
@@ -476,24 +556,60 @@ class Download:
             if "sample" not in parse and parse.get("sampling_rate"):
                 is_mp3 = True if int(self.quality) == 5 else False
                 letras_info: dict[str, object] = {}
-                res = await self._download_and_tag(
-                    dirn,
-                    idx,
-                    parse,
-                    i,
-                    album_meta,
-                    False,
-                    is_mp3,
-                    i.get("media_number") if is_multiple else None,
-                    is_parallel=is_parallel,
-                    position_pool=position_pool,
-                    letras_out=letras_info,
-                    cover_source=cover_source,
-                )
-                status = "ok" if res is True else "falha"
-                motivo = "" if res is True else "erro"
-                await report_track(i, t_num, status, motivo, letras=letras_info)
-                return res
+
+                async def _baixar_e_marcar():
+                    res = await self._download_and_tag(
+                        dirn,
+                        idx,
+                        parse,
+                        i,
+                        album_meta,
+                        False,
+                        is_mp3,
+                        i.get("media_number") if is_multiple else None,
+                        is_parallel=is_parallel,
+                        position_pool=position_pool,
+                        letras_out=letras_info,
+                        cover_source=cover_source,
+                    )
+                    outcome = getattr(self, "last_download_outcome", None)
+                    if outcome is None:
+                        outcome = "downloaded" if res is True else "failed"
+
+                    status = {
+                        "downloaded": "ok",
+                        "existing": "ok",
+                        "skipped": "pulada",
+                        "failed": "falha",
+                    }.get(outcome, "falha")
+
+                    motivo = (
+                        "Arquivo já existente"
+                        if outcome == "existing"
+                        else (
+                            "Faixa indisponível ou ignorada"
+                            if outcome == "skipped"
+                            else ""
+                        )
+                    )
+
+                    await report_track(i, t_num, status, motivo, letras=letras_info)
+
+                    if outcome == "existing":
+                        return "existing"
+                    if outcome == "skipped":
+                        return "skipped"
+                    if outcome == "failed":
+                        return False
+
+                    return True
+
+                if pipeline is None:
+                    return await _baixar_e_marcar()
+                # Pipeline: volta assim que o download termina e devolve a tarefa
+                # (pós-processamento em andamento); o download_release a aguarda
+                # depois, com resolve_pending.
+                return await pipeline.run(_baixar_e_marcar)
             else:
                 ui.skip(f"Pulada: {t_title} (Apenas amostra/demo)")
                 create_missing_placeholder(
@@ -678,14 +794,27 @@ class Download:
             is_parallel = True
             mode_label = f"Paralelo ({active_workers} workers)"
 
+        # Relogio do "Tempo total" do resumo: comeca quando o cabecalho sai.
+        _album_started = time.monotonic()
+
         if not suppress_header:
+            _faixas_label = str(track_count)
+            if is_multiple:
+                _faixas_label += f" · {media_count} discos"
             print_download_header(
                 "ÁLBUM",
                 [
                     ("Título", album_title),
                     ("Artista", artist_name),
+                    ("Tipo", release_type_label(report_tipo_lancamento)),
                     ("Ano", release_year or "--"),
-                    ("Faixas", str(track_count)),
+                    (
+                        "Gravadora",
+                        _safe_get(album_meta, "label", "name", default=""),
+                    ),
+                    ("Gênero", _safe_get(album_meta, "genre", "name", default="")),
+                    ("Faixas", _faixas_label),
+                    ("Duração", clock_label(_album_duration_seconds(album_meta))),
                     (
                         "Qualidade",
                         (
@@ -695,6 +824,7 @@ class Download:
                         ),
                     ),
                     ("Modo", mode_label),
+                    ("Destino", destination_label(target_dirn, self.path)),
                 ],
             )
 
@@ -785,7 +915,10 @@ class Download:
             # Separa a preparação (booklet, capas) das faixas, nos dois modos.
             ui.separator()
 
-            semaphore = asyncio.Semaphore(active_workers)
+            semaphore, pipeline_ctx = build_slots(
+                active_workers, self.settings, parallel=is_parallel
+            )
+            pipeline_kw = {"pipeline": pipeline_ctx} if pipeline_ctx is not None else {}
 
             async def _report_track(i, t_num, status, motivo="", letras=None):
                 """Report track download result to JSON progress stream."""
@@ -826,6 +959,7 @@ class Download:
                     semaphore=semaphore,
                     report_track=_report_track,
                     cover_source=cover_source,
+                    **pipeline_kw,
                 )
 
             faixas_previstas = []
@@ -897,12 +1031,16 @@ class Download:
                     _bounded_process_track,
                     limit=max(1, active_workers),
                 )
+                # Faixas que ainda estão no pós-processamento (pipeline).
+                pending_results = await resolve_pending(pending_results)
                 for (idx, _track), result in zip(album_track_items, pending_results):
                     results[idx] = result
             except (KeyboardInterrupt, asyncio.CancelledError) as exc:
                 abort_event.set()
                 aborted_by_user = True
                 cancelled_by_task = isinstance(exc, asyncio.CancelledError)
+                if pipeline_ctx is not None:
+                    await pipeline_ctx.cancel_all()
                 try:
                     await self.http_session.aclose()
                 except Exception as e:
@@ -927,7 +1065,7 @@ class Download:
                         exc_info=(type(result), result, result.__traceback__),
                     )
             failed_tracks = sum(
-                res is not True and res != "existing" for res in results
+                res is False or isinstance(res, BaseException) for res in results
             )
 
             if not abort_event.is_set():
@@ -1117,18 +1255,24 @@ class Download:
                 failed=real_failed,
                 existing=existing_count,
                 notes=(
-                    ["Faixas puladas marcadas em .missing.txt"]
+                    [("Lista das puladas", ".missing.txt", "warn")]
                     if skipped_count > 0
                     else []
                 ),
+                elapsed=time.monotonic() - _album_started,
             )
 
         return bool(results) and failed_tracks == 0 and not aborted_by_user
 
     async def download_track(
-        self, is_parallel=False, position_pool=None, suppress_header=False
+        self,
+        is_parallel: bool = False,
+        position_pool=None,
+        suppress_header: bool = False,
+        suppress_track_summary: bool = False,
     ):
         """Download a single track file from Qobuz."""
+        _track_started = time.monotonic()  # "Tempo total" do resumo da faixa
         parse = await self.client.get_track_url(self.item_id, self.quality)
 
         track_meta = await self.client.get_track_meta(self.item_id)
@@ -1150,6 +1294,8 @@ class Download:
             ui.skip(f"{track_title} (Apenas amostra/demo (30s))")
             success = False
             track_attr = None
+            if hasattr(self, "settings") and self.settings is not None:
+                self.settings.pl_skipped = getattr(self.settings, "pl_skipped", 0) + 1
         else:
             # Posição da faixa NA PLAYLIST. Serve só para exibição (barra de
             # progresso, logs). NÃO sobrescreve track_meta["track_number"]:
@@ -1194,12 +1340,32 @@ class Download:
             file_format, quality_met, bit_depth, sampling_rate = format_info
 
             if not suppress_header:
+                _num_faixa = track_meta.get("track_number")
+                _total_faixas = track_album.get("tracks_count") or track_album.get(
+                    "track_count"
+                )
+                if _num_faixa and _total_faixas:
+                    _faixa_label = f"{_num_faixa} de {_total_faixas}"
+                else:
+                    _faixa_label = str(_num_faixa) if _num_faixa else ""
                 print_download_header(
                     "FAIXA",
                     [
                         ("Título", track_title),
                         ("Artista", artist),
                         ("Álbum", album_name),
+                        ("Faixa", _faixa_label),
+                        ("Ano", str(release_date or "")[:4]),
+                        ("Duração", clock_label(track_meta.get("duration"))),
+                        (
+                            "Gênero",
+                            _safe_get(track_album, "genre", "name", default=""),
+                        ),
+                        (
+                            "Gravadora",
+                            _safe_get(track_album, "label", "name", default=""),
+                        ),
+                        ("ISRC", track_meta.get("isrc") or ""),
                         (
                             "Qualidade",
                             (
@@ -1363,6 +1529,7 @@ class Download:
                         letras_out=letras_info,
                         cover_source=cover_source,
                         display_index=playlist_index,
+                        suppress_track_summary=suppress_track_summary,
                     )
                 finally:
                     _PROGRESS_NOTES.pop(rotulo_faixa, None)
@@ -1457,8 +1624,7 @@ class Download:
                 )
 
         is_batch_or_playlist = (
-            getattr(self, "is_playlist", False)
-            or getattr(self.settings, "pl_success", None) is not None
+            getattr(self, "is_playlist", False) or suppress_track_summary
         )
 
         if not is_batch_or_playlist:
@@ -1479,6 +1645,7 @@ class Download:
                             "ok" if success else "err",
                         )
                     ],
+                    elapsed=time.monotonic() - _track_started,
                 )
             except Exception as e:
                 ui.error(f"Erro ao gerar painel de resumo da Faixa: {e}")
@@ -1542,7 +1709,9 @@ class Download:
         novo_album = {**album, "tracks": {"items": itens_completos}}
         return {**track_metadata, "album": novo_album}
 
-    async def _download_and_tag(self, *args, **kwargs) -> bool:
+    async def _download_and_tag(
+        self, *args, suppress_track_summary: bool = False, **kwargs
+    ) -> bool:
         """Apply tags and present a final status only after all processing."""
         claimed_paths: list[str] = []
         track_meta = args[3] if len(args) > 3 else kwargs.get("track_metadata", {})
@@ -1696,6 +1865,7 @@ class Download:
                     "(mesma faixa repetida na playlist)"
                 )
                 self.last_downloaded_file = final_file
+                self.last_download_outcome = "existing"
                 return True
             if name_state == STATE_NEW and final_file != candidate_files[0]:
                 ui.step(
@@ -1734,18 +1904,24 @@ class Download:
                         f"{_skip_pfx}Pulando: {os.path.basename(final_file)} (Ja existe)"
                     )
                     self.last_downloaded_file = final_file
+                    self.last_download_outcome = "existing"
                     return True
             else:
                 ui.skip(
                     f"{_skip_pfx}Pulando: {os.path.basename(final_file)} (Ja existe)"
                 )
                 self.last_downloaded_file = final_file
+                self.last_download_outcome = "existing"
                 return True
 
         if abort_event.is_set():
             return False
 
-        await asyncio.sleep(1)
+        # Em pipeline a pausa fixa de 1 s por faixa sai: o início escalonado do
+        # lote (HEADER_STAGGER_DELAY) já espaça as primeiras requisições.
+        handoff = current_handoff.get()
+        if handoff is None:
+            await asyncio.sleep(1)
         try:
             track_url_dict["url"]
         except KeyError:
@@ -1832,6 +2008,7 @@ class Download:
                         "URL retornada é apenas amostra",
                         total_discs,
                     )
+                    self.last_download_outcome = "skipped"
                     return False
 
                 if "url" in fresh_track_dict:
@@ -1851,6 +2028,7 @@ class Download:
                         if abort_event.is_set():
                             return False
                         ui.warn(f"Faixa indisponivel, pulando: {e}")
+                        self.last_download_outcome = "skipped"
                         return False
                     except Exception as e:
                         # [FIX] Antes este bloco so' avisava sobre "bloqueio Akamai"
@@ -1861,6 +2039,10 @@ class Download:
                         logger.debug(
                             f"Falha no download direto (tier {attempt_fmt}): {e}"
                         )
+                        if handoff is not None:
+                            handoff.report_throttle(
+                                "falha de rede ou bloqueio do servidor"
+                            )
                         ui.warn(
                             f"Bloqueio Akamai detectado (ou falha de rede: {e}). "
                             "Ativando download segmentado de fallback..."
@@ -1906,6 +2088,7 @@ class Download:
                 if abort_event.is_set():
                     return False
                 ui.warn(f"Faixa indisponível, pulando: {e}")
+                self.last_download_outcome = "skipped"
                 return False
             except Exception as e:
                 # [FIX] Agora reporta o motivo em vez de "pass" silencioso, para
@@ -1926,6 +2109,11 @@ class Download:
 
         if abort_event.is_set():
             return False
+
+        # Fim do estágio de rede: libera a vaga de download (a próxima faixa já
+        # começa) e entra na fila do pós-processamento (tags, letras, verificação).
+        if handoff is not None:
+            await handoff.downloaded()
 
         is_mp3 = True if final_fmt == 5 else False
         extension = ".mp3" if is_mp3 else ".flac"
@@ -2147,6 +2335,7 @@ class Download:
             await asyncio.sleep(delay_time)
 
         self.last_downloaded_file = final_file
+        self.last_download_outcome = "downloaded"
         return True
 
     @staticmethod

@@ -226,8 +226,10 @@ async def test_interactive_artista_top_tracks(monkeypatch):
             ]
         return next(selections)
 
-    async def get_artist_meta(item_id):
-        yield {"tracks": {"items": [{"id": "t1", "title": "Hit"}]}}
+    async def get_artist_tracks(item_id, limit=20):
+        assert item_id == "a1"
+        assert limit == 20
+        return [{"id": "t1", "title": "Hit"}]
 
     async def search_by_type(*args, **kwargs):
         return options
@@ -235,7 +237,7 @@ async def test_interactive_artista_top_tracks(monkeypatch):
     async def search_tracks(*args, **kwargs):
         return {"tracks": {"items": []}}
 
-    app.client.get_artist_meta = get_artist_meta
+    app.client.get_artist_tracks = get_artist_tracks
     app.client.search_tracks = search_tracks
     app.search_by_type = search_by_type
     app.download_list_of_urls = _done

@@ -245,6 +245,7 @@ module = [
     "qobuz_dl.metadata_cache",
     "qobuz_dl.name_suggest",
     "qobuz_dl.paths",
+    "qobuz_dl.pipeline",
     "qobuz_dl.playlist_import",
     "qobuz_dl.postprocess",
     "qobuz_dl.qobuz_notes_sync",

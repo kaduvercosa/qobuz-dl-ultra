@@ -14,6 +14,18 @@ publicar, renomeie a seção para a nova versão e a data.
 ## [Não lançado]
 
 ### Adicionado
+- Pipeline de download: com `--max-workers` maior que 1, a vaga de rede é liberada assim
+  que o arquivo baixa, e tags, capa, letras e verificação seguem em paralelo com os
+  próximos downloads (`pipeline.py`). O teto de downloads simultâneos continua sendo o
+  `--max-workers`. `--no-pipeline` (ou `pipeline = false` no `config.ini`) desliga.
+- `--adaptive-workers` (ou `adaptive_workers = true` no `config.ini`): corta os downloads
+  simultâneos pela metade quando há falha de rede ou bloqueio e sobe 1 a cada 4 downloads
+  bons, sem passar do `--max-workers`.
+- Favoritos: nova opção "Minhas playlists (criadas)", separada das playlists favoritadas
+  (que seguem em "Playlists"). A separação usa o dono da playlist e a lista é paginada
+  até o fim.
+- `Client.get_artist_tracks`: faixas do artista (`extra=tracks`), em vez das páginas de
+  álbuns.
 - `--continuous-track-numbers` (`dl` e `tags`) e `continuous_track_numbers` no
   `config.ini`: em álbuns com vários discos, grava `TRACKNUMBER`/`TRCK` seguidos de 1 a N
   (ex.: 1 a 11) e `TRACKTOTAL` = N, para o player mostrar a numeração contínua.
@@ -38,6 +50,21 @@ publicar, renomeie a seção para a nova versão e a data.
 - Workflow `mypy-baseline.yml` para gerar o `mypy-baseline.txt` uma única vez.
 
 ### Alterado
+- Resumo de fim de download (álbum, playlist, playlist importada e lote de faixas) ganhou a
+  linha `Tempo total` e fica em uma única caixa; `Já existentes` aparece só quando há
+  arquivos já baixados.
+- Cabeçalhos de `PLAYLIST`, `PLAYLIST IMPORTADA` e `LOTE DE FAIXAS` não mostram a linha
+  `QUALIDADE` (continua em `ÁLBUM` e `FAIXA`).
+- Nome de pasta padrão usa `{quality_tag}`: `[FLAC 24]` para FLAC e só `[MP3]` para MP3
+  (o Qobuz informa 16 bits para MP3 e `[MP3 16]` enganava).
+- Comentário técnico (COMMENT) grava a qualidade real do arquivo (bits e taxa no FLAC,
+  kbps no MP3) e, quando ela difere do máximo do catálogo, uma linha `Máx. no Qobuz`.
+  Os links do álbum e da faixa saem e entra `Trk ID`.
+- COMMENT do MP3 passa a ter uma linha por item, como no FLAC. MP3 antigos, em linha única
+  separada por ` | `, continuam sendo lidos e mantêm o formato ao serem atualizados.
+- Listagem de playlists do usuário envia `type` e `offset` (entram antes da assinatura da
+  requisição) e pagina pelas linhas brutas, sem perder itens quando o filtro de dono
+  descarta alguns.
 - Changelog automático (`tools/gerar_changelog.py` + workflow `changelog.yml`): em vez de
   só listar os títulos dos commits, a release agora descreve o que mudou, lendo o diff de
   cada commit com o **GitHub Models** (IA gratuita do GitHub, via `GITHUB_TOKEN` com

@@ -143,6 +143,7 @@ class QobuzDLSettings:
     # Estado de execução do lote/playlist: zerado em ``__init__`` e atualizado
     # por core.py/downloader.py durante o download (não vem do config.ini).
     pl_success: int
+    pl_existing: int
     pl_skipped: int
     pl_failed: int
 
@@ -181,6 +182,8 @@ class QobuzDLSettings:
     embed_lyrics: bool
     _lyrics_translation_lang: str  # use a propriedade lyrics_translation_lang
     fetch_translation: bool
+    pipeline: bool
+    adaptive_workers: bool
     only_synced_lyrics: bool
     lyrics_word_sync: bool
 
@@ -237,6 +240,7 @@ class QobuzDLSettings:
         self.progress_json = kwargs.get("progress_json", False)
         self.check_storage = kwargs.get("check_storage", True)
         self.pl_success = 0
+        self.pl_existing = 0
         self.pl_skipped = 0
         self.pl_failed = 0
 
@@ -268,6 +272,10 @@ class QobuzDLSettings:
         self.embed_lyrics = kwargs.get("embed_lyrics", True)
         self.lyrics_translation_lang = kwargs.get("lyrics_translation_lang", "pt")
         self.fetch_translation = kwargs.get("fetch_translation", True)
+        # Pipeline de download (rede e pós-processamento se sobrepõem) e teto
+        # adaptativo de downloads simultâneos (opcional).
+        self.pipeline = bool(kwargs.get("pipeline", True))
+        self.adaptive_workers = bool(kwargs.get("adaptive_workers", False))
         self.only_synced_lyrics = kwargs.get("only_synced_lyrics", False)
         self.lyrics_word_sync = kwargs.get("lyrics_word_sync", False)
 
@@ -474,6 +482,10 @@ class QobuzDLSettings:
             or config.get(section, "max_workers", fallback="1"),
             "segment_workers": getattr(arguments, "segment_workers", None)
             or config.get(section, "segment_workers", fallback="0"),
+            "pipeline": not getattr(arguments, "no_pipeline", False)
+            and config.getboolean(section, "pipeline", fallback=True),
+            "adaptive_workers": getattr(arguments, "adaptive_workers", False)
+            or config.getboolean(section, "adaptive_workers", fallback=False),
             "user_auth_token": config.get(section, "user_auth_token", fallback=""),
             # # --no-sentinel força False; senão vale write_sentinel do config.ini (padrão True).
             "write_sentinel": (

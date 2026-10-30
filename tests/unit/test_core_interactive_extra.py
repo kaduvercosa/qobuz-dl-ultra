@@ -53,7 +53,8 @@ async def test_interactive_pesquisa_sem_resultados_volta(monkeypatch):
     selections = iter(
         [
             ("🎵 Tracks", 0),
-            None,
+            None,  # menu "sem resultados": volta ao menu inicial
+            None,  # menu inicial: sai
         ]
     )
 
@@ -74,7 +75,8 @@ async def test_interactive_busca_e_cancela_apos_resultados(monkeypatch):
     selections = iter(
         [
             ("🎵 Tracks", 0),
-            None,
+            None,  # menu "sem resultados": volta ao menu inicial
+            None,  # menu inicial: sai
         ]
     )
 
@@ -96,7 +98,8 @@ async def test_interactive_favoritos_sem_resultados(monkeypatch):
         [
             ("⭐ Favorites", 0),
             ("🎵 Tracks", 0),
-            None,
+            None,  # menu "sem resultados": volta ao menu inicial
+            None,  # menu inicial: sai
         ]
     )
 
