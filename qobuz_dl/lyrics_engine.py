@@ -188,6 +188,7 @@ class LyricsQuery:
     qobuz_translation_response: object = None
     isrc: str | None = None
     duration: int | None = None  # segundos
+    upc: str | None = None  # codigo de barras do album (BiniLyrics: ISRC ou UPC)
 
 
 @dataclass
@@ -604,8 +605,16 @@ class LyricsEngine:
         if not original_sync:
             return None
 
-        # So traducoes sincronizadas servem; prefere pt, senao a primeira.
-        translations = [t for t in lyrics.get("translations", []) if t.get("synced")]
+        # So traducoes sincronizadas servem; prefere pt, senao a primeira. E so
+        # se o usuario pediu traducao nas configuracoes (`lyrics_translation_lang`
+        # vazio = nao quer): mesmo que o chamador entregue uma traducao, ela
+        # nao entra na letra.
+        quer_traducao = bool(getattr(self.settings, "lyrics_translation_lang", ""))
+        translations = (
+            [t for t in lyrics.get("translations", []) if t.get("synced")]
+            if quer_traducao
+            else []
+        )
         orig_lang = str(lyrics.get("lang") or "unknown").lower()
         best = next(
             (t for t in translations if "pt" in str(t.get("language", "")).lower()),
@@ -631,8 +640,8 @@ class LyricsEngine:
     def _provider_binilyrics(self, query):
         """BiniLyrics: TTML estilo Apple Music (sync por palavra/linha).
 
-        Precisa da duracao da faixa (a API exige segundos) e usa o ISRC, quando
-        existe, para achar a gravacao exata. Veja qobuz_dl/binilyrics.py.
+        Precisa da duracao da faixa (a API exige segundos) e usa o ISRC ou o
+        UPC, quando existem, para achar a gravacao exata. Veja qobuz_dl/binilyrics.py.
         """
         try:
             duration = int(round(float(query.duration)))
@@ -667,6 +676,7 @@ class LyricsEngine:
         chosen = binilyrics.select_candidate(
             (response.json() or {}).get("results"),
             isrc=query.isrc,
+            upc=query.upc,
             title=query.track,
             artist=query.artist,
             album=query.album,
@@ -721,7 +731,8 @@ class LyricsEngine:
         Usa album/duracao/ISRC como dicas; se com elas nao vier nada, repete so
         com artista + titulo e depois com as variantes limpas (sem feat. etc.).
         """
-        hints = {"album": query.album, "duration": query.duration, "isrc": query.isrc}
+        # Identificacao por nome, artista, album e duracao (sem ISRC).
+        hints = {"album": query.album, "duration": query.duration}
         has_hints = any(hints.values())
         for artist, track in query_variants(query.artist, query.track):
             attempts = [hints, {}] if has_hints else [{}]
@@ -761,12 +772,38 @@ class LyricsEngine:
             response = request_sync(
                 self.session, "GET", url, params=params, headers=headers, timeout=12
             )
-            if response.status_code != 200 and "album_name" in params:
+
+            # Erros transitórios já passaram pelos retries de request_sync().
+            # Repetir a mesma faixa sem álbum ou com outras variantes não ajuda
+            # quando o próprio LRCLIB está indisponível (ex.: 502/503).
+            status = response.status_code
+            if status in {408, 425, 429} or status >= 500:
+                logger.debug(
+                    "LRCLIB indisponível para %s - %s (HTTP %s); "
+                    "interrompendo as variantes desta faixa",
+                    artist,
+                    track,
+                    status,
+                )
+                return None
+
+            # 404/resultado não encontrado pode se beneficiar da busca sem álbum.
+            if status != 200 and "album_name" in params:
                 params = {k: v for k, v in params.items() if k != "album_name"}
                 response = request_sync(
                     self.session, "GET", url, params=params, headers=headers, timeout=12
                 )
-            if response.status_code != 200:
+                status = response.status_code
+                if status in {408, 425, 429} or status >= 500:
+                    logger.debug(
+                        "LRCLIB indisponível para %s - %s (HTTP %s); "
+                        "interrompendo as variantes desta faixa",
+                        artist,
+                        track,
+                        status,
+                    )
+                    return None
+            if status != 200:
                 continue
 
             data = response.json() or {}
@@ -883,6 +920,7 @@ class LyricsEngine:
         buffer_output=False,
         network_budget=None,
         dry_run=False,
+        upc=None,
     ):
         """
         Percorre as fontes de LyricsEngine.PROVIDERS (Qobuz -> BiniLyrics ->
@@ -899,8 +937,8 @@ class LyricsEngine:
         que a precedeu (misturada com outras linhas de progresso de
         download no meio). Mesma numeracao usada em "Em Progresso: [NN] ...".
 
-        `isrc` e `duration` (segundos) sao opcionais; sem a duracao a fonte
-        BiniLyrics e' ignorada.
+        `isrc`, `upc` e `duration` (segundos) sao opcionais; sem a duracao a
+        fonte BiniLyrics e' ignorada.
 
         `quiet=True` omite as linhas de progresso/sucesso/aviso (quem chama,
         como o comando `lyrics`, monta a propria saida a partir do retorno).
@@ -946,6 +984,7 @@ class LyricsEngine:
                 quiet=quiet,
                 better_than=better_than,
                 dry_run=dry_run,
+                upc=upc,
             )
         finally:
             if saida:
@@ -973,6 +1012,7 @@ class LyricsEngine:
         quiet=False,
         better_than=None,
         dry_run=False,
+        upc=None,
     ):
         """Corpo de `fetch_and_inject`; `_escrever(linhas)` e' o destino das linhas."""
         # "[NN] título": identifica a faixa em cada linha (modo paralelo).
@@ -1012,6 +1052,7 @@ class LyricsEngine:
             qobuz_translation_response=qobuz_translation_response,
             isrc=isrc,
             duration=duration,
+            upc=upc,
         )
 
         _tw("search", f"Procurando letras: {_ident}")

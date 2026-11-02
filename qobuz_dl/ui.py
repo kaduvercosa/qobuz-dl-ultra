@@ -17,8 +17,7 @@
 #   ui.step("Buscando letras...")     -> [*] cor de destaque
 #   ui.detail("caminho/do/arquivo")   -> linha secundária recuada
 #   ui.header("ALBUM", [("Artista", "Daft Punk"), ("Faixas", "14")])
-#   ui.section("ESTATISTICAS")
-#   ui.kv("Total de downloads", "1234")
+#   ui.Painel("ESTATISTICAS").kv("Total de downloads", "1234").emit()
 #
 # No boot da CLI, para que o `logging` de todos os módulos também respeite
 # as barras de progresso do tqdm:
@@ -31,6 +30,7 @@ import os
 import re
 import shutil
 import sys
+import textwrap
 import threading
 import unicodedata
 from typing import TypedDict
@@ -78,11 +78,12 @@ LAYOUT_MEDIUM = "medium"
 LAYOUT_WIDE = "wide"
 
 
-def raw_width():
+def raw_width(fallback=FALLBACK):
     """Return the current terminal width without clamping.
 
     Prefer the live TTY size so resizing a terminal is reflected immediately.
     For redirected output and tests, honor ``COLUMNS`` before using a fallback.
+    ``fallback`` é o par (colunas, linhas) usado quando nada informa a largura.
     """
     try:
         if hasattr(sys.stdout, "isatty") and sys.stdout.isatty():
@@ -101,9 +102,39 @@ def raw_width():
             # COLUMNS inválido: segue para o fallback.
             pass
     try:
-        return shutil.get_terminal_size(fallback=FALLBACK).columns
+        return shutil.get_terminal_size(fallback=fallback).columns
     except Exception:
-        return FALLBACK[0]
+        return fallback[0]
+
+
+def raw_height(fallback=FALLBACK):
+    """Altura atual do terminal, em linhas (par do ``raw_width``).
+
+    Mesma ordem de busca: tamanho do TTY ao vivo, depois ``LINES`` e por fim o
+    par ``fallback`` (colunas, linhas). Telas que precisam saber quantas linhas
+    cabem (a lista do modo interativo, por exemplo) usam esta função em vez de
+    chamar ``shutil.get_terminal_size`` direto.
+    """
+    try:
+        if hasattr(sys.stdout, "isatty") and sys.stdout.isatty():
+            return os.get_terminal_size(sys.stdout.fileno()).lines
+    except (OSError, ValueError, AttributeError):
+        # Sem tty ou tamanho indisponível: cai para LINES/fallback.
+        pass
+
+    env = os.environ.get("LINES")
+    if env:
+        try:
+            value = int(env)
+            if value > 0:
+                return value
+        except (TypeError, ValueError):
+            # LINES inválido: segue para o fallback.
+            pass
+    try:
+        return shutil.get_terminal_size(fallback=fallback).lines
+    except Exception:
+        return fallback[1]
 
 
 def width(max_width=MAX_WIDTH, min_width=MIN_WIDTH):
@@ -112,6 +143,47 @@ def width(max_width=MAX_WIDTH, min_width=MIN_WIDTH):
     # existiam espalhados por vários arquivos do projeto.
     """Return terminal width clamped to the requested minimum and maximum."""
     return max(min(raw_width(), max_width), min_width)
+
+
+# Largura dos relatórios de varredura (letras/tags retroativas): mais larga que
+# a dos painéis, para caber caminhos e motivos sem quebrar a todo momento.
+REPORT_MAX_WIDTH = 120
+REPORT_MIN_WIDTH = 60
+# Teto da caixa "ÁLBUM" dos relatórios retroativos (`lyrics` e `tags`).
+ALBUM_BOX_COLS = 90
+# Teto da largura dos painéis de relatório (`stats`, `inspect`): ``Painel``.
+PAINEL_COLS = 72
+
+
+def report_width():
+    """Largura dos relatórios retroativos (entre REPORT_MIN e REPORT_MAX)."""
+    return width(max_width=REPORT_MAX_WIDTH, min_width=REPORT_MIN_WIDTH)
+
+
+def wrap_indented(text, indent, cols=None):
+    """Quebra ``text`` em linhas que cabem em ``cols``, com recuo fixo."""
+    cols = cols or report_width()
+    prefix = " " * indent
+    return textwrap.wrap(
+        text,
+        width=cols - 1,
+        initial_indent=prefix,
+        subsequent_indent=prefix,
+        break_long_words=True,
+        break_on_hyphens=False,
+    ) or [prefix]
+
+
+def labeled_lines(label, text, cols):
+    """Linha "   Rótulo  texto" com continuação alinhada sob o texto."""
+    return textwrap.wrap(
+        text,
+        width=cols - 1,
+        initial_indent=f"   {label:<6} ",
+        subsequent_indent=" " * 10,
+        break_long_words=True,
+        break_on_hyphens=False,
+    ) or [f"   {label}"]
 
 
 def layout():
@@ -709,7 +781,7 @@ def blank():
 
 
 # --------------------------------------------------------------------------
-# Estrutura visual (regras, banners, seções, tabelas chave/valor)
+# Estrutura visual (regras divisórias)
 # --------------------------------------------------------------------------
 def rule(char=None, cols=None, color=HIGHLIGHT):
     # Linha divisória de largura total (usa a largura do terminal por
@@ -718,52 +790,6 @@ def rule(char=None, cols=None, color=HIGHLIGHT):
     ch = char or heavy_bar_char()
     n = cols if cols is not None else width()
     emit(f"{c(color)}{ch * n}{c(RESET)}")
-
-
-def banner(title, cols=None):
-    # Título centralizado entre duas linhas grossas -- usado para
-    # destacar seções importantes (relatório de stats, menu de playlist).
-    """Print a banner with text centered in a box."""
-    n = cols if cols is not None else width()
-    bar = heavy_bar_char() * n
-    emit(f"\n{c(HIGHLIGHT)}{bar}{c(RESET)}")
-    emit(f"{c(BG)}{c(HIGHLIGHT)}{center_cells(title, n)}{c(RESET)}")
-    emit(f"{c(HIGHLIGHT)}{bar}{c(RESET)}\n")
-
-
-def section(title):
-    # Subtítulo de bloco dentro de um relatório maior.
-    """Print a section header."""
-    emit(f"  {c(BG)}{truncate(title, max(1, width() - 2))}{c(RESET)}")
-
-
-def kv(label, value, label_width=30, narrow_stack=False):
-    # Par rótulo/valor, sempre dentro da largura do terminal. Escolhe entre
-    # três modos conforme o espaço disponível:
-    #   1) coluna alinhada (rótulo + valor lado a lado) -- padrão em telas
-    #      médias/largas;
-    #   2) rótulo e valor empilhados, com o valor quebrado em várias linhas,
-    #      quando o valor não cabe na coluna (ex.: listas longas);
-    #   3) "rotulo: valor" corrido em telas estreitas.
-    """Print a key-value pair with aligned formatting."""
-    value = str(value)
-    total = width()
-
-    if is_narrow():
-        if narrow_stack or len(value) > total - 4 - len(label):
-            emit(f"  {c(HIGHLIGHT)}{label}:{c(RESET)}")
-            wrapped(value, indent=4)
-        else:
-            emit(f"  {c(HIGHLIGHT)}{label}:{c(RESET)} {value}")
-        return
-
-    # Espaço que sobra para o valor depois de "  " + rótulo + "  ".
-    room = total - 2 - label_width - 2
-    if len(value) <= room:
-        emit(f"  {c(HIGHLIGHT)}{label:<{label_width}}{c(RESET)}  {value}")
-    else:
-        emit(f"  {c(HIGHLIGHT)}{label}{c(RESET)}")
-        wrapped(value, indent=4)
 
 
 # --------------------------------------------------------------------------
@@ -884,22 +910,52 @@ def box(title, lines, cols=None, color=HIGHLIGHT):
     return out
 
 
-def emit_box(title, lines, cols=None, color=HIGHLIGHT, always=False):
-    """Imprime a caixa numa única escrita (as linhas nunca se intercalam)."""
+def emit_box(title, lines, cols=None, color=HIGHLIGHT, always=False, lead=True):
+    """Imprime a caixa numa única escrita (as linhas nunca se intercalam).
+
+    A caixa sai com uma linha em branco depois e, com ``lead=True``, outra
+    antes. Em caixas seguidas, ``lead=False`` evita duas linhas em branco
+    entre elas.
+    """
     escrever = emit_always if always else emit
-    escrever("\n" + "\n".join(box(title, lines, cols=cols, color=color)) + "\n")
+    inicio = "\n" if lead else ""
+    escrever(inicio + "\n".join(box(title, lines, cols=cols, color=color)) + "\n")
 
 
-def header(kind, rows):
+def header(kind, rows, cols=None, fit=False, lead=True):
     # Cabeçalho de operação (álbum, faixa, playlist, lote de urls): caixa
     # fechada com o tipo embutido na borda de cima e os pares rótulo/valor
     # alinhados dentro. Valores longos quebram com recuo (nunca cortam) e a
     # medida é por células de terminal, então títulos em japonês/coreano ou
     # com emoji não desalinham a borda.
-    """Print a closed header box with the kind in the top border."""
+    """Print a closed header box with the kind in the top border.
+
+    ``cols`` troca o teto de largura da caixa (BOX_MAX); o piso e o limite da
+    tela continuam valendo. Com ``fit=True`` a caixa se ajusta ao conteúdo:
+    fica só do tamanho da linha mais longa (até o teto), em vez de ocupar o
+    teto inteiro. ``lead=False`` tira a linha em branco de antes (ver
+    ``emit_box``), para encadear vários painéis.
+    """
     rows = list(rows)
-    inner = box_width() - 4
-    label_width = max((_cell_width(str(label)) for label, _ in rows), default=0)
+    if fit:
+        teto = cols if cols is not None else BOX_MAX
+        rotulo_max = max((_cell_width(str(label)) for label, _ in rows), default=0)
+        valor_max = max((_cell_width(str(value)) for _, value in rows), default=0)
+        natural = max(rotulo_max + 2 + valor_max + 4, _cell_width(str(kind)) + 6)
+        cols = min(natural, teto)
+    inner = box_width(cols) - 4
+    emit_box(str(kind), _kv_lines(rows, inner), cols=cols, lead=lead)
+
+
+def _kv_lines(rows, inner, label_width=None):
+    """Linhas "RÓTULO  valor" alinhadas para dentro de uma caixa de ``inner`` células.
+
+    Valores longos quebram com recuo (nunca cortam). ``label_width`` fixa a
+    coluna dos rótulos; sem ele vale o maior rótulo, limitado à metade da caixa.
+    """
+    rows = [(str(label), value) for label, value in rows]
+    if label_width is None:
+        label_width = max((_cell_width(label) for label, _ in rows), default=0)
     # Rótulos enormes não podem roubar a coluna de valor inteira.
     label_width = min(label_width, max(4, inner // 2))
     value_room = max(12, inner - label_width - 2)
@@ -907,10 +963,100 @@ def header(kind, rows):
     lines = []
     for label, value in rows:
         parts = _wrap_lines(value, value_room)
-        tag = pad_cells(truncate(str(label).upper(), label_width), label_width)
+        tag = pad_cells(truncate(label.upper(), label_width), label_width)
         lines.append(f"{c(HIGHLIGHT)}{tag}{c(RESET)}  {parts[0]}")
         lines.extend(" " * (label_width + 2) + part for part in parts[1:])
-    emit_box(str(kind), lines)
+    return lines
+
+
+class Painel:
+    """Caixa que mistura pares rótulo/valor e mensagens (ok, aviso, erro...).
+
+    Para telas de relatório (``inspect`` e afins): cada seção vira um painel,
+    no mesmo desenho do ``header``/``summary``. Monte com ``kv``, ``ok``,
+    ``warn``, ``error``, ``info``, ``text``, ``detail`` e ``rule`` e imprima
+    de uma vez com ``emit``; o painel todo sai numa única escrita.
+    """
+
+    def __init__(self, title, cols=None):
+        self.title = str(title)
+        self.cols = PAINEL_COLS if cols is None else cols
+        self._items = []
+
+    # -- montagem (todas devolvem o próprio painel, para encadear) ----------
+    def kv(self, label, value):
+        self._items.append(("kv", str(label), str(value)))
+        return self
+
+    def _msg(self, tone, text):
+        self._items.append(("msg", tone, str(text)))
+        return self
+
+    def ok(self, text):
+        return self._msg("ok", text)
+
+    def warn(self, text):
+        return self._msg("warn", text)
+
+    def error(self, text):
+        return self._msg("err", text)
+
+    def info(self, text):
+        return self._msg("info", text)
+
+    def text(self, text, indent=0):
+        """Linha de texto normal (cor padrão), com recuo."""
+        self._items.append(("text", int(indent), str(text)))
+        return self
+
+    def detail(self, text, indent=0):
+        """Linha de apoio em cinza, com recuo."""
+        self._items.append(("detail", int(indent), str(text)))
+        return self
+
+    def rule(self):
+        self._items.append(("rule",))
+        return self
+
+    def __bool__(self):
+        return bool(self._items)
+
+    # -- desenho -------------------------------------------------------------
+    def lines(self):
+        """Linhas internas da caixa (sem a moldura)."""
+        inner = box_width(self.cols) - 4
+        rst = c(RESET)
+        label_width = max(
+            (_cell_width(item[1]) for item in self._items if item[0] == "kv"),
+            default=0,
+        )
+        out = []
+        for item in self._items:
+            kind = item[0]
+            if kind == "kv":
+                out.extend(_kv_lines([(item[1], item[2])], inner, label_width))
+            elif kind == "msg":
+                fancy, plain, color = _TONES.get(item[1], _TONES["info"])
+                marca = f"{c(color)}{_glyph(fancy, plain)}{rst}"
+                parts = _wrap_lines(item[2], inner - 2)
+                out.append(f"{marca} {parts[0]}")
+                out.extend("  " + part for part in parts[1:])
+            elif kind == "text":
+                recuo = " " * item[1]
+                out.extend(recuo + p for p in _wrap_lines(item[2], inner - item[1]))
+            elif kind == "detail":
+                out.extend(
+                    f"{' ' * item[1]}{c(GRAY)}{p}{rst}"
+                    for p in _wrap_lines(item[2], inner - item[1])
+                )
+            else:
+                out.append(BOX_RULE)
+        return out
+
+    def emit(self, lead=True):
+        """Imprime o painel (nada, se estiver vazio)."""
+        if self._items:
+            emit_box(self.title, self.lines(), cols=self.cols, lead=lead)
 
 
 # Tons dos resumos: (glifo bonito, glifo ASCII, cor). Mesmo significado de cor
@@ -923,13 +1069,14 @@ _TONES = {
 }
 
 
-def summary(title, rows, notes=(), cols=None, subtitle="", elapsed=None):
+def summary(title, rows, notes=(), cols=None, subtitle="", elapsed=None, lead=True):
     # Painel de resumo (fim de álbum/faixa/playlist/lote). `rows` são tuplas
     # (rótulo, valor, tom) com tom em ok/warn/err/info; o valor sai alinhado
     # à direita. `notes` aceita dois formatos: tupla (rótulo, valor, tom), que
     # vira uma linha igual às demais (mesmo glifo e mesma cor do tom), ou
     # texto simples, que sai em cinza abaixo de uma divisória (formato antigo).
     # `elapsed` (segundos) acrescenta a linha "Tempo total" por último.
+    # `lead=False` tira a linha em branco de antes (para encadear painéis).
     """Print a closed summary box with status glyphs and right-aligned values."""
     inner = box_width(cols) - 4
     rst = c(RESET)
@@ -960,13 +1107,26 @@ def summary(title, rows, notes=(), cols=None, subtitle="", elapsed=None):
         for note in text_notes:
             for part in _wrap_lines(note, inner):
                 lines.append(f"{c(GRAY)}{part}{rst}")
-    emit_box(title, lines, cols=cols)
+    emit_box(title, lines, cols=cols, lead=lead)
 
 
 def summary_downloads(
-    kind, name, success, total, skipped=0, failed=0, notes=(), existing=0, elapsed=0
+    kind,
+    name,
+    success,
+    total,
+    skipped=0,
+    failed=0,
+    notes=(),
+    existing=0,
+    elapsed=None,
+    total_bytes=None,
 ):
-    """Resumo consolidado dos resultados de download"""
+    """Resumo consolidado dos resultados de download.
+
+    `elapsed` (segundos) acrescenta "Tempo total"; `total_bytes` acrescenta
+    "Tamanho baixado" e, havendo `elapsed`, a "Velocidade média".
+    """
     ok_tone = "ok" if success else ("err" if failed else "info")
     rows = [("Baixadas", f"{success}/{total}", ok_tone)]
     if existing:
@@ -975,6 +1135,12 @@ def summary_downloads(
         rows.append(("Puladas / indisponíveis", str(skipped), "warn"))
     if failed:
         rows.append(("Falhas", str(failed), "err"))
+    if total_bytes:
+        rows.append(("Tamanho baixado", format_bytes(total_bytes), "info"))
+        if elapsed:
+            rows.append(
+                ("Velocidade média", format_speed(total_bytes, elapsed), "info")
+            )
     summary(
         f"RESUMO {kind}",
         rows,
@@ -1048,6 +1214,28 @@ def format_elapsed(seconds):
     if hours:
         return f"{hours} h {minutes:02d} min"
     return f"{minutes} min {sec:02d} s"
+
+
+def format_bytes(size):
+    """Tamanho legível (base 1000): ``312 MB``, ``3.1 MB``, ``850 KB``."""
+    value = max(0.0, float(size))
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if value < 1000 or unit == "TB":
+            if unit == "B":
+                return f"{int(value)} B"
+            return f"{value:.0f} {unit}" if value >= 100 else f"{value:.1f} {unit}"
+        value /= 1000
+    return f"{value:.0f} TB"  # inalcançável; satisfaz o type checker
+
+
+def format_speed(size, seconds):
+    """Velocidade média: ``3.1 MB/s``; vazio se não houver tempo medido."""
+    try:
+        if float(seconds) <= 0:
+            return ""
+        return f"{format_bytes(float(size) / float(seconds))}/s"
+    except (TypeError, ValueError, ZeroDivisionError):
+        return ""
 
 
 def format_clock(seconds):
@@ -1286,7 +1474,6 @@ __all__ = [
     "MIN_WIDTH",
     "NARROW",
     "TqdmLoggingHandler",
-    "banner",
     "bar_gauge",
     "blank",
     "block_char",
@@ -1303,15 +1490,14 @@ __all__ = [
     "info",
     "install_logging",
     "is_narrow",
-    "kv",
     "layout",
     "light_bar_char",
     "ok",
     "print_lock",
     "progress_ncols",
+    "raw_height",
     "raw_width",
     "rule",
-    "section",
     "skip",
     "step",
     "step_inline",

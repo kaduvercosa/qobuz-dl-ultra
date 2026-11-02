@@ -518,6 +518,8 @@ def ler_arquivo(caminho: str) -> dict:
         "letras": _letras(caminho, campos),
         "problemas": _diagnostico(caminho, campos, capas),
         "_sample_rate": getattr(info, "sample_rate", None),
+        "_bits": getattr(info, "bits_per_sample", None),
+        "_bitrate": getattr(info, "bitrate", None),
         "_duracao_s": getattr(info, "length", None),
     }
 

@@ -11,7 +11,6 @@ import asyncio
 import logging
 import os
 import re
-import shutil
 import sys
 import time
 from typing import Any, Optional
@@ -397,7 +396,7 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
         try:
             columns = get_app().output.get_size().columns
         except Exception:
-            columns, _ = shutil.get_terminal_size((80, 24))
+            columns = ui.raw_width()
 
         table_columns = max(32, columns - 2)
 
@@ -494,7 +493,7 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
         try:
             columns = get_app().output.get_size().columns
         except Exception:
-            columns, _ = shutil.get_terminal_size((80, 24))
+            columns = ui.raw_width()
 
         table_columns = max(32, columns - 2)
         # Em terminais estreitos (celulares), reduzir os detalhes do item
@@ -615,7 +614,7 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
             try:
                 term_rows = get_app().output.get_size().rows
             except Exception:
-                _, term_rows = shutil.get_terminal_size((80, 24))
+                term_rows = ui.raw_height()
             info = list_window.render_info
             avail = (
                 info.window_height
@@ -1189,7 +1188,7 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
         try:
             columns = get_app().output.get_size().columns
         except Exception:
-            columns, _ = shutil.get_terminal_size((80, 24))
+            columns = ui.raw_width()
 
         is_table, widths, headers, borders = _get_table_layout(
             max(32, columns - 2),
@@ -1349,7 +1348,7 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
         try:
             columns = get_app().output.get_size().columns
         except Exception:
-            columns, _ = shutil.get_terminal_size((80, 24))
+            columns = ui.raw_width()
         if ui.compact_mode(columns):
             footer_rows = sum(text.count("\n") for _style, text in get_footer_text())
             return Dimension.exact(max(1, footer_rows))
@@ -1376,7 +1375,7 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
         try:
             columns = get_app().output.get_size().columns
         except Exception:
-            columns, _ = shutil.get_terminal_size((80, 24))
+            columns = ui.raw_width()
 
         table_columns = max(32, columns - 2)
 
@@ -1556,6 +1555,48 @@ class QobuzDL:
         bundle = await Bundle.create()
         self.app_id = bundle.get_app_id()
         self.secrets = [secret for secret in bundle.get_secrets().values() if secret]
+
+    async def retry_album(self, album_id, album_dir, track_ids) -> bool:
+        """Repete as faixas `track_ids` de um álbum já baixado (comando `retry`).
+
+        Reusa o download normal de álbum, mas: grava na pasta `album_dir` (a que
+        já existe, não a recalculada pelo folder_format), mexe só nas faixas
+        pedidas e deixa o resumo para quem chamou. Não consulta o banco de
+        "já baixado": o álbum consta lá justamente por ter sido baixado antes.
+        Erros viram log e `False`, como em `download_from_id`.
+        """
+        try:
+            dloader = downloader.Download(
+                self.client,
+                album_id,
+                self.directory,
+                int(self.quality),
+                self.embed_art,
+                self.ignore_singles_eps,
+                self.quality_fallback,
+                self.cover_og_quality,
+                self.no_cover,
+                self.folder_format,
+                self.track_format,
+                self.fetch_lyrics,
+                self.no_lrc_files,
+                self.genius_token,
+                self.no_credits,
+                self.settings,
+                self.downloads_db,
+                booklet_only=self.booklet_only,
+                playlist_as_albums=self.playlist_as_albums,
+            )
+            dloader.force_album_dir = album_dir
+            dloader.only_track_ids = {str(t) for t in track_ids}
+            dloader.suppress_album_summary = True
+            return bool(await dloader.download_id_by_type(False, suppress_header=True))
+        except (httpx.HTTPError, NonStreamable) as e:
+            logger.error(f"{RED}Erro ao repetir o álbum {album_id}: {e}{OFF}")
+        except Exception as e:
+            logger.error(f"{RED}Erro inesperado repetindo o álbum {album_id}: {e}{OFF}")
+            logger.debug("Detalhes do erro inesperado", exc_info=True)
+        return False
 
     async def download_from_id(
         self,

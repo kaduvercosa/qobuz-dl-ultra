@@ -18,9 +18,13 @@ from typing import Any
 from qobuz_dl import ui
 from qobuz_dl.db import get_stats
 
-# Rotulos cujo valor e' longo e deve ser empilhado abaixo do rotulo em
-# telas estreitas em vez de estourar a largura da linha.
-_STACK_ON_NARROW = ("Bit depths", "Sample rates")
+# Largura dos paineis: o mesmo desenhista de caixas do resto do programa
+# (`ui.header`/`ui.emit_box`), com teto proprio; em terminal estreito a caixa
+# encolhe sozinha. Rotulos curtos: abaixo de ~40 colunas o painel limita o
+# rotulo a metade da largura interna.
+_COLS_PAINEL = ui.PAINEL_COLS
+_NOME_MIN = 14  # abaixo disso o nome do artista fica pequeno demais: empilha
+_GLIFO_LISTA = "\u00b7"
 
 
 def _fmt_date(value: Any) -> Any:
@@ -34,99 +38,121 @@ def _fmt_date(value: Any) -> Any:
         return value
 
 
-def _row(label: str, value: Any) -> None:
-    """Generate a table row with columns."""
-    ui.kv(label, value, narrow_stack=label in _STACK_ON_NARROW)
+def _painel(titulo: str, linhas: list, primeiro: bool = False) -> None:
+    """Painel de pares rotulo/valor (um por secao do relatorio)."""
+    ui.header(titulo, linhas, cols=_COLS_PAINEL, lead=primeiro)
+
+
+def _linhas_top_artistas(top: list) -> list:
+    """Linhas do ranking: nome + barra na mesma linha, ou empilhadas se estreito."""
+    inner = ui.box_width(_COLS_PAINEL) - 4
+    peak = top[0][1] or 1
+    largura_contagem = len(str(max(count for _, count in top)))
+    blocos = max(6, min(20, inner // 4))
+    # "NN. " + nome + " " + barra + " " + contagem
+    nome_col = inner - 4 - 1 - blocos - 1 - largura_contagem
+    linhas = []
+    for rank, (artist, count) in enumerate(top, 1):
+        if nome_col >= _NOME_MIN:
+            gauge = ui.bar_gauge(count, peak, max_blocks=blocos)
+            nome = ui.pad_cells(ui.truncate(artist, nome_col), nome_col)
+            linhas.append(f"{rank:>2}. {nome} {gauge} {count}")
+        else:
+            # Nome numa linha, barra recuada na linha de baixo.
+            blocos_estreito = max(3, inner - 4 - 1 - largura_contagem)
+            gauge = ui.bar_gauge(count, peak, max_blocks=min(20, blocos_estreito))
+            linhas.append(f"{rank:>2}. {ui.truncate(artist, inner - 4)}")
+            linhas.append(f"    {gauge} {count}")
+    return linhas
 
 
 def render_stats(db_path: Any, show_all_artists: bool = False) -> int:
     """Imprime o relatorio de estatisticas. Retorna o codigo de saida."""
     stats = get_stats(db_path)
 
-    ui.banner("QOBUZ-DL-ULTRA  \u00b7  ESTAT\u00cdSTICAS")
-
     if not stats or stats.get("total", 0) == 0:
         ui.warn(
             "Nenhum dado encontrado. Comece a baixar para popular as estat\u00edsticas."
         )
-        ui.rule()
         ui.blank()
         return 0
 
     total = stats["total"] or 1
 
     # --- Totais gerais ---
-    ui.section("BIBLIOTECA")
-    _row("Total de downloads", str(stats["total"]))
-    _row("\u00c1lbuns", str(stats["albums"]))
-    _row("Faixas avulsas", str(stats["tracks"]))
-    _row("Artistas \u00fanicos", str(stats["unique_artists"]))
-    _row("\u00c1lbuns \u00fanicos", str(stats["unique_albums"]))
-    ui.blank()
+    _painel(
+        "BIBLIOTECA",
+        [
+            ("Downloads", str(stats["total"])),
+            ("\u00c1lbuns", str(stats["albums"])),
+            ("Avulsas", str(stats["tracks"])),
+            ("Artistas", str(stats["unique_artists"])),
+            ("\u00c1lbuns \u00fanicos", str(stats["unique_albums"])),
+        ],
+        primeiro=True,
+    )
 
     # --- Qualidade ---
-    ui.section("QUALIDADE DE \u00c1UDIO")
     hires_pct = stats["hires"] * 100 // total
     met_pct = stats["quality_met"] * 100 // total
-    _row("Hi-Res (\u226524bit)", f"{stats['hires']}  ({hires_pct}%)")
-    _row("Qualidade solicitada atingida", f"{stats['quality_met']}  ({met_pct}%)")
-    _row("Qualidade reduzida", str(stats["quality_not_met"]))
-
+    qualidade = [
+        ("Hi-Res \u226524bit", f"{stats['hires']}  ({hires_pct}%)"),
+        ("Meta atingida", f"{stats['quality_met']}  ({met_pct}%)"),
+        ("Reduzida", str(stats["quality_not_met"])),
+    ]
     if stats.get("bit_depths"):
         depths = "  /  ".join(
-            f"{k}bit \u2192 {v}" for k, v in list(stats["bit_depths"].items())[:5]
+            f"{k}bit\u2192{v}" for k, v in list(stats["bit_depths"].items())[:5]
         )
-        _row("Bit depths", depths)
-
+        qualidade.append(("Bit depths", depths))
     if stats.get("sample_rates"):
         rates = "  /  ".join(
-            f"{k}kHz \u2192 {v}" for k, v in list(stats["sample_rates"].items())[:5]
+            f"{k}kHz\u2192{v}" for k, v in list(stats["sample_rates"].items())[:5]
         )
-        _row("Sample rates", rates)
-    ui.blank()
+        qualidade.append(("Sample rates", rates))
+    _painel("QUALIDADE DE \u00c1UDIO", qualidade)
 
     # --- Formatos ---
-    ui.section("FORMATOS")
-    for fmt, count in stats["formats"].items():
-        _row(fmt, f"{count}  ({count * 100 // total}%)")
-    ui.blank()
+    _painel(
+        "FORMATOS",
+        [
+            (fmt, f"{count}  ({count * 100 // total}%)")
+            for fmt, count in stats["formats"].items()
+        ],
+    )
 
     # --- Datas ---
     if stats.get("oldest") or stats.get("newest"):
-        ui.section("PER\u00cdODO")
-        _row("Lan\u00e7amento mais antigo", _fmt_date(stats["oldest"]))
-        _row("Lan\u00e7amento mais recente", _fmt_date(stats["newest"]))
-        ui.blank()
+        _painel(
+            "PER\u00cdODO",
+            [
+                ("Mais antigo", _fmt_date(stats["oldest"])),
+                ("Mais recente", _fmt_date(stats["newest"])),
+            ],
+        )
 
     # --- Top artistas ---
     if stats.get("top_artists"):
-        ui.section("TOP ARTISTAS")
-        peak = stats["top_artists"][0][1] or 1
-        narrow = ui.is_narrow()
-        # Coluna do nome dimensionada pela largura real: reserva espaco para
-        # "  NN. ", a barra e o numero, em vez de fixar 32 colunas (que
-        # estourava a linha em terminais de ~72 colunas).
-        blocks = max(6, min(24, ui.width() - 56))
-        name_col = max(12, ui.width() - 6 - blocks - 6)
-        for rank, (artist, count) in enumerate(stats["top_artists"], 1):
-            gauge = ui.bar_gauge(count, peak, max_blocks=blocks)
-            if narrow:
-                # Nome numa linha, barra recuada na linha de baixo.
-                ui.emit(f"  {rank:>2}. {ui.truncate(artist, ui.width() - 6)}")
-                ui.emit(f"      {gauge} {count}")
-            else:
-                name = ui.truncate(artist, name_col)
-                ui.emit(f"  {rank:>2}. {ui.pad_cells(name, name_col)} {gauge} {count}")
-        ui.blank()
+        ui.emit_box(
+            "TOP ARTISTAS",
+            _linhas_top_artistas(stats["top_artists"]),
+            cols=_COLS_PAINEL,
+            lead=False,
+        )
 
     # --- Lista completa de artistas ---
     if show_all_artists:
-        ui.section(f"TODOS OS ARTISTAS ({stats['unique_artists']})")
-        for artist in stats["artist_list"]:
-            ui.emit(f"    \u00b7 {ui.truncate(artist, ui.width() - 6)}")
-        ui.blank()
+        inner = ui.box_width(_COLS_PAINEL) - 4
+        ui.emit_box(
+            f"TODOS OS ARTISTAS ({stats['unique_artists']})",
+            [
+                f"{_GLIFO_LISTA} {ui.truncate(artist, inner - 2)}"
+                for artist in stats["artist_list"]
+            ],
+            cols=_COLS_PAINEL,
+            lead=False,
+        )
 
-    ui.rule()
     if not show_all_artists:
         ui.detail(
             "Dica: use  qobuz-dl stats --artistas  para ver a lista completa.",

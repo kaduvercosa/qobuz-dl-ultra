@@ -17,9 +17,10 @@ from __future__ import annotations
 
 import logging
 import os
-import shutil
 import sys
 from typing import Any
+
+from qobuz_dl import ui
 
 logger = logging.getLogger(__name__)
 
@@ -109,7 +110,7 @@ def _build_application(kind: str):
 
     from qobuz_dl.interactive_ui import _hex_accent, prompt_style
 
-    width = box_width(shutil.get_terminal_size((80, 24)).columns)
+    width = box_width(ui.raw_width())
     app_holder: dict[str, Any] = {}
 
     def _accept(buffer):

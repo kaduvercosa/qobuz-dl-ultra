@@ -1,8 +1,5 @@
 """Exercita os renderizadores internos de _tui_select em todos os modos."""
 
-import os
-import shutil
-
 import pytest
 
 from qobuz_dl import core
@@ -98,11 +95,7 @@ async def test_renderers_fallback_largura_e_texto_longo(monkeypatch):
     monkeypatch.setattr(
         core, "get_app", lambda: (_ for _ in ()).throw(RuntimeError("no app"))
     )
-    monkeypatch.setattr(
-        shutil,
-        "get_terminal_size",
-        lambda *args, **kwargs: os.terminal_size((20, 10)),
-    )
+    monkeypatch.setattr(core.ui, "raw_width", lambda *args, **kwargs: 20)
 
     await core._tui_select(
         "Título muito longo",

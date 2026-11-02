@@ -6,7 +6,11 @@ from unittest.mock import patch
 
 import pytest
 
-from qobuz_dl.paths import DirectoryNotUsable, ensure_directory_ready
+from qobuz_dl.paths import (
+    DirectoryNotUsable,
+    ensure_directory_ready,
+    resolve_library_directory,
+)
 
 # ---------------------------------------------------------------------------
 # DirectoryNotUsable
@@ -145,3 +149,62 @@ def test_write_oserror_sem_strerror_usa_str(tmp_path):
     with patch("qobuz_dl.paths.Path.write_text", side_effect=erro):
         with pytest.raises(DirectoryNotUsable):
             ensure_directory_ready(str(tmp_path))
+
+
+# ---------------------------------------------------------------------------
+# resolve_library_directory -- precedência e compatibilidade iOS
+# ---------------------------------------------------------------------------
+
+
+def test_diretorio_explicito_tem_precedencia_sobre_config(tmp_path):
+    explicit = tmp_path / "explicit"
+    configured = tmp_path / "configured"
+    result = resolve_library_directory(
+        str(explicit), str(configured), home="", ios_home=""
+    )
+    assert result == str(explicit)
+
+
+def test_caminho_relativo_comum_e_absolutizado(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    result = resolve_library_directory("FLAC", home="", ios_home="", windows=False)
+    assert result == str(tmp_path / "FLAC")
+
+
+def test_usa_diretorio_configurado_quando_nao_ha_argumento(tmp_path):
+    configured = tmp_path / "biblioteca"
+    result = resolve_library_directory(None, str(configured), home="", ios_home="")
+    assert result == str(configured)
+
+
+def test_caminho_relativo_ios_vai_para_documents_comportamento_lyrics(tmp_path):
+    home = str(tmp_path / "Containers" / "Data" / "Application" / "APP")
+    result = resolve_library_directory(
+        None, "FLAC", home=home, ios_home="", windows=False
+    )
+    assert result == os.path.join(home, "Documents", "FLAC")
+
+
+def test_caminho_ja_em_documents_ios_e_preservado(tmp_path):
+    home = str(tmp_path / "Containers" / "Data" / "Application" / "APP")
+    expected = os.path.join(home, "Documents", "Minha Biblioteca")
+    result = resolve_library_directory(
+        expected, "outra", home=home, ios_home="", windows=False
+    )
+    assert result == expected
+
+
+def test_ios_home_aplica_base_antes_da_regra_documents(tmp_path):
+    home = str(tmp_path / "Containers" / "Data" / "Application" / "APP")
+    ios_home = str(tmp_path / "File Provider Storage")
+    result = resolve_library_directory(
+        None, "FLAC", home=home, ios_home=ios_home, windows=False
+    )
+    assert result == os.path.join(home, "Documents", "FLAC")
+
+
+def test_windows_prefixo_extended_e_aplicado(tmp_path):
+    result = resolve_library_directory(
+        str(tmp_path), home="", ios_home="", windows=True
+    )
+    assert result.startswith("\\\\?\\")

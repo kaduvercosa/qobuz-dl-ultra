@@ -1,5 +1,4 @@
 import re
-import types
 
 import pytest
 
@@ -108,12 +107,9 @@ def test_aceita_dict_e_tupla():
 
 
 def test_largura_padrao_detecta_terminal(monkeypatch):
-    # Troca só o `shutil` do módulo (e não o global), para não atrapalhar o
-    # próprio pytest, que também chama shutil.get_terminal_size(fallback=...).
-    falso = types.SimpleNamespace(
-        get_terminal_size=lambda *a, **k: types.SimpleNamespace(columns=50)
-    )
-    monkeypatch.setattr(hs, "shutil", falso)
+    # A largura vem de `ui.raw_width` (a mesma do resto do programa); trocá-la
+    # evita depender do TTY real ou do COLUMNS de quem roda o teste.
+    monkeypatch.setattr(hs.ui, "raw_width", lambda *a, **k: 50)
     for linha in hs.render_home(_cmds(), cor=False).splitlines():
         assert hs._largura_visivel(linha) <= 50
 

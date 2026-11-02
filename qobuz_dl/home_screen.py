@@ -17,8 +17,9 @@
 # ============================================================================
 
 import re
-import shutil
 import unicodedata
+
+from qobuz_dl import ui
 
 PROG = "qobuz-dl"
 LARGURA_MAX = 110
@@ -60,6 +61,7 @@ EXEMPLOS = {
     "scan": ("scan [opções] [DIR]", "scan ~/Music --dry-run"),
     "library": ("library [ação] [opções]", "library missing --limit 20"),
     "doctor": ("doctor [--json]", "doctor"),
+    "retry": ("retry [PASTA]", "retry ~/Music"),
     "import-playlist": (
         "import-playlist [-n NOME] [--auto] <URL ou arquivo>",
         'ip lista.csv -n "Meu Mix" --auto',
@@ -340,7 +342,7 @@ def render_aviso_update(
     versão do texto que cabe na largura (completa > média > curta).
     """
     if largura is None:
-        largura = shutil.get_terminal_size((100, 24)).columns
+        largura = ui.raw_width(fallback=(100, 24))
     st = _Estilo(cor, destaque, mudo, reset, negrito)
     marca = st.dest("▲")
     versoes = f"{st.mudo('v' + atual)} → {st.neg(st.dest('v' + nova))}"
@@ -373,7 +375,7 @@ def render_home(
     largura:  largura do terminal (padrão: detecta); nenhuma linha passa dela.
     """
     if largura is None:
-        largura = shutil.get_terminal_size((100, 24)).columns
+        largura = ui.raw_width(fallback=(100, 24))
     largura = max(LARGURA_MIN, largura)
     caixa = min(largura, LARGURA_MAX)
     margem = " " * ((largura - caixa) // 2)
@@ -422,7 +424,7 @@ def render_checks(
     resumo: linha final dentro do painel de resumo.
     """
     if largura is None:
-        largura = shutil.get_terminal_size((100, 24)).columns
+        largura = ui.raw_width(fallback=(100, 24))
     largura = max(LARGURA_MIN, largura)
     caixa = min(largura, LARGURA_MAX)
     margem = " " * ((largura - caixa) // 2)
@@ -625,7 +627,7 @@ def render_ajuda_comando(
     que o próprio parser define (capa, tags, discos...) mantêm o título dele.
     """
     if largura is None:
-        largura = shutil.get_terminal_size((100, 24)).columns
+        largura = ui.raw_width(fallback=(100, 24))
     largura = max(LARGURA_MIN, largura)
     caixa = min(largura, LARGURA_MAX)
     margem = " " * ((largura - caixa) // 2)

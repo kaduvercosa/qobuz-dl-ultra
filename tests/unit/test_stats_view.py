@@ -41,8 +41,12 @@ class TestFmtDate:
 # --------------------------------------------------------------------
 @pytest.fixture
 def capturado(monkeypatch):
-    """Substitui as funções da camada `ui` usadas por render_stats por
-    versões que só registram a chamada, na ordem em que aconteceram."""
+    """Substitui as funcoes da camada `ui` usadas por render_stats por
+    versoes que so registram a chamada, na ordem em que aconteceram.
+
+    `header` guarda (titulo, linhas rotulo/valor); `emit_box` guarda
+    (titulo, linhas de texto). `box_width` e `bar_gauge`/`truncate` rodam de
+    verdade (sao puras e baratas)."""
     chamadas = []
 
     def _fake(nome):
@@ -51,22 +55,27 @@ def capturado(monkeypatch):
 
         return _fn
 
-    for nome in ("banner", "section", "warn", "rule", "blank", "detail", "emit"):
+    for nome in ("warn", "blank", "detail", "emit", "header", "emit_box"):
         monkeypatch.setattr(ui, nome, _fake(nome))
 
-    # kv registra label/value pra facilitar asserção direta, sem precisar
-    # reconstruir a string formatada que ui.kv desenharia na tela.
-    def _fake_kv(label, value, label_width=30, narrow_stack=False):
-        chamadas.append(("kv", (label, value), {}))
-
-    monkeypatch.setattr(ui, "kv", _fake_kv)
-
-    # bar_gauge/truncate são chamadas de verdade (são puras e baratas) --
-    # só is_narrow/width viram controláveis pelo teste.
-    monkeypatch.setattr(ui, "is_narrow", lambda: False)
     monkeypatch.setattr(ui, "width", lambda *a, **k: 100)
+    monkeypatch.setattr(ui, "box_width", lambda cols=None: 76)  # interno: 72
 
     return chamadas
+
+
+def _paineis(chamadas):
+    """{titulo: {rotulo: valor}} dos paineis de pares rotulo/valor."""
+    return {c[1][0]: dict(c[1][1]) for c in chamadas if c[0] == "header"}
+
+
+def _titulos(chamadas):
+    """Titulos de todos os paineis, na ordem em que foram impressos."""
+    return [c[1][0] for c in chamadas if c[0] in ("header", "emit_box")]
+
+
+def _linhas_da_caixa(chamadas, titulo):
+    return next(c[1][1] for c in chamadas if c[0] == "emit_box" and c[1][0] == titulo)
 
 
 def _stats_completo(**overrides):
@@ -105,15 +114,11 @@ class TestRenderStatsSemDados:
         assert codigo == 0
         assert any(c[0] == "warn" for c in capturado)
 
-    def test_sem_dados_nao_tenta_mostrar_secoes_de_qualidade(
-        self, monkeypatch, capturado
-    ):
+    def test_sem_dados_nao_tenta_mostrar_paineis(self, monkeypatch, capturado):
         monkeypatch.setattr(stats_view, "get_stats", lambda db_path: {"total": 0})
         render_stats("qualquer.db")
-        # Não deve nem tentar montar a seção de qualidade/formatos sem
-        # nenhum dado -- confirma que a função sai cedo (early return).
-        secoes = [c[1][0] for c in capturado if c[0] == "section"]
-        assert secoes == []
+        # Sem nenhum dado a funcao sai cedo (early return): nenhum painel.
+        assert _titulos(capturado) == []
 
 
 class TestRenderStatsComDados:
@@ -121,11 +126,10 @@ class TestRenderStatsComDados:
         monkeypatch.setattr(stats_view, "get_stats", lambda db_path: _stats_completo())
         assert render_stats("qualquer.db") == 0
 
-    def test_secoes_esperadas_aparecem(self, monkeypatch, capturado):
+    def test_paineis_esperados_aparecem_na_ordem(self, monkeypatch, capturado):
         monkeypatch.setattr(stats_view, "get_stats", lambda db_path: _stats_completo())
         render_stats("qualquer.db")
-        secoes = [c[1][0] for c in capturado if c[0] == "section"]
-        assert secoes == [
+        assert _titulos(capturado) == [
             "BIBLIOTECA",
             "QUALIDADE DE ÁUDIO",
             "FORMATOS",
@@ -133,48 +137,83 @@ class TestRenderStatsComDados:
             "TOP ARTISTAS",
         ]
 
+    def test_so_o_primeiro_painel_tem_linha_em_branco_antes(
+        self, monkeypatch, capturado
+    ):
+        # Cada caixa ja termina com uma linha em branco: sem "lead" nas demais,
+        # nao ficam duas linhas em branco entre os paineis.
+        monkeypatch.setattr(stats_view, "get_stats", lambda db_path: _stats_completo())
+        render_stats("qualquer.db")
+        leads = [c[2]["lead"] for c in capturado if c[0] in ("header", "emit_box")]
+        assert leads == [True, False, False, False, False]
+
+    def test_totais_da_biblioteca(self, monkeypatch, capturado):
+        monkeypatch.setattr(stats_view, "get_stats", lambda db_path: _stats_completo())
+        render_stats("qualquer.db")
+        biblioteca = _paineis(capturado)["BIBLIOTECA"]
+        assert biblioteca["Downloads"] == "10"
+        assert biblioteca["Álbuns"] == "6"
+        assert biblioteca["Avulsas"] == "4"
+        assert biblioteca["Artistas"] == "3"
+
     def test_percentuais_de_hires_e_qualidade_calculados_certo(
         self, monkeypatch, capturado
     ):
         # hires=4 de total=10 -> 40%; quality_met=8 de 10 -> 80%.
         monkeypatch.setattr(stats_view, "get_stats", lambda db_path: _stats_completo())
         render_stats("qualquer.db")
-        valores_kv = {c[1][0]: c[1][1] for c in capturado if c[0] == "kv"}
-        assert "40%" in valores_kv["Hi-Res (\u226524bit)"]
-        assert "80%" in valores_kv["Qualidade solicitada atingida"]
+        qualidade = _paineis(capturado)["QUALIDADE DE ÁUDIO"]
+        assert "40%" in qualidade["Hi-Res ≥24bit"]
+        assert "80%" in qualidade["Meta atingida"]
+        assert qualidade["Reduzida"] == "2"
+
+    def test_formatos_com_percentual(self, monkeypatch, capturado):
+        monkeypatch.setattr(stats_view, "get_stats", lambda db_path: _stats_completo())
+        render_stats("qualquer.db")
+        formatos = _paineis(capturado)["FORMATOS"]
+        assert formatos == {"FLAC": "8  (80%)", "MP3": "2  (20%)"}
 
     def test_datas_sao_formatadas_para_br(self, monkeypatch, capturado):
         monkeypatch.setattr(stats_view, "get_stats", lambda db_path: _stats_completo())
         render_stats("qualquer.db")
-        valores_kv = {c[1][0]: c[1][1] for c in capturado if c[0] == "kv"}
-        assert valores_kv["Lançamento mais antigo"] == "01/01/2015"
-        assert valores_kv["Lançamento mais recente"] == "15/06/2024"
+        periodo = _paineis(capturado)["PERÍODO"]
+        assert periodo["Mais antigo"] == "01/01/2015"
+        assert periodo["Mais recente"] == "15/06/2024"
 
-    def test_sem_oldest_nem_newest_pula_secao_periodo(self, monkeypatch, capturado):
+    def test_sem_oldest_nem_newest_pula_painel_periodo(self, monkeypatch, capturado):
         stats = _stats_completo(oldest=None, newest=None)
         monkeypatch.setattr(stats_view, "get_stats", lambda db_path: stats)
         render_stats("qualquer.db")
-        secoes = [c[1][0] for c in capturado if c[0] == "section"]
-        assert "PERÍODO" not in secoes
+        assert "PERÍODO" not in _titulos(capturado)
 
-    def test_sem_top_artists_pula_secao(self, monkeypatch, capturado):
+    def test_sem_top_artists_pula_painel(self, monkeypatch, capturado):
         stats = _stats_completo(top_artists=[])
         monkeypatch.setattr(stats_view, "get_stats", lambda db_path: stats)
         render_stats("qualquer.db")
-        secoes = [c[1][0] for c in capturado if c[0] == "section"]
-        assert "TOP ARTISTAS" not in secoes
+        assert "TOP ARTISTAS" not in _titulos(capturado)
 
     def test_sem_bit_depths_nem_sample_rates_pula_essas_linhas(
         self, monkeypatch, capturado
     ):
-        # bit_depths/sample_rates vazios -> os dois `if` de exibição são
+        # bit_depths/sample_rates vazios -> os dois `if` de exibicao sao
         # falsos (nenhum teste existente deixava essas chaves vazias).
         stats = _stats_completo(bit_depths={}, sample_rates={})
         monkeypatch.setattr(stats_view, "get_stats", lambda db_path: stats)
         render_stats("qualquer.db")
-        labels_kv = {c[1][0] for c in capturado if c[0] == "kv"}
-        assert "Bit depths" not in labels_kv
-        assert "Sample rates" not in labels_kv
+        qualidade = _paineis(capturado)["QUALIDADE DE ÁUDIO"]
+        assert "Bit depths" not in qualidade
+        assert "Sample rates" not in qualidade
+
+    def test_bit_depths_e_sample_rates_nao_quebram_no_meio_de_um_item(
+        self, monkeypatch, capturado
+    ):
+        monkeypatch.setattr(stats_view, "get_stats", lambda db_path: _stats_completo())
+        render_stats("qualquer.db")
+        qualidade = _paineis(capturado)["QUALIDADE DE ÁUDIO"]
+        # Sem espacos dentro de cada item ("24bit→4"): a quebra de linha so
+        # pode cair entre os itens, nunca entre o valor e a quantidade.
+        assert qualidade["Bit depths"].startswith("24bit\u21924  /  16bit\u21926")
+        assert "96kHz\u21923" in qualidade["Sample rates"]
 
     def test_dica_de_flag_aparece_so_quando_nao_pediu_todos_os_artistas(
         self, monkeypatch, capturado
@@ -183,15 +222,21 @@ class TestRenderStatsComDados:
         render_stats("qualquer.db", show_all_artists=False)
         assert any(c[0] == "detail" and "--artistas" in str(c[1]) for c in capturado)
 
-    def test_show_all_artists_adiciona_secao_com_a_lista_completa(
+    def test_show_all_artists_adiciona_painel_com_a_lista_completa(
         self, monkeypatch, capturado
     ):
         monkeypatch.setattr(stats_view, "get_stats", lambda db_path: _stats_completo())
         render_stats("qualquer.db", show_all_artists=True)
-        secoes = [c[1][0] for c in capturado if c[0] == "section"]
-        assert any(s.startswith("TODOS OS ARTISTAS") for s in secoes)
-        # E a dica de usar --artistas não deveria aparecer de novo, já
-        # que o usuário já pediu a lista completa.
+        titulos = _titulos(capturado)
+        assert titulos[-1] == "TODOS OS ARTISTAS (3)"
+        linhas = _linhas_da_caixa(capturado, "TODOS OS ARTISTAS (3)")
+        assert [l.split(" ", 1)[1] for l in linhas] == [
+            "Artista A",
+            "Artista B",
+            "Artista C",
+        ]
+        # E a dica de usar --artistas nao deveria aparecer de novo, ja
+        # que o usuario ja pediu a lista completa.
         assert not any(
             c[0] == "detail" and "--artistas" in str(c[1]) for c in capturado
         )
@@ -199,26 +244,47 @@ class TestRenderStatsComDados:
     def test_top_artists_modo_largo_usa_uma_linha_por_artista(
         self, monkeypatch, capturado
     ):
-        monkeypatch.setattr(ui, "is_narrow", lambda: False)
         monkeypatch.setattr(stats_view, "get_stats", lambda db_path: _stats_completo())
         render_stats("qualquer.db")
-        linhas_emit = [c[1][0] for c in capturado if c[0] == "emit"]
-        linhas_com_artista = [l for l in linhas_emit if "Artista A" in l]
+        linhas = _linhas_da_caixa(capturado, "TOP ARTISTAS")
         # Modo largo: nome e barra na MESMA linha (uma linha por artista).
-        assert len(linhas_com_artista) == 1
+        assert len(linhas) == 3
+        assert "Artista A" in linhas[0] and "5" in linhas[0]
 
     def test_top_artists_modo_estreito_usa_duas_linhas_por_artista(
         self, monkeypatch, capturado
     ):
-        monkeypatch.setattr(ui, "is_narrow", lambda: True)
+        # Caixa de 31 colunas (o piso) e contagens grandes: o nome ficaria
+        # menor que o minimo ao lado da barra, entao o ranking empilha.
+        monkeypatch.setattr(ui, "box_width", lambda cols=None: 31)
+        stats = _stats_completo(
+            top_artists=[("Artista A", 123456789), ("Artista B", 5)]
+        )
+        monkeypatch.setattr(stats_view, "get_stats", lambda db_path: stats)
+        render_stats("qualquer.db")
+        linhas = _linhas_da_caixa(capturado, "TOP ARTISTAS")
+        # Modo estreito: nome numa linha, barra recuada na linha seguinte.
+        assert len(linhas) == 4
+        assert "Artista A" in linhas[0] and "Artista A" not in linhas[1]
+        assert linhas[1].startswith("    ") and linhas[1].rstrip().endswith("123456789")
+
+    def test_no_piso_de_largura_com_contagem_curta_ainda_cabe_numa_linha(
+        self, monkeypatch, capturado
+    ):
+        monkeypatch.setattr(ui, "box_width", lambda cols=None: 31)
         monkeypatch.setattr(stats_view, "get_stats", lambda db_path: _stats_completo())
         render_stats("qualquer.db")
-        linhas_emit = [c[1][0] for c in capturado if c[0] == "emit"]
-        linhas_com_artista = [l for l in linhas_emit if "Artista A" in l]
-        # Modo estreito: nome numa linha, barra recuada na linha seguinte.
-        assert len(linhas_com_artista) == 1  # a linha com o NOME
-        # E deve existir uma linha logo depois só com a barra/contagem
-        # (não contém o nome do artista).
-        idx = linhas_emit.index(linhas_com_artista[0])
-        assert idx + 1 < len(linhas_emit)
-        assert "Artista A" not in linhas_emit[idx + 1]
+        assert len(_linhas_da_caixa(capturado, "TOP ARTISTAS")) == 3
+
+    def test_nenhuma_linha_do_ranking_passa_da_largura_interna(
+        self, monkeypatch, capturado
+    ):
+        longo = "Artista Com Um Nome Extremamente Longo Que Nao Cabe Na Tela"
+        stats = _stats_completo(top_artists=[(longo, 1234), ("Curto", 7)])
+        monkeypatch.setattr(stats_view, "get_stats", lambda db_path: stats)
+        for caixa in (76, 48, 31):
+            capturado.clear()
+            monkeypatch.setattr(ui, "box_width", lambda cols=None, n=caixa: n)
+            render_stats("qualquer.db")
+            for linha in _linhas_da_caixa(capturado, "TOP ARTISTAS"):
+                assert ui._cell_width(linha) <= caixa - 4, (caixa, linha)

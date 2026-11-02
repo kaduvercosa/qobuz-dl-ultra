@@ -151,11 +151,18 @@ async def test_numero_de_workers_tem_teto(rodar):
     assert engine.pico <= 3
 
 
-async def test_falha_em_um_arquivo_cancela_o_resto_e_fecha_a_engine(rodar):
+async def test_falha_em_um_arquivo_nao_derruba_o_resto_e_fecha_a_engine(rodar):
+    """Um arquivo que dá erro vira FALHA no relatório; os demais são processados."""
     engine = _Engine(atraso=0.05, falha_em="f2.flac")
-    with pytest.raises(RuntimeError, match="f2.flac"):
-        await rodar(engine, max_workers=3)
+    await rodar(engine, max_workers=3)
+
     assert engine.fechada
+    assert sorted(engine.ordem) == NOMES  # nenhum arquivo foi abandonado
+    # o relatório mantém os 6 blocos, na ordem dos arquivos
+    assert rodar.indices() == [str(n) for n in range(1, len(NOMES) + 1)]
+    texto = " ".join(re.sub(r"\x1b\[[0-9;]*m", "", "\n".join(rodar.saida)).split())
+    assert "as próximas continuam: falhou em f2.flac" in texto
+    assert texto.count("as próximas continuam") == 1  # só o f2 falhou por erro
     # nenhuma tarefa ficou solta depois do erro
     pendentes = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
     assert pendentes == []
@@ -190,3 +197,38 @@ def test_max_workers_das_configuracoes_chega_ao_limite_das_letras(valor, esperad
 
     config = QobuzDLSettings(max_workers=valor)
     assert rt._lyrics_workers(config) == esperado
+
+
+async def test_blocos_agrupados_por_album_em_ordem_mesmo_em_paralelo(
+    rodar, monkeypatch, tmp_path
+):
+    # f1..f3 numa pasta (álbum Alfa), f4..f6 em outra (álbum Beta).
+    for nome in NOMES:
+        (tmp_path / nome).unlink()
+    for i, nome in enumerate(NOMES):
+        pasta = tmp_path / ("alfa" if i < 3 else "beta")
+        pasta.mkdir(exist_ok=True)
+        (pasta / nome).write_bytes(b"x")
+
+    monkeypatch.setattr(
+        rt,
+        "FLAC",
+        lambda p: {
+            "TITLE": [os.path.splitext(os.path.basename(p))[0]],
+            "ARTIST": ["A"],
+            "ALBUM": ["Alfa" if int(os.path.basename(p)[1]) <= 3 else "Beta"],
+        },
+    )
+
+    class _Invertido(_Engine):
+        def fetch_and_inject(self, **kw):
+            n = int(os.path.basename(kw["file_path"])[1])
+            self.atraso = 0.05 * (7 - n)
+            return super().fetch_and_inject(**kw)
+
+    await rodar(_Invertido(), max_workers=3)
+    texto = "\n".join(rodar.saida)
+    assert texto.count("ÁLBUM") == 2
+    assert texto.index("Alfa") < texto.index("f1") < texto.index("Beta")
+    assert texto.index("Beta") < texto.index("f4")
+    assert rodar.nomes_no_relatorio() == [n[:-5] for n in NOMES]

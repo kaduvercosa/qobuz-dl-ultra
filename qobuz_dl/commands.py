@@ -6,8 +6,8 @@
 
 import argparse
 import os
-import shutil
 
+from qobuz_dl import ui
 from qobuz_dl.color import ANSI_BOLD
 from qobuz_dl.color import RESET as OFF
 
@@ -20,7 +20,7 @@ class CustomHelpFormatter(argparse.RawTextHelpFormatter):
     def __init__(self, prog, indent_increment=2, max_help_position=50, width=None):
         """Initialize formatter with terminal-aware width calculation."""
         try:
-            term_width = shutil.get_terminal_size((100, 24)).columns
+            term_width = ui.raw_width(fallback=(100, 24))
             width = term_width
         except Exception:
             width = 100
@@ -54,7 +54,6 @@ class ColoredArgumentParser(argparse.ArgumentParser):
 
     # Ajuda em painéis ------------------------------------------------------
     def _ajuda_em_paineis(self):
-        from qobuz_dl import ui
         from qobuz_dl.color import HIGHLIGHT, MUTED
         from qobuz_dl.home_screen import EXEMPLOS, render_ajuda_comando
 
@@ -1205,6 +1204,11 @@ def inspect_args(subparsers):
         help="resume todas as faixas da pasta (formato, qualidade, capa, problemas) sem abrir o navegador",
     )
     inspect.add_argument(
+        "--auditar",
+        action="store_true",
+        help="com PASTA: confere se o nome da pasta e o comentário de cada arquivo batem com a qualidade real do áudio (só leitura; implica --resumo)",
+    )
+    inspect.add_argument(
         "--json",
         action="store_true",
         help="imprime só o JSON do relatório (para scripts); com PASTA, o resumo dela",
@@ -1231,6 +1235,34 @@ def inspect_args(subparsers):
 # ----------------------------------------------------------------------------
 # Subcomando: "sync-favorites" (alias: "sf")  -- portado da ideia do libsync
 # ----------------------------------------------------------------------------
+def retry_args(subparsers, default_folder=None):
+    """Define the 'retry' subcommand and its arguments."""
+    retry = subparsers.add_parser(
+        "retry",
+        usage="qobuz-dl retry [PASTA]",
+        description=(
+            "Repete as faixas que ficaram pendentes em álbuns já baixados: as "
+            "puladas por indisponibilidade ou erro de API e as que falharam. A "
+            "lista vem do .report.json de cada álbum, então só funciona em "
+            "pastas baixadas por esta versão (as sem .report.json são "
+            "ignoradas). As faixas voltam para a mesma pasta; o que já estava "
+            "baixado não é tocado."
+        ),
+        help="repete as faixas puladas ou que falharam em álbuns já baixados",
+    )
+    retry.add_argument(
+        "DIR",
+        nargs="?",
+        default=default_folder,
+        metavar="PASTA",
+        help=(
+            "pasta com os álbuns (procura em todas as subpastas); padrão: a "
+            "pasta de downloads do config.ini"
+        ),
+    )
+    return retry
+
+
 def sync_favorites_args(subparsers):
     """Define the 'sync-favorites' subcommand and its arguments."""
     sf = subparsers.add_parser(
@@ -1702,6 +1734,7 @@ def qobuz_dl_args(default_quality=6, default_limit=20, default_folder=None):
     stats = stats_args(subparsers)
     inspect_cmd = inspect_args(subparsers)
     auth_cmd = auth_args(subparsers)
+    retry_cmd = retry_args(subparsers, default_folder=default_folder)
     sync_fav_cmd = sync_favorites_args(subparsers)
     artists_cmd = artist_review_args(subparsers)
     scan_cmd = scan_args(subparsers)
@@ -1723,6 +1756,7 @@ def qobuz_dl_args(default_quality=6, default_limit=20, default_folder=None):
         stats,
         inspect_cmd,
         auth_cmd,
+        retry_cmd,
         sync_fav_cmd,
         artists_cmd,
         scan_cmd,

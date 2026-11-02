@@ -57,3 +57,97 @@ def test_config_dir_isolado_de_verdade(dir_config_temp, monkeypatch, capsys):
     assert os.environ.get("CONFIG_DIR") == str(dir_config_temp)
     saida = _rodar(["stats"], 80, dir_config_temp, monkeypatch, capsys)
     assert saida.strip(), "o comando `stats` nao imprimiu nada -- teste inutil"
+
+
+def _shutil_falso(monkeypatch, ui, get_terminal_size):
+    """Troca o `shutil` SÓ dentro do `ui` (o módulo, não o objeto global).
+
+    `ui.shutil` é o mesmo módulo que o pytest usa para medir o terminal ao
+    escrever a barra de progresso; trocar `ui.shutil.get_terminal_size` faz o
+    próprio pytest chamar a versão falsa e, se ela levantar erro, dá
+    INTERNALERROR no modo `-v`. Trocar o atributo `shutil` do `ui` isola o teste.
+    """
+    import types
+
+    monkeypatch.setattr(
+        ui, "shutil", types.SimpleNamespace(get_terminal_size=get_terminal_size)
+    )
+
+
+def _sem_tty_nem_columns(monkeypatch):
+    from qobuz_dl import ui
+
+    def _sem_terminal(*args, **kwargs):
+        raise OSError("sem tty")
+
+    monkeypatch.delenv("COLUMNS", raising=False)
+    monkeypatch.setattr(ui.os, "get_terminal_size", _sem_terminal)
+    return ui
+
+
+def test_raw_width_usa_o_fallback_pedido(monkeypatch):
+    ui = _sem_tty_nem_columns(monkeypatch)
+    _shutil_falso(monkeypatch, ui, lambda fallback: os.terminal_size(fallback))
+    assert ui.raw_width() == 80
+    assert ui.raw_width(fallback=(100, 24)) == 100
+
+
+def test_raw_width_devolve_o_fallback_pedido_se_tudo_falhar(monkeypatch):
+    ui = _sem_tty_nem_columns(monkeypatch)
+
+    def _explode(*args, **kwargs):
+        raise RuntimeError("sem terminal")
+
+    _shutil_falso(monkeypatch, ui, _explode)
+    assert ui.raw_width(fallback=(100, 24)) == 100
+
+
+def _sem_tty_nem_linhas(monkeypatch):
+    ui = _sem_tty_nem_columns(monkeypatch)
+    monkeypatch.delenv("LINES", raising=False)
+    return ui
+
+
+def test_raw_height_usa_lines_quando_nao_ha_tty(monkeypatch):
+    ui = _sem_tty_nem_linhas(monkeypatch)
+    monkeypatch.setenv("LINES", "37")
+    assert ui.raw_height() == 37
+
+
+@pytest.mark.parametrize("valor", ["0", "-5", "abc"])
+def test_raw_height_ignora_lines_invalido(valor, monkeypatch):
+    ui = _sem_tty_nem_linhas(monkeypatch)
+    monkeypatch.setenv("LINES", valor)
+    _shutil_falso(monkeypatch, ui, lambda fallback: os.terminal_size(fallback))
+    assert ui.raw_height(fallback=(100, 31)) == 31
+
+
+def test_raw_height_devolve_o_fallback_se_tudo_falhar(monkeypatch):
+    ui = _sem_tty_nem_linhas(monkeypatch)
+
+    def _explode(*args, **kwargs):
+        raise RuntimeError("sem terminal")
+
+    _shutil_falso(monkeypatch, ui, _explode)
+    assert ui.raw_height(fallback=(100, 31)) == 31
+
+
+def test_so_o_ui_le_o_tamanho_do_terminal():
+    """Teste-guarda: largura/altura vêm de `ui.raw_width()`/`ui.raw_height()`.
+
+    Uma tela que chama `shutil.get_terminal_size` ou `os.get_terminal_size`
+    por conta própria ignora o `COLUMNS`/`LINES` e o fallback do `ui`, e nos
+    testes sai com a largura errada.
+    """
+    import ast
+    from pathlib import Path
+
+    pacote = Path(__file__).resolve().parents[2] / "qobuz_dl"
+    achados = []
+    for arquivo in sorted(pacote.glob("*.py")):
+        if arquivo.name == "ui.py":
+            continue
+        for no in ast.walk(ast.parse(arquivo.read_text(encoding="utf-8"))):
+            if isinstance(no, ast.Attribute) and no.attr == "get_terminal_size":
+                achados.append(f"{arquivo.name}:{no.lineno}")
+    assert not achados, "use ui.raw_width()/ui.raw_height():\n  " + "\n  ".join(achados)

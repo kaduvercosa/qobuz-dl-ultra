@@ -7,7 +7,6 @@ ganhar as flags esperadas).
 """
 
 import io
-import os
 
 import pytest
 
@@ -39,33 +38,34 @@ class TestDefaultDownloadFolder:
 # --------------------------------------------------------------------
 class TestCustomHelpFormatter:
     def test_usa_a_largura_do_terminal_quando_disponivel(self, monkeypatch):
-        import shutil
+        from qobuz_dl import ui
 
-        # NOTA: shutil.get_terminal_size() de verdade devolve um
-        # os.terminal_size (com atributo .columns), não uma tupla simples
-        # -- um mock que devolva só (120, 40) faria .columns falhar e
-        # cair silenciosamente no `except Exception` do próprio código
-        # (que existe pra tratar ambiente sem terminal), mascarando o
-        # teste.
-        monkeypatch.setattr(
-            shutil,
-            "get_terminal_size",
-            lambda fallback=(100, 24): os.terminal_size((120, 40)),
-        )
+        # A largura vem de `ui.raw_width` (a mesma do resto do programa).
+        monkeypatch.setattr(ui, "raw_width", lambda fallback=(100, 24): 120)
         formatter = CustomHelpFormatter(prog="qobuz-dl")
         assert formatter._width == 120
 
-    def test_cai_pro_fallback_100_se_get_terminal_size_falhar(self, monkeypatch):
-        import shutil
+    def test_pede_o_fallback_100_colunas_ao_ui(self, monkeypatch):
+        from qobuz_dl import ui
 
-        original = shutil.get_terminal_size
+        pedidos = []
 
-        def _explode_so_para_100_24(*args, **kwargs):
-            if args == ((100, 24),):
-                raise OSError("sem terminal")
-            return original(*args, **kwargs)
+        def _largura(fallback=(80, 24)):
+            pedidos.append(fallback)
+            return fallback[0]
 
-        monkeypatch.setattr(shutil, "get_terminal_size", _explode_so_para_100_24)
+        monkeypatch.setattr(ui, "raw_width", _largura)
+        formatter = CustomHelpFormatter(prog="qobuz-dl")
+        assert pedidos == [(100, 24)]
+        assert formatter._width == 100
+
+    def test_cai_pro_fallback_100_se_a_largura_falhar(self, monkeypatch):
+        from qobuz_dl import ui
+
+        def _explode(*args, **kwargs):
+            raise OSError("sem terminal")
+
+        monkeypatch.setattr(ui, "raw_width", _explode)
         formatter = CustomHelpFormatter(prog="qobuz-dl")
         assert formatter._width == 100
 
@@ -98,12 +98,21 @@ class TestParserPrincipal:
             "sync-playlist": ["https://play.qobuz.com/playlist/12345"],
             "stats": [],
             "inspect": [],
+            "retry": [],
             "auth": [],
             "user": [],
         }
         for comando, args_extra in minimos.items():
             resultado = parser.parse_args([comando, *args_extra])
             assert resultado.command == comando, f"subcomando '{comando}' não registrou"
+
+    def test_retry_aceita_pasta_opcional(self, parser):
+        assert parser.parse_args(["retry"]).DIR == "MinhaMusica"  # pasta do config
+        assert parser.parse_args(["retry", "/musica"]).DIR == "/musica"
+
+    def test_inspect_auditar(self, parser):
+        assert parser.parse_args(["inspect", "/musica"]).auditar is False
+        assert parser.parse_args(["inspect", "/musica", "--auditar"]).auditar is True
 
     def test_tags_multi_tags_e_no_multi_tags(self, parser):
         sem_flag = parser.parse_args(["tags"])

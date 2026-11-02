@@ -48,6 +48,16 @@ publicar, renomeie a seção para a nova versão e a data.
 - `tests/unit/test_excecoes_silenciosas.py`: falha se um `except` que só faz
   `pass`/`continue` não tiver um comentário com o motivo.
 - Workflow `mypy-baseline.yml` para gerar o `mypy-baseline.txt` uma única vez.
+- Comando `retry [PASTA]`: repete as faixas puladas (indisponíveis ou erro de API) e as que
+  falharam em álbuns já baixados. A lista vem do `.report.json` de cada álbum; as faixas
+  voltam para a mesma pasta (mesmo que o `folder_format` tenha mudado) e o que já estava
+  baixado não é tocado. Os `.missing.txt` das que baixaram são apagados. Pastas sem
+  `.report.json` ficam de fora.
+- `inspect PASTA --auditar` (implica `--resumo`, só leitura): confere se o nome da pasta
+  (`[FLAC 24]`) e o comentário de cada arquivo batem com o áudio real e sugere o `tags` para
+  corrigir os comentários. Com `--json`, a auditoria vai no campo `auditoria`.
+- Resumo de álbum mostra `Tamanho baixado` e `Velocidade média` (a velocidade é a média do
+  álbum inteiro, incluindo tags e capa).
 
 ### Alterado
 - Resumo de fim de download (álbum, playlist, playlist importada e lote de faixas) ganhou a
@@ -93,7 +103,42 @@ publicar, renomeie a seção para a nova versão e a data.
 - Cobertura mínima unificada em **60%** no `pyproject.toml`, no `codecov.yml` e
   no `tests.yml` (antes: 75% nos dois primeiros e 60% no CI).
 
+- Largura do terminal unificada: `core`, `commands`, `home_screen`, `search_prompt` e
+  `retro_tagger` usam `ui.raw_width()`/`ui.width()` em vez de `shutil.get_terminal_size`
+  (`ui.raw_width` ganhou o parâmetro `fallback`; a ajuda dos comandos e a tela inicial
+  seguem com 100 colunas quando nada informa a largura). Os relatórios retroativos
+  (`lyrics` e `tags`) usam `ui.report_width()` (60 a 120 colunas), e as quebras de linha
+  rotuladas/recuadas vieram para `ui.labeled_lines` e `ui.wrap_indented`, antes
+  duplicadas em `retro_tagger.py` e `retro_tags.py`.
+- `tags`: o cabeçalho de cada álbum agora é a mesma caixa "ÁLBUM" do `lyrics`
+  (`ui.header`, largura `ui.ALBUM_BOX_COLS`), com título, artista, tipo, faixas e como a
+  capa Apple do álbum foi decidida, no lugar da linha `== Título -- Artista | ... ====`.
+- `stats`: o relatório sai em painéis (`ui.header`/`ui.emit_box`: BIBLIOTECA, QUALIDADE DE
+  ÁUDIO, FORMATOS, PERÍODO e TOP ARTISTAS) no lugar do banner e dos pares `rótulo: valor`;
+  os rótulos ficaram curtos para caber em terminais estreitos. `ui.emit_box` e
+  `ui.header` ganharam `lead=False` para encadear painéis sem duas linhas em branco.
+- `inspect` (arquivo, pasta e auditoria) e `library`/`scan`/`sync-favorites` também saem em
+  painéis, no lugar de `====` e `rótulo: valor`. Nova classe `ui.Painel` (kv, ok, warn,
+  error, info, text, detail, rule; sai numa escrita só, largura `ui.PAINEL_COLS`) e
+  `ui.summary(..., lead=False)`. As listagens `library list/missing/history` seguem com uma
+  linha por álbum, para uso com `grep` e pipes.
+- `ui.banner`, `ui.section` e `ui.kv` foram removidos: depois da conversão das telas em
+  painéis nenhum comando os usava mais (use `ui.Painel`, `ui.header` ou `ui.summary`).
+  `ui.center_cells` e `ui.is_narrow` seguem no módulo, hoje sem uso fora dos testes.
+- `Download` declara `force_album_dir`, `only_track_ids` e `suppress_album_summary` (usados
+  pelo `retry`), em vez de atribuí-los de fora sem declaração.
+
 ### Corrigido
+- Busca no catálogo (`search_albums`/`tracks`/`playlists`/`artists`): quando a API falhava
+  (token vencido, rede fora), o erro era engolido e a busca parecia "sem resultados". O
+  retorno continua `{}`, mas agora sai um aviso com o tipo e a causa do erro (o traço
+  completo vai para o nível DEBUG). Os quatro métodos passaram a dividir o `Client._search`.
+- Falhas ao buscar o JSON de letras do Qobuz e ao ler/gravar no keyring ficam registradas
+  no nível DEBUG (antes eram silenciosas); o valor da credencial nunca vai para o log.
+- `download_release`: um cancelamento antes da medição de bytes fazia o resumo final
+  estourar `UnboundLocalError` (`_bytes_baixados`) e esconder o `CancelledError`.
+- Download de álbum: uma faixa que falhava (abortada, sem URL ou falha na verificação de integridade) podia ser reportada como sucesso por reutilização do resultado de outra faixa. A implementação atual preserva o resultado por chamada (`outcome_out`), evitando estado compartilhado entre faixas paralelas; qualquer retorno diferente de `True` conta como falha, exceto "pulada".
+- `ui.summary_downloads`: o padrão de `elapsed` é `None`; uma chamada sem esse valor não mostra "Tempo total 0.0 s".
 - Download em paralelo (a-Shell, `--max-workers 5`): o terminal não trava mais numa
   faixa enquanto a pasta já mostra tudo baixado. A busca de letras rodava com o
   `print_lock` preso e, com uma fonte em limite de requisições (429), dormia até 60 s por
@@ -108,6 +153,37 @@ publicar, renomeie a seção para a nova versão e a data.
   o cliente falso não tinha `get_user_playlists` e um handler de log deixado por
   outro teste jogava o aviso na saída capturada. O cliente falso foi completado e
   o `conftest.py` ganhou um fixture que desfaz o `ui.install_logging()` de cada teste.
+
+### Removido
+- `tests/regression/test_dependencias.py`: cópia antiga (usava subprocesso, que trava no
+  a-Shell) do `tests/unit/test_dependencias.py`, que já cobre os mesmos 13 testes e mais
+  os extras `dev-full`.
+- `tests/unit/test_qopy_respx.py`: cópia idêntica de `tests/network/test_qopy_respx.py`
+  (fica só a da pasta `network`).
+
+### Manutenção
+- Largura e altura do terminal só por `ui.raw_width()`/`ui.raw_height()` (esta é nova):
+  `color.accent_preview`, a lista do `artists` e a altura da tabela do modo interativo
+  não chamam mais `shutil.get_terminal_size`; o teste-guarda
+  `test_so_o_ui_le_o_tamanho_do_terminal` impede a volta.
+- `tests/conftest.py`: `prompt_toolkit.PromptSession()` sem `input=`/`output=` agora falha
+  com mensagem clara dentro dos testes (no a-Shell abrir o terminal real derruba o runtime
+  com segfault), e `library_cmd._interactive()` é falso por padrão. Testes novos em
+  `tests/unit/test_guarda_prompt.py`.
+- Testes alinhados ao código atual: `_config_directory_if_exists` (`cli`), `outcome_out`
+  por chamada (`test_downloader_outcome.py`), erro por faixa no `retro_tagger` (vira FALHA
+  no relatório e as demais continuam) e o guarda de `except` silencioso, que aceita por
+  nome de função as duas rotinas best-effort de `download_utils.py` já documentadas.
+- `retry_missing.py`: removido o teste de tipo redundante sobre o retorno de
+  `_load_report` (sempre `dict`), apontado pelo mypy.
+- `pyproject.toml`: `httpx` duplicado saiu da lista de dependências (`httpx[http2]` já
+  instala o `httpx`); `requirements.txt` regenerado.
+- CI (`tests.yml`): o resumo de falhas enviado por e-mail usa um delimitador aleatório em
+  vez de `EOF` fixo, para um log com uma linha `EOF` não quebrar o `GITHUB_OUTPUT`.
+- Referências a `tests/regression/test_dependencias.py` (Dockerfile, dependabot, SKILL.md)
+  apontam agora para `tests/unit/test_dependencias.py`.
+- `todo.md` e `SKILL.md` atualizados: o bloco de capas Apple já saiu de `utils.py` e a
+  cobertura mínima já é 60% nos três lugares.
 
 ## [2.6.5.5] - 2026-10-23
 

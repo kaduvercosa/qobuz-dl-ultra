@@ -169,7 +169,9 @@ def _keyring_save(key: str, value: str) -> bool:
     try:
         keyring.set_password(KEYRING_SERVICE, key, value)
         return True
-    except Exception:
+    except Exception as exc:
+        # Só o nome da chave e o tipo do erro: nunca o valor da credencial.
+        logger.debug("Keyring indisponível ao gravar '%s': %s", key, type(exc).__name__)
         return False
 
 
@@ -177,7 +179,8 @@ def _keyring_load(key: str):
     """Retrieve a credential from the OS keyring. Returns None if not found or on error."""
     try:
         return keyring.get_password(KEYRING_SERVICE, key)
-    except Exception:
+    except Exception as exc:
+        logger.debug("Keyring indisponível ao ler '%s': %s", key, type(exc).__name__)
         return None
 
 
@@ -1445,6 +1448,7 @@ async def _handle_commands(qobuz: QobuzDL, arguments):
         "ip",
         "sync-favorites",
         "sf",
+        "retry",
     }
 
     if arguments.command in DOWNLOAD_COMMANDS or arguments.command is None:
@@ -1464,6 +1468,13 @@ async def _handle_commands(qobuz: QobuzDL, arguments):
                 playlist_root(qobuz.directory),
                 auto_confirm=arguments.yes,
             )
+        elif arguments.command == "retry":
+            from qobuz_dl.retry_missing import run_retry
+
+            retry_root = getattr(arguments, "DIR", None) or qobuz.directory
+            rc = await run_retry(qobuz, retry_root)
+            if rc:
+                sys.exit(rc)
         elif arguments.command in ("sync-favorites", "sf"):
             from qobuz_dl.library_cmd import cmd_sync_favorites
 
@@ -1594,6 +1605,7 @@ _COMMAND_DESCRIPTIONS_PT = {
     "organize": "Reaplica folder_format/track_format aos arquivos existentes, sem rede; use --dry-run para revisar e --undo para restaurar a organização anterior.",
     "doctor": "Diagnostica ambiente, config, bancos e sentinelas (somente leitura).",
     "import-playlist": "Importa um arquivo de playlist (TXT, CSV, JSON) de qualquer plataforma para download.",
+    "retry": "Repete as faixas puladas ou que falharam em álbuns já baixados, na mesma pasta (usa o .report.json de cada álbum).",
     "stats": "Mostra estatísticas detalhadas sobre sua biblioteca e downloads efetuados.",
     "inspect": "Mostra tudo de uma faixa local: dados técnicos, tags por assunto, capas, letras, diagnóstico e autenticidade (ou resume uma pasta).",
     "auth": "Mostra a conta e a assinatura (perfil, plano, limites; --json traz o bruto) ou atualiza e-mail e token com -l. Também responde por user, account, profile, me e info.",
@@ -1948,6 +1960,7 @@ async def async_main():
                 getattr(offline_args, "caminho", None) or _config_directory_if_exists(),
                 json_saida=bool(getattr(offline_args, "json", False)),
                 resumo=bool(getattr(offline_args, "resumo", False)),
+                auditar=bool(getattr(offline_args, "auditar", False)),
                 completo=bool(getattr(offline_args, "completo", False)),
                 espectro=not getattr(offline_args, "sem_espectro", False),
             )

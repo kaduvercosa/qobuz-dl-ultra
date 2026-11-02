@@ -1,8 +1,5 @@
 """Testes unitários para os caminhos interativos de core.py."""
 
-import os
-import shutil
-
 import pytest
 
 from qobuz_dl import core
@@ -209,10 +206,6 @@ async def test_tui_header_fallback_terminal(monkeypatch):
     monkeypatch.setattr(
         core, "get_app", lambda: (_ for _ in ()).throw(RuntimeError("sem app"))
     )
-    monkeypatch.setattr(
-        shutil,
-        "get_terminal_size",
-        lambda *args, **kwargs: os.terminal_size((80, 24)),
-    )
+    monkeypatch.setattr(core.ui, "raw_width", lambda *args, **kwargs: 80)
 
     await core._tui_select("Título", ["a"], item_category="filter")

@@ -5,7 +5,7 @@ description: Guia completo do projeto qobuz-dl-ultra (fork em Python do qobuz-dl
 
 # QOBUZ-DL-ULTRA — guia do projeto (SKILL.md)
 
-> **Última revisão:** versão do pacote `2.6.5.5` · atualizado em 2026-10-23.
+> **Última revisão:** versão do pacote `2.6.7.5` · atualizado em 2026-11-01.
 > Idioma do projeto: **português do Brasil** (código-fonte, comentários, mensagens, README, commits e testes).
 
 ---
@@ -61,7 +61,7 @@ qobuz-dl-ultra/
 ├── setup.py             # shim mínimo (não duplicar dependências — há teste que garante)
 ├── requirements.txt     # ESPELHO gerado do pyproject (tools/gerar_requirements.py)
 ├── Dockerfile           # python:3.12-slim + ffmpeg; entrypoint `python -m qobuz_dl`
-├── check_audio.py       # utilitário solto de verificação de áudio (raiz)
+├── MERGE_NOTES.md · README-SINCRONIZACAO.md · aplicar_patch.py · corrigir_teste_banda.py · cascata-letras.patch   # soltos na raiz (ver §11)
 ├── MANIFEST.in          # inclui README, LICENSE, requirements.txt
 ├── todo.md              # pendências abertas (reescrito em 2026-10-13; antes falava da GUI removida)
 ├── codecov.yml · .pre-commit-config.yaml · .dockerignore · .gitignore
@@ -125,21 +125,23 @@ Tamanhos aproximados em linhas. **“Mexa aqui quando…”** é o atalho para a
 | `artist_checklist.py` | tela de `artists` no estilo do modo interativo: `ChecklistState` (cursor, marcados, desfazer, marcar todos, ordem novos primeiro, busca sem acento, filtro, tela de detalhe, `request_confirm` em dois passos para desfazer), `table_layout`/`header_fragments`/`list_fragments`/`detail_fragments` (tabela ┌─┬─┐ ou cartões em tela estreita; sem prompt_toolkit, testáveis), `roster_lines`/`release_lines` (tabelas em texto) e `run_checklist` (prompt_toolkit, teclado e toque) | lista com checkbox |
 | `library_scan.py` (~820) | `scan`: casa pastas do disco com o catálogo (auto / revisar / sem-match) | casamento pasta ↔ álbum |
 | `favorites_sync.py` | `sync-favorites`: conta Qobuz ⇄ catálogo local (diff, histórico, baixar o que falta) | favoritos |
-| `library_cmd.py` | Terminal dos comandos `sync-favorites`, `scan`, `library` (cada `cmd_*` devolve **código de saída**, não chama `sys.exit`) | UX desses comandos |
+| `library_cmd.py` | Terminal dos comandos `sync-favorites`, `scan`, `library` (cada `cmd_*` devolve **código de saída**, não chama `sys.exit`). Telas em painéis (`ui.Painel`: cabeçalho, RESULTADO, REVISÃO MANUAL, favoritos novos/removidos com `_LISTA_MAX` = 20 por painel, menu de download); as listagens `library list`/`missing`/`history` ficam em **uma linha por álbum** (de propósito, para `grep`/pipes) | UX desses comandos |
+| `retry_missing.py` | `retry`: repete faixas puladas/falhas de álbuns já baixados, lendo o `.report.json` de cada pasta (pastas sem ele são ignoradas; só relatórios de `tipo = "album"`) | retentativa |
+| `library_organizer.py` | `organize`/`rename`: reaplica os formatos de pasta/faixa aos arquivos locais, sem consultar o Qobuz nem mexer em áudio/tags; prévia (`--dry-run`) e `--undo` por journal | reorganizar a biblioteca |
 | `sentinel.py` | Sentinela por álbum **`.streamrip.json`** (nome herdado do libsync de propósito): dedup pelo sistema de arquivos | dedup por pasta |
 | `sync.py` | `--sync-db` (reconstrói o banco varrendo a biblioteca) e `--find-duplicates` (fingerprint Chromaprint/AcoustID) | reconstruir banco / duplicatas |
 | `postprocess.py` | Relatório de downloads: **`.report.json` oculto** (fonte da verdade, sob lock por pasta), `report.html` gerado na finalização, `collection_index.jsonl`, `Tracklist.txt` | relatório pós-download |
 | `report_viewer.py` | Gera página HTML autônoma (estética “Nothing”) a partir do `.report.json` | visual do relatório |
 | `watcher.py` | `--watch`: retro-tagging automático quando aparecem arquivos novos (lib `watchdog`) | modo vigia |
-| `inspector.py` (~1450) | `inspect`: navegador de arquivos em tela cheia, relatório em seções (técnico, tags por assunto, capas, letras, diagnóstico, ffmpeg, autenticidade/gráfico espectral), `--resumo` de pasta, `--json` e `--comparar` (simula o `tags` numa cópia) | inspeção de áudio |
+| `inspector.py` (~1550) | `inspect`: navegador de arquivos em tela cheia, relatório em painéis (`ui.Painel`, um por seção) (técnico, tags por assunto, capas, letras, diagnóstico, ffmpeg, autenticidade/gráfico espectral), `--resumo` de pasta, `--json` e `--comparar` (simula o `tags` numa cópia) | inspeção de áudio |
 | `inspect_data.py` | Leitura de UM arquivo sem imprimir nada (FLAC/MP3/M4A/Ogg/Opus): `ler_arquivo`, `agrupar_tags` (nenhuma tag se perde), capas, letras, `diagnose` compartilhado com `library_report`, `verificar_integridade`/`medir_volume` (ffmpeg) | `inspector.py` |
 | `doctor.py` | `doctor`: checagem **somente leitura** do ambiente/config/bancos (herdado dos scripts do libsync) | diagnóstico |
-| `stats_view.py` | Renderização do `stats` | estatísticas |
+| `stats_view.py` | Renderização do `stats` em painéis (BIBLIOTECA, QUALIDADE DE ÁUDIO, FORMATOS, PERÍODO, TOP ARTISTAS) | estatísticas |
 
 ### 3.5 Camada de terminal
 | Módulo | Papel |
 | :--- |:--- |
-| `ui.py` (~750) | **Única** saída de tela: `ui.emit()` com um lock e uma fonte de verdade p/ largura/breakpoints. Evita `print`/`logging`/`tqdm` brigando |
+| `ui.py` (~1500) | **Única** saída de tela: `ui.emit()`/`emit_always()` com um lock e uma fonte de verdade p/ largura/breakpoints. Desenho em caixas: `box`/`emit_box` (uma escrita só; `lead=False` encadeia caixas sem linha em branco dobrada), `header` (pares rótulo/valor), `summary` (resumo com tons ok/warn/err/info), **`Painel`** (mistura `kv`/`ok`/`warn`/`error`/`info`/`text`/`detail`/`rule`; é o desenhista dos relatórios). Largura: `raw_width()`/`raw_height()` (única leitura do terminal; aceitam `fallback`), `width()`, `box_width()`, `report_width()` (60–120 col., relatórios do `lyrics`/`tags`), constantes `PAINEL_COLS` (72) e `ALBUM_BOX_COLS` (90). Texto em **células** (emoji/CJK): `_cell_width`, `pad_cells`, `truncate`, `_wrap_lines`, `wrap_indented`, `labeled_lines`. `banner`/`section`/`kv` foram **removidos** (2026-11-01). Evita `print`/`logging`/`tqdm` brigando |
 | `color.py` | ANSI/TrueColor, `NO_COLOR`/`FORCE_COLOR`, TTY, cor de destaque (accent) |
 | `fuzzy.py` | Similaridade de texto (usa `rapidfuzz` se existir; senão `difflib`) |
 
@@ -162,10 +164,11 @@ Definidos em `commands.py`, roteados em `cli.py::_handle_commands`. `DOWNLOAD_CO
 | `library` | `lib` | Consulta/gerencia o catálogo local |
 | `lyrics` | — | Letras retroativas |
 | `tags` | — | Tags/capas retroativas (`--tags-only`, `--covers-only`, `--both`, `--multi-tags`/`--no-multi-tags`, `--continuous-track-numbers`) |
+| `retry` | — | Repete faixas puladas/falhas de álbuns já baixados (`retry [PASTA]`; usa o `.report.json` de cada pasta) |
+| `organize` | `rename` | Reaplica formatos de pasta/faixa à biblioteca local (`--dry-run`, `--show-files`, `--include-playlists`, `--undo`) |
 | `inspect` | — | Inspeciona arquivo/pasta de áudio (`--resumo`, `--json`, `--completo`, `--sem-espectro`, `--comparar`) |
 | `stats` | — | Estatísticas (`--artistas` etc.) |
-| `auth` | — | Atualiza as credenciais de login |
-| `user` | — | Mostra informações do usuário e status da assinatura |
+| `auth` | `login`, `user`, `account`, `profile`, `me`, `info` | Mostra conta, assinatura e limites; `-l`/`--login` atualiza e-mail e token; `--json` mostra o JSON bruto |
 | `doctor` | `check` | Saúde do ambiente |
 
 **Flags globais** (sem subcomando): `-r/--reset`, `-p/--purge`, `--sync-db [PATH]`, `--find-duplicates [PATH]`, `--watch [PATH]`, `-sc/--show-config`, mais `add_output_args` (saída/cores/progresso). Os downloads aceitam `--ui auto|compact|comfortable` e `--check-storage`.
@@ -211,10 +214,13 @@ Definidos em `commands.py`, roteados em `cli.py::_handle_commands`. `DOWNLOAD_CO
 - **Idioma:** tudo em português (comentários, docstrings, mensagens ao usuário, nomes de teste). Identificadores técnicos podem ser em inglês.
 - **Cabeçalho de módulo:** comentário “MÓDULO / DESCRIÇÃO / ONDE PROCURAR quando precisar mexer em algo”. Manter ao criar módulo novo.
 - **Toda saída de tela passa por `ui.emit()`** (nunca `print` cru no fluxo normal) — o lock evita corrupção de linha com `tqdm`/logging.
+- **Telas de relatório são painéis:** use `ui.Painel`, `ui.header` ou `ui.summary` (caixa com o título na borda). Nada de `====` nem `rótulo: valor` solto. Painéis seguidos usam `emit(lead=False)`; o primeiro de uma tela leva a linha em branco antes (`lead=True`).
+- **Largura e altura vêm só de `ui.raw_width()`/`ui.raw_height()`** (e `ui.width()`/`ui.box_width()`/`ui.report_width()`): nunca `shutil.get_terminal_size` nem `os.get_terminal_size` fora do `ui.py` (o teste-guarda `test_so_o_ui_le_o_tamanho_do_terminal` falha se alguém fizer). Texto com emoji/japonês mede-se em células (`ui._cell_width`, `ui.pad_cells`), não com `len()`/`ljust`.
+- **Nome de variável de painel não reaproveita nome de outro tipo na mesma função** (o mypy acusa `Incompatible types in assignment`; já aconteceu com `totais` no `inspect`).
 - **Cores:** usar `qobuz_dl.color` (respeita `NO_COLOR`). Aliases: `INFO`=azul-claro, `WARNING`=amarelo.
 - **Assíncrono:** rede e downloads são `async` (httpx/asyncio). Não bloquear o loop.
 - **Escrita de arquivo:** usar `fileio` (atômica) para qualquer arquivo que não possa ficar pela metade.
-- **Dependência opcional:** importar com `try/except ImportError` e degradar (marcar o bloco com `# pragma: no cover`). Não colocar dependência compilada no núcleo (há teste em `tests/regression/test_dependencias.py`).
+- **Dependência opcional:** importar com `try/except ImportError` e degradar (marcar o bloco com `# pragma: no cover`). Não colocar dependência compilada no núcleo (há teste em `tests/unit/test_dependencias.py`).
 - **Funções `cmd_*`** devolvem código de saída; só o roteador chama `sys.exit`.
 - **Lint:** Ruff, `line-length = 88` (E501 ignorado), seleção `E,W,F,B,C,T`. `target-version = py312` mas o código deve rodar em 3.10.
 - **Tipos:** mypy permissivo com **baseline** (só reclama de erro novo).
@@ -228,6 +234,8 @@ Definidos em `commands.py`, roteados em `cli.py::_handle_commands`. `DOWNLOAD_CO
 - Pastas: `tests/unit/` (maioria; lógica pura), `tests/ui/` (largura, quebra, concorrência, tela inicial), `tests/lyrics/`, `tests/network/` (HTTP **mockado** via pytest-httpx), `tests/regression/` (trava bugs históricos/dependências), `tests/manual/` (**não** roda no pytest; exige credenciais reais).
 - Marcadores (`--strict-markers`): `slow`, `integration`, `asyncio`, `unit`, `network`, `ui`, `regression`, `lyrics`. `asyncio_mode = auto`.
 - **`tests/conftest.py` isola o ambiente:** define `CONFIG_DIR` temporário e `NO_COLOR=1` **antes** de importar `qobuz_dl`, e cria um `config.ini` com credenciais **inválidas de propósito** (nenhum teste toca a API real; evita o assistente de 1ª execução travar em `input()`).
+- **O `conftest.py` também protege contra prompt real:** `prompt_toolkit.PromptSession()` sem `input=`/`output=` levanta `AssertionError` (no a-Shell abrir o terminal de verdade dá **segfault**; `isatty()` pode ser `True` mesmo com a saída capturada) e `library_cmd._interactive()` é falso por padrão. Teste de menu interativo troca `_interactive` e `_ask` na mão (ver `test_library_paineis.py`). Fixture autouse nova **não** deve pedir `monkeypatch`: isso muda a ordem de teardown dos fixtures dos módulos.
+- Telas em painéis têm testes em `tests/ui/` (`test_painel.py`, `test_library_paineis.py`, `test_stats_view`/`test_inspector_*` em `tests/unit/`): conferem título na borda, nenhuma linha acima da largura do terminal (inclusive CJK/emoji) e o conteúdo de cada painel. **Regra do dono:** quando teste e código divergem, o teste acompanha o código (exceção só para bug real, avisado antes).
 - Regra do projeto: bug corrigido ⇒ **teste de regressão** que falha antes e passa depois.
 - Cobertura: `fail_under = 75` no `pyproject.toml`, mas o CI usa `--cov-fail-under=60` (ver §11).
 
@@ -270,6 +278,8 @@ Definidos em `commands.py`, roteados em `cli.py::_handle_commands`. `DOWNLOAD_CO
 | **Sentinela `.streamrip.json`** | Nome mantido por compatibilidade com libsync/streamrip |
 | **Portabilidade a-Shell** | Sem dependência compilada no núcleo; `fuzzy.py` cai para `difflib`; Pillow sem piso de versão |
 | **UI entre dispositivos** | `--ui auto` é o padrão; `--ui compact` força cartões e rodapé curto; `--ui comfortable` privilegia detalhes. A decisão passa por `ui.compact_mode()` para TUI e renderizadores não divergirem |
+| **Telas em painéis** | Decisão do dono (2026-11-01): `stats`, `inspect`, `library`/`scan`/`sync-favorites`, `tags` e `lyrics` usam caixas (`ui.Painel`/`ui.header`/`ui.summary`) com a mesma largura (`ui.raw_width()`); o cabeçalho de álbum do `tags` é a mesma caixa "ÁLBUM" do `lyrics`. `library list`/`missing`/`history` continuam **uma linha por álbum** (para `grep`/pipes). `ui.banner`/`ui.section`/`ui.kv` foram removidos por falta de uso. |
+| **Cancelamento do download** | Bug real corrigido (2026-11-01): cancelar antes da medição de bytes dava `UnboundLocalError` em `_bytes_baixados`; agora ele é inicializado em `download_release`. Foi a **única** mudança de código feita para satisfazer um teste, avisada ao dono. |
 | **Fila interativa** | URLs repetidas são deduplicadas; o fluxo é rotativo e preserva a fila ao voltar ao menu inicial ou iniciar nova pesquisa; antes do download há resumo por tipo, revisão com rótulo artista/título, remoção seletiva e cancelamento; discografias acima de 20 álbuns pedem confirmação; submenus de favoritos/artistas distinguem `b` (voltar aos resultados/contexto do artista), `n` (nova pesquisa) e `m` (menu inicial); esses atalhos só são registrados em listas de resultados, nunca em menus de confirmação/filtro; listas ordenam com `a` (A-Z), `y` (ano novo→antigo) e `Y` (ano antigo→novo); faixas exibem ANO no lugar de DURAÇÃO em tabela/cartão; a lista de Singles pode exibir FUNÇÃO no lugar de TIPO |
 | **Espaço em disco** | A checagem é automática e usa duração/qualidade com margem conservadora; `--no-check-storage` desliga. Quando a API não fornece duração, não inventa uma estimativa nem bloqueia o download |
 | **Cache de metadados** | Ativo por padrão por 12 h e 512 entradas; somente endpoints de leitura, com fallback silencioso e exclusão de tokens/assinaturas. Desligar com `QOBUZ_DL_DISABLE_METADATA_CACHE=1` |
@@ -282,15 +292,18 @@ Definidos em `commands.py`, roteados em `cli.py::_handle_commands`. `DOWNLOAD_CO
 
 Pendências abertas também estão em `todo.md`.
 
-1. **Cobertura mínima inconsistente:** `pyproject.toml` (`fail_under = 75`) e `codecov.yml` (alvo 75%) pedem 75%; o CI roda com `--cov-fail-under=60`. Medir a cobertura real e alinhar os três. *(decisão do dono)*
+1. **Cobertura mínima:** `pyproject.toml` (`fail_under`), `codecov.yml` e o `--cov-fail-under` do CI usam o mesmo valor, 60%. Medir a cobertura real num PC e subir os três juntos. *(decisão do dono)*
 2. **`mypy-baseline.txt` não versionado:** o CI gera um novo a cada execução quando ele não existe, então hoje o mypy não detecta erro *novo*. Gerar uma vez e fazer commit.
 3. **Teclado do iPad (Pontuação Inteligente do iOS):** ao editar `README.md` ou `SKILL.md` pelo iPad, `--` vira `—` e aspas retas viram curvas; isso quebrou comandos (corrigido no README e no SKILL.md em 2026-10-13 e de novo em 2026-10-18; agora `tests/regression/test_docs_sem_pontuacao_inteligente.py` falha se voltar). Desligar em Ajustes > Geral > Teclado e **conferir flags dentro de blocos de código** depois de editar. Em arquivos `.py`, `.toml` e `.yml` o mesmo problema seria erro de sintaxe.
 4. **README — linha `usage` dos comandos globais desatualizada:** não lista `tags`, `inspect`, `import-playlist`, `sync-favorites`, `scan`, `library`, `doctor`, `auth`, `user`.
-5. **Arquivos grandes:** `core.py` (~2900), `downloader.py` (~3100), `utils.py` (~2000). A quebra em módulos menores está em andamento (`download_utils.py`, `interactive_ui.py`, `stats_view.py` já extraídos). Ao extrair, mover **só** o que já tem teste.
+5. **Arquivos grandes:** `core.py` (~3600), `downloader.py` (~3700), `cli.py` (~2700); `utils.py` já caiu para ~1000 (capas Apple em `apple_cover.py`). Funções gigantes: `core._tui_select` (~1300 linhas), `apple_cover.get_apple_hq_cover` (~1000), `cli.async_main`, `retro_tags.retag_directory`, `downloader.download_release`. A quebra em módulos menores está em andamento (`download_utils.py`, `interactive_ui.py`, `stats_view.py` já extraídos). Ao extrair, mover **só** o que já tem teste.
 6. **`bundle.py`** depende do HTML/JS do Qobuz: quebra sem aviso quando o site muda (o canário existe para isso).
 7. **Testes placeholder:** `tests/unit/test_core_remaining_interactive_disabled.py` só tem testes `skip` (`pass`) criados para o iOS; a cobertura real do `interactive()` está em `test_core_interactive_branches.py` e testes estáticos.
 8. **Zip do projeto:** ao compactar para enviar, excluir `.coverage` e `.pytest_cache/` (estão no `.gitignore`, mas foram no zip e pesam ~3 MB).
 9. **Event loop:** nada síncrono e demorado (disco, `os.walk`, mutagen, HTTP) pode rodar direto numa função `async` — use `asyncio.to_thread`. O `LyricsEngine` usa um cliente HTTP **síncrono** (`make_sync_client`): chame `fetch_and_inject` sempre em thread. As letras retroativas são sequenciais por padrão e paralelas com `--max-workers` (teto 4, provedores limitam requisições); ao mexer na engine, não introduza estado compartilhado por arquivo. `tests/unit/test_sem_bloqueio_pesado_no_loop.py` (guarda por AST: falha se uma `async def` chamar I/O pesado direto; se a chamada for legítima, use `to_thread` ou liste a função em `PERMITIDOS` com o motivo), `tests/regression/test_loop_nao_bloqueia.py` e `tests/unit/test_retro_tagger_paralelo.py` guardam esse comportamento. **Nunca `asyncio.to_thread(shutil.rmtree, ...)`**: trava no a-Shell/iOS (`copyfile`/`copy2` em thread funcionam). Deixe o `rmtree` síncrono e registre em `PERMITIDOS`.
+10. **Arquivos soltos na raiz:** `aplicar_patch.py`, `corrigir_teste_banda.py`, `cascata-letras.patch`, `MERGE_NOTES.md` (relatório de um merge antigo) e `README-SINCRONIZACAO.md` parecem sobras; mover para `tools/`/`docs/` ou remover (decisão do dono).
+11. **Nomes de teste que não dizem o assunto:** ~21 arquivos em `tests/unit/` terminam em `_fixed`, `_fixed2/3`, `_extra`, `_paths`, `_remaining_branches` (e há `test_coverage_critical_paths.py`); renomear por assunto ou fundir.
+12. **Código sem uso no `ui.py`:** `center_cells` e `is_narrow` só são chamados por testes desde a remoção de `banner`/`kv`.
 
 **Resolvidas em 2026-10-13** (não reabrir): `qobuz_dl/pyproject.toml` duplicado removido; teste `test_core_interactive_branches-2026-09-28.py` renomeado; `todo.md` reescrito; README com `—`/aspas curvas dentro de comandos corrigido.
 
@@ -316,6 +329,12 @@ Mais recente primeiro. Uma linha por alteração pedida.
 
 | Data | Alteração | Arquivos principais |
 | :--- |:--- |:--- |
+| 2026-11-02 | Revisão dos `except Exception` (214 handlers: 24 relançam, 107 registram, 23 avisam, 70 não relançam nem registram, quase todos fallbacks de leitura/cosmética). `search_*` do `Client` engoliam qualquer erro da API e pareciam "sem resultados": agora dividem `Client._search` e avisam a causa; letras do Qobuz e keyring registram no DEBUG | `qobuz_dl/qopy.py`, `qobuz_dl/downloader.py`, `qobuz_dl/cli.py`, `tests/unit/test_qopy_busca_erro.py` |
+| 2026-11-02 | Largura/altura do terminal só por `ui.raw_width()`/`ui.raw_height()` (novo): `color.accent_preview`, a lista do `artists` e a altura da tabela do modo interativo deixaram de chamar `shutil.get_terminal_size`; teste-guarda impede a volta | `qobuz_dl/ui.py`, `qobuz_dl/color.py`, `qobuz_dl/artist_checklist.py`, `qobuz_dl/core.py`, `tests/ui/test_terminal_width.py`, `tests/unit/test_color.py` |
+| 2026-11-01 | Telas `inspect` (arquivo, pasta e auditoria) e `library`/`scan`/`sync-favorites` em painéis; nova classe `ui.Painel` e `ui.summary(..., lead=False)`; `ui.banner`/`section`/`kv` removidos; listagens do `library` seguem em uma linha por álbum | `qobuz_dl/ui.py`, `qobuz_dl/inspector.py`, `qobuz_dl/library_cmd.py`, `tests/ui/test_painel.py`, `tests/ui/test_library_paineis.py`, `CHANGELOG.md` |
+| 2026-11-01 | `conftest.py` recusa `PromptSession()` sem `input=`/`output=` e deixa `library_cmd._interactive()` falso por padrão (segfault no a-Shell); erro de mypy por variável `totais` reaproveitada no `inspect` | `tests/conftest.py`, `tests/unit/test_guarda_prompt.py`, `qobuz_dl/inspector.py` |
+| 2026-11-01 | `stats` em painéis; cabeçalho de álbum do `tags` igual ao do `lyrics` (`ui.header`, `ALBUM_BOX_COLS`); largura única (`ui.raw_width(fallback=)`, `ui.report_width()`); `labeled_lines`/`wrap_indented` movidos para o `ui.py` | `qobuz_dl/ui.py`, `qobuz_dl/stats_view.py`, `qobuz_dl/retro_tags.py`, `qobuz_dl/retro_tagger.py`, `qobuz_dl/core.py`, `qobuz_dl/commands.py`, `qobuz_dl/home_screen.py`, `qobuz_dl/search_prompt.py` |
+| 2026-11-01 | Testes alinhados ao código (a regra do dono); bug de cancelamento (`_bytes_baixados`) corrigido; `Download` declara `force_album_dir`/`only_track_ids`/`suppress_album_summary`; `retry_missing` ignora relatório que não é de álbum (apontado pelo mypy) | `qobuz_dl/downloader.py`, `qobuz_dl/retry_missing.py`, `tests/unit/test_downloader_outcome.py`, `tests/unit/test_cli_commands.py`, `tests/unit/test_retro_tagger_*.py` |
 | 2026-10-26 | Multi-disco: o padrão volta a ser `TRACKNUMBER`/`TRACKTOTAL` por disco (com `DISCNUMBER`/`DISCTOTAL`/`TPOS`), e a numeração seguida (1 a N, ex.: 1 a 11, mantendo as tags de disco) passa a ser opcional pela nova flag `--continuous-track-numbers` (`dl` e `tags`) ou `continuous_track_numbers` no `config.ini`. Com a flag vale para álbum, faixa avulsa, playlist e `tags`; faixa avulsa/playlist e álbum com lista incompleta buscam a lista de faixas do álbum (`Download._com_lista_completa_de_faixas`, cache por álbum, só com a flag ligada), com queda para a numeração por disco se a busca falhar. Nome do arquivo e pastas sempre por disco. Novo `_numeracao_continua()`, nova opção em `settings.py`/`commands.py`/`cli.py`/`home_screen.py` e testes novos. Verificado só com harness offline (sem pytest/mutagen no ambiente; MP3 não executado): rodar a suíte. Pendente (não verificado): se `album/get` devolve todas as faixas em álbuns com mais de ~50 faixas | `qobuz_dl/{metadata,downloader,settings,commands,cli,home_screen}.py`, `tests/unit/test_numeracao_continua.py` |
 | 2026-10-25 | Multi-disco: tentativa de numerar as tags de 1 a N (sem `DISCNUMBER`/`DISCTOTAL`/`TPOS`) foi **desfeita** a pedido do dono, porque o player deixou de dividir por disco. Código, testes e docs voltaram ao estado anterior: `TRACKNUMBER`/`TRCK` por disco, `TRACKTOTAL` por disco, `DISCNUMBER`/`DISCTOTAL`/`TPOS` gravados; nome do arquivo por disco | `qobuz_dl/metadata.py` (sem mudança líquida) |
 | 2026-10-21 | `artists --json` exporta a lista atual de artistas seguidos como objeto JSON com ID, nome e URL, sincronizando apenas favoritos e sem consultar discografias; indicado para Atalhos/Apple Notes e deduplicação persistente por ID | `qobuz_dl/artist_review.py`, `qobuz_dl/commands.py`, `tests/unit/test_artist_review.py`, `README.md`, `SKILL.md` |

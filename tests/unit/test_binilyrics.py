@@ -375,3 +375,20 @@ def test_binilyrics_esta_no_registro_depois_do_qobuz():
         < LyricsEngine.PROVIDERS.index("_provider_binilyrics")
         < LyricsEngine.PROVIDERS.index("_provider_musixmatch")
     )
+
+
+def test_select_candidate_casa_pelo_upc_do_album():
+    certo = {
+        "lyricsUrl": "u1",
+        "track_name": "Song",
+        "artist_name": "Outro",
+        "upc": "00602445",
+        "timing_type": "line",
+    }
+    outro = {
+        "lyricsUrl": "u2",
+        "track_name": "Song",
+        "upc": "999",
+        "timing_type": "line",
+    }
+    assert bl.select_candidate([outro, certo], upc="602445", title="Song") is certo

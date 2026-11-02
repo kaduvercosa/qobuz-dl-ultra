@@ -21,6 +21,67 @@ class DirectoryNotUsable(ValueError):
     curta pro usuário, sem precisar de mais um bloco except."""
 
 
+def resolve_library_directory(
+    explicit_directory: str | os.PathLike[str] | None = None,
+    configured_directory: str | os.PathLike[str] | None = None,
+    *,
+    ios_home: str | None = None,
+    home: str | None = None,
+    windows: bool | None = None,
+) -> str:
+    """Resolve the single library directory used by directory-based commands.
+
+    Precedence is explicit CLI path, then ``directory`` from config.ini, then
+    the application default.  The iOS sandbox handling intentionally matches
+    the historical ``lyrics`` behavior: relative paths are based on
+    ``QOBUZ_DL_IOS_HOME`` when available, and paths outside the app's
+    Documents directory are mapped by basename into that Documents directory.
+
+    The function does not create or validate the directory; callers decide
+    whether a missing directory should be created or reported.
+    """
+    raw = explicit_directory or configured_directory or "Qobuz Downloads"
+    target = os.path.expanduser(os.fspath(raw).strip())
+    if not target:
+        target = "Qobuz Downloads"
+
+    if windows is None:
+        windows = os.name == "nt"
+    if home is None:
+        home = os.environ.get("HOME", "")
+    if ios_home is None:
+        ios_home = os.environ.get("QOBUZ_DL_IOS_HOME")
+
+    # Preserve absolute paths exactly. In particular, explicit CLI paths and
+    # externally mounted iOS folders (Files/iCloud) must not be remapped.
+    was_relative = not os.path.isabs(target)
+    if was_relative and ios_home:
+        target = os.path.join(ios_home, target)
+
+    if was_relative and "Containers/Data/Application" in home:
+        # Compatibility with the historical lyrics behavior: relative paths
+        # outside the app's Documents directory are mapped by basename.
+        docs_dir = os.path.join(home, "Documents")
+        try:
+            already_in_documents = os.path.commonpath(
+                (os.path.abspath(target), os.path.abspath(docs_dir))
+            ) == os.path.abspath(docs_dir)
+        except ValueError:
+            already_in_documents = False
+        if not already_in_documents:
+            base_name = os.path.basename(target.rstrip("\\/"))
+            target = os.path.join(docs_dir, base_name or "Qobuz Downloads")
+    elif was_relative and not ios_home:
+        target = os.path.abspath(target)
+
+    if windows:
+        target = os.path.abspath(target)
+        if not target.startswith("\\\\?\\"):
+            target = "\\\\?\\" + target
+
+    return target
+
+
 def ensure_directory_ready(raw_path: str) -> Path:
     """Resolve `raw_path` e garante que dá pra ler e escrever nela.
 

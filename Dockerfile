@@ -19,7 +19,7 @@ COPY pyproject.toml README.md MANIFEST.in setup.py ./
 COPY qobuz_dl ./qobuz_dl
 
 # Instala o projeto direto do pyproject.toml -- ele é a ÚNICA fonte de
-# verdade das dependências (ver tests/regression/test_dependencias.py).
+# verdade das dependências (ver tests/unit/test_dependencias.py).
 # ANTES: `pip install -r requirements.txt || pip install .` tentava o
 # requirements.txt primeiro e caía num fallback silencioso pro pyproject
 # se desse errado -- se o requirements.txt estivesse desatualizado ou

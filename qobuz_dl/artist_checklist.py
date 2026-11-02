@@ -957,7 +957,6 @@ async def run_checklist(
     ou nas bordas marca; tocar em [abrir] abre o perfil.
     Ctrl+C levanta KeyboardInterrupt, como os outros prompts do projeto.
     """
-    import shutil
 
     from prompt_toolkit.application import Application, get_app
     from prompt_toolkit.filters import Condition
@@ -978,8 +977,7 @@ async def run_checklist(
             out = get_app().output.get_size()
             return int(out.columns), int(out.rows)
         except Exception:
-            cols, rows = shutil.get_terminal_size((80, 24))
-            return cols, rows
+            return ui.raw_width(), ui.raw_height()
 
     def open_profile(row) -> None:
         url = profile_url(row.artist_id)

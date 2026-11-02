@@ -166,7 +166,7 @@ def request_sync(
             if not retryable:
                 return response
             if attempt == attempts:
-                logger.warning(
+                logger.debug(
                     "HTTP %s %s continuou retornando %s após %d tentativas",
                     method,
                     host,
@@ -226,7 +226,7 @@ async def request_async(
             if not retryable:
                 return response
             if attempt == attempts:
-                logger.warning(
+                logger.debug(
                     "HTTP %s %s continuou retornando %s após %d tentativas",
                     method,
                     host,

@@ -13,7 +13,7 @@ import os
 
 import pytest
 
-from qobuz_dl import retro_tags
+from qobuz_dl import retro_tags, ui
 
 pytestmark = pytest.mark.unit
 
@@ -185,16 +185,16 @@ class TestSplitAppleDiagnostic:
 
 class TestWrapEDetalhes:
     def test_wrap_respeita_largura_e_recuo(self):
-        linhas = retro_tags._wrap_lines("palavra " * 30, 10, width=40)
+        linhas = ui.wrap_indented("palavra " * 30, 10, cols=40)
         assert len(linhas) > 1
         assert all(len(ln) <= 39 and ln.startswith(" " * 10) for ln in linhas)
 
     def test_palavra_gigante_nao_estoura(self):
-        linhas = retro_tags._wrap_lines("x" * 200, 4, width=40)
+        linhas = ui.wrap_indented("x" * 200, 4, cols=40)
         assert all(len(ln) <= 39 for ln in linhas)
 
     def test_labeled_alinha_a_continuacao_sob_o_texto(self):
-        linhas = retro_tags._labeled_lines("Capa", "palavra " * 20, 40)
+        linhas = ui.labeled_lines("Capa", "palavra " * 20, 40)
         assert linhas[0].startswith("   Capa   palavra")
         assert all(ln.startswith(" " * 10) for ln in linhas[1:])
 
@@ -218,16 +218,16 @@ class TestWrapEDetalhes:
     def test_kept_nao_tem_detalhe(self):
         assert retro_tags._cover_detail_lines("kept", None, "x", 100) == []
 
-    def test_term_width_fica_entre_60_e_120(self, monkeypatch):
+    def test_report_width_fica_entre_60_e_120(self, monkeypatch):
         # `ui.raw_width()` prefere o TTY real ao COLUMNS; sem isto, `pytest -s`
         # num terminal faria o teste depender da janela de quem o executa.
         def _sem_terminal(fd=None):
             raise OSError("sem terminal")
 
-        monkeypatch.setattr(retro_tags.ui.os, "get_terminal_size", _sem_terminal)
+        monkeypatch.setattr(ui.os, "get_terminal_size", _sem_terminal)
         for colunas, esperado in (("20", 60), ("90", 90), ("300", 120)):
             monkeypatch.setenv("COLUMNS", colunas)
-            assert retro_tags._term_width() == esperado
+            assert ui.report_width() == esperado
 
 
 class TestContagemDeTags:
@@ -248,32 +248,38 @@ class TestCabecalhoDoAlbum:
         return album
 
     def test_titulo_artista_tipo_e_faixas(self):
-        linhas = retro_tags._album_header_lines(self._album(), None, 80)
-        assert linhas[0].startswith("== Anti-Herói -- Jão  |  álbum | 10 faixas ")
-        assert linhas[0].endswith("=") and len(linhas[0]) <= 80
-        assert len(linhas) == 1  # sem decisão informada: só o cabeçalho
+        linhas = retro_tags._album_header_rows(self._album(), None)
+        assert linhas == [
+            ("Título", "Anti-Herói"),
+            ("Artista", "Jão"),
+            ("Tipo", "álbum"),
+            ("Faixas", "10"),
+        ]  # sem decisão informada: nenhuma linha de capa
 
     def test_com_decisao_mostra_o_metodo(self):
         decisao = {"url": "u", "method": "consenso de 8/9 faixas"}
-        linhas = retro_tags._album_header_lines(self._album(), decisao, 80)
-        assert linhas[1] == (
-            "   Capa Apple única para todas as faixas (consenso de 8/9 faixas)"
+        linhas = retro_tags._album_header_rows(self._album(), decisao)
+        assert linhas[-1] == (
+            "Capa",
+            "Apple única para todas as faixas (consenso de 8/9 faixas)",
         )
 
     def test_sem_url_explica_que_cada_faixa_e_avaliada_sozinha(self):
-        linhas = retro_tags._album_header_lines(self._album(), {"url": None}, 80)
-        assert "cada faixa é avaliada separadamente" in linhas[1]
+        linhas = retro_tags._album_header_rows(self._album(), {"url": None})
+        assert "cada faixa é avaliada separadamente" in dict(linhas)["Capa"]
 
     def test_sem_titulo_nao_tem_cabecalho(self):
-        assert retro_tags._album_header_lines({"id": "X"}, None, 80) == []
+        assert retro_tags._album_header_rows({"id": "X"}, None) == []
 
-    def test_titulo_longo_e_truncado_sem_estourar_a_largura(self):
-        linhas = retro_tags._album_header_lines(self._album(title="T" * 200), None, 60)
-        assert len(linhas[0]) <= 60
+    def test_sem_artista_nem_faixas_omite_as_linhas(self):
+        linhas = retro_tags._album_header_rows({"title": "Só título"}, None)
+        rotulos = [rotulo for rotulo, _ in linhas]
+        assert rotulos[0] == "Título"
+        assert "Artista" not in rotulos and "Faixas" not in rotulos
 
     def test_singular_para_uma_faixa(self):
-        linhas = retro_tags._album_header_lines(self._album(tracks_count=1), None, 80)
-        assert "single | 1 faixa " in linhas[0]
+        linhas = dict(retro_tags._album_header_rows(self._album(tracks_count=1), None))
+        assert linhas["Tipo"] == "single" and linhas["Faixas"] == "1"
 
 
 def test_legenda_explica_as_quatro_cores():

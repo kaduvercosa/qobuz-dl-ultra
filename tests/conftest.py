@@ -57,6 +57,31 @@ _CONFIG.write_text(
     encoding="utf-8",
 )
 
+# Guarda contra o prompt de verdade. `PromptSession()` sem entrada/saida
+# explicitas abre o terminal real; no a-Shell (iOS) isso derruba o runtime com
+# segfault, e em CI o teste ficaria esperando teclado. A troca acontece ANTES
+# de importar o pacote, para todo `from prompt_toolkit import PromptSession`
+# receber o guarda. Quem passa `input=`/`output=` (teste do `_ask` com pipe) ou
+# troca o PromptSession por um falso continua funcionando como antes.
+try:
+    import prompt_toolkit as _pt
+
+    _PromptSessionReal = _pt.PromptSession
+
+    def _prompt_session_guardado(*args, **kwargs):
+        if kwargs.get("input") is None and kwargs.get("output") is None:
+            raise AssertionError(
+                "PromptSession() abriria o terminal real dentro de um teste "
+                "(segfault no a-Shell). Troque-o por um falso com "
+                "monkeypatch.setattr(modulo, 'PromptSession', ...) ou passe "
+                "input=/output= de pipe."
+            )
+        return _PromptSessionReal(*args, **kwargs)
+
+    _pt.PromptSession = _prompt_session_guardado  # type: ignore[assignment]
+except ImportError:  # sem prompt_toolkit nao ha o que guardar
+    pass
+
 # Garante que o pacote do repositorio ganha do que estiver instalado no
 # sistema -- senao o teste pode validar uma versao antiga sem avisar.
 RAIZ = Path(__file__).resolve().parent.parent
@@ -141,3 +166,28 @@ def _restaura_logging_do_ui():
     root.setLevel(nivel)
     for nome, valor in niveis.items():
         logging.getLogger(nome).setLevel(valor)
+
+
+@pytest.fixture(autouse=True)
+def _terminal_nao_interativo():
+    """`library_cmd._interactive()` dá False por padrão nos testes.
+
+    No a-Shell `isatty()` pode ser True mesmo com a saida capturada, e o codigo
+    entraria nos menus que perguntam algo. Os testes dos menus ligam de novo com
+    `monkeypatch.setattr(lc, "_interactive", lambda: True)`.
+
+    Troca na mao, sem o fixture `monkeypatch`: pedi-lo aqui antecipa o setup do
+    `monkeypatch` de todos os testes e muda a ordem de teardown em relacao aos
+    fixtures autouse dos modulos (um deles chegou a limpar um cache depois de o
+    teste ja ter desfeito o seu patch).
+    """
+    modulo = sys.modules.get("qobuz_dl.library_cmd")
+    if modulo is None:
+        yield
+        return
+    original = modulo._interactive
+    modulo._interactive = lambda: False
+    try:
+        yield
+    finally:
+        modulo._interactive = original

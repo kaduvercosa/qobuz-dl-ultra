@@ -36,7 +36,6 @@ classifiers = [
 
 dependencies = [
     "pathvalidate",
-    "httpx",
     "httpx[http2]",
     "aiosqlite",
     "send2trash",

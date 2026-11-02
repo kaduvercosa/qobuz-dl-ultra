@@ -25,6 +25,7 @@ from qobuz_dl.library_scan import (
     run_scan,
     unmark_album_downloaded,
 )
+from qobuz_dl.paths import resolve_library_directory
 
 
 def library_db_path(config_path: Optional[str] = None) -> str:
@@ -117,19 +118,20 @@ async def cmd_scan(
     downloads_db: Optional[str] = None,
     lib: Optional[LibraryDB] = None,
 ) -> int:
-    root = os.path.expanduser(getattr(args, "DIR", None) or directory)
+    root = resolve_library_directory(getattr(args, "DIR", None), directory)
     lib = lib or LibraryDB(library_db_path())
     dry = bool(getattr(args, "dry_run", False))
 
-    ui.banner("QOBUZ-DL-ULTRA  ·  SCAN DA BIBLIOTECA")
-    ui.kv("Pasta", root)
-    ui.kv("Modo", "SIMULAÇÃO (nada será gravado)" if dry else "aplicar")
+    cabecalho = ui.Painel("🔍 SCAN DA BIBLIOTECA")
+    cabecalho.kv("Pasta", root)
+    cabecalho.kv("Modo", "SIMULAÇÃO (nada será gravado)" if dry else "aplicar")
     if not lib.get_albums(SOURCE):
-        ui.warn(
+        cabecalho.warn(
             "O catálogo está vazio. Rode `qobuz-dl sync-favorites` antes para o scan "
             "poder casar pastas com seus favoritos (pastas com tag QOBUZALBUMID "
             "ainda serão adotadas)."
         )
+    cabecalho.emit()
 
     def progress(i, total, folder):
         if i % 25 == 0 or i == total:
@@ -151,20 +153,24 @@ async def cmd_scan(
         ui.error(f"Pasta não encontrada: {root}")
         return 1
 
-    ui.blank()
-    ui.section("RESULTADO")
-    ui.kv("Pastas analisadas", report["scanned"])
-    ui.kv("Já tinham sentinela", report["sentinel_skipped"])
-    ui.kv("Marcadas (match certo)", len(report["auto_matched"]))
-    ui.kv("Adotadas (tag de ID)", len(report["adopted"]))
-    ui.kv("Incompletas", len(report["incomplete"]))
-    ui.kv("Para revisar", len(report["review"]))
-    ui.kv("Sem match", len(report["unmatched"]))
-    ui.kv("Falhas", len(report["failed"]))
+    resultado = ui.Painel("📊 RESULTADO")
+    resultado.kv("Pastas analisadas", report["scanned"])
+    resultado.kv("Já tinham sentinela", report["sentinel_skipped"])
+    resultado.kv("Marcadas (match certo)", len(report["auto_matched"]))
+    resultado.kv("Adotadas (tag de ID)", len(report["adopted"]))
+    resultado.kv("Incompletas", len(report["incomplete"]))
+    resultado.kv("Para revisar", len(report["review"]))
+    resultado.kv("Sem match", len(report["unmatched"]))
+    resultado.kv("Falhas", len(report["failed"]))
+    if report["incomplete"] or report["failed"]:
+        resultado.rule()
     for item in report["incomplete"]:
-        ui.warn(f"Incompleto: {item['artist']} - {item['title']}  ({item['folder']})")
+        resultado.warn(
+            f"Incompleto: {item['artist']} - {item['title']}  ({item['folder']})"
+        )
     for f in report["failed"]:
-        ui.error(f"{f['folder']}: {f['error']}")
+        resultado.error(f"{f['folder']}: {f['error']}")
+    resultado.emit()
 
     if (
         report["review"]
@@ -186,18 +192,23 @@ async def cmd_scan(
 
 
 async def _review_loop(lib: LibraryDB, report: dict, *, sentinel: bool) -> None:
-    ui.blank()
-    ui.section(f"REVISÃO MANUAL ({len(report['review'])} pastas)")
-    ui.info("  número = confirmar candidato · s = pular · q = sair da revisão")
+    total = len(report["review"])
+    ui.Painel(f"🧐 REVISÃO MANUAL ({total} pastas)").info(
+        "número = confirmar candidato · s = pular · q = sair da revisão"
+    ).emit(lead=False)
     for n, item in enumerate(report["review"], start=1):
-        ui.blank()
-        ui.info(f"[{n}/{len(report['review'])}] {item['folder']}")
-        ui.detail(
-            f"local: {item['local_artist'] or '?'} - {item['local_album']} "
-            f"({item['local_track_count']} faixas)"
+        pasta = ui.Painel(f"PASTA {n}/{total}")
+        pasta.kv("Pasta", item["folder"])
+        pasta.kv(
+            "Local",
+            f"{item['local_artist'] or '?'} - {item['local_album']} "
+            f"({item['local_track_count']} faixas)",
         )
+        if item["candidates"]:
+            pasta.rule()
         for i, c in enumerate(item["candidates"], start=1):
-            ui.detail(f"{i}) {c['artist']} - {c['title']}  [{c['reason']}]")
+            pasta.text(f"{i}) {c['artist']} - {c['title']}  [{c['reason']}]")
+        pasta.emit(lead=False)
         while True:
             ans = await _ask("  > ")
             if ans in ("q", "quit", "sair"):
@@ -230,22 +241,25 @@ async def cmd_library(
     action = getattr(args, "action", "status") or "status"
 
     if action == "status":
-        ui.banner("QOBUZ-DL-ULTRA  ·  BIBLIOTECA")
+        painel = ui.Painel("📚 BIBLIOTECA")
         rows = lib.status_counts()
         if not rows:
-            ui.warn("Catálogo vazio. Rode `qobuz-dl sync-favorites`.")
+            painel.warn("Catálogo vazio. Rode `qobuz-dl sync-favorites`.").emit()
             return 0
         for r in rows:
-            ui.kv(f"{r['source']} / {r['download_status']}", r["cnt"])
+            painel.kv(f"{r['source']} / {r['download_status']}", r["cnt"])
         stuck = lib.stuck_albums()
+        nofolder = lib.complete_without_folder()
+        if stuck or nofolder:
+            painel.rule()
         if stuck:
-            ui.warn(
+            painel.warn(
                 f"{len(stuck)} álbum(ns) presos em queued/downloading (resto de uma "
                 "execução interrompida). Use `qobuz-dl library reset-stuck`."
             )
-        nofolder = lib.complete_without_folder()
         if nofolder:
-            ui.info(f"{len(nofolder)} álbum(ns) 'complete' sem pasta registrada.")
+            painel.info(f"{len(nofolder)} álbum(ns) 'complete' sem pasta registrada.")
+        painel.emit()
         return 0
 
     if action in ("missing", "list"):
@@ -287,7 +301,7 @@ async def cmd_library(
         return 0
 
     if action == "reconcile":
-        root = os.path.expanduser(getattr(args, "TARGET", None) or directory)
+        root = resolve_library_directory(getattr(args, "TARGET", None), directory)
         rep = await asyncio.to_thread(
             reconcile_sentinels,
             lib,
@@ -295,19 +309,23 @@ async def cmd_library(
             apply=not getattr(args, "dry_run", False),
             fix_missing=bool(getattr(args, "fix", False)),
         )
-        ui.banner("QOBUZ-DL-ULTRA  ·  RECONCILIAÇÃO")
-        ui.kv("Sentinelas vistas", rep["scanned"])
-        ui.kv("Reconciliadas", len(rep["reconciled"]))
-        ui.kv("Inválidas", len(rep["invalid"]))
-        ui.kv("No catálogo, mas sem pasta", len(rep["missing_on_disk"]))
+        painel = ui.Painel("🔁 RECONCILIAÇÃO")
+        painel.kv("Sentinelas vistas", rep["scanned"])
+        painel.kv("Reconciliadas", len(rep["reconciled"]))
+        painel.kv("Inválidas", len(rep["invalid"]))
+        painel.kv("No catálogo, mas sem pasta", len(rep["missing_on_disk"]))
+        if rep["invalid"] or rep["missing_on_disk"]:
+            painel.rule()
         for i in rep["invalid"]:
-            ui.warn(f"{i['folder']}: {i['error']}")
+            painel.warn(f"{i['folder']}: {i['error']}")
         for m in rep["missing_on_disk"]:
-            ui.warn(
-                f"Sumiu do disco: {m['artist']} - {m['title']} ({m['folder'] or 'sem pasta'})"
+            painel.warn(
+                f"Sumiu do disco: {m['artist']} - {m['title']} "
+                f"({m['folder'] or 'sem pasta'})"
             )
         if rep["missing_on_disk"] and not getattr(args, "fix", False):
-            ui.info("Use --fix para devolvê-los a not_downloaded.")
+            painel.info("Use --fix para devolvê-los a not_downloaded.")
+        painel.emit()
         return 1 if rep["invalid"] else 0
 
     if action == "unmark":
@@ -327,6 +345,17 @@ async def cmd_library(
 # ---------------------------------------------------------------------------
 # sync-favorites
 # ---------------------------------------------------------------------------
+
+
+_LISTA_MAX = 20  # álbuns listados por painel; o resto vira "... e mais N"
+
+
+def _painel_resumo_download(resultado: dict) -> ui.Painel:
+    """Painel "RESUMO DO DOWNLOAD" (baixados e falhas) de um lote de favoritos."""
+    painel = ui.Painel("📥 RESUMO DO DOWNLOAD")
+    painel.kv("Baixados com sucesso", resultado["downloaded"])
+    painel.kv("Falhas", resultado["failed"])
+    return painel
 
 
 async def cmd_sync_favorites(
@@ -383,39 +412,42 @@ async def cmd_sync_favorites(
             return 1
 
         r = res["refresh"]
-        ui.banner("QOBUZ-DL-ULTRA  ·  SINCRONIZAÇÃO DE FAVORITOS")
-        ui.kv("Total de favoritos na conta", r["total"])
-        ui.kv("Novos adicionados nesta sync", r["new"])
-        ui.kv(
+        sync = ui.Painel("⭐ SINCRONIZAÇÃO DE FAVORITOS")
+        sync.kv("Total de favoritos na conta", r["total"])
+        sync.kv("Novos adicionados nesta sync", r["new"])
+        sync.kv(
             "Removidos da conta Qobuz",
             r["removed"] if r["complete"] else "n/d (paginação incompleta)",
         )
+        sync.emit()
 
         if r["new_albums"]:
-            ui.blank()
-            ui.section(f"✨ ÁLBUNS NOVOS ADICIONADOS ({len(r['new_albums'])})")
-            for a in r["new_albums"][:20]:
-                ui.ok(f"  + {_label(a)}")
-            if len(r["new_albums"]) > 20:
-                ui.detail(f"  ... e mais {len(r['new_albums']) - 20} álbuns.")
+            novos = ui.Painel(f"✨ ÁLBUNS NOVOS ADICIONADOS ({len(r['new_albums'])})")
+            for a in r["new_albums"][:_LISTA_MAX]:
+                novos.ok(_label(a))
+            if len(r["new_albums"]) > _LISTA_MAX:
+                novos.detail(f"... e mais {len(r['new_albums']) - _LISTA_MAX} álbuns.")
+            novos.emit(lead=False)
 
         if r["removed_albums"]:
-            ui.blank()
-            ui.section(f"🗑️  ÁLBUNS REMOVIDOS DA CONTA ({len(r['removed_albums'])})")
-            for a in r["removed_albums"][:20]:
-                ui.warn(f"  - {_label(a)}")
-            if len(r["removed_albums"]) > 20:
-                ui.detail(f"  ... e mais {len(r['removed_albums']) - 20} álbuns.")
+            removidos = ui.Painel(
+                f"🗑️  ÁLBUNS REMOVIDOS DA CONTA ({len(r['removed_albums'])})"
+            )
+            for a in r["removed_albums"][:_LISTA_MAX]:
+                removidos.warn(_label(a))
+            if len(r["removed_albums"]) > _LISTA_MAX:
+                removidos.detail(
+                    f"... e mais {len(r['removed_albums']) - _LISTA_MAX} álbuns."
+                )
+            removidos.emit(lead=False)
 
         if res["targets"]:
-            ui.blank()
-            ui.section("RESUMO DO DOWNLOAD")
-            ui.kv("Baixados com sucesso", res["download"]["downloaded"])
-            ui.kv("Falhas", res["download"]["failed"])
+            _painel_resumo_download(res["download"]).emit(lead=False)
 
         if dry:
-            ui.blank()
-            ui.info("Modo simulação: nenhuma alteração foi gravada.")
+            ui.Painel("🧪 SIMULAÇÃO").info(
+                "Modo simulação: nenhuma alteração foi gravada."
+            ).emit(lead=False)
             return 0
 
         # Se o usuário NÃO especificou nenhuma flag de download (--download-new / --download-missing)
@@ -434,22 +466,29 @@ async def cmd_sync_favorites(
             )
 
             if missing_targets or new_targets:
-                ui.blank()
-                ui.section("OPÇÕES DE DOWNLOAD DOS FAVORITOS")
-                ui.emit("  Deseja realizar o download agora?")
+                menu = ui.Painel("⬇️  OPÇÕES DE DOWNLOAD DOS FAVORITOS")
+                menu.text("Deseja realizar o download agora?")
+                menu.rule()
                 if new_targets:
-                    ui.emit(f"   [1] Baixar apenas os {len(new_targets)} álbuns NOVOS")
-                else:
-                    ui.emit("   [1] (Nenhum álbum novo para baixar)")
-
-                if missing_targets:
-                    ui.emit(
-                        f"   [2] Baixar TODOS os {len(missing_targets)} álbuns FALTANTES no disco"
+                    menu.text(
+                        f"[1] Baixar apenas os {len(new_targets)} álbuns NOVOS",
+                        indent=1,
                     )
                 else:
-                    ui.emit("   [2] (Todos os favoritos já estão completos no disco)")
-
-                ui.emit("   [3] Apenas sincronizar o catálogo e sair [Padrão]")
+                    menu.detail("[1] (Nenhum álbum novo para baixar)", indent=1)
+                if missing_targets:
+                    menu.text(
+                        f"[2] Baixar TODOS os {len(missing_targets)} álbuns "
+                        "FALTANTES no disco",
+                        indent=1,
+                    )
+                else:
+                    menu.detail(
+                        "[2] (Todos os favoritos já estão completos no disco)",
+                        indent=1,
+                    )
+                menu.text("[3] Apenas sincronizar o catálogo e sair [Padrão]", indent=1)
+                menu.emit(lead=False)
 
                 ans = await _ask("  Escolha uma opção (1-3): ")
                 chosen_targets = []
@@ -474,10 +513,7 @@ async def cmd_sync_favorites(
                                 res["run_id"],
                                 dl_res["downloaded"],
                             )
-                        ui.blank()
-                        ui.section("RESUMO DO DOWNLOAD")
-                        ui.kv("Baixados com sucesso", dl_res["downloaded"])
-                        ui.kv("Falhas", dl_res["failed"])
+                        _painel_resumo_download(dl_res).emit(lead=False)
                         return 1 if dl_res["failed"] else 0
 
         return 1 if res["download"]["failed"] else 0

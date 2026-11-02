@@ -20,6 +20,7 @@ leituras de tag usam classes falsas no lugar de `FLAC`/`id3`.
 
 import asyncio
 import os
+import re
 from types import SimpleNamespace
 
 import pytest
@@ -1137,13 +1138,12 @@ class TestCapaPorAlbum:
         assert amb.decisoes == ["ALB"]  # decidido uma vez
         assert "capa do álbum baixada" in amb.texto
         assert amb.texto.count("capa do álbum reaproveitada") == 2
-        cabecalhos = [t for t in amb.de("emit") if t.startswith("== Disco")]
-        assert len(cabecalhos) == 1  # uma vez por álbum, não por faixa
-        assert cabecalhos[0].startswith("== Disco -- Banda  |  álbum | 12 faixas ")
-        assert cabecalhos[0].endswith("=")
-        assert "   Capa Apple única para todas as faixas (busca do álbum)" in amb.de(
-            "emit"
-        )
+        caixas = _caixas_de_album(amb)
+        assert len(caixas) == 1  # uma vez por álbum, não por faixa
+        caixa = " ".join(caixas[0].split())
+        assert "Disco" in caixa and "Banda" in caixa
+        assert re.search(r"TIPO\s+álbum", caixa) and re.search(r"FAIXAS\s+12", caixa)
+        assert "Apple única para todas as faixas (busca do álbum)" in caixa
         assert _temporarios(amb.pasta) == []
 
     def test_faixa_que_a_apple_nao_achou_herda_a_capa_do_album(self, amb):
@@ -1195,7 +1195,7 @@ class TestCapaPorAlbum:
         stats = _rodar(amb)
         assert self._downloads(amb) == ["https://img/a.jpg", "https://img/a.jpg"]
         assert stats["apple_embedded"] == 2
-        assert "Capa Apple única" not in amb.texto
+        assert "Apple única para todas as faixas" not in amb.texto
 
     def test_capa_nao_superior_em_uma_faixa_nao_apaga_a_do_album(
         self, amb, monkeypatch
@@ -1448,9 +1448,15 @@ def _album_com_titulo(id_, titulo, faixas=12):
     }
 
 
+def _caixas_de_album(amb):
+    """Textos (sem cores) das caixas "ÁLBUM" impressas, na ordem."""
+    sem_cor = re.compile(r"\x1b\[[0-9;]*m")
+    return [sem_cor.sub("", t) for t in amb.de("emit") if "ÁLBUM" in t and "\n" in t]
+
+
 class TestCabecalhoDeAlbum:
     def _cabecalhos(self, amb):
-        return [t for t in amb.de("emit") if t.startswith("== ")]
+        return _caixas_de_album(amb)
 
     def test_uma_vez_por_album_e_de_novo_ao_voltar(self, amb):
         amb.album_de = {
@@ -1461,8 +1467,10 @@ class TestCabecalhoDeAlbum:
         for nome, tid in (("a.flac", "1"), ("b.flac", "2"), ("c.flac", "3")):
             amb.arquivo(nome, track_id=tid)
         _rodar(amb)
-        titulos = [c.split(" -- ")[0] for c in self._cabecalhos(amb)]
-        assert titulos == ["== Primeiro", "== Segundo", "== Primeiro"]
+        titulos = [
+            re.search(r"TÍTULO\s+(\w+)", c).group(1) for c in self._cabecalhos(amb)
+        ]
+        assert titulos == ["Primeiro", "Segundo", "Primeiro"]
 
     def test_faixas_do_mesmo_album_nao_repetem_o_cabecalho(self, amb):
         amb.album = _album_com_titulo("ALB", "Disco")
@@ -1475,16 +1483,16 @@ class TestCabecalhoDeAlbum:
         amb.album = _album_com_titulo("ALB", "Ressaca", faixas=1)
         amb.arquivo("a.flac")
         _rodar(amb)
-        assert "|  single | 1 faixa " in self._cabecalhos(amb)[0]
+        caixa = " ".join(self._cabecalhos(amb)[0].split())
+        assert re.search(r"TIPO\s+single", caixa)
+        assert re.search(r"FAIXAS\s+1\b", caixa)
 
     def test_sem_decisao_por_album_o_cabecalho_explica(self, amb):
         amb.album = _album_com_titulo("ALB", "Disco")
         amb.arquivo("a.flac")
         _rodar(amb)
-        assert (
-            "   Sem capa única para o álbum: cada faixa é avaliada separadamente"
-            in amb.de("emit")
-        )
+        caixa = " ".join(self._cabecalhos(amb)[0].split())
+        assert "sem capa única: cada faixa é avaliada separadamente" in caixa
 
     def test_album_sem_titulo_nao_imprime_cabecalho(self, amb):
         amb.arquivo("a.flac")  # o álbum do ambiente é só {"id": "ALB"}
@@ -1496,10 +1504,11 @@ class TestCabecalhoDeAlbum:
         amb.arquivo("a.flac")
         _rodar(amb)
         emit = amb.de("emit")
-        i = next(i for i, t in enumerate(emit) if t.startswith("== Disco"))
-        assert emit[i - 1] == ""
+        i = next(i for i, t in enumerate(emit) if "ÁLBUM" in t and "\n" in t)
+        # A caixa já traz a linha em branco antes e depois: sem "" a mais.
+        assert emit[i].startswith("\n") and emit[i].endswith("\n")
         j = next(j for j, t in enumerate(emit) if t.startswith("[1/1]"))
-        assert j > i and emit[j - 1] == ""
+        assert j > i and "" not in emit[i + 1 : j]
 
 
 class TestLegendaEEspacamento:

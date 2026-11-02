@@ -49,22 +49,6 @@ def test_pad_cells_conta_celulas_e_nao_caracteres():
 
 
 @pytest.mark.parametrize("largura", LARGURAS)
-def test_banner_com_emoji_cabe_na_tela(largura, monkeypatch):
-    saida = _coletar(monkeypatch, largura)
-    ui.banner("🔍 INSPETOR DE ÁUDIO")
-    for linha in _linhas(saida):
-        assert _celulas(linha) <= ui.width(), repr(linha)
-
-
-@pytest.mark.parametrize("largura", [32, 40, 60])
-def test_secao_com_titulo_longo_e_cortada(largura, monkeypatch):
-    saida = _coletar(monkeypatch, largura)
-    ui.section("🔬 AUTENTICIDADE (heurística espectral) e mais um monte de texto")
-    for linha in _linhas(saida):
-        assert _celulas(linha) <= ui.width(), repr(linha)
-
-
-@pytest.mark.parametrize("largura", LARGURAS)
 def test_stats_top_artistas_cjk_e_emoji_cabem(largura, monkeypatch):
     stats = {
         "total": 10, "albums": 5, "tracks": 5, "unique_artists": 3,

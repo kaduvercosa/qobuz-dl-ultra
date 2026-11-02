@@ -159,6 +159,7 @@ def select_candidate(
     results,
     *,
     isrc=None,
+    upc=None,
     title="",
     artist="",
     album="",
@@ -167,6 +168,8 @@ def select_candidate(
     """Escolhe a gravacao certa entre os `results` da API (ou None).
 
     1. ISRC exato vence na hora (se houver mais de um, word > line > plain).
+       Sem ISRC (ou sem casar), o UPC exato do album vale da mesma forma, desde
+       que o titulo-base bata (um UPC identifica o album, nao a faixa).
     2. Sem ISRC: so entram candidatos com o MESMO titulo-base e as MESMAS
        marcas de versao (live/remix/...), artista em comum e duracao dentro de
        +-4 s. Entre eles ganha quem combina mais artista/album/duracao e, no
@@ -184,6 +187,20 @@ def select_candidate(
     want_base, want_flags = _title_parts(title)
     if not want_base:
         return None
+
+    if upc:
+        wanted_upc = str(upc).strip().lstrip("0")
+        same_album = [
+            r
+            for r in cands
+            if wanted_upc
+            and str(r.get("upc") or r.get("barcode") or "").strip().lstrip("0")
+            == wanted_upc
+            and _title_parts(r.get("track_name", "")) == (want_base, want_flags)
+        ]
+        if same_album:
+            return max(same_album, key=_timing_rank)
+
     want_artists = _artist_set(artist)
     want_album = _normalize(album)
 

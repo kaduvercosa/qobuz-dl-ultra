@@ -8,7 +8,6 @@ import contextvars
 import logging
 import os
 import re
-import textwrap
 import time
 
 import mutagen.id3 as id3
@@ -22,6 +21,7 @@ from qobuz_dl.color import WARNING as YELLOW
 from qobuz_dl.concurrency import run_bounded
 from qobuz_dl.executors import MAX_LYRICS_WORKERS
 from qobuz_dl.lyrics_engine import (
+    LYRICS_NETWORK_BUDGET,
     RANK_BINILYRICS,
     RANK_PLAIN,
     RANK_QOBUZ_BILINGUAL,
@@ -34,6 +34,12 @@ from qobuz_dl.resilient_http import request_async
 from qobuz_dl.settings import MAX_DOWNLOAD_WORKERS, QobuzDLSettings
 
 logger = logging.getLogger(__name__)
+
+# Teto total por faixa do comando `lyrics`. Uma faixa presa em rede
+# vira FALHA e libera o worker; as outras continuam.
+_TIMEOUT_FAIXA = 300.0
+
+_TIMEOUT_FAIXA = 300.0  # teto total por faixa, em segundos
 
 
 def extract_track_id(file_path: str) -> str | None:
@@ -79,22 +85,31 @@ def extract_track_id(file_path: str) -> str | None:
 
 
 def _lyrics_lookup_hints(file_path):
-    """ISRC e duração (s) do arquivo: ajudam fontes que identificam a gravação
+    """ISRC, UPC e duração (s) do arquivo: ajudam fontes que identificam a gravação
     exata (BiniLyrics). Qualquer falha de leitura devolve só o que deu."""
     hints: dict[str, str | int] = {}
     try:
         if file_path.lower().endswith(".flac"):
             audio_flac = FLAC(file_path)
             isrc = (audio_flac.get("ISRC") or [""])[0]
+            upc = (audio_flac.get("UPC") or audio_flac.get("BARCODE") or [""])[0]
             length = getattr(audio_flac.info, "length", 0)
         else:
             audio_mp3 = MP3(file_path)
             audio_tags = getattr(audio_mp3, "tags", None)
             frame = audio_tags.get("TSRC") if audio_tags is not None else None
             isrc = frame.text[0] if frame is not None and frame.text else ""
+            upc = ""
+            for chave in ("TXXX:UPC", "TXXX:BARCODE"):
+                quadro = audio_tags.get(chave) if audio_tags is not None else None
+                if quadro is not None and quadro.text:
+                    upc = quadro.text[0]
+                    break
             length = getattr(audio_mp3.info, "length", 0)
         if isrc:
             hints["isrc"] = str(isrc).strip()
+        if upc:
+            hints["upc"] = str(upc).strip()
         if length:
             hints["duration"] = int(round(length))
     except Exception as e:
@@ -362,16 +377,28 @@ def _collect_audio_files(directory_path):
     return found
 
 
+def _artista_do_album(album_artist, track_artist):
+    """Artista mostrado/pesquisado: o do ÁLBUM (conciso, sem "A, B feat. C").
+
+    Mesma regra do download: sem artista do álbum, ou "Various Artists",
+    vale o artista da faixa.
+    """
+    album_artist = (album_artist or "").strip()
+    if not album_artist or album_artist.lower() == "various artists":
+        return (track_artist or "").strip() or album_artist
+    return album_artist
+
+
 def _read_basic_tags(file_path, ext):
-    """Lê (título, artista, álbum) do arquivo; vazio quando a tag não existe."""
+    """Lê (título, artista do álbum, álbum) do arquivo; vazio sem a tag."""
     title, artist, album = "", "", ""
     if ext == ".flac":
         try:
             audio_flac = FLAC(file_path)
             title = audio_flac.get("TITLE", [""])[0]
-            artist = (
-                audio_flac.get("ARTIST", [""])[0]
-                or audio_flac.get("ALBUMARTIST", [""])[0]
+            artist = _artista_do_album(
+                audio_flac.get("ALBUMARTIST", [""])[0],
+                audio_flac.get("ARTIST", [""])[0],
             )
             album = audio_flac.get("ALBUM", [""])[0]
         except Exception as e:
@@ -380,7 +407,10 @@ def _read_basic_tags(file_path, ext):
         try:
             audio_id3 = id3.ID3(file_path)
             title = audio_id3.get("TIT2").text[0] if audio_id3.get("TIT2") else ""
-            artist = audio_id3.get("TPE1").text[0] if audio_id3.get("TPE1") else ""
+            artist = _artista_do_album(
+                audio_id3.get("TPE2").text[0] if audio_id3.get("TPE2") else "",
+                audio_id3.get("TPE1").text[0] if audio_id3.get("TPE1") else "",
+            )
             album = audio_id3.get("TALB").text[0] if audio_id3.get("TALB") else ""
         except Exception as e:
             logger.debug(f"Falha ao ler tags do MP3: {e}")
@@ -421,27 +451,11 @@ _RESUMO_STATUS = (
 )
 
 
-def _largura_terminal() -> int:
-    return max(60, min(ui.raw_width(), 120))
-
-
 def _curto(texto: str, limite: int) -> str:
     texto = str(texto)
     if len(texto) <= limite:
         return texto
     return texto[: max(1, limite - 1)].rstrip() + "…"
-
-
-def _linhas_rotuladas(rotulo: str, texto: str, largura: int) -> list:
-    """Linha "   Rótulo  texto" com continuação alinhada sob o texto."""
-    return textwrap.wrap(
-        texto,
-        width=largura - 1,
-        initial_indent=f"   {rotulo:<6} ",
-        subsequent_indent=" " * 10,
-        break_long_words=True,
-        break_on_hyphens=False,
-    ) or [f"   {rotulo}"]
 
 
 def _legenda_lyrics() -> list:
@@ -609,18 +623,18 @@ def _bloco_faixa(
 
     linhas = [f"{cor}{rotulo} {nome}{OFF}", f"   {cor}• {estado}{OFF}"]
     if tipo == "alterada":
-        for linha in _linhas_rotuladas("Antes", antes, largura):
+        for linha in ui.labeled_lines("Antes", antes, largura):
             linhas.append(f"{MUTED}{linha}{OFF}")
         if depois:
-            for linha in _linhas_rotuladas("Agora", depois, largura):
+            for linha in ui.labeled_lines("Agora", depois, largura):
                 linhas.append(f"{GREEN}{linha}{OFF}")
     else:
-        for linha in _linhas_rotuladas("Atual", antes, largura):
+        for linha in ui.labeled_lines("Atual", antes, largura):
             linhas.append(f"{MUTED}{linha}{OFF}")
     if nota_id:
-        for linha in _linhas_rotuladas("ID", nota_id, largura):
+        for linha in ui.labeled_lines("ID", nota_id, largura):
             linhas.append(f"{YELLOW}{linha}{OFF}")
-    for linha in _linhas_rotuladas("Motivo", desc, largura):
+    for linha in ui.labeled_lines("Motivo", desc, largura):
         linhas.append(f"{MUTED}{linha}{OFF}")
     return linhas
 
@@ -641,18 +655,6 @@ def _ler_album_e_artista(file_path: str):
     except Exception as e:
         logger.debug(f"Falha ao ler álbum/artista do álbum: {e}")
     return str(album or ""), str(artista or "")
-
-
-def _cabecalho_album(file_path: str, quantidade: int, largura: int) -> list:
-    """Cabeçalho do álbum (uma vez por pasta): '== Álbum -- Artista | N faixas ==='."""
-    album, artista = _ler_album_e_artista(file_path)
-    titulo = album.strip() or os.path.basename(os.path.dirname(file_path)).strip()
-    if not titulo:
-        return []
-    cabecalho = f"== {titulo}" + (f" -- {artista.strip()}" if artista.strip() else "")
-    cabecalho += f"  |  {quantidade} faixa{'s' if quantidade != 1 else ''}"
-    cabecalho = _curto(cabecalho, largura - 6) + " "
-    return [f"{CYAN}{cabecalho}{'=' * max(3, largura - len(cabecalho) - 1)}{OFF}"]
 
 
 async def process_retroactive_lyrics_async(
@@ -771,7 +773,7 @@ async def process_retroactive_lyrics_async(
         nota_pulados = f" ({pulados} já em dia, pulados)" if pulados else ""
         ui.emit(f"\n{CYAN}[i] {total} arquivo(s) para verificar{nota_pulados}.{OFF}")
 
-        largura = _largura_terminal()
+        largura = ui.report_width()
         digitos = len(str(total))
         por_pasta = collections.Counter(os.path.dirname(f) for f in files_to_check)
 
@@ -795,8 +797,52 @@ async def process_retroactive_lyrics_async(
 
             lookup_hints = await asyncio.to_thread(_lyrics_lookup_hints, file_path)
 
+            # Primeiro inspeciona o arquivo localmente. Faixas que ja possuem
+            # letra sincronizada do Qobuz no idioma-alvo nao precisam de busca
+            # textual, consulta de letra nem consulta de traducao.
+            lyrics_state = await asyncio.to_thread(inspect_existing_lyrics, file_path)
+            has_lyrics = lyrics_state["has_lyrics"]
+            is_bilingual = lyrics_state["is_bilingual"]
+            existing_lang = str(lyrics_state.get("language") or "").lower()
+            antes = _descrever_letra(lyrics_state)
+            display_name = f"{artist} - {title}" if artist else title
+
+            idioma_existente = {
+                parte.strip() for parte in existing_lang.split("+") if parte.strip()
+            }
+            rank_existente = _rank_letra_atual(lyrics_state)
+            fonte_qobuz = rank_existente in {
+                RANK_QOBUZ_SYNCED,
+                RANK_QOBUZ_BILINGUAL,
+            }
+            idioma_alvo_presente = bool(
+                target_lang and target_lang.lower() in idioma_existente
+            )
+
+            if (
+                has_lyrics
+                and lyrics_state.get("is_synced")
+                and fonte_qobuz
+                and idioma_alvo_presente
+            ):
+                stats["unchanged_already_pt"] += 1
+                status_counts["SEM ALTERAÇÃO"] += 1
+                await _registrar_progresso(file_path, "SEM ALTERAÇÃO")
+                return _bloco_faixa(
+                    rotulo,
+                    display_name,
+                    "SEM ALTERAÇÃO",
+                    f"Letra sincronizada do Qobuz já contém {target_lang.upper()}; "
+                    "nenhuma consulta externa necessária",
+                    antes,
+                    "",
+                    None,
+                    largura,
+                )
+
             # IDs gravados pelo downloader sao confiaveis; busca textual e usada
-            # apenas como fallback.
+            # apenas como fallback. So faz a busca depois de descartar os casos
+            # que ja estao corretos localmente.
             track_id = await asyncio.to_thread(extract_track_id, file_path)
             track_id_is_trusted = bool(track_id)
 
@@ -836,15 +882,6 @@ async def process_retroactive_lyrics_async(
                 except Exception as e:
                     logger.debug(f"Falha ao casar faixa por busca textual: {e}")
 
-            # Estado atual: presenca, idioma, se ja e sincronizada e se ja e bilingue.
-            lyrics_state = await asyncio.to_thread(inspect_existing_lyrics, file_path)
-            has_lyrics = lyrics_state["has_lyrics"]
-            is_bilingual = lyrics_state["is_bilingual"]
-            existing_lang = lyrics_state["language"]
-            antes = _descrever_letra(lyrics_state)
-
-            display_name = f"{artist} - {title}" if artist else title
-
             # Aviso so quando o ID nao veio das tags (o caso normal fica quieto).
             if track_id_is_trusted:
                 nota_id = None
@@ -872,7 +909,20 @@ async def process_retroactive_lyrics_async(
                         client, track_id, language=None
                     )
 
-                    if target_lang:
+                    # A traducao so e consultada quando a original sincronizada
+                    # existe e esta em outro idioma. Se a original ja e PT, pedir
+                    # "translation=PT" e uma requisicao redundante.
+                    orig_block = (
+                        qobuz_orig_json.get("original", {}) or {}
+                        if isinstance(qobuz_orig_json, dict)
+                        else {}
+                    )
+                    orig_lang = str(orig_block.get("lang") or "").lower()
+                    orig_sync = any(
+                        line.get("start") is not None
+                        for line in (orig_block.get("lines") or [])
+                    )
+                    if target_lang and orig_sync and orig_lang != target_lang.lower():
                         trans_full = await fetch_qobuz_lyrics_raw(
                             client, track_id, language=target_lang
                         )
@@ -933,6 +983,7 @@ async def process_retroactive_lyrics_async(
                             track_number=index,
                             quiet=True,
                             better_than=melhor_que,
+                            network_budget=LYRICS_NETWORK_BUDGET,
                             **extra,
                         )
                     finally:
@@ -1123,37 +1174,106 @@ async def process_retroactive_lyrics_async(
                 simulado=dry_run,
             )
 
-        # Os blocos saem SEMPRE na ordem dos arquivos, mesmo que, em modo
-        # paralelo, terminem fora de ordem: cada faixa pronta espera sua vez.
-        prontos: dict[int, tuple[str, list]] = {}
-        proximo: int = 1
-        pasta_atual: str | None = None
+        # Saída em ordem e agrupada por álbum: as faixas podem terminar fora de
+        # ordem (modo paralelo), mas cada bloco só é impresso quando todas as
+        # anteriores já foram. Os arquivos vêm ordenados por caminho, então as
+        # faixas de uma pasta (um álbum, ou um disco dele) ficam juntas; quando
+        # a pasta muda, sai o cabeçalho em caixa (o mesmo `ui.header` do
+        # download). Título e artista vêm das tags ALBUM e ALBUMARTIST; sem o álbum,
+        # vale o nome da pasta.
         trava_saida = asyncio.Lock()
+        prontos: dict[int, tuple[str, list[str]]] = {}
+        proximo_indice = 1
+        pasta_atual: str | None = None
 
-        async def _liberar():
-            nonlocal proximo, pasta_atual
-
+        async def _emitir(
+            index: int, file_path: str, status: str, linhas: list[str]
+        ) -> None:
+            nonlocal proximo_indice, pasta_atual
             async with trava_saida:
-                while proximo in prontos:
-                    caminho, linhas = prontos.pop(proximo)
+                prontos[index] = (file_path, linhas)
+                while proximo_indice in prontos:
+                    apos_caixa = False
+                    caminho, bloco = prontos.pop(proximo_indice)
                     pasta = os.path.dirname(caminho)
                     if pasta != pasta_atual:
-                        cabecalho = await asyncio.to_thread(
-                            _cabecalho_album, caminho, por_pasta[pasta], largura
-                        )
-                        if cabecalho:
-                            ui.emit("")
-                            for linha in cabecalho:
-                                ui.emit(linha)
                         pasta_atual = pasta
-                    ui.emit("")
-                    for linha in linhas:
-                        ui.emit(linha)
-                    proximo += 1
+                        album, artista_album = await asyncio.to_thread(
+                            _ler_album_e_artista, caminho
+                        )
+                        titulo = album.strip() or os.path.basename(pasta) or "Sem álbum"
+                        linhas_album = [("Título", titulo)]
+                        if artista_album.strip():
+                            linhas_album.append(("Artista", artista_album.strip()))
+                        linhas_album.append(("Faixas", str(por_pasta[pasta])))
+                        ui.header(
+                            "ÁLBUM",
+                            linhas_album,
+                            cols=ui.ALBUM_BOX_COLS,
+                            fit=True,
+                        )
+                        apos_caixa = True
+                    # A caixa já termina com uma linha em branco.
+                    for linha_bloco in bloco if apos_caixa else ["", *bloco]:
+                        ui.emit(linha_bloco)
+                    apos_caixa = False
+                    proximo_indice += 1
 
-        async def _uma(index, file_path):
-            prontos[index] = (file_path, await _processar_arquivo(index, file_path))
-            await _liberar()
+        async def _uma(index: int, file_path: str) -> None:
+            inicio = time.monotonic()
+            try:
+                linhas = await asyncio.wait_for(
+                    _processar_arquivo(index, file_path),
+                    timeout=_TIMEOUT_FAIXA,
+                )
+                status = "CONCLUÍDA"
+            except Exception as exc:
+                logger.exception(
+                    "Falha inesperada ao processar a faixa %s (%s)",
+                    index,
+                    file_path,
+                )
+
+                status_counts["FALHA"] += 1
+                stats["not_found"] += 1
+                try:
+                    await _registrar_progresso(file_path, "FALHA")
+                except Exception:
+                    logger.exception(
+                        "Não foi possível registrar a falha da faixa %s", file_path
+                    )
+
+                nome = os.path.basename(file_path)
+                if isinstance(exc, asyncio.TimeoutError):
+                    detalhe = (
+                        f"tempo esgotado após {_TIMEOUT_FAIXA:.0f}s; "
+                        "a faixa pode ter continuado em segundo plano"
+                    )
+                else:
+                    detalhe = " ".join(str(exc).split()) or type(exc).__name__
+                if len(detalhe) > 240:
+                    detalhe = detalhe[:237] + "..."
+
+                linhas = _bloco_faixa(
+                    f"[{index:0{digitos}d}/{total}]",
+                    nome,
+                    "FALHA",
+                    f"Erro nesta faixa; as próximas continuam: {detalhe}",
+                    "Estado local não concluído",
+                    "",
+                    None,
+                    largura,
+                )
+                status = "FALHA"
+
+            duracao = time.monotonic() - inicio
+            if duracao >= 10.0:
+                linhas = [
+                    *linhas,
+                    f"{MUTED}   Tempo  {duracao:.0f}s{OFF}",
+                ]
+
+            await _emitir(index, file_path, status, linhas)
 
         async def _worker(_worker_index, entry):
             index, file_path = entry

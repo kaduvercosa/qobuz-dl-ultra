@@ -25,7 +25,6 @@ import os
 import re
 import shutil
 import tempfile
-import textwrap
 from collections.abc import Mapping
 from typing import Any, Optional, TypedDict
 
@@ -55,25 +54,34 @@ AUDIO_EXTENSIONS = (".flac", ".mp3")
 
 
 def resolve_library_dir(target_dir: str) -> str:
-    """Normaliza a pasta alvo, sandbox do iOS/a-Shell e caminho Windows."""
-    target_dir = os.path.expanduser(target_dir)
-    home_dir = os.environ.get("HOME", "")
+    """Resolve a pasta usada pelo comando tags, preservando a regra legada do iOS.
 
-    if "Containers/Data/Application" in home_dir:
-        docs_dir = os.path.join(home_dir, "Documents")
-        if not target_dir.startswith(docs_dir):
-            base_name = os.path.basename(target_dir.rstrip("/\\"))
-            target_dir = os.path.join(
-                docs_dir,
-                base_name if base_name else "Qobuz Downloads",
-            )
+    No sandbox do iOS, caminhos externos (inclusive absolutos) são
+    redirecionados para Documents usando somente o nome da pasta. Caminhos
+    que já estão em Documents permanecem no local. Essa compatibilidade é
+    específica do comando tags; os demais comandos usam o helper central.
+    """
+    home = os.path.expanduser(os.environ.get("HOME", ""))
+    if "Containers/Data/Application" in home:
+        documents = os.path.join(home, "Documents")
+        target = os.path.expanduser(os.fspath(target_dir).strip()) or "Qobuz Downloads"
 
-    if os.name == "nt":
-        target_dir = os.path.abspath(target_dir)
-        if not target_dir.startswith("\\\\?\\"):
-            target_dir = "\\\\?\\" + target_dir
+        try:
+            already_in_documents = os.path.commonpath(
+                (os.path.abspath(target), os.path.abspath(documents))
+            ) == os.path.abspath(documents)
+        except ValueError:
+            already_in_documents = False
 
-    return target_dir
+        if already_in_documents:
+            return target
+
+        basename = os.path.basename(target.rstrip("\\/"))
+        return os.path.join(documents, basename or "Qobuz Downloads")
+
+    from qobuz_dl.paths import resolve_library_directory
+
+    return resolve_library_directory(target_dir)
 
 
 def find_audio_files(directory_path: str) -> list[str]:
@@ -645,36 +653,6 @@ def _compare_covers(file_path, cover_path):
     return decision, (reason_getter() if reason_getter else None)
 
 
-def _term_width() -> int:
-    return max(60, min(ui.raw_width(), 120))
-
-
-def _wrap_lines(text: str, indent: int, width: Optional[int] = None) -> list:
-    """Quebra o texto em linhas que cabem no terminal, com recuo fixo."""
-    width = width or _term_width()
-    prefix = " " * indent
-    return textwrap.wrap(
-        text,
-        width=width - 1,
-        initial_indent=prefix,
-        subsequent_indent=prefix,
-        break_long_words=True,
-        break_on_hyphens=False,
-    ) or [prefix]
-
-
-def _labeled_lines(label: str, text: str, width: int) -> list:
-    """Linha "   Rótulo  texto" com continuação alinhada sob o texto."""
-    return textwrap.wrap(
-        text,
-        width=width - 1,
-        initial_indent=f"   {label:<6} ",
-        subsequent_indent=" " * 10,
-        break_long_words=True,
-        break_on_hyphens=False,
-    ) or [f"   {label}"]
-
-
 def split_apple_diagnostic(text: str) -> list:
     """Separa o diagnóstico da Apple em [(rótulo, texto)].
 
@@ -775,56 +753,50 @@ def _cover_detail_lines(outcome: str, cover_source, detail: str, width: int) -> 
     lines = []
     if outcome == "replaced":
         text = f"Fonte: {cover_source or 'Apple/iTunes'} | {detail}"
-        lines.extend(_wrap_lines(text, indent, width))
+        lines.extend(ui.wrap_indented(text, indent, width))
     elif outcome == "not_found":
         for label, body in split_apple_diagnostic(detail):
             if label == "Exemplos":
-                lines.extend(_wrap_lines("Exemplos:", indent, width))
+                lines.extend(ui.wrap_indented("Exemplos:", indent, width))
                 for example in body.split(" | "):
-                    wrapped = _wrap_lines(example, indent + 4, width)
+                    wrapped = ui.wrap_indented(example, indent + 4, width)
                     wrapped[0] = " " * (indent + 2) + "• " + wrapped[0].lstrip()
                     lines.extend(wrapped)
             else:
-                lines.extend(_wrap_lines(f"{label}: {body}", indent, width))
+                lines.extend(ui.wrap_indented(f"{label}: {body}", indent, width))
     elif (
         outcome in ("download_failed", "embed_failed", "error", "no_compare") and detail
     ):
-        lines.extend(_wrap_lines(detail, indent, width))
+        lines.extend(ui.wrap_indented(detail, indent, width))
     return [f"{MUTED}{line}{OFF}" for line in lines]
 
 
-def _album_header_lines(album: dict, decision, width: int) -> list:
-    """Cabeçalho do álbum (uma vez por álbum) e como a capa dele foi decidida."""
+def _album_header_rows(album: dict, decision) -> list:
+    """Linhas (rótulo, valor) da caixa ÁLBUM e de como a capa dele foi decidida."""
     title = (album.get("title") or "").strip()
     if not title:
         return []
+    rows = [("Título", title)]
     artist = ((album.get("artist") or {}).get("name") or "").strip()
+    if artist:
+        rows.append(("Artista", artist))
+    release = _RELEASE_LABELS.get(_classify_album(album))
+    if release:
+        rows.append(("Tipo", release))
     items = (album.get("tracks") or {}).get("items") or []
     count = album.get("tracks_count") or len(items)
-    meta = " | ".join(
-        part
-        for part in (
-            _RELEASE_LABELS.get(_classify_album(album)),
-            f"{count} faixa{'s' if count != 1 else ''}" if count else None,
-        )
-        if part
-    )
-    head = f"== {title}" + (f" -- {artist}" if artist else "")
-    if meta:
-        head += f"  |  {meta}"
-    head = _short(head, width - 6) + " "
-    lines = [f"{CYAN}{head}{'=' * max(3, width - len(head) - 1)}{OFF}"]
+    if count:
+        rows.append(("Faixas", str(count)))
     if decision and decision.get("url"):
-        lines.append(
-            f"{CYAN}   Capa Apple única para todas as faixas "
-            f"({decision.get('method')}){OFF}"
+        rows.append(
+            (
+                "Capa",
+                f"Apple única para todas as faixas ({decision.get('method')})",
+            )
         )
     elif decision is not None:
-        lines.append(
-            f"{MUTED}   Sem capa única para o álbum: cada faixa é avaliada "
-            f"separadamente{OFF}"
-        )
-    return lines
+        rows.append(("Capa", "sem capa única: cada faixa é avaliada separadamente"))
+    return rows
 
 
 def _legend_lines() -> list:
@@ -1351,27 +1323,27 @@ async def retag_directory(
             if not tags_only:
                 stats["cover_outcomes"][cover_outcome] += 1
 
-            columns = _term_width()
+            columns = ui.report_width()
             state_color, state_text = _file_state(
                 tags_changed, cover_changed, cover_outcome in _COVER_ATTENTION
             )
             if dry_run:
                 state_text += " [simulação]"
 
-            # Cabeçalho do álbum: uma vez, quando o álbum muda.
+            # Caixa do álbum (a mesma `ui.header` do `lyrics`): uma vez, quando
+            # o álbum muda. Ela já termina com uma linha em branco.
+            header_printed = False
             if album_key and album_key != last_album_key:
-                header = _album_header_lines(
-                    album, album_decisions.get(album_key), columns
-                )
-                if header:
-                    ui.emit("")
-                    for header_line in header:
-                        ui.emit(header_line)
+                header_rows = _album_header_rows(album, album_decisions.get(album_key))
+                if header_rows:
+                    ui.header("ÁLBUM", header_rows, cols=ui.ALBUM_BOX_COLS, fit=True)
+                    header_printed = True
                 last_album_key = album_key
 
             # Um bloco por faixa, separado por linha em branco. Cor: verde =
             # alterou, amarelo = atenção, cinza = nada a alterar.
-            ui.emit("")
+            if not header_printed:
+                ui.emit("")
             ui.emit(f"{state_color}{label} {name}{OFF}")
             ui.emit(f"   {state_color}• {state_text}{OFF}")
 
@@ -1387,7 +1359,7 @@ async def retag_directory(
                 )
             else:
                 tags_color, tags_text = MUTED, "já estavam corretas"
-            for line in _labeled_lines("Tags", tags_text, columns):
+            for line in ui.labeled_lines("Tags", tags_text, columns):
                 ui.emit(f"{tags_color}{line}{OFF}")
             if tags_changed and not covers_only:
                 for diff_line in format_tag_diff(before_text, after_text):
@@ -1399,7 +1371,7 @@ async def retag_directory(
                 cover_color, cover_text = _cover_line(
                     cover_outcome, cover_changed, cover_source
                 )
-            for line in _labeled_lines("Capa", cover_text, columns):
+            for line in ui.labeled_lines("Capa", cover_text, columns):
                 ui.emit(f"{cover_color}{line}{OFF}")
             for line in _cover_detail_lines(
                 cover_outcome, cover_source, cover_status, columns

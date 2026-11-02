@@ -494,37 +494,7 @@ class TestBarGauge:
         assert len(ui.bar_gauge(10, 10)) == 24  # teto
 
 
-class TestKvEHeader:
-    def test_kv_alinhado_em_tela_larga(self, estado_limpo, saida, colunas):
-        colunas(100)
-        ui.configure(color=False)
-        ui.kv("Rotulo", "valor", label_width=10)
-        assert saida == ["  Rotulo      valor"]
-
-    def test_kv_estreito_fica_na_mesma_linha_quando_cabe(
-        self, estado_limpo, saida, colunas
-    ):
-        colunas(40)
-        ui.configure(color=False)
-        ui.kv("Rotulo", "valor")
-        assert saida == ["  Rotulo: valor"]
-
-    def test_kv_estreito_empilha_valor_longo(self, estado_limpo, saida, colunas):
-        colunas(40)
-        ui.configure(color=False)
-        ui.kv("Rotulo", "palavra " * 10)
-        assert saida[0] == "  Rotulo:"
-        assert len(saida) > 2 and all(l.startswith("    ") for l in saida[1:])
-
-    def test_kv_largo_com_valor_longo_quebra_em_bloco(
-        self, estado_limpo, saida, colunas
-    ):
-        colunas(100)
-        ui.configure(color=False)
-        ui.kv("Rotulo", "palavra " * 20, label_width=10)
-        assert saida[0] == "  Rotulo"
-        assert len(saida) > 2
-
+class TestHeader:
     def test_header_traz_tipo_e_pares_em_maiusculas(self, estado_limpo, saida, colunas):
         colunas(100)
         ui.configure(color=False, unicode=False)
@@ -544,7 +514,7 @@ class TestKvEHeader:
         assert "VAZIO" in "\n".join(saida)
 
 
-class TestRuleBannerSection:
+class TestRule:
     def test_rule_usa_a_largura(self, estado_limpo, saida, colunas):
         colunas(50)
         ui.configure(color=False, unicode=False)
@@ -555,18 +525,6 @@ class TestRuleBannerSection:
         ui.configure(color=False)
         ui.rule(char="*", cols=7)
         assert saida == ["*" * 7]
-
-    def test_banner_centraliza_o_titulo(self, estado_limpo, saida):
-        ui.configure(color=False, unicode=False)
-        ui.banner("TITULO", cols=20)
-        texto = "\n".join(saida)
-        assert "=" * 20 in texto
-        assert "TITULO".center(20) in texto
-
-    def test_section(self, estado_limpo, saida):
-        ui.configure(color=False)
-        ui.section("Bloco")
-        assert saida == ["  Bloco"]
 
 
 # ---------------------------------------------------------------------------
@@ -812,6 +770,27 @@ class TestSummary:
         texto = "\n".join(saida)
         assert "12/12" in texto and "Disco" in texto
         assert "Puladas" not in texto and "Falhas" not in texto
+
+    def test_downloads_sem_elapsed_nao_mostra_tempo_total(
+        self, estado_limpo, saida, colunas
+    ):
+        colunas(60)
+        ui.configure(color=False, unicode=False)
+        ui.summary_downloads("DO ÁLBUM", "Disco", 1, 2, failed=1)
+        assert "Tempo total" not in "\n".join(saida)
+
+    def test_downloads_mostra_tempo_tamanho_e_velocidade(
+        self, estado_limpo, saida, colunas
+    ):
+        colunas(60)
+        ui.configure(color=False, unicode=False)
+        ui.summary_downloads(
+            "DO ÁLBUM", "Disco", 11, 13, elapsed=102, total_bytes=312_000_000
+        )
+        texto = "\n".join(saida)
+        assert "1 min 42 s" in texto
+        assert "Tamanho baixado" in texto and "312 MB" in texto
+        assert "Velocidade média" in texto and "3.1 MB/s" in texto
 
     def test_downloads_mostra_puladas_e_falhas(self, estado_limpo, saida, colunas):
         colunas(60)
@@ -1148,3 +1127,19 @@ class TestResultadoEIndiceCinza:
         ui.configure(color=False, unicode=True)
         ui.done(ui.tail("Concluído: Booklet.pdf", "26.7 MB · 1.1 s"))
         assert saida == ["[+] └─ Concluído: Booklet.pdf   26.7 MB · 1.1 s"]
+
+
+def test_header_fit_ajusta_a_caixa_ao_conteudo(monkeypatch):
+    monkeypatch.setenv("COLUMNS", "120")
+    monkeypatch.setattr(ui, "color_enabled", lambda: False)
+    saidas = []
+    monkeypatch.setattr(ui, "emit", lambda texto="", end="\n": saidas.append(texto))
+    linhas = [("Título", "Red Bottoms"), ("Artista", "ADÉLA"), ("Faixas", "1")]
+
+    ui.header("ÁLBUM", linhas, cols=90, fit=True)
+    ajustada = max(len(x) for x in saidas[-1].splitlines())
+    ui.header("ÁLBUM", linhas, cols=90)
+    padrao = max(len(x) for x in saidas[-1].splitlines())
+
+    assert ajustada < padrao  # a caixa padrão ocupa o teto de 48 colunas
+    assert ajustada >= len("│ ARTISTA  Red Bottoms │")

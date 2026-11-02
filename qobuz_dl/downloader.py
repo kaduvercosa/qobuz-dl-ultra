@@ -114,12 +114,14 @@ from qobuz_dl.download_utils import (
     _PositionPool,
     _safe_get,
     _short_track_name,
+    audio_bytes,
     create_missing_placeholder,
     format_release_type,
     format_track_label,
     get_album_artist,
     is_track_streamable,
     process_folder_format_with_subdirs,
+    remove_missing_placeholder,  # noqa: F401 -- usado pelo comando retry
 )
 
 # ANTES: as 10 funções/classe acima estavam definidas aqui direto. Movidas
@@ -380,6 +382,12 @@ class Download:
     faixa de playlist). Ponto de entrada publico: download_id_by_type().
     """
 
+    # Opcionais, preenchidos por quem usa o `retry` (core.py) depois de criar a
+    # instancia; os valores padrao mantem o fluxo normal inalterado.
+    force_album_dir: Optional[str] = None
+    only_track_ids: Optional[set[str]] = None
+    suppress_album_summary: bool = False
+
     def __init__(
         self,
         client,
@@ -558,6 +566,11 @@ class Download:
                 letras_info: dict[str, object] = {}
 
                 async def _baixar_e_marcar():
+                    # Resultado POR CHAMADA (como `letras_out`): um atributo
+                    # único no objeto era sobrescrito por outra faixa em
+                    # paralelo e, nos caminhos de falha que não o definiam,
+                    # deixava valer o resultado da faixa anterior.
+                    resultado_info: dict[str, str] = {}
                     res = await self._download_and_tag(
                         dirn,
                         idx,
@@ -571,10 +584,15 @@ class Download:
                         position_pool=position_pool,
                         letras_out=letras_info,
                         cover_source=cover_source,
+                        outcome_out=resultado_info,
                     )
-                    outcome = getattr(self, "last_download_outcome", None)
+                    outcome = resultado_info.get("outcome")
                     if outcome is None:
                         outcome = "downloaded" if res is True else "failed"
+                    elif res is not True and outcome != "skipped":
+                        # Retorno diferente de True é falha, seja qual for o
+                        # resultado registrado (só "skipped" é exceção).
+                        outcome = "failed"
 
                     status = {
                         "downloaded": "ok",
@@ -746,6 +764,12 @@ class Download:
         target_dirn = process_folder_format_with_subdirs(
             self.folder_format, album_attr, self.path, legacy_charmap=legacy_flag
         )
+        # `retry`: repete faixas NA PASTA onde o álbum já está, mesmo que o
+        # folder_format tenha mudado desde então (senão criaria outra pasta e
+        # baixaria o álbum inteiro de novo).
+        _pasta_forcada = getattr(self, "force_album_dir", None)
+        if _pasta_forcada:
+            target_dirn = _pasta_forcada
 
         base_path, folder_name = os.path.split(target_dirn)
 
@@ -832,6 +856,9 @@ class Download:
 
         failed_tracks = 0
         aborted_by_user = False
+        # Lido no `finally` (resumo); sem valor inicial, um cancelamento antes
+        # da medição escondia o CancelledError com um UnboundLocalError.
+        _bytes_baixados = 0
         cancelled_by_task = False
         results: list[Any] = []
         abort_event.clear()
@@ -1003,6 +1030,7 @@ class Download:
             )
 
             album_tracks = album_meta["tracks"]["items"]
+            _bytes_antes = await asyncio.to_thread(audio_bytes, dirn)
             completed_ids = set()
             if not getattr(self.settings, "verify_after_download", False):
                 completed_ids = await postprocess.resumable_track_ids(dirn)
@@ -1011,6 +1039,10 @@ class Download:
 
             async def _bounded_process_track(_worker_index, entry):
                 idx, track = entry
+                # `retry`: só as faixas pedidas; as demais passam em silêncio.
+                _so_estas = getattr(self, "only_track_ids", None)
+                if _so_estas is not None and str(track.get("id", "")) not in _so_estas:
+                    return "existing"
                 if str(track.get("id", "")) in completed_ids:
                     index_token = ui.set_track_index(
                         ui.index_from_meta(track, album_meta)
@@ -1052,10 +1084,13 @@ class Download:
                     )
                 raise
 
+            _bytes_baixados = max(
+                0, await asyncio.to_thread(audio_bytes, dirn) - _bytes_antes
+            )
             for track_meta, result in zip(album_meta["tracks"]["items"], results):
                 if isinstance(result, BaseException):
                     ui.error(
-                        f"Faixa {track_meta.get('track_number', '?')} — "
+                        f"Faixa {track_meta.get('track_number', '?')} -- "
                         f"{track_meta.get('title', 'Faixa Desconhecida')}: "
                         f"{type(result).__name__}: {result}"
                     )
@@ -1246,21 +1281,23 @@ class Download:
             )
             downloaded_count = sum(1 for r in results if r is True)
 
-            ui.summary_downloads(
-                "DO ÁLBUM",
-                album_title,
-                downloaded_count,
-                track_count,
-                skipped=skipped_count,
-                failed=real_failed,
-                existing=existing_count,
-                notes=(
-                    [("Lista das puladas", ".missing.txt", "warn")]
-                    if skipped_count > 0
-                    else []
-                ),
-                elapsed=time.monotonic() - _album_started,
-            )
+            if not getattr(self, "suppress_album_summary", False):
+                ui.summary_downloads(
+                    "DO ÁLBUM",
+                    album_title,
+                    downloaded_count,
+                    track_count,
+                    skipped=skipped_count,
+                    failed=real_failed,
+                    existing=existing_count,
+                    notes=(
+                        [("Lista das puladas", ".missing.txt", "warn")]
+                        if skipped_count > 0
+                        else []
+                    ),
+                    elapsed=time.monotonic() - _album_started,
+                    total_bytes=_bytes_baixados,
+                )
 
         return bool(results) and failed_tracks == 0 and not aborted_by_user
 
@@ -1757,10 +1794,24 @@ class Download:
         cover_source=None,
         display_index: Optional[int] = None,
         _claimed: Optional[list] = None,
+        outcome_out: Optional[dict] = None,
     ) -> bool:
-        """Download audio file and apply ID3/FLAC tags."""
+        """Download audio file and apply ID3/FLAC tags.
+
+        ``outcome_out``: dict opcional que recebe ``{"outcome": ...}`` com
+        "downloaded", "existing" ou "skipped" quando a faixa chega a esse
+        ponto. Sem chave = nenhum resultado registrado (o chamador trata o
+        retorno ``False`` como falha).
+        """
         extension = ".mp3" if is_mp3 else ".flac"
         loop = asyncio.get_running_loop()
+
+        if outcome_out is not None:
+            outcome_out.pop("outcome", None)
+
+        def _registrar_resultado(valor: str) -> None:
+            if outcome_out is not None:
+                outcome_out["outcome"] = valor
 
         track_artist = _safe_get(track_metadata, "performer", "name")
         filename_attr = self._get_filename_attr(
@@ -1865,7 +1916,7 @@ class Download:
                     "(mesma faixa repetida na playlist)"
                 )
                 self.last_downloaded_file = final_file
-                self.last_download_outcome = "existing"
+                _registrar_resultado("existing")
                 return True
             if name_state == STATE_NEW and final_file != candidate_files[0]:
                 ui.step(
@@ -1904,14 +1955,14 @@ class Download:
                         f"{_skip_pfx}Pulando: {os.path.basename(final_file)} (Ja existe)"
                     )
                     self.last_downloaded_file = final_file
-                    self.last_download_outcome = "existing"
+                    _registrar_resultado("existing")
                     return True
             else:
                 ui.skip(
                     f"{_skip_pfx}Pulando: {os.path.basename(final_file)} (Ja existe)"
                 )
                 self.last_downloaded_file = final_file
-                self.last_download_outcome = "existing"
+                _registrar_resultado("existing")
                 return True
 
         if abort_event.is_set():
@@ -2008,7 +2059,7 @@ class Download:
                         "URL retornada é apenas amostra",
                         total_discs,
                     )
-                    self.last_download_outcome = "skipped"
+                    _registrar_resultado("skipped")
                     return False
 
                 if "url" in fresh_track_dict:
@@ -2028,7 +2079,7 @@ class Download:
                         if abort_event.is_set():
                             return False
                         ui.warn(f"Faixa indisponivel, pulando: {e}")
-                        self.last_download_outcome = "skipped"
+                        _registrar_resultado("skipped")
                         return False
                     except Exception as e:
                         # [FIX] Antes este bloco so' avisava sobre "bloqueio Akamai"
@@ -2088,7 +2139,7 @@ class Download:
                 if abort_event.is_set():
                     return False
                 ui.warn(f"Faixa indisponível, pulando: {e}")
-                self.last_download_outcome = "skipped"
+                _registrar_resultado("skipped")
                 return False
             except Exception as e:
                 # [FIX] Agora reporta o motivo em vez de "pass" silencioso, para
@@ -2232,6 +2283,7 @@ class Download:
                     qobuz_translation_response=qobuz_translation_response,
                     track_number=track_no,
                     isrc=track_metadata.get("isrc"),
+                    upc=_safe_get(track_metadata, "album", "upc"),
                     duration=track_metadata.get("duration"),
                     buffer_output=bool(is_parallel),
                     network_budget=LYRICS_NETWORK_BUDGET,
@@ -2335,7 +2387,7 @@ class Download:
             await asyncio.sleep(delay_time)
 
         self.last_downloaded_file = final_file
-        self.last_download_outcome = "downloaded"
+        _registrar_resultado("downloaded")
         return True
 
     @staticmethod
@@ -2963,6 +3015,8 @@ async def fetch_qobuz_lyrics_json(client, http_session, track_id, language=None)
             resp.raise_for_status()
             return resp.json()
     except Exception:
+        # Letra é opcional: o download segue sem ela, mas o motivo fica no DEBUG.
+        logger.debug("Falha ao buscar o JSON de letras do Qobuz", exc_info=True)
         return None
 
 

@@ -199,3 +199,42 @@ async def test_lyrics_com_traducao_escolhida_consulta_a_traducao(ambiente):
     await ambiente.rodar(fetch_translation=True, lyrics_translation_lang="pt")
     assert ambiente.pedidos == [None, "pt"]
     assert ambiente.engine.chamadas[0]["qobuz_translation_response"] is not None
+
+
+# ------------------------------------------------- Qobuz: traducao e opcional
+def _qobuz_eng(settings):
+    eng = LyricsEngine(session=MagicMock(), settings=settings)
+    eng.PROVIDERS = ("_provider_qobuz",)
+    eng._inject_metadata = MagicMock(return_value=True)
+    eng._save_lrc_file = MagicMock(return_value=True)
+    eng._inject_instrumental_pauses = lambda t: t
+    return eng
+
+
+def _qobuz_buscar(eng):
+    return eng.fetch_and_inject(
+        file_path="/m/a.flac",
+        artist="A",
+        track="T",
+        album="Al",
+        qobuz_lyrics_response={
+            "original": {"lang": "en", "lines": [{"start": 1000, "line": "hi"}]}
+        },
+        qobuz_translation_response={
+            "lang": "pt",
+            "lines": [{"start": 1000, "line": "oi"}],
+        },
+    )
+
+
+def test_qobuz_sem_traducao_escolhida_ignora_a_traducao_recebida():
+    eng = _qobuz_eng(QobuzDLSettings(fetch_translation=False))
+    r = _qobuz_buscar(eng)
+    assert r["success"] and not r["bilingual"]
+    assert eng._inject_metadata.call_args.args[1] == "[00:01.000]hi"
+
+
+def test_qobuz_com_traducao_escolhida_fica_bilingue():
+    eng = _qobuz_eng(QobuzDLSettings(fetch_translation=True))
+    r = _qobuz_buscar(eng)
+    assert r["success"] and r["bilingual"]

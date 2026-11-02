@@ -12,6 +12,17 @@ from pathlib import Path
 
 PACOTE = Path(__file__).resolve().parents[2] / "qobuz_dl"
 
+# Funções cujo silêncio já é o contrato documentado na própria docstring
+# (best-effort: ignoram erro de leitura/remoção de arquivo e seguem para o
+# próximo). Chave: (arquivo, função que contém o handler). Não use números de
+# linha aqui -- eles mudam a cada edição do arquivo.
+SILENCIO_DOCUMENTADO_NA_DOCSTRING = {
+    # "Ignora capa, booklet, parciais e qualquer erro de leitura."
+    ("download_utils.py", "audio_bytes"),
+    # "Best-effort: nunca levanta erro."
+    ("download_utils.py", "remove_missing_placeholder"),
+}
+
 
 def _tem_justificativa(linhas: list[str]) -> bool:
     for linha in linhas:
@@ -24,17 +35,27 @@ def _tem_justificativa(linhas: list[str]) -> bool:
     return False
 
 
+def _handlers_com_funcao(no, funcao=None):
+    """Gera (handler, função que o contém) para cada ``except`` da árvore."""
+    if isinstance(no, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        funcao = no.name
+    if isinstance(no, ast.ExceptHandler):
+        yield no, funcao
+    for filho in ast.iter_child_nodes(no):
+        yield from _handlers_com_funcao(filho, funcao)
+
+
 def _handlers_silenciosos_sem_motivo() -> list[str]:
     achados = []
     for arquivo in sorted(PACOTE.glob("*.py")):
         fonte = arquivo.read_text(encoding="utf-8")
         linhas = fonte.splitlines()
-        for no in ast.walk(ast.parse(fonte)):
-            if not isinstance(no, ast.ExceptHandler):
-                continue
+        for no, funcao in _handlers_com_funcao(ast.parse(fonte)):
             if len(no.body) != 1 or not isinstance(
                 no.body[0], (ast.Pass, ast.Continue)
             ):
+                continue
+            if (arquivo.name, funcao) in SILENCIO_DOCUMENTADO_NA_DOCSTRING:
                 continue
             if not _tem_justificativa(linhas[no.lineno - 1 : no.end_lineno]):
                 achados.append(f"{arquivo.name}:{no.lineno}")

@@ -1076,21 +1076,33 @@ class Client:
             matched_ids.extend(fuzzy_ids)
         return matched_ids
 
-    async def search_albums(self, query, limit=20):
+    async def _search(self, kind: str, query, limit):
+        """Busca no catálogo; em erro devolve ``{}`` (nenhum resultado) e AVISA.
+
+        Os chamadores tratam ``{}`` como "sem resultado" e seguem, então a falha
+        não pode derrubar a busca. Mas ela também não pode passar por "nada
+        encontrado": token vencido ou rede fora apareceriam como busca vazia.
+        O aviso mostra a causa; o detalhe completo vai para o nível DEBUG.
+        """
         try:
             return await self.api_call(
-                "catalog/search", query=query, type="albums", limit=limit
+                "catalog/search", query=query, type=kind, limit=limit
             )
-        except Exception:
+        except Exception as exc:
+            logger.warning(
+                "A busca de %s falhou (%s: %s); tratada como sem resultados.",
+                kind,
+                type(exc).__name__,
+                exc,
+            )
+            logger.debug("Detalhe da falha na busca de %s", kind, exc_info=True)
             return {}
 
+    async def search_albums(self, query, limit=20):
+        return await self._search("albums", query, limit)
+
     async def search_tracks(self, query, limit=20):
-        try:
-            return await self.api_call(
-                "catalog/search", query=query, type="tracks", limit=limit
-            )
-        except Exception:
-            return {}
+        return await self._search("tracks", query, limit)
 
     async def create_qobuz_playlist(
         self, name: str, description: str = "", is_public: bool = False
@@ -1133,20 +1145,10 @@ class Client:
         return success
 
     async def search_playlists(self, query, limit=20):
-        try:
-            return await self.api_call(
-                "catalog/search", query=query, type="playlists", limit=limit
-            )
-        except Exception:
-            return {}
+        return await self._search("playlists", query, limit)
 
     async def search_artists(self, query, limit=20):
-        try:
-            return await self.api_call(
-                "catalog/search", query=query, type="artists", limit=limit
-            )
-        except Exception:
-            return {}
+        return await self._search("artists", query, limit)
 
     async def get_favorites(
         self, fav_type="albums", limit=100, offset=0, *, strict=False

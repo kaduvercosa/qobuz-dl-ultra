@@ -553,18 +553,15 @@ def test_lrclib_tenta_variante_do_artista_e_titulo_quando_exata_falha():
 
 
 # ----------------------------------------- Musixmatch: dicas e variantes
-def test_musixmatch_envia_dicas_de_album_duracao_e_isrc():
+def test_musixmatch_envia_dicas_de_album_e_duracao():
     eng = LyricsEngine(session=MagicMock())
     eng._mxm_token = "tok"
     eng.session.get.return_value = _resp(_mxm_ok(SYNC))
-    assert (
-        eng._fetch_musixmatch_lyrics("A", "T", album="Al", duration=174.4, isrc="I")
-        == SYNC
-    )
+    assert eng._fetch_musixmatch_lyrics("A", "T", album="Al", duration=174.4) == SYNC
     params = eng.session.get.call_args.kwargs["params"]
     assert params["q_album"] == "Al"
     assert params["q_duration"] == 174
-    assert params["track_isrc"] == "I"
+    assert "track_isrc" not in params
 
 
 def test_musixmatch_sem_dicas_nao_envia_parametros_extras():
@@ -666,3 +663,19 @@ def test_mensagem_de_falha_e_erro_e_identifica_a_faixa(monkeypatch):
     )
     assert kind == "error"
     assert "Falha ao gravar letras: [07] Faixa" in linhas[0]
+
+
+def test_musixmatch_identifica_so_por_nome_artista_album_e_duracao():
+    eng = _engine()
+    pedidos = []
+
+    def fake(artista, titulo, **dicas):
+        pedidos.append(dicas)
+        return SYNC
+
+    eng._fetch_musixmatch_lyrics = fake
+    eng.session.get.return_value = _resp(status=404)
+    eng.fetch_and_inject(
+        "/m/a.flac", "Drake", "One Dance", "Views", isrc="X", upc="123", duration=174
+    )
+    assert pedidos[0] == {"album": "Views", "duration": 174}

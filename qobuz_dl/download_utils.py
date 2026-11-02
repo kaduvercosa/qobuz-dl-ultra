@@ -119,6 +119,54 @@ def create_missing_placeholder(
         )
 
 
+_AUDIO_EXTS = (".flac", ".mp3", ".m4a", ".aac", ".ogg", ".opus", ".wav")
+
+
+def audio_bytes(path) -> int:
+    """Soma, em bytes, dos arquivos de áudio dentro de `path` (recursivo).
+
+    Usado para medir quanto um download trouxe (tamanho depois menos antes).
+    Ignora capa, booklet, parciais e qualquer erro de leitura.
+    """
+    total = 0
+    try:
+        for root, _dirs, files in os.walk(path):
+            for name in files:
+                if not name.lower().endswith(_AUDIO_EXTS):
+                    continue
+                try:
+                    total += os.path.getsize(os.path.join(root, name))
+                except OSError:
+                    continue
+    except OSError:
+        return total
+    return total
+
+
+def remove_missing_placeholder(folder_path, title) -> bool:
+    """Apaga o `.missing.txt` de uma faixa que acabou de ser baixada.
+
+    O nome vem de `create_missing_placeholder`: `<nº>. <título> [INDISPONÍVEL]`.
+    Devolve True se removeu algum. Best-effort: nunca levanta erro.
+    """
+    seguro = str(title or "").replace("/", "-").replace("\\", "-")
+    sufixo = f". {seguro} [INDISPONÍVEL].missing.txt"
+    try:
+        nomes = os.listdir(folder_path)
+    except OSError:
+        return False
+    removido = False
+    for nome in nomes:
+        if not nome.endswith(sufixo):
+            continue
+        try:
+            os.remove(os.path.join(folder_path, nome))
+            removido = True
+        except OSError:
+            continue
+    return removido
+
+
 def _get_safe_ncols():
     """Delegado para ``ui.progress_ncols()`` (fonte unica de largura)."""
     return ui.progress_ncols()

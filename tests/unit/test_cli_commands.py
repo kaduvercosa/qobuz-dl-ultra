@@ -251,3 +251,59 @@ def test_artists_sync_checklist_does_not_require_path():
     parser = cli.qobuz_dl_args()
     args = parser.parse_args(["artists", "--sincronizar-checklist"])
     assert args.sincronizar_checklist is True
+
+
+def test_config_directory_if_exists_devolve_a_pasta_do_config(tmp_path, monkeypatch):
+    config_file = tmp_path / "config.ini"
+    configured = tmp_path / "Biblioteca configurada"
+    configured.mkdir()
+    config_file.write_text(f"[qobuz]\ndirectory = {configured}\n", encoding="utf-8")
+    monkeypatch.setattr(cli, "CONFIG_FILE", str(config_file))
+    monkeypatch.setattr(cli, "IOS_HOME", None)
+
+    assert cli._config_directory_if_exists() == str(configured)
+
+
+def test_config_directory_if_exists_ignora_pasta_inexistente(tmp_path, monkeypatch):
+    """Pasta configurada que não existe -> None (o chamador usa o próprio padrão)."""
+    config_file = tmp_path / "config.ini"
+    configured = tmp_path / "Biblioteca configurada"
+    config_file.write_text(f"[qobuz]\ndirectory = {configured}\n", encoding="utf-8")
+    monkeypatch.setattr(cli, "CONFIG_FILE", str(config_file))
+    monkeypatch.setattr(cli, "IOS_HOME", None)
+
+    assert cli._config_directory_if_exists() is None
+
+
+def test_config_directory_if_exists_sem_config_devolve_none(tmp_path, monkeypatch):
+    monkeypatch.setattr(cli, "CONFIG_FILE", str(tmp_path / "nao-existe.ini"))
+    monkeypatch.setattr(cli, "IOS_HOME", None)
+
+    assert cli._config_directory_if_exists() is None
+
+
+def test_config_directory_if_exists_resolve_caminho_relativo_no_ios(
+    tmp_path, monkeypatch
+):
+    config_file = tmp_path / "config.ini"
+    config_file.write_text("[qobuz]\ndirectory = Musicas\n", encoding="utf-8")
+    (tmp_path / "Musicas").mkdir()
+    monkeypatch.setattr(cli, "CONFIG_FILE", str(config_file))
+    monkeypatch.setattr(cli, "IOS_HOME", str(tmp_path))
+
+    assert cli._config_directory_if_exists() == str(tmp_path / "Musicas")
+
+
+def test_config_directory_if_exists_aceita_chave_legada_default_folder(
+    tmp_path, monkeypatch
+):
+    config_file = tmp_path / "config.ini"
+    configured = tmp_path / "Biblioteca antiga"
+    configured.mkdir()
+    config_file.write_text(
+        f"[DEFAULT]\ndefault_folder = {configured}\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(cli, "CONFIG_FILE", str(config_file))
+    monkeypatch.setattr(cli, "IOS_HOME", None)
+
+    assert cli._config_directory_if_exists() == str(configured)

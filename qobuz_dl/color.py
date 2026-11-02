@@ -18,7 +18,6 @@
 
 import configparser
 import os
-import shutil
 import sys
 
 from colorama import Fore, Style, just_fix_windows_console
@@ -264,7 +263,10 @@ PROGRESS = _ACCENT
 def accent_preview(escape: str, label: str = "") -> str:
     """Retorna uma string com preview do `escape` em fundo escuro E claro.
     Adapta automaticamente para o tamanho da tela (celular vs iPad/PC)."""
-    cols, _ = shutil.get_terminal_size((80, 24))
+    # Import tardio: o `ui` importa este módulo, então o topo do arquivo não pode.
+    from qobuz_dl import ui
+
+    cols = ui.raw_width((80, 24))
 
     dark_bg = _e("\033[40m")  # Fundo Preto
     light_bg = _e("\033[107m")  # Fundo Branco Brilhante

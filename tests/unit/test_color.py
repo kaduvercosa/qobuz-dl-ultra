@@ -35,7 +35,7 @@ import sys
 
 import pytest
 
-from qobuz_dl import color
+from qobuz_dl import color, ui
 
 
 # --------------------------------------------------------------------
@@ -177,23 +177,16 @@ class TestLoadAccentRgb:
 # --------------------------------------------------------------------
 class TestAccentPreview:
     def test_terminal_estreito_usa_modo_empilhado(self, monkeypatch):
-        # NOTA: color.shutil é o MESMO objeto módulo que o shutil usado
-        # pelo próprio pytest internamente (pra desenhar a barra de
-        # progresso) -- não é uma cópia isolada. O pytest chama
-        # `shutil.get_terminal_size(fallback=(80, 24))` com kwarg, então
-        # o mock precisa aceitar *args/**kwargs, senão quebra o pytest
-        # enquanto o mock estiver ativo (gera INTERNALERROR real, já visto
-        # em execução).
-        monkeypatch.setattr(color.shutil, "get_terminal_size", lambda *a, **k: (80, 24))
+        # A largura vem de `ui.raw_width()` (fonte única); trocar só ela evita
+        # mexer no `shutil`, que o próprio pytest também usa.
+        monkeypatch.setattr(ui, "raw_width", lambda *a, **k: 80)
         resultado = color.accent_preview("\033[38;2;1;2;3m", "Teste")
         assert "Escuro:" in resultado and "Claro:" in resultado
         # Modo estreito quebra em duas linhas (uma pra cada amostra).
         assert resultado.count("\n") >= 2
 
     def test_terminal_largo_usa_modo_lado_a_lado(self, monkeypatch):
-        monkeypatch.setattr(
-            color.shutil, "get_terminal_size", lambda *a, **k: (140, 24)
-        )
+        monkeypatch.setattr(ui, "raw_width", lambda *a, **k: 140)
         resultado = color.accent_preview("\033[38;2;1;2;3m", "Teste")
         assert "Escuro:" in resultado and "Claro:" in resultado
         # Modo largo é uma linha só, lado a lado -- sem quebra dupla.
@@ -204,7 +197,7 @@ class TestAccentPreview:
         # `max(2, ...)` tem que segurar isso. Sem o clamp, " " * negativo
         # não quebra (Python trata como zero), mas o recuo documentado
         # como "piso de 2" deixaria de existir silenciosamente.
-        monkeypatch.setattr(color.shutil, "get_terminal_size", lambda *a, **k: (20, 24))
+        monkeypatch.setattr(ui, "raw_width", lambda *a, **k: 20)
         resultado = color.accent_preview("\033[38;2;1;2;3m")
         indent_line = next(l for l in resultado.split("\n") if "Escuro:" in l)
         recuo = len(indent_line) - len(indent_line.lstrip(" "))

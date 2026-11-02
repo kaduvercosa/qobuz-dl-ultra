@@ -117,7 +117,7 @@ def test_arquivo_direto_mostra_todas_as_secoes(biblioteca, capsys):
     codigo, saida = _rodar(biblioteca["completo"], capsys)
     assert codigo == 0
     for secao in (
-        "📄 ARQUIVO",
+        "🔍 INSPETOR DE ÁUDIO",
         "🎼 IDENTIFICAÇÃO",
         "🔢 FAIXA E DISCO",
         "🏷️  CÓDIGOS E SELOS",
@@ -209,13 +209,13 @@ def test_json_de_pasta_traz_totais_e_faixas(biblioteca, capsys):
 def test_resumo_da_pasta(biblioteca, capsys):
     codigo, saida = _rodar(biblioteca["pasta"], capsys, resumo=True)
     assert codigo == 0
-    assert "📚 RESUMO DA PASTA" in saida and "Arquivos de áudio" in saida
+    assert "📚 RESUMO DA PASTA" in saida and "ARQUIVOS DE ÁUDIO" in saida
     # \u2014 = travessão (o separador artista/título do resumo). Escrito como
     # escape ASCII para nenhum editor/teclado trocar o caractere por "--".
     assert "Dua Lipa \u2014 Completo" in saida and "capa 600x600" in saida
     assert "sem capa" in saida
     assert "04 ruim.flac" in saida and "não foi possível ler" in saida
-    assert "📊 TOTAIS" in saida and "Faixas lidas" in saida
+    assert "📊 TOTAIS" in saida and "FAIXAS LIDAS" in saida
     assert "O QUE FALTA CORRIGIR" in saida and "tags --report" in saida
     # o arquivo com problema é identificado pelo nome
     assert "arquivo: 02 pobre.flac" in saida
@@ -229,7 +229,7 @@ def test_resumo_de_pasta_vazia_avisa(tmp_path, capsys):
 def test_resumo_completo_marca_o_que_nao_decodifica(biblioteca, capsys):
     _, saida = _rodar(biblioteca["pasta"], capsys, resumo=True, completo=True)
     assert "CORROMPIDO" not in saida.split("04 ruim.flac")[0]  # os bons estão íntegros
-    assert "Áudio corrompido" in saida
+    assert "ÁUDIO CORROMPIDO" in saida
 
 
 def test_resumo_de_pasta_sem_problemas(biblioteca, tmp_path, capsys):
@@ -341,6 +341,7 @@ def test_cli_repassa_as_flags_ao_inspetor(monkeypatch, tmp_path):
         "caminho": "/musicas",
         "json_saida": True,
         "resumo": True,
+        "auditar": False,
         "completo": True,
         "espectro": False,
     }
@@ -352,6 +353,7 @@ def test_cli_padrao_do_inspetor(monkeypatch, tmp_path):
         "caminho": None,
         "json_saida": False,
         "resumo": False,
+        "auditar": False,
         "completo": False,
         "espectro": True,
     }

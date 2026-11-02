@@ -449,23 +449,39 @@ async def test_resumo_conta_atualizacoes(ambiente):
     assert re.search(r"letras novas inseridas\s*: 1\b", texto)
 
 
-async def test_engine_e_fechada_mesmo_quando_ocorre_erro(tmp_path, monkeypatch):
+def _texto_plano(linhas):
+    """Saída sem códigos ANSI e com espaços/quebras normalizados."""
+    texto = re.sub(r"\x1b\[[0-9;]*m", "", "\n".join(linhas))
+    return " ".join(texto.split())
+
+
+async def test_engine_e_fechada_mesmo_quando_ocorre_erro(tmp_path, monkeypatch, caplog):
+    """Erro numa faixa não derruba a execução: vira FALHA no relatório, a
+    engine é fechada e as próximas faixas continuam."""
     _Engine.instancias = []
     (tmp_path / "a.flac").write_bytes(b"x")
+    saida = []
 
     def explode(_):
         raise RuntimeError("falha inesperada")
 
-    monkeypatch.setattr(rt.ui, "emit", lambda t="", end="\n": None)
+    monkeypatch.setattr(rt.ui, "emit", lambda t="", end="\n": saida.append(t))
     monkeypatch.setattr(rt, "LyricsEngine", _Engine)
     monkeypatch.setattr(rt, "extract_track_id", lambda p: None)
     monkeypatch.setattr(rt, "FLAC", lambda p: {})
     monkeypatch.setattr(rt, "inspect_existing_lyrics", explode)
-    with pytest.raises(RuntimeError, match="falha inesperada"):
-        await rt.process_retroactive_lyrics_async(
+
+    with caplog.at_level("ERROR", logger="qobuz_dl.retro_tagger"):
+        stats = await rt.process_retroactive_lyrics_async(
             str(tmp_path), None, settings=SimpleNamespace()
         )
+
     assert _engine().fechada
+    assert stats["not_found"] == 1
+    texto = _texto_plano(saida)
+    assert "as próximas continuam: falha inesperada" in texto
+    assert re.search(r"Sem letra / com falha\s*: 1\b", texto)
+    assert "Falha inesperada ao processar a faixa 1" in caplog.text
 
 
 async def test_biblioteca_vazia_avisa_e_fecha_a_engine(tmp_path, monkeypatch):
@@ -665,10 +681,15 @@ async def test_cabecalho_do_album_sai_uma_vez_por_pasta(ambiente, tmp_path):
     await ambiente(
         resposta_orig=None, estados=[_estado(has=True, lang="pt")], tags=tags
     )
-    cabecalhos = [l for l in ambiente.saida if l.startswith("== ")]
-    assert len(cabecalhos) == 3  # A, B e a pasta raiz (o arquivo do fixture)
-    assert sum("Meu Álbum -- Banda  |  2 faixas" in c for c in cabecalhos) == 2
-    assert any("|  1 faixa " in c for c in cabecalhos)
+    texto = "\n".join(ambiente.saida)
+    assert texto.count("ÁLBUM") == 3  # A, B e a pasta raiz (o arquivo do fixture)
+    assert texto.count("Meu Álbum") == 3
+    assert len(re.findall(r"ARTISTA\s+Banda", texto)) == 3
+    # A e B têm 2 faixas; a pasta raiz, 1 (o arquivo do fixture).
+    assert len(re.findall(r"FAIXAS\s+2\b", texto)) == 2
+    assert len(re.findall(r"FAIXAS\s+1\b", texto)) == 1
+    # O nome das faixas usa o artista do ÁLBUM, não o de cada faixa.
+    assert "Banda - Faixa" in texto and "Artista - Faixa" not in texto
 
 
 async def test_mostra_legenda_de_cores_e_destino_da_gravacao(ambiente):
