@@ -66,9 +66,23 @@ def _linhas_top_artistas(top: list) -> list:
     return linhas
 
 
-def render_stats(db_path: Any, show_all_artists: bool = False) -> int:
-    """Imprime o relatorio de estatisticas. Retorna o codigo de saida."""
+def render_stats(
+    db_path: Any, show_all_artists: bool = False, como_json: bool = False
+) -> int:
+    """Imprime o relatorio de estatisticas. Retorna o codigo de saida.
+
+    Com ``como_json`` sai so o JSON das estatisticas (as mesmas chaves de
+    ``db.get_stats``; ``artist_list`` so entra com ``show_all_artists``). Banco
+    vazio ou ausente vira o dicionario zerado, nunca texto.
+    """
     stats = get_stats(db_path)
+
+    if como_json:
+        dados = dict(stats or {})
+        if not show_all_artists:
+            dados.pop("artist_list", None)
+        ui.emit_json(dados)
+        return 0
 
     if not stats or stats.get("total", 0) == 0:
         ui.warn(

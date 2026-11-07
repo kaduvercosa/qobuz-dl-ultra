@@ -24,13 +24,15 @@
 #   ui.configure(quiet=args.quiet, verbose=args.verbose, color=not args.no_color)
 #   ui.install_logging()
 
+import contextlib
 import contextvars
+import dataclasses
+import json
 import logging
 import os
 import re
 import shutil
 import sys
-import textwrap
 import threading
 import unicodedata
 from typing import TypedDict
@@ -68,10 +70,64 @@ MEDIUM = 90  # iPad retrato, terminal de meia tela
 COMPACT_WIDTH = 72  # abaixo/igual: atalhos e metadados compactos na TUI
 # acima de MEDIUM -> "wide" (desktop, iPad paisagem)
 
-# Override opcional para terminais móveis. ``None`` preserva a detecção automática
-# pela largura; ``compact`` força cartões/atalhos e ``comfortable`` privilegia
-# detalhes mesmo quando o terminal informa poucas colunas.
-_ui_mode: str | None = None
+
+@dataclasses.dataclass
+class EstadoUI:
+    """Todo o estado mutável do terminal num só lugar (antes eram 7 globais).
+
+    Campos:
+      quiet / verbose        flags de saída (`--quiet`, `--verbose`)
+      color_enabled          None = ainda não detectado (cache preguiçoso)
+      unicode_enabled        idem, para glifos unicode
+      ui_mode                override para terminais móveis: ``None`` preserva a
+                             detecção automática pela largura; ``compact`` força
+                             cartões/atalhos e ``comfortable`` privilegia detalhes
+      pending_status         há uma linha de status "em andamento" sem quebra
+      ultima_linha_vazia     a última escrita terminou em linha em branco
+
+    Existe UMA instância, `ui.estado`. Para mexer: `ui.configure(...)` no boot
+    do programa; em teste, `monkeypatch.setattr(ui.estado, "quiet", True)` ou
+    `with ui.estado_temporario(quiet=True): ...`. Nunca troque a instância
+    (`ui.estado = ...`): as funções do módulo leem o objeto que já existe.
+    """
+
+    quiet: bool = False
+    verbose: bool = False
+    color_enabled: bool | None = None
+    unicode_enabled: bool | None = None
+    ui_mode: str | None = None
+    pending_status: bool = False
+    ultima_linha_vazia: bool = False
+
+
+estado = EstadoUI()
+
+
+def redefinir_estado():
+    """Volta todos os campos de `estado` ao padrão (cor e unicode serão redetectados)."""
+    for campo in dataclasses.fields(EstadoUI):
+        setattr(estado, campo.name, campo.default)
+
+
+@contextlib.contextmanager
+def estado_temporario(**campos):
+    """Muda campos de `estado` dentro do bloco e restaura tudo ao sair.
+
+    ``with ui.estado_temporario(quiet=True, color_enabled=False): ...``
+    Campo inexistente levanta ``AttributeError`` (erro de digitação não passa).
+    """
+    antes = dataclasses.asdict(estado)
+    for nome in campos:
+        if nome not in antes:
+            raise AttributeError(f"EstadoUI não tem o campo '{nome}'")
+    try:
+        for nome, valor in campos.items():
+            setattr(estado, nome, valor)
+        yield estado
+    finally:
+        for nome, valor in antes.items():
+            setattr(estado, nome, valor)
+
 
 LAYOUT_NARROW = "narrow"
 LAYOUT_MEDIUM = "medium"
@@ -148,7 +204,9 @@ def width(max_width=MAX_WIDTH, min_width=MIN_WIDTH):
 # Largura dos relatórios de varredura (letras/tags retroativas): mais larga que
 # a dos painéis, para caber caminhos e motivos sem quebrar a todo momento.
 REPORT_MAX_WIDTH = 120
-REPORT_MIN_WIDTH = 60
+# Piso igual ao dos painéis: em tela de 40 colunas (a-Shell no iPhone) o relatório
+# se ajusta à tela em vez de ficar sempre com 60 colunas e quebrar no meio.
+REPORT_MIN_WIDTH = MIN_WIDTH
 # Teto da caixa "ÁLBUM" dos relatórios retroativos (`lyrics` e `tags`).
 ALBUM_BOX_COLS = 90
 # Teto da largura dos painéis de relatório (`stats`, `inspect`): ``Painel``.
@@ -160,30 +218,148 @@ def report_width():
     return width(max_width=REPORT_MAX_WIDTH, min_width=REPORT_MIN_WIDTH)
 
 
+def _wrap_prefixed(text, width, first_prefix, next_prefix):
+    """Quebra ``text`` em linhas de no máximo ``width`` CÉLULAS, com prefixos.
+
+    ``first_prefix`` abre a primeira linha e ``next_prefix`` as seguintes. Mede
+    em células (emoji e CJK valem 2), ao contrário do ``textwrap``, que conta
+    caracteres e deixava a linha passar da tela. Uma palavra maior que a linha é
+    cortada por células. Devolve ``[]`` se não houver palavra.
+    """
+    lines = []
+    prefix = first_prefix
+    current = ""
+
+    def room():
+        return max(1, int(width) - _cell_width(prefix))
+
+    for word in str(text).split():
+        while _cell_width(word) > room():
+            if current:  # fecha a linha atual antes de partir a palavra
+                lines.append(prefix + current)
+                prefix, current = next_prefix, ""
+                continue
+            piece = ""
+            for char in word:
+                if piece and _cell_width(piece + char) > room():
+                    break
+                piece += char
+            lines.append(prefix + piece)
+            prefix = next_prefix
+            word = word[len(piece) :]
+        candidate = f"{current} {word}" if current else word
+        if _cell_width(candidate) <= room():
+            current = candidate
+        else:
+            lines.append(prefix + current)
+            prefix, current = next_prefix, word
+    if current:
+        lines.append(prefix + current)
+    return lines
+
+
+def _recuo_de_continuacao(visivel):
+    """Recuo das linhas seguintes de uma linha quebrada: o da própria linha,
+    mais o que o marcador (``•`` ou ``[x]``) ocupa, para o texto alinhar."""
+    recuo = len(visivel) - len(visivel.lstrip(" "))
+    resto = visivel[recuo:]
+    if resto[:1] in ("•", "-") and resto[1:2] == " ":
+        return recuo + 2
+    if resto[:1] == "[" and resto[2:3] == "]" and resto[3:4] == " ":
+        return recuo + 4
+    return recuo
+
+
+def wrap_ansi_line(linha, cols=None):
+    """Quebra uma linha COM cores ANSI para caber em ``cols`` colunas.
+
+    Mede em células, ignorando as sequências de cor. Quebra entre palavras, mantém
+    o recuo (e o do marcador ``•``/``[x]``) nas linhas seguintes. Uma palavra maior
+    que a linha (um caminho, por exemplo) NÃO é partida: vai inteira para uma linha
+    só dela, para continuar copiável. Linha que já cabe volta intacta. Uma cor aberta numa linha continua valendo na seguinte, que
+    é como o terminal trata o código de cor.
+    """
+    linha = str(linha)
+    limite = max(10, int(cols or report_width()) - 1)
+    if _cell_width(linha) <= limite:
+        return [linha]
+    recuo = min(_recuo_de_continuacao(_ANSI_ESCAPE.sub("", linha)), limite // 2)
+    margem = " " * recuo
+    linhas, atual, primeira = [], "", True
+    for palavra in linha.split(" "):
+        if not primeira and not palavra:
+            atual += " "  # espaço duplo no meio da linha
+            continue
+        candidata = palavra if primeira else f"{atual} {palavra}"
+        if _cell_width(candidata) <= limite:
+            atual, primeira = candidata, False
+            continue
+        if not primeira:
+            linhas.append(atual.rstrip())
+        # Palavra maior que a linha (um caminho) fica inteira, em linha própria:
+        # o terminal a quebra sozinho e, ao copiar, o caminho continua íntegro.
+        atual, primeira = margem + palavra, False
+    if atual.strip():
+        linhas.append(atual)
+    return linhas or [linha]
+
+
+def emit_wrapped(linha, cols=None):
+    """``emit`` de uma linha com cores que não passa da largura do relatório.
+
+    Aceita ``\n`` dentro do texto: cada trecho é quebrado separadamente.
+    """
+    for trecho in str(linha).split("\n"):
+        for parte in wrap_ansi_line(trecho, cols):
+            emit(parte)
+
+
+def resumo_linhas(
+    rotulo,
+    valor,
+    explicacao="",
+    *,
+    cor_rotulo="",
+    cor_valor="",
+    cor_explicacao="",
+    reset="",
+    larg_rotulo=26,
+    cols=None,
+):
+    """Linhas de uma linha de resumo "• Rótulo : valor  explicação".
+
+    Em tela larga, rótulos alinhados na mesma coluna (``larg_rotulo`` é o do maior
+    rótulo da tabela, para nenhum estourar a coluna). Em tela estreita
+    (< ``NARROW``) a explicação desce para a linha de baixo, recuada.
+    """
+    cols = int(cols or report_width())
+    valor = str(valor)
+    if cols >= NARROW:
+        rot = pad_cells(rotulo, larg_rotulo)
+        linha = f"{cor_rotulo} • {rot}:{reset} {cor_valor}{valor}{reset}"
+        if explicacao:
+            linha += f"  {cor_explicacao}{explicacao}{reset}"
+        return wrap_ansi_line(linha, cols)
+    saida = wrap_ansi_line(
+        f"{cor_rotulo} • {rotulo}:{reset} {cor_valor}{valor}{reset}", cols
+    )
+    if explicacao:
+        saida += wrap_ansi_line(f"   {cor_explicacao}{explicacao}{reset}", cols)
+    return saida
+
+
 def wrap_indented(text, indent, cols=None):
     """Quebra ``text`` em linhas que cabem em ``cols``, com recuo fixo."""
     cols = cols or report_width()
     prefix = " " * indent
-    return textwrap.wrap(
-        text,
-        width=cols - 1,
-        initial_indent=prefix,
-        subsequent_indent=prefix,
-        break_long_words=True,
-        break_on_hyphens=False,
-    ) or [prefix]
+    return _wrap_prefixed(text, cols - 1, prefix, prefix) or [prefix]
 
 
 def labeled_lines(label, text, cols):
     """Linha "   Rótulo  texto" com continuação alinhada sob o texto."""
-    return textwrap.wrap(
-        text,
-        width=cols - 1,
-        initial_indent=f"   {label:<6} ",
-        subsequent_indent=" " * 10,
-        break_long_words=True,
-        break_on_hyphens=False,
-    ) or [f"   {label}"]
+    return _wrap_prefixed(text, cols - 1, f"   {pad_cells(label, 6)} ", " " * 10) or [
+        f"   {label}"
+    ]
 
 
 def layout():
@@ -191,9 +367,9 @@ def layout():
     # que outras funções decidam como se adaptar (empilhar valor, quebrar
     # linha, etc.).
     """Return the current layout mode ('narrow' or 'wide') based on terminal width."""
-    if _ui_mode == "compact":
+    if estado.ui_mode == "compact":
         return LAYOUT_NARROW
-    if _ui_mode == "comfortable":
+    if estado.ui_mode == "comfortable":
         return LAYOUT_WIDE
     cols = raw_width()
     if cols < NARROW:
@@ -211,9 +387,9 @@ def is_narrow():
 
 def compact_mode(columns=None):
     """Return whether dense/card rendering should be used."""
-    if _ui_mode == "compact":
+    if estado.ui_mode == "compact":
         return True
-    if _ui_mode == "comfortable":
+    if estado.ui_mode == "comfortable":
         return False
     return (raw_width() if columns is None else columns) <= COMPACT_WIDTH
 
@@ -231,10 +407,6 @@ def progress_ncols():
 # --------------------------------------------------------------------------
 # Cache module-level: a detecção só roda uma vez por processo, não a cada
 # chamada de emit().
-_color_enabled = None
-_unicode_enabled = None
-_quiet = False
-_verbose = False
 
 
 def _detect_color():
@@ -259,19 +431,17 @@ def _detect_unicode():
 def color_enabled():
     # Getter com cache preguiçoso (lazy) para o resultado de _detect_color().
     """Check if color output is currently enabled."""
-    global _color_enabled
-    if _color_enabled is None:
-        _color_enabled = _detect_color()
-    return _color_enabled
+    if estado.color_enabled is None:
+        estado.color_enabled = _detect_color()
+    return estado.color_enabled
 
 
 def unicode_enabled():
     # Getter com cache preguiçoso para o resultado de _detect_unicode().
     """Check if Unicode output is currently enabled."""
-    global _unicode_enabled
-    if _unicode_enabled is None:
-        _unicode_enabled = _detect_unicode()
-    return _unicode_enabled
+    if estado.unicode_enabled is None:
+        estado.unicode_enabled = _detect_unicode()
+    return estado.unicode_enabled
 
 
 def configure(quiet=None, verbose=None, color=None, unicode=None, ui_mode=None):
@@ -279,19 +449,18 @@ def configure(quiet=None, verbose=None, color=None, unicode=None, ui_mode=None):
     # no boot da CLI, com os valores vindos dos argumentos de linha de
     # comando. Parâmetros None são ignorados (mantêm o valor atual).
     """Configure UI system (color, Unicode, quiet/verbose modes)."""
-    global _quiet, _verbose, _color_enabled, _unicode_enabled, _ui_mode
     if quiet is not None:
-        _quiet = bool(quiet)
+        estado.quiet = bool(quiet)
     if verbose is not None:
-        _verbose = bool(verbose)
+        estado.verbose = bool(verbose)
     if color is not None:
-        _color_enabled = bool(color)
+        estado.color_enabled = bool(color)
     if unicode is not None:
-        _unicode_enabled = bool(unicode)
+        estado.unicode_enabled = bool(unicode)
     if ui_mode is not None:
         if ui_mode not in ("auto", "compact", "comfortable"):
             raise ValueError(f"modo de UI inválido: {ui_mode}")
-        _ui_mode = None if ui_mode == "auto" else ui_mode
+        estado.ui_mode = None if ui_mode == "auto" else ui_mode
 
 
 def c(code):
@@ -334,7 +503,6 @@ def block_char():
 # Linha de status "em andamento" (ex.: "[*] Logando...") deixada SEM quebra de
 # linha. A proxima escrita pelo emit()/emit_always() apaga essa linha e escreve
 # por cima, fazendo "Logando..." virar "Logado: OK" na mesma linha.
-_pending_status = False
 
 
 def _status_inline_supported():
@@ -348,9 +516,8 @@ def _status_inline_supported():
 
 def _clear_pending_locked():
     # Chamado dentro do print_lock: apaga a linha de status pendente.
-    global _pending_status
-    if _pending_status:
-        _pending_status = False
+    if estado.pending_status:
+        estado.pending_status = False
         try:
             sys.stdout.write("\r\033[2K")
             sys.stdout.flush()
@@ -361,12 +528,11 @@ def _clear_pending_locked():
 
 def step_inline(message):
     """Print a progress step WITHOUT newline; the next message replaces it."""
-    if _quiet:
+    if estado.quiet:
         return
     if not _status_inline_supported():
         step(message)
         return
-    global _pending_status
     with print_lock:
         _clear_pending_locked()
         linha = _tagged(HIGHLIGHT, "*", message)[0]
@@ -376,7 +542,7 @@ def step_inline(message):
         except Exception:
             # Terminal sem suporte: efeito só cosmético.
             pass
-        _pending_status = True
+        estado.pending_status = True
 
 
 def emit(text="", end="\n"):
@@ -386,7 +552,7 @@ def emit(text="", end="\n"):
     # ativas sejam apagadas e redesenhadas ao redor da mensagem em vez de
     # serem cortadas ao meio. Respeita --quiet (não imprime nada).
     """Print a message unless quiet mode is active."""
-    if _quiet:
+    if estado.quiet:
         return
     with print_lock:
         _clear_pending_locked()
@@ -396,12 +562,12 @@ def emit(text="", end="\n"):
 
 # True quando a última escrita por emit()/emit_always() terminou numa linha em
 # branco. Serve só a `separator()`, para não empilhar duas linhas em branco.
-_ultima_linha_vazia = False
 
 
 def _registrar_saida(text, end):
-    global _ultima_linha_vazia
-    _ultima_linha_vazia = end == "\n" and (str(text) == "" or str(text).endswith("\n"))
+    estado.ultima_linha_vazia = end == "\n" and (
+        str(text) == "" or str(text).endswith("\n")
+    )
 
 
 def separator():
@@ -410,7 +576,7 @@ def separator():
     # cabeçalho), não escreve outra. Sem lock aqui: emit() já o pega e o
     # print_lock não é reentrante.
     """Print a blank line between sections, never two in a row."""
-    if not _ultima_linha_vazia:
+    if not estado.ultima_linha_vazia:
         emit("")
 
 
@@ -446,6 +612,16 @@ def emit_always(text="", end="\n"):
         _clear_pending_locked()
         _write_locked(text, end)
         _registrar_saida(text, end)
+
+
+def emit_json(data):
+    """Imprime ``data`` como JSON (UTF-8, recuo 2) na saída padrão, mesmo com --quiet.
+
+    É o único jeito de um comando falar JSON: `--json` em `library`, `stats`,
+    `config`, `duplicates`, `doctor`. Nada mais pode sair no stdout nesse modo.
+    Valores que o JSON não conhece (datas, Path) viram texto.
+    """
+    emit_always(json.dumps(data, ensure_ascii=False, indent=2, default=str))
 
 
 _track_index = contextvars.ContextVar("ui_track_index", default="")
@@ -770,7 +946,7 @@ def detail(message, indent=4):
 def debug(message):
     # Só aparece quando --verbose está ativo.
     """Print a debug message if verbose mode is active."""
-    if _verbose:
+    if estado.verbose:
         emit(f"{c(MUTED)}[debug] {message}{c(RESET)}")
 
 
@@ -1436,9 +1612,9 @@ def install_logging(level=None):
     """Configure Python logging to route through the UI system."""
     explicit_level = level is not None
     if level is None:
-        if _quiet:
+        if estado.quiet:
             level = logging.WARNING
-        elif _verbose:
+        elif estado.verbose:
             level = logging.DEBUG
         else:
             level = logging.INFO

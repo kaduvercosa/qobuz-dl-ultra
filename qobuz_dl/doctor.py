@@ -6,7 +6,8 @@ Portado dos scripts de diagnóstico do libsync (``env-doctor.sh``,
 ``check-sentinels.sh``, ``album-status-report.sh``, ``check-dedup.sh``),
 unificados num comando só. Regras herdadas:
 
-  * SOMENTE LEITURA: não instala nada, não faz rede, não grava nada.
+  * SOMENTE LEITURA por padrão: não instala nada, não faz rede, não grava nada.
+    Só com ``--fix`` ele corrige o que é seguro e reversível (ver ``apply_fixes``).
   * Níveis PASS / WARN / FAIL; só FAIL derruba o código de saída.
   * Nunca imprime segredo (tokens/senhas): só diz se existem.
 
@@ -62,6 +63,15 @@ OPTIONAL_MODULES = {
 class Check:
     level: str
     name: str
+    detail: str = ""
+
+
+@dataclass
+class Fix:
+    """Resultado de uma correção tentada por ``doctor --fix``."""
+
+    name: str
+    ok: bool
     detail: str = ""
 
 
@@ -337,6 +347,37 @@ def check_sentinels(directory: Optional[str]) -> list[Check]:
     ]
 
 
+def apply_fixes(*, config_file: str, directory: Optional[str]) -> list[Fix]:
+    """Corrige só o que é seguro e não perde nada (``doctor --fix``).
+
+    1. config.ini legível por outros usuários -> chmod 600 (o arquivo guarda
+       e-mail e, às vezes, token);
+    2. pasta de downloads configurada que ainda não existe -> cria.
+
+    Nunca apaga, move nem reescreve conteúdo; o resto (instalar pacote, refazer
+    o login, mexer no config) continua sendo ação do usuário. Devolve uma
+    entrada por coisa corrigida ou que falhou ao corrigir; nada a fazer = [].
+    """
+    fixes: list[Fix] = []
+    if os.name == "posix" and os.path.isfile(config_file):
+        mode = stat.S_IMODE(os.stat(config_file).st_mode)
+        if mode & 0o077:
+            try:
+                os.chmod(config_file, 0o600)
+                fixes.append(Fix("Permissão do config", True, f"{oct(mode)} -> 0o600"))
+            except OSError as exc:
+                fixes.append(Fix("Permissão do config", False, str(exc)))
+    if directory:
+        pasta = os.path.expanduser(directory)
+        if not os.path.isdir(pasta):
+            try:
+                os.makedirs(pasta, exist_ok=True)
+                fixes.append(Fix("Pasta de downloads", True, f"criada: {pasta}"))
+            except OSError as exc:
+                fixes.append(Fix("Pasta de downloads", False, f"{pasta}: {exc}"))
+    return fixes
+
+
 def run_checks(
     *, config_file: str, downloads_db: str, library_db: str, directory: Optional[str]
 ) -> list[Check]:
@@ -459,3 +500,16 @@ def render(results: list[Check]) -> int:
 
 def to_json(results: list[Check]) -> list[dict]:
     return [asdict(r) for r in results]
+
+
+def render_fixes(fixes: list[Fix]) -> None:
+    """Painel com o que o ``--fix`` fez (nada, se não havia o que corrigir)."""
+    from qobuz_dl import ui
+
+    painel = ui.Painel("🔧 CORREÇÕES")
+    if not fixes:
+        painel.ok("Nada a corrigir automaticamente.")
+    for fix in fixes:
+        linha = f"{fix.name}: {fix.detail}" if fix.detail else fix.name
+        (painel.ok if fix.ok else painel.error)(linha)
+    painel.emit()

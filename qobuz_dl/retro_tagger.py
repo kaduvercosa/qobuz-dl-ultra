@@ -700,26 +700,26 @@ async def process_retroactive_lyrics_async(
         destino = "nada (metadata e .lrc desligados)"
     n_workers = _lyrics_workers(settings)
 
-    ui.emit(
+    ui.emit_wrapped(
         f"\n{CYAN}[*] Iniciando verificação e atualização de letras no Qobuz...{OFF}"
     )
-    ui.emit(f"{CYAN} • Pasta raiz  :{RESET} {directory_path}")
-    ui.emit(f"{CYAN} • Idioma alvo :{RESET} {lang_display}")
-    ui.emit(f"{CYAN} • Gravação    :{RESET} {destino}")
-    ui.emit(
+    ui.emit_wrapped(f"{CYAN} • Pasta raiz  :{RESET} {directory_path}")
+    ui.emit_wrapped(f"{CYAN} • Idioma alvo :{RESET} {lang_display}")
+    ui.emit_wrapped(f"{CYAN} • Gravação    :{RESET} {destino}")
+    ui.emit_wrapped(
         f"{CYAN} • Prioridade  :{RESET} Qobuz bilíngue > Qobuz > BiniLyrics > "
         "Musixmatch > LRCLIB (só letra sincronizada)"
     )
     if n_workers > 1:
-        ui.emit(f"{CYAN} • Em paralelo :{RESET} {n_workers} faixas por vez")
+        ui.emit_wrapped(f"{CYAN} • Em paralelo :{RESET} {n_workers} faixas por vez")
     if dry_run:
-        ui.emit(
+        ui.emit_wrapped(
             f"{YELLOW} • SIMULAÇÃO   :{RESET} nada será gravado (nem letra, nem "
             ".lrc, nem progresso); as fontes de letra são consultadas normalmente"
         )
     ui.emit("")
     for linha_legenda in _legenda_lyrics():
-        ui.emit(linha_legenda)
+        ui.emit_wrapped(linha_legenda)
 
     engine = LyricsEngine(genius_token=genius_token, settings=settings)
 
@@ -758,20 +758,22 @@ async def process_retroactive_lyrics_async(
 
         if not files_to_check:
             if pulados:
-                ui.emit(
+                ui.emit_wrapped(
                     f"\n{GREEN}[+] Nada a fazer: os {pulados} arquivo(s) já estavam "
                     f"em dia. Rode sem --resume/--incremental para refazer tudo.{OFF}"
                 )
                 if progress is not None and not dry_run:
                     await asyncio.to_thread(progress.finish)
             else:
-                ui.emit(
+                ui.emit_wrapped(
                     f"\n{YELLOW}[!] Nenhum arquivo .flac/.mp3 encontrado na pasta.{OFF}"
                 )
             return stats
 
         nota_pulados = f" ({pulados} já em dia, pulados)" if pulados else ""
-        ui.emit(f"\n{CYAN}[i] {total} arquivo(s) para verificar{nota_pulados}.{OFF}")
+        ui.emit_wrapped(
+            f"\n{CYAN}[i] {total} arquivo(s) para verificar{nota_pulados}.{OFF}"
+        )
 
         largura = ui.report_width()
         digitos = len(str(total))
@@ -1215,7 +1217,7 @@ async def process_retroactive_lyrics_async(
                         apos_caixa = True
                     # A caixa já termina com uma linha em branco.
                     for linha_bloco in bloco if apos_caixa else ["", *bloco]:
-                        ui.emit(linha_bloco)
+                        ui.emit_wrapped(linha_bloco)
                     apos_caixa = False
                     proximo_indice += 1
 
@@ -1308,11 +1310,11 @@ async def process_retroactive_lyrics_async(
 
         ui.emit("")
         if dry_run:
-            ui.emit(f"{GREEN}[+] Simulação concluída: nada foi gravado.{OFF}")
+            ui.emit_wrapped(f"{GREEN}[+] Simulação concluída: nada foi gravado.{OFF}")
         else:
-            ui.emit(f"{GREEN}[+] Verificação de letras concluída.{OFF}")
+            ui.emit_wrapped(f"{GREEN}[+] Verificação de letras concluída.{OFF}")
         ui.emit("")
-        ui.emit(f"{CYAN} Resumo:{RESET}")
+        ui.emit_wrapped(f"{CYAN} Resumo:{RESET}")
         for texto, valor, cor_ativa, explicacao in (
             (
                 "Arquivos analisados",
@@ -1346,10 +1348,17 @@ async def process_retroactive_lyrics_async(
             ),
         ):
             cor_valor = cor_ativa if (cor_ativa and valor) else MUTED
-            ui.emit(
-                f"{CYAN} • {texto.ljust(26)}:{RESET} "
-                f"{cor_valor}{valor}{OFF}  {MUTED}{explicacao}{OFF}"
-            )
+            for linha_resumo in ui.resumo_linhas(
+                texto,
+                valor,
+                explicacao,
+                cor_rotulo=CYAN,
+                cor_valor=cor_valor,
+                cor_explicacao=MUTED,
+                reset=OFF,
+                larg_rotulo=26,
+            ):
+                ui.emit(linha_resumo)
 
         detalhes = [
             (rotulo_status, sum(status_counts[s] for s in nomes))
@@ -1357,16 +1366,22 @@ async def process_retroactive_lyrics_async(
         ]
         if any(qtd for _, qtd in detalhes):
             ui.emit("")
-            ui.emit(f"{CYAN} Letras (o que houve em cada faixa):{RESET}")
+            ui.emit_wrapped(f"{CYAN} Letras (o que houve em cada faixa):{RESET}")
             for rotulo_status, qtd in detalhes:
                 if qtd:
-                    ui.emit(
-                        f"{CYAN} • {rotulo_status.ljust(36)}:{RESET} {GREEN}{qtd}{OFF}"
-                    )
+                    for linha_resumo in ui.resumo_linhas(
+                        rotulo_status,
+                        qtd,
+                        cor_rotulo=CYAN,
+                        cor_valor=GREEN,
+                        reset=OFF,
+                        larg_rotulo=36,
+                    ):
+                        ui.emit(linha_resumo)
 
         if stats["deferred"]:
             ui.emit("")
-            ui.emit(
+            ui.emit_wrapped(
                 f"{YELLOW}[!] {stats['deferred']} faixa(s) adiada(s): o Qobuz recusou "
                 "as consultas. Rode o lyrics de novo mais tarde ou reduza "
                 f"--max-workers.{OFF}"
@@ -1416,10 +1431,10 @@ async def inject_lyrics_retroactively(
 
     # Nao cria uma biblioteca vazia automaticamente: informa o usuario e encerra.
     if not os.path.isdir(directory_path):
-        ui.emit(
+        ui.emit_wrapped(
             f"{RED}[!] Erro: O diretório de downloads configurado não existe: '{directory_path}'{OFF}"
         )
-        ui.emit(
+        ui.emit_wrapped(
             f"{YELLOW}[*] Dica: Baixe algum álbum primeiro ou configure a pasta com 'qobuz-dl -r'.{OFF}"
         )
         return

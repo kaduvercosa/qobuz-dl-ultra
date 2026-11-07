@@ -887,11 +887,11 @@ class TestPastaSessaoEResumo:
         amb.arquivo("c.flac", None)
         stats = _rodar(amb)
         resumo = amb.texto
-        assert f"Arquivos analisados       : {stats['total']}" in resumo
-        assert "Atualizados               : 2" in resumo
-        assert "Sem ID Qobuz              : 1" in resumo
-        assert "Capas Apple embutidas     : 2" in resumo
-        assert "Erros                     : 0" in resumo
+        assert f"Arquivos analisados         : {stats['total']}" in resumo
+        assert "Atualizados                 : 2" in resumo
+        assert "Sem ID Qobuz                : 1" in resumo
+        assert "Capas Apple embutidas       : 2" in resumo
+        assert "Erros                       : 0" in resumo
         assert "Arquivos sem ID Qobuz não podem ser corrigidos" in resumo
 
     def test_aviso_de_sem_id_so_aparece_quando_necessario(self, amb):
@@ -1652,10 +1652,12 @@ class TestResumoFinal:
         _rodar(amb)
         resumo = "\n".join(self._linhas(amb))
         assert "Resumo:" in resumo
-        assert "Arquivos analisados       : 1  faixas .flac/.mp3 encontradas" in resumo
-        assert "Atualizados               : 1  faixas com tags e/ou capa" in resumo
-        assert "Capas Apple embutidas     : 1  faixas que receberam a capa" in resumo
-        assert "Erros                     : 0  falhas ao consultar" in resumo
+        assert (
+            "Arquivos analisados         : 1  faixas .flac/.mp3 encontradas" in resumo
+        )
+        assert "Atualizados                 : 1  faixas com tags e/ou capa" in resumo
+        assert "Capas Apple embutidas       : 1  faixas que receberam a capa" in resumo
+        assert "Erros                       : 0  falhas ao consultar" in resumo
 
     def test_linha_em_branco_antes_do_resumo(self, amb):
         amb.arquivo("a.flac")
@@ -1682,7 +1684,7 @@ class TestResumoFinal:
         resumo = "\n".join(self._linhas(amb))
         assert "<G>1</>" in resumo  # Atualizados > 0
         assert "<Y>1</>" in resumo  # sem ID Qobuz / capa não encontrada > 0
-        assert "Erros                     :</> <M>0</>" in resumo  # zero = cinza
+        assert "Erros                       :</> <M>0</>" in resumo  # zero = cinza
 
 
 class TestDecideAlbumCoverVersaoCerta:

@@ -218,14 +218,14 @@ class TestWrapEDetalhes:
     def test_kept_nao_tem_detalhe(self):
         assert retro_tags._cover_detail_lines("kept", None, "x", 100) == []
 
-    def test_report_width_fica_entre_60_e_120(self, monkeypatch):
+    def test_report_width_fica_entre_32_e_120(self, monkeypatch):
         # `ui.raw_width()` prefere o TTY real ao COLUMNS; sem isto, `pytest -s`
         # num terminal faria o teste depender da janela de quem o executa.
         def _sem_terminal(fd=None):
             raise OSError("sem terminal")
 
         monkeypatch.setattr(ui.os, "get_terminal_size", _sem_terminal)
-        for colunas, esperado in (("20", 60), ("90", 90), ("300", 120)):
+        for colunas, esperado in (("20", 32), ("40", 40), ("90", 90), ("300", 120)):
             monkeypatch.setenv("COLUMNS", colunas)
             assert ui.report_width() == esperado
 

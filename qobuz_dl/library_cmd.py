@@ -239,8 +239,29 @@ async def cmd_library(
 ) -> int:
     lib = lib or LibraryDB(library_db_path())
     action = getattr(args, "action", "status") or "status"
+    como_json = bool(getattr(args, "json", False))
+
+    if como_json and action in ("reset-stuck", "unmark"):
+        ui.error(f"--json não se aplica a '{action}' (ele altera o catálogo).")
+        return 2
 
     if action == "status":
+        if como_json:
+            ui.emit_json(
+                {
+                    "contagens": [
+                        {
+                            "origem": r["source"],
+                            "estado": r["download_status"],
+                            "total": r["cnt"],
+                        }
+                        for r in lib.status_counts()
+                    ],
+                    "presos": len(lib.stuck_albums()),
+                    "completos_sem_pasta": len(lib.complete_without_folder()),
+                }
+            )
+            return 0
         painel = ui.Painel("📚 BIBLIOTECA")
         rows = lib.status_counts()
         if not rows:
@@ -269,6 +290,22 @@ async def cmd_library(
         limit = getattr(args, "limit", None)
         if limit:
             albums = albums[: int(limit)]
+        if como_json:
+            ui.emit_json(
+                [
+                    {
+                        "id": a["source_album_id"],
+                        "artista": a["artist"],
+                        "titulo": a["title"],
+                        "estado": a["download_status"],
+                        "bit_depth": a.get("bit_depth"),
+                        "sample_rate": a.get("sample_rate"),
+                        "removido_da_conta": bool(a["removed_from_service"]),
+                    }
+                    for a in albums
+                ]
+            )
+            return 0
         if not albums:
             ui.ok("Nada para listar.")
             return 0
@@ -285,6 +322,22 @@ async def cmd_library(
         hist = lib.get_sync_history(
             SOURCE, limit=int(getattr(args, "limit", None) or 10)
         )
+        if como_json:
+            ui.emit_json(
+                [
+                    {
+                        "id": h["id"],
+                        "inicio": h["started_at"],
+                        "estado": h["status"],
+                        "achados": h["albums_found"],
+                        "novos": h["albums_new"],
+                        "removidos": h["albums_removed"],
+                        "baixados": h["albums_downloaded"],
+                    }
+                    for h in hist
+                ]
+            )
+            return 0
         if not hist:
             ui.info("Nenhuma sincronização registrada.")
         for h in hist:
@@ -309,6 +362,16 @@ async def cmd_library(
             apply=not getattr(args, "dry_run", False),
             fix_missing=bool(getattr(args, "fix", False)),
         )
+        if como_json:
+            ui.emit_json(
+                {
+                    "sentinelas_vistas": rep["scanned"],
+                    "reconciliadas": len(rep["reconciled"]),
+                    "invalidas": rep["invalid"],
+                    "sem_pasta": rep["missing_on_disk"],
+                }
+            )
+            return 1 if rep["invalid"] else 0
         painel = ui.Painel("🔁 RECONCILIAÇÃO")
         painel.kv("Sentinelas vistas", rep["scanned"])
         painel.kv("Reconciliadas", len(rep["reconciled"]))

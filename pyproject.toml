@@ -88,8 +88,17 @@ dev = [
     "pytest>=8",
     "pytest-asyncio>=0.24",
     "pytest-httpx>=0.30",
+    # tests/network/test_qopy_respx.py faz `import respx` no topo: sem ele a
+    # coleta falha e o pytest inteiro e interrompido (por isso fica no `dev`,
+    # nao so no `dev-full`).
+    "respx>=0.23,<0.24",
     "pytest-cov>=5",
     "pytest-randomly>=3.15",
+    # Em paralelo: `pytest -n auto`. Fica desligado por padrao (sem `-n`).
+    "pytest-xdist>=3.5",
+    # Testes de propriedade (tests/ui/test_ui_propriedades.py); sem ele os
+    # casos com gerador fixo rodam do mesmo jeito.
+    "hypothesis>=6.100",
     "tomli; python_version < '3.11'",
 ]
 
@@ -101,7 +110,9 @@ dev-full = [
     "mypy==1.15.0",
     "types-aiofiles",
     "mypy-baseline>=0.7",
-    "respx>=0.23,<0.24",
+    # Qualidade (workflow qualidade.yml): codigo sem uso e vulnerabilidades.
+    "vulture>=2.11",
+    "pip-audit>=2.7",
 ]
 [project.urls]
 Homepage = "https://github.com/kaduvercosa/qobuz-dl-ultra"
@@ -123,7 +134,15 @@ include = ["qobuz_dl*"]
 minversion = "8.0"
 testpaths = ["tests"]
 
-norecursedirs = ["manual", ".git", "__pycache__", "build", "dist"]
+norecursedirs = [
+    ".hypothesis",
+    ".git",
+    ".pytest_cache",
+    "__pycache__",
+    "build",
+    "dist",
+    "manual",
+]
 addopts = """
     -ra
     --strict-markers
@@ -151,6 +170,7 @@ markers = [
 ]
 
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 
 # Filtra avisos barulhentos que nao sao bugs do projeto
 filterwarnings = [
@@ -260,6 +280,13 @@ module = [
 ]
 disallow_untyped_defs = true
 disallow_incomplete_defs = true
+
+[tool.vulture]
+# Codigo sem uso (workflow qualidade.yml). 80% = so o que e quase certo
+# (import, variavel e retorno inalcancaveis); funcoes "sem chamador" ficam de
+# fora de proposito porque o projeto as expoe por nome (comandos, ui.__all__).
+paths = ["qobuz_dl"]
+min_confidence = 80
 
 [tool.ruff]
 target-version = "py310"  # igual ao requires-python (>=3.10)

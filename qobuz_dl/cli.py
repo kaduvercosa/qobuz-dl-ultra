@@ -148,11 +148,36 @@ def _redacted_config(config):
     return output.getvalue()
 
 
+# Comandos cuja saída com `--json` tem de ser só o JSON (para scripts/Atalhos).
+_COMANDOS_JSON = frozenset(
+    {
+        "library",
+        "lib",
+        "stats",
+        "config",
+        "cfg",
+        "duplicates",
+        "dups",
+        "doctor",
+        "check",
+    }
+)
+
+
+def _saida_so_json(argv: list) -> bool:
+    """True se `--json` foi pedido num comando de `_COMANDOS_JSON`.
+
+    Nesse caso as mensagens de progresso (INFO) ficam em silêncio e o stdout
+    leva apenas o JSON. Avisos e erros continuam saindo.
+    """
+    return "--json" in argv and any(a in _COMANDOS_JSON for a in argv)
+
+
 def _bootstrap_ui():
     """Configure UI system early based on command-line flags before argparse runs."""
     argv = sys.argv[1:]
     ui.configure(
-        quiet="--quiet" in argv,
+        quiet="--quiet" in argv or _saida_so_json(argv),
         verbose=("--verbose" in argv or "-v" in argv),
         color=False if "--no-color" in argv else None,
     )
@@ -196,6 +221,25 @@ def _save_token_in_both_config_keys(config, token: str) -> None:
     config.set(section, "user_auth_token", token)
 
 
+# Um token de sessão do Qobuz tem bem mais de 60 caracteres; uma senha, não.
+# É o mesmo limite que `qopy.Client.auth` usa para tratar o segundo argumento
+# como token em vez de senha.
+_TAMANHO_MINIMO_TOKEN = 60
+
+
+def _separar_senha_e_token(valor_password: str) -> tuple[str, str]:
+    """Separa o que o campo ``password`` do config.ini guarda.
+
+    Versões antigas gravavam o token de sessão no campo ``password``. Devolve
+    ``(senha, token_legado)``: se o valor tem cara de token, ele sai como
+    ``token_legado`` e a senha fica vazia; senão é uma senha de verdade.
+    """
+    valor = (valor_password or "").strip()
+    if len(valor) > _TAMANHO_MINIMO_TOKEN:
+        return "", valor
+    return valor, ""
+
+
 def _load_token_from_all_locations(config, section="qobuz"):
     """Lê o token usando todos os nomes legados/atuais."""
     disable_keyring = config.getboolean(section, "disable_keyring", fallback=False)
@@ -205,7 +249,8 @@ def _load_token_from_all_locations(config, section="qobuz"):
         config.get(section, "user_auth_token", fallback=""),
         config.get(section, "user_token", fallback=""),
         config.get(section, "auth_token", fallback=""),
-        config.get(section, "password", fallback=""),
+        # `password` só vale como token se tiver cara de token (formato antigo).
+        _separar_senha_e_token(config.get(section, "password", fallback=""))[1],
     ):
         value = (value or "").strip()
         if value:
@@ -1392,9 +1437,10 @@ async def _garantir_assinatura_ativa(qobuz: QobuzDL) -> bool:
         new_email = config.get(section, "email", fallback="")
         disable_kr = config.getboolean(section, "disable_keyring", fallback=False)
         if disable_kr:
-            new_token = config.get(section, "auth_token", fallback="") or config.get(
-                section, "password", fallback=""
+            legado = _separar_senha_e_token(
+                config.get(section, "password", fallback="")
             )
+            new_token = config.get(section, "auth_token", fallback="") or legado[1]
         else:
             new_token = _keyring_load("auth_token") or config.get(
                 section, "auth_token", fallback=""
@@ -1609,6 +1655,11 @@ _COMMAND_DESCRIPTIONS_PT = {
     "stats": "Mostra estatísticas detalhadas sobre sua biblioteca e downloads efetuados.",
     "inspect": "Mostra tudo de uma faixa local: dados técnicos, tags por assunto, capas, letras, diagnóstico e autenticidade (ou resume uma pasta).",
     "auth": "Mostra a conta e a assinatura (perfil, plano, limites; --json traz o bruto) ou atualiza e-mail e token com -l. Também responde por user, account, profile, me e info.",
+    "config": "Mostra e altera o config.ini sem abrir um editor: show, path, get CHAVE, set CHAVE VALOR (preserva comentários) e reset. Credenciais ficam ocultas.",
+    "duplicates": "Acha faixas repetidas e diz qual cópia fica; --mover leva as sobras para _duplicatas (sem apagar) e --desfazer devolve.",
+    "cleanup": "Limpa temporários de download abandonados e pastas vazias. Simula por padrão; --apagar remove de verdade.",
+    "sync-db": "Restaura no banco de downloads os IDs das faixas que já estão numa pasta (o mesmo que --sync-db).",
+    "watch": "Observa a pasta e injeta letras em arquivos novos (o mesmo que --watch).",
 }
 
 _FLAG_DESCRIPTIONS_PT = {
@@ -1735,10 +1786,100 @@ def _print_command_help(argv: list) -> bool:
     return True
 
 
+def _pede_reset(argv: list) -> bool:
+    """True se a linha de comando pede para recriar o config.ini.
+
+    Vale a flag antiga (`-r`, `--reset`) e o subcomando novo (`config reset`,
+    ou `cfg reset`). Se o arquivo não existe, o assistente de primeira
+    execução já é o reset: por isso `_initial_checks` não o roda duas vezes.
+    """
+    if "-r" in argv or "--reset" in argv:
+        return True
+    palavras = [a for a in argv if not a.startswith("-")]
+    return any(
+        palavras[i] in ("config", "cfg") and palavras[i + 1] == "reset"
+        for i in range(len(palavras) - 1)
+    )
+
+
+def _aplicar_atalhos(arguments) -> None:
+    """Converte os subcomandos novos nas flags que o resto do fluxo já entende.
+
+    `config reset` -> `--reset`; `sync-db [PASTA]` -> `--sync-db [PASTA]`;
+    `watch [PASTA]` -> `--watch [PASTA]`. As flags antigas continuam valendo.
+    """
+    comando = getattr(arguments, "command", None)
+    pasta = getattr(arguments, "DIR", None) or "DEFAULT"
+    if comando in ("config", "cfg") and getattr(arguments, "action", "") == "reset":
+        arguments.reset = True
+    elif comando == "sync-db":
+        arguments.sync_db = pasta
+    elif comando == "watch":
+        arguments.watch = pasta
+
+
+def _confirmar_reset() -> bool:
+    """Pergunta antes de sobrescrever o config.ini (usado só por `config reset`)."""
+    ui.emit_always(
+        "Isto recria o config.ini e apaga as opções atuais.\nContinuar? [s/N] ",
+        end="",
+    )
+    try:
+        resposta = input().strip().lower()
+    except EOFError:
+        return False
+    return resposta in ("s", "sim", "y", "yes")
+
+
+def _pasta_da_biblioteca(argumento, padrao: str) -> str:
+    """Pasta pedida no comando ou a do config.ini (relativa à home no iOS)."""
+    pasta = os.path.expanduser(argumento or padrao)
+    if IOS_HOME and not os.path.isabs(pasta):
+        pasta = os.path.join(IOS_HOME, pasta)
+    return pasta
+
+
+# Comandos que funcionam sem config.ini nem login: não devem abrir o assistente
+# de primeira execução (que pede e-mail e token). O `doctor` até avisa que o
+# arquivo não existe; `config` só lê/edita (o `reset` é tratado à parte).
+_COMANDOS_SEM_ASSISTENTE = frozenset(
+    {
+        "stats",
+        "library",
+        "lib",
+        "doctor",
+        "check",
+        "config",
+        "cfg",
+        "duplicates",
+        "dups",
+        "cleanup",
+        "clean",
+        "inspect",
+    }
+)
+
+
+def _dispensa_assistente(argv: list) -> bool:
+    """True se esta linha de comando não precisa do assistente de 1ª execução.
+
+    Vale para a ajuda (`-h/--help`) e para os comandos locais de
+    `_COMANDOS_SEM_ASSISTENTE`. `config reset` e `-r` nunca dispensam: eles
+    é que recriam o arquivo.
+    """
+    if _pede_reset(argv):
+        return False
+    if any(a in ("-h", "--help") for a in argv):
+        return True
+    comando = next((a for a in argv if not a.startswith("-")), None)
+    return comando in _COMANDOS_SEM_ASSISTENTE
+
+
 async def _initial_checks():
     if not os.path.isdir(CONFIG_PATH) or not os.path.isfile(CONFIG_FILE):
         os.makedirs(CONFIG_PATH, exist_ok=True)
-        if "-r" not in sys.argv and "--reset" not in sys.argv:
+        argv = sys.argv[1:]
+        if not _pede_reset(argv) and not _dispensa_assistente(argv):
             await _reset_config(CONFIG_FILE)
     # Ajuda em painéis, onde quer que -h/--help apareça na linha de comando:
     # sem comando (`qobuz-dl -h`, `qobuz-dl -v --help`, `--log-level debug -h`)
@@ -1849,23 +1990,33 @@ def _load_cli_config(config: configparser.ConfigParser, started: float) -> CliCo
         config.get(section, "disable_keyring", fallback="false")
     ).strip().lower() in ["true", "yes", "y", "1"]
 
+    senha, token_legado = _separar_senha_e_token(
+        config.get(section, "password", fallback="")
+    )
     if disable_keyring:
-        ini_password = config.get(section, "password", fallback="")
-        cfg.token = ini_token if ini_token else ini_password
+        cfg.token = ini_token or token_legado
         cfg.genius_token = ini_genius
-        cfg.password = ini_password
     else:
-        cfg.token = _keyring_load("auth_token") or ini_token
-        cfg.password = (
-            cfg.token if cfg.token else config.get(section, "password", fallback="")
-        )
+        cfg.token = _keyring_load("auth_token") or ini_token or token_legado
         cfg.genius_token = _keyring_load("genius_token") or ini_genius
+    # `password` é só a senha. O token nunca é copiado para ela.
+    cfg.password = senha
 
     migrated = False
     for k, v in (("auth_token", ini_token), ("genius_token", ini_genius)):
         if v and _keyring_save(k, v):
             config.set(section, k, "")
             migrated = True
+    if token_legado and cfg.token == token_legado:
+        # Token guardado no campo errado e sem outro token: muda para o lugar
+        # certo (keyring, ou `auth_token` se o keyring está desligado) e limpa
+        # `password`. Se já existia outro token, o antigo não é apagado.
+        if not disable_keyring and _keyring_save("auth_token", token_legado):
+            config.set(section, "auth_token", "")
+        else:
+            config.set(section, "auth_token", token_legado)
+        config.set(section, "password", "")
+        migrated = True
     if migrated:
         try:
             _write_config_secure(config, CONFIG_FILE)
@@ -1946,7 +2097,9 @@ async def async_main():
 
         sys.exit(
             render_stats(
-                QOBUZ_DB, show_all_artists=getattr(offline_args, "artistas", False)
+                QOBUZ_DB,
+                show_all_artists=getattr(offline_args, "artistas", False),
+                como_json=bool(getattr(offline_args, "json", False)),
             )
         )
 
@@ -1966,8 +2119,27 @@ async def async_main():
             )
         )
 
-    # Comandos locais: doctor, scan, library e organize. Não exigem login; o
-    # organize precisa apenas dos formatos salvos no config.ini.
+    # `config` (menos `reset`, que usa o assistente abaixo): só lê/edita o
+    # config.ini, sem rede nem login.
+    if offline_command in ("config", "cfg") and (
+        getattr(offline_args, "action", "show") != "reset"
+    ):
+        from qobuz_dl.config_cmd import cmd_config
+        from qobuz_dl.library_cmd import library_db_path
+
+        sys.exit(
+            cmd_config(
+                offline_args,
+                config_file=CONFIG_FILE,
+                db_path=QOBUZ_DB,
+                library_db=library_db_path(),
+                sensiveis=_SENSITIVE_CONFIG_KEYS,
+            )
+        )
+
+    # Comandos locais: doctor, scan, library, organize, duplicates e cleanup.
+    # Não exigem login; o organize precisa apenas dos formatos salvos no
+    # config.ini.
     if offline_command in (
         "doctor",
         "check",
@@ -1977,6 +2149,10 @@ async def async_main():
         "lib",
         "organize",
         "rename",
+        "duplicates",
+        "dups",
+        "cleanup",
+        "clean",
     ):
         from qobuz_dl import doctor
         from qobuz_dl.library_cmd import cmd_library, cmd_scan, library_db_path
@@ -1987,7 +2163,29 @@ async def async_main():
         if IOS_HOME and not os.path.isabs(cfg_dir):
             cfg_dir = os.path.join(IOS_HOME, cfg_dir)
 
+        if offline_command in ("duplicates", "dups"):
+            from qobuz_dl.duplicates_cmd import cmd_duplicates
+
+            sys.exit(
+                await cmd_duplicates(
+                    offline_args,
+                    directory=_pasta_da_biblioteca(offline_args.DIR, cfg_dir),
+                )
+            )
+        if offline_command in ("cleanup", "clean"):
+            from qobuz_dl.library_cleanup import cmd_cleanup
+
+            sys.exit(
+                await cmd_cleanup(
+                    offline_args,
+                    directory=_pasta_da_biblioteca(offline_args.DIR, cfg_dir),
+                )
+            )
+
         if offline_command in ("doctor", "check"):
+            fixes = None
+            if getattr(offline_args, "fix", False):
+                fixes = doctor.apply_fixes(config_file=CONFIG_FILE, directory=cfg_dir)
             results = doctor.run_checks(
                 config_file=CONFIG_FILE,
                 downloads_db=QOBUZ_DB,
@@ -1995,8 +2193,17 @@ async def async_main():
                 directory=cfg_dir,
             )
             if getattr(offline_args, "json", False):
-                print(json.dumps(doctor.to_json(results), ensure_ascii=False, indent=2))
+                verificacoes = doctor.to_json(results)
+                saida_json: Any = verificacoes
+                if fixes is not None:
+                    saida_json = {
+                        "correcoes": [dataclasses.asdict(f) for f in fixes],
+                        "verificacoes": verificacoes,
+                    }
+                ui.emit_json(saida_json)
                 sys.exit(1 if any(r.level == doctor.FAIL for r in results) else 0)
+            if fixes is not None:
+                doctor.render_fixes(fixes)
             sys.exit(doctor.render(results))
 
         _cfg = configparser.ConfigParser(interpolation=None)
@@ -2098,6 +2305,7 @@ async def async_main():
 
     except (configparser.Error, KeyError) as error:
         arguments = qobuz_dl_args().parse_args()
+        _aplicar_atalhos(arguments)
         if not arguments.reset:
             sys.exit(
                 f"{RED}Configuração inválida ou corrompida ({error}).\n{RESET}{YELLOW}Execute 'python -m qobuz_dl -r' para consertar isto.{RESET}"
@@ -2131,6 +2339,7 @@ async def async_main():
     folder_format = cfg.folder_format
     track_format = cfg.track_format
 
+    _aplicar_atalhos(arguments)
     ui.configure(
         quiet=getattr(arguments, "quiet", False),
         verbose=getattr(arguments, "verbose", False),
@@ -2143,6 +2352,16 @@ async def async_main():
     )
 
     if arguments.reset:
+        # `config reset` confirma antes de sobrescrever (a flag -r, não: é o
+        # comportamento antigo). `-y` pula a pergunta.
+        if (
+            getattr(arguments, "command", None) in ("config", "cfg")
+            and not getattr(arguments, "yes", False)
+            and os.path.isfile(CONFIG_FILE)
+            and not _confirmar_reset()
+        ):
+            ui.info("Nada foi alterado.")
+            sys.exit(0)
         await _reset_config(CONFIG_FILE)
         sys.exit(0)
 

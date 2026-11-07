@@ -13,6 +13,31 @@ from qobuz_dl.color import RESET as OFF
 
 
 # ----------------------------------------------------------------------------
+# Códigos de saída (documentados; `docs/COMANDOS.md` é gerado a partir daqui)
+# ----------------------------------------------------------------------------
+# Regra geral de todos os comandos: 0 = deu certo, 1 = falhou (total ou em
+# parte), 2 = uso errado (ação desconhecida, argumento faltando). Ctrl+C sai
+# com 1. Só entram em SAIDA_POR_COMANDO os comandos cujo código foi conferido
+# no código-fonte; os demais seguem a regra geral.
+CODIGOS_DE_SAIDA = (
+    (0, "deu certo"),
+    (1, "falhou, no todo ou em parte (ou Ctrl+C)"),
+    (2, "uso errado: ação desconhecida ou argumento que falta"),
+)
+
+SAIDA_POR_COMANDO = {
+    "doctor": "1 se alguma verificação deu FAIL (avisos não contam)",
+    "config": "1 se o config.ini não existe ou está vazio, a opção não existe, o valor é recusado ou o arquivo não pôde ser gravado; 2 se falta CHAVE ou VALOR",
+    "duplicates": "1 se a pasta não existe, se o --desfazer deixou algo sem devolver ou se algum arquivo não pôde ser movido",
+    "cleanup": "1 se a pasta não existe",
+    "library": "1 em reconcile com sentinelas inválidas; 2 para ação desconhecida ou --json em reset-stuck/unmark",
+    "scan": "1 se a pasta não existe",
+    "sync-favorites": "1 se algum download falhou",
+    "organize": "1 se houve conflito ou erro ao mover arquivos",
+}
+
+
+# ----------------------------------------------------------------------------
 # Formatter customizado do argparse: ajusta a largura do texto de ajuda
 # de acordo com o tamanho do terminal (evita quebras de linha feias).
 # ----------------------------------------------------------------------------
@@ -1155,7 +1180,7 @@ def stats_args(subparsers):
     """Define the 'stats' subcommand and its arguments."""
     stats = subparsers.add_parser(
         "stats",
-        usage="qobuz-dl stats [opções]",
+        usage="qobuz-dl stats [--artistas] [--json]",
         description="Mostra estatísticas detalhadas sobre sua biblioteca.",
         help="exibe as estatísticas do banco de dados",
     )
@@ -1163,6 +1188,9 @@ def stats_args(subparsers):
         "--artistas",
         action="store_true",
         help="Mostra a lista completa de todos os artistas únicos baixados.",
+    )
+    stats.add_argument(
+        "--json", action="store_true", default=False, help="saída em JSON"
     )
     return stats
 
@@ -1547,6 +1575,12 @@ def library_args(subparsers):
     lib.add_argument(
         "--dry-run", action="store_true", default=False, help="reconcile: só reporta"
     )
+    lib.add_argument(
+        "--json",
+        action="store_true",
+        default=False,
+        help="saída em JSON (status, missing, list, history e reconcile)",
+    )
     return lib
 
 
@@ -1645,15 +1679,198 @@ def doctor_args(subparsers):
     doc = subparsers.add_parser(
         "doctor",
         aliases=["check"],
-        usage="qobuz-dl doctor [--json]",
+        usage="qobuz-dl doctor [--fix] [--json]",
         description=(
-            "Diagnostica ambiente, config, keyring, bancos e sentinelas. Somente "
-            "leitura, sem rede, e nunca mostra segredos."
+            "Diagnostica ambiente, config, keyring, bancos e sentinelas, sem "
+            "rede e sem nunca mostrar segredos. Somente leitura, a não ser com "
+            "--fix, que corrige só o seguro: chmod 600 no config.ini e criar a "
+            "pasta de downloads que falta."
         ),
         help="verifica a saúde da instalação e da biblioteca",
     )
+    doc.add_argument(
+        "--fix",
+        action="store_true",
+        default=False,
+        help="corrige o que é seguro (permissão do config, pasta de downloads)",
+    )
     doc.add_argument("--json", action="store_true", default=False, help="saída em JSON")
     return doc
+
+
+# ----------------------------------------------------------------------------
+# Subcomando: "config"  -- ver e editar o config.ini sem abrir um editor
+# ----------------------------------------------------------------------------
+def config_args(subparsers):
+    """Define the 'config' subcommand (show, path, get, set, reset)."""
+    cfg = subparsers.add_parser(
+        "config",
+        aliases=["cfg"],
+        usage="qobuz-dl config [show|path|get|set|reset] [CHAVE] [VALOR]",
+        description=(
+            "Mostra e altera o config.ini sem abrir um editor. 'show' (padrão) "
+            "lista as opções com as credenciais ocultas; 'path' imprime só o "
+            "caminho do arquivo; 'get CHAVE' lê uma opção; 'set CHAVE VALOR' "
+            "altera uma opção existente preservando os comentários do arquivo "
+            "(--nova cria a opção); 'reset' recria o arquivo. Credenciais não "
+            "são alteradas aqui: use 'qobuz-dl auth -l'."
+        ),
+        help="mostra e altera o config.ini (show, path, get, set, reset)",
+    )
+    cfg.add_argument(
+        "action",
+        nargs="?",
+        default="show",
+        choices=["show", "path", "get", "set", "reset"],
+        help="o que fazer (padrão: show)",
+    )
+    cfg.add_argument("key", nargs="?", default=None, metavar="CHAVE", help="opção")
+    cfg.add_argument(
+        "value", nargs="?", default=None, metavar="VALOR", help="novo valor (set)"
+    )
+    cfg.add_argument(
+        "--nova",
+        action="store_true",
+        default=False,
+        help="com 'set': cria a opção se ela ainda não existir",
+    )
+    cfg.add_argument(
+        "-y",
+        "--yes",
+        dest="yes",
+        action="store_true",
+        default=False,
+        help="com 'reset': não pede confirmação",
+    )
+    cfg.add_argument("--json", action="store_true", default=False, help="saída em JSON")
+    return cfg
+
+
+# ----------------------------------------------------------------------------
+# Subcomando: "duplicates"  -- faixas repetidas (lista, move, desfaz)
+# ----------------------------------------------------------------------------
+def duplicates_args(subparsers):
+    """Define the 'duplicates' subcommand."""
+    dup = subparsers.add_parser(
+        "duplicates",
+        aliases=["dups"],
+        usage="qobuz-dl duplicates [PASTA] [--mover | --desfazer] [--json]",
+        description=(
+            "Acha faixas repetidas (MD5 do áudio FLAC, ID/ISRC ou metadados) e "
+            "diz qual cópia ficaria: FLAC antes de outros formatos, depois o "
+            "maior arquivo. Por padrão só lista. Com --mover, as sobras vão para "
+            "PASTA/_duplicatas (nada é apagado); --desfazer devolve tudo."
+        ),
+        help="acha faixas repetidas e tira as sobras do caminho (sem apagar)",
+    )
+    dup.add_argument(
+        "DIR",
+        metavar="PASTA",
+        nargs="?",
+        default=None,
+        help="biblioteca a verificar (padrão: directory do config.ini)",
+    )
+    grupo = dup.add_mutually_exclusive_group()
+    grupo.add_argument(
+        "--mover",
+        action="store_true",
+        default=False,
+        help="move as cópias a mais para PASTA/_duplicatas",
+    )
+    grupo.add_argument(
+        "--desfazer",
+        action="store_true",
+        default=False,
+        help="devolve ao lugar o que o último --mover tirou",
+    )
+    dup.add_argument("--json", action="store_true", default=False, help="saída em JSON")
+    return dup
+
+
+# ----------------------------------------------------------------------------
+# Subcomando: "cleanup"  -- temporários abandonados e pastas vazias
+# ----------------------------------------------------------------------------
+def cleanup_args(subparsers):
+    """Define the 'cleanup' subcommand."""
+    clean = subparsers.add_parser(
+        "cleanup",
+        aliases=["clean"],
+        usage="qobuz-dl cleanup [PASTA] [--apagar] [--idade HORAS]",
+        description=(
+            "Remove temporários de download abandonados (.part e similares, "
+            "parados há mais de 24 h) e pastas que ficaram vazias. Por padrão "
+            "só mostra o que seria removido; --apagar remove de verdade. Nunca "
+            "toca em áudio, capas, letras ou relatórios."
+        ),
+        help="limpa temporários abandonados e pastas vazias (simula por padrão)",
+    )
+    clean.add_argument(
+        "DIR",
+        metavar="PASTA",
+        nargs="?",
+        default=None,
+        help="biblioteca a limpar (padrão: directory do config.ini)",
+    )
+    clean.add_argument(
+        "--apagar",
+        action="store_true",
+        default=False,
+        help="remove de verdade (sem isto, só simula)",
+    )
+    clean.add_argument(
+        "--idade",
+        type=float,
+        default=None,
+        metavar="HORAS",
+        help="idade mínima dos temporários, em horas (padrão: 24)",
+    )
+    return clean
+
+
+# ----------------------------------------------------------------------------
+# Subcomandos "sync-db" e "watch": o mesmo que as flags --sync-db e --watch
+# ----------------------------------------------------------------------------
+def sync_db_args(subparsers):
+    """Define 'sync-db' (equivale à flag legada --sync-db)."""
+    sd = subparsers.add_parser(
+        "sync-db",
+        usage="qobuz-dl sync-db [PASTA]",
+        description=(
+            "Varre uma pasta local e restaura no banco de downloads os IDs do "
+            "Qobuz que estiverem faltando. Equivale a --sync-db [PASTA]."
+        ),
+        help="restaura no banco os IDs das faixas que já estão na pasta",
+    )
+    sd.add_argument(
+        "DIR",
+        metavar="PASTA",
+        nargs="?",
+        default=None,
+        help="pasta a varrer (padrão: a do config.ini)",
+    )
+    return sd
+
+
+def watch_args(subparsers):
+    """Define 'watch' (equivale à flag legada --watch)."""
+    wt = subparsers.add_parser(
+        "watch",
+        usage="qobuz-dl watch [PASTA]",
+        description=(
+            "Observa a pasta e injeta letras automaticamente quando aparecem "
+            "arquivos novos. Equivale a --watch [PASTA]. Precisa do extra "
+            "'watch'."
+        ),
+        help="observa a pasta e injeta letras em arquivos novos",
+    )
+    wt.add_argument(
+        "DIR",
+        metavar="PASTA",
+        nargs="?",
+        default=None,
+        help="pasta a observar (padrão: a do config.ini)",
+    )
+    return wt
 
 
 # ----------------------------------------------------------------------------
@@ -1741,6 +1958,11 @@ def qobuz_dl_args(default_quality=6, default_limit=20, default_folder=None):
     library_cmd = library_args(subparsers)
     organize_cmd = organize_args(subparsers)
     doctor_cmd = doctor_args(subparsers)
+    config_cmd = config_args(subparsers)
+    duplicates_cmd = duplicates_args(subparsers)
+    cleanup_cmd = cleanup_args(subparsers)
+    sync_db_cmd = sync_db_args(subparsers)
+    watch_cmd = watch_args(subparsers)
 
     for subparser in (interactive, download, lucky, sync_pl_cmd, sync_fav_cmd):
         add_common_arg(subparser, default_folder, default_quality)
@@ -1763,6 +1985,11 @@ def qobuz_dl_args(default_quality=6, default_limit=20, default_folder=None):
         library_cmd,
         organize_cmd,
         doctor_cmd,
+        config_cmd,
+        duplicates_cmd,
+        cleanup_cmd,
+        sync_db_cmd,
+        watch_cmd,
     ):
         add_output_args(subparser, suppress=True)
 

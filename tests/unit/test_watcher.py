@@ -25,7 +25,13 @@ from types import SimpleNamespace
 
 import pytest
 
-from qobuz_dl import watcher
+# `qobuz_dl/watcher.py` importa o `watchdog` (extra opcional `[watch]`) já na
+# primeira linha; no a-Shell ele não está instalado. Sem isto, a falta do pacote
+# vira um erro de coleta que INTERROMPE a suíte inteira, em vez de pular só
+# este arquivo.
+pytest.importorskip("watchdog", reason="extra opcional [watch] não instalado")
+
+from qobuz_dl import watcher  # noqa: E402
 
 
 class _LoopFalso:

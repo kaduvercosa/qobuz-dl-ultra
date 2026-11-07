@@ -5,7 +5,7 @@ description: Guia completo do projeto qobuz-dl-ultra (fork em Python do qobuz-dl
 
 # QOBUZ-DL-ULTRA — guia do projeto (SKILL.md)
 
-> **Última revisão:** versão do pacote `2.6.7.5` · atualizado em 2026-11-01.
+> **Última revisão:** versão do pacote `2.6.8` · atualizado em 2026-11-05.
 > Idioma do projeto: **português do Brasil** (código-fonte, comentários, mensagens, README, commits e testes).
 
 ---
@@ -82,6 +82,9 @@ Tamanhos aproximados em linhas. **“Mexa aqui quando…”** é o atalho para a
 | `commands.py` (~1170) | **Todos** os subcomandos e flags (argparse); parser colorido e traduzido p/ PT; `qobuz_dl_args()` monta o parser | criar/alterar comando ou flag |
 | `cli.py` (~1700) | `main()` → `async_main()`: config.ini, assistente de 1ª execução (`_reset_config`), login/token/keyring, `auth`, `_handle_commands` (roteamento), logo/boas-vindas, checagem de atualização | roteamento de comando, config.ini, login |
 | `settings.py` (~350) | `QobuzDLSettings`: junta **CLI + config.ini** num só objeto (`from_arguments_configparser`). Helpers `_merge_bool_opt_in/out` | nova opção que existe na CLI **e** no config |
+| `config_cmd.py` | Comando `config`: leitura com credenciais ocultas e edição do `config.ini` linha a linha | ler/alterar opções por comando |
+| `duplicates_cmd.py` | Comando `duplicates`: escolha da cópia, mover para `_duplicatas`, diário e desfazer | regra de qual duplicata fica |
+| `library_cleanup.py` | Comando `cleanup`: temporários velhos e pastas vazias | o que a limpeza pode remover |
 | `paths.py` | Valida/cria a pasta de biblioteca (`directory`) testando escrita real | pasta de downloads/permissões |
 | `constants.py` | Padrões de `folder_format`/`track_format` | formato padrão de pastas/arquivos |
 | `exceptions.py` | Exceções próprias | novo tipo de erro |
@@ -135,7 +138,7 @@ Tamanhos aproximados em linhas. **“Mexa aqui quando…”** é o atalho para a
 | `watcher.py` | `--watch`: retro-tagging automático quando aparecem arquivos novos (lib `watchdog`) | modo vigia |
 | `inspector.py` (~1550) | `inspect`: navegador de arquivos em tela cheia, relatório em painéis (`ui.Painel`, um por seção) (técnico, tags por assunto, capas, letras, diagnóstico, ffmpeg, autenticidade/gráfico espectral), `--resumo` de pasta, `--json` e `--comparar` (simula o `tags` numa cópia) | inspeção de áudio |
 | `inspect_data.py` | Leitura de UM arquivo sem imprimir nada (FLAC/MP3/M4A/Ogg/Opus): `ler_arquivo`, `agrupar_tags` (nenhuma tag se perde), capas, letras, `diagnose` compartilhado com `library_report`, `verificar_integridade`/`medir_volume` (ffmpeg) | `inspector.py` |
-| `doctor.py` | `doctor`: checagem **somente leitura** do ambiente/config/bancos (herdado dos scripts do libsync) | diagnóstico |
+| `doctor.py` | `doctor`: checagem do ambiente/config/bancos, **somente leitura** salvo com `--fix` (`apply_fixes`: só chmod 600 e criar pasta; nunca apaga nem reescreve). Herdado dos scripts do libsync | diagnóstico |
 | `stats_view.py` | Renderização do `stats` em painéis (BIBLIOTECA, QUALIDADE DE ÁUDIO, FORMATOS, PERÍODO, TOP ARTISTAS) | estatísticas |
 
 ### 3.5 Camada de terminal
@@ -169,9 +172,16 @@ Definidos em `commands.py`, roteados em `cli.py::_handle_commands`. `DOWNLOAD_CO
 | `inspect` | — | Inspeciona arquivo/pasta de áudio (`--resumo`, `--json`, `--completo`, `--sem-espectro`, `--comparar`) |
 | `stats` | — | Estatísticas (`--artistas` etc.) |
 | `auth` | `login`, `user`, `account`, `profile`, `me`, `info` | Mostra conta, assinatura e limites; `-l`/`--login` atualiza e-mail e token; `--json` mostra o JSON bruto |
-| `doctor` | `check` | Saúde do ambiente |
+| `doctor` | `check` | Saúde do ambiente; `--fix` corrige só o seguro e reversível (`doctor.apply_fixes`: chmod 600 no `config.ini`, cria a pasta de downloads) e `--json` com `--fix` devolve `{correcoes, verificacoes}` |
+| `config` | `cfg` | `show` (padrão), `path`, `get CHAVE`, `set CHAVE VALOR [--nova]`, `reset [-y]`; edita o `config.ini` linha a linha (preserva comentários), recusa credenciais, confere tipo, grava 0600 (`config_cmd.py`). `reset` roda o assistente do `cli.py` e só pergunta se o arquivo existe |
+| `duplicates` | `dups` | Lista faixas repetidas (usa `sync.find_duplicate_tracks`) e a cópia que fica; `--mover` leva as sobras a `PASTA/_duplicatas` com diário `.movidos.json`; `--desfazer` devolve; `--json` (`duplicates_cmd.py`) |
+| `cleanup` | `clean` | Simula por padrão; `--apagar` remove `.part`/temporários velhos (`fileio.STALE_PATTERNS`, `--idade` em horas) e pastas vazias (`library_cleanup.py`) |
+| `sync-db` | — | Subcomando de `--sync-db [PASTA]` (`cli._aplicar_atalhos` converte na flag) |
+| `watch` | — | Subcomando de `--watch [PASTA]` (idem) |
 
-**Flags globais** (sem subcomando): `-r/--reset`, `-p/--purge`, `--sync-db [PATH]`, `--find-duplicates [PATH]`, `--watch [PATH]`, `-sc/--show-config`, mais `add_output_args` (saída/cores/progresso). Os downloads aceitam `--ui auto|compact|comfortable` e `--check-storage`.
+**`--json` e códigos de saída.** `--json` em `doctor`, `library`, `stats`, `config` e `duplicates` imprime o JSON sempre por `ui.emit_json` (INFO fica mudo; `ui.warn`/`ui.error` ignoram o silêncio e vão para o stdout, então em erro o stdout pode não ser JSON puro: confira o código de saída) (a lista de comandos fica em `cli._COMANDOS_JSON`; `cli._saida_so_json` silencia o INFO). `scan --json ARQUIVO` é outra coisa (grava arquivo). Códigos: 0 ok, 1 falha total/parcial (ou Ctrl+C), 2 uso errado; exceções por comando em `commands.SAIDA_POR_COMANDO` (só os conferidos no código; ao mudar o `return` de um `cmd_*`, atualize ali). **`docs/COMANDOS.md` é gerado** por `python tools/gerar_referencia.py` a partir do parser: depois de mexer em qualquer comando/flag, regenere; o teste `test_referencia_comandos.py` falha se estiver velho.
+
+**Flags globais** (sem subcomando; as de `-r`, `-sc`, `--sync-db`, `--watch` têm subcomando equivalente, mas seguem valendo): `-r/--reset`, `-p/--purge`, `--sync-db [PATH]`, `--find-duplicates [PATH]`, `--watch [PATH]`, `-sc/--show-config`, mais `add_output_args` (saída/cores/progresso). Os downloads aceitam `--ui auto|compact|comfortable` e `--check-storage`.
 
 ---
 
@@ -197,7 +207,7 @@ Definidos em `commands.py`, roteados em `cli.py::_handle_commands`. `DOWNLOAD_CO
 
 | Arquivo | Conteúdo |
 |:--- |:--- |
-| `config.ini` | Seção `[qobuz]` (ou `[DEFAULT]` se não houver `[qobuz]`). Token em `user_token` **e** `user_auth_token` (mantidos sincronizados) ou no **Keyring** do SO |
+| `config.ini` | Seção `[qobuz]` (ou `[DEFAULT]` se não houver `[qobuz]`). Token em `user_token` **e** `user_auth_token` (mantidos sincronizados) ou no **Keyring** do SO. `password` é só senha: um valor com mais de 60 caracteres ali é token do formato antigo e `cli._load_cli_config` o migra para `auth_token`/keyring (`cli._separar_senha_e_token`); `cfg.password` nunca recebe o token |
 | `qobuz_dl.db` | Dedup de downloads (`downloads`, PK `id+quality`) |
 | `library.db` | Catálogo da biblioteca (`albums`, `sync_runs`) |
 
@@ -215,7 +225,8 @@ Definidos em `commands.py`, roteados em `cli.py::_handle_commands`. `DOWNLOAD_CO
 - **Cabeçalho de módulo:** comentário “MÓDULO / DESCRIÇÃO / ONDE PROCURAR quando precisar mexer em algo”. Manter ao criar módulo novo.
 - **Toda saída de tela passa por `ui.emit()`** (nunca `print` cru no fluxo normal) — o lock evita corrupção de linha com `tqdm`/logging.
 - **Telas de relatório são painéis:** use `ui.Painel`, `ui.header` ou `ui.summary` (caixa com o título na borda). Nada de `====` nem `rótulo: valor` solto. Painéis seguidos usam `emit(lead=False)`; o primeiro de uma tela leva a linha em branco antes (`lead=True`).
-- **Largura e altura vêm só de `ui.raw_width()`/`ui.raw_height()`** (e `ui.width()`/`ui.box_width()`/`ui.report_width()`): nunca `shutil.get_terminal_size` nem `os.get_terminal_size` fora do `ui.py` (o teste-guarda `test_so_o_ui_le_o_tamanho_do_terminal` falha se alguém fizer). Texto com emoji/japonês mede-se em células (`ui._cell_width`, `ui.pad_cells`), não com `len()`/`ljust`.
+- **Estado do terminal = `ui.estado`** (dataclass `EstadoUI`: `quiet`, `verbose`, `color_enabled`, `unicode_enabled`, `ui_mode`, `pending_status`, `ultima_linha_vazia`). Mude por `ui.configure(...)`; em teste use `monkeypatch.setattr(ui.estado, "quiet", True)` ou `with ui.estado_temporario(quiet=True): ...`, e `ui.redefinir_estado()` zera tudo. Os globais antigos (`ui._quiet`, `ui._verbose`, `ui._color_enabled`...) **não existem mais**: patch neles seria um no-op silencioso, e o `test_estado_ui.py` falha se algum código ou teste voltar a citá-los. Não troque a instância (`ui.estado = ...`).
+- **Largura e altura vêm só de `ui.raw_width()`/`ui.raw_height()`** (e `ui.width()`/`ui.box_width()`/`ui.report_width()`): nunca `shutil.get_terminal_size` nem `os.get_terminal_size` fora do `ui.py` (o teste-guarda `test_so_o_ui_le_o_tamanho_do_terminal` falha se alguém fizer). Texto com emoji/japonês mede-se em células (`ui._cell_width`, `ui.pad_cells`), não com `len()`/`ljust`. Linha **com cor** que pode passar da tela (relatórios do `tags`/`lyrics`) sai por `ui.emit_wrapped` (quebra entre palavras, mantém o recuo do `•`/`[x]`) e linha de resumo "• Rótulo : valor  explicação" por `ui.resumo_linhas` (em tela estreita a explicação desce para a linha de baixo). `ui.report_width()` vai de 32 a 120 colunas; teste com `COLUMNS=40` em `tests/unit/test_largura_40_colunas.py`.
 - **Nome de variável de painel não reaproveita nome de outro tipo na mesma função** (o mypy acusa `Incompatible types in assignment`; já aconteceu com `totais` no `inspect`).
 - **Cores:** usar `qobuz_dl.color` (respeita `NO_COLOR`). Aliases: `INFO`=azul-claro, `WARNING`=amarelo.
 - **Assíncrono:** rede e downloads são `async` (httpx/asyncio). Não bloquear o loop.
@@ -230,13 +241,14 @@ Definidos em `commands.py`, roteados em `cli.py::_handle_commands`. `DOWNLOAD_CO
 
 ## 8. Testes
 
-- Rodar tudo: `pip install -e ".[all,dev]"` e `pytest`. Rápido: `pytest -m "not slow"`.
+- Rodar tudo: `pip install -r requirements-dev.txt` (editável + extra `dev`; é o que o a-Shell usa) e `pytest`. Com os recursos opcionais também: `pip install -e ".[all,dev]"`. `pip install -e .` sozinho NÃO instala extras (o pip não tem extra padrão). Rápido: `pytest -m "not slow"`.
 - Pastas: `tests/unit/` (maioria; lógica pura), `tests/ui/` (largura, quebra, concorrência, tela inicial), `tests/lyrics/`, `tests/network/` (HTTP **mockado** via pytest-httpx), `tests/regression/` (trava bugs históricos/dependências), `tests/manual/` (**não** roda no pytest; exige credenciais reais).
 - Marcadores (`--strict-markers`): `slow`, `integration`, `asyncio`, `unit`, `network`, `ui`, `regression`, `lyrics`. `asyncio_mode = auto`.
 - **`tests/conftest.py` isola o ambiente:** define `CONFIG_DIR` temporário e `NO_COLOR=1` **antes** de importar `qobuz_dl`, e cria um `config.ini` com credenciais **inválidas de propósito** (nenhum teste toca a API real; evita o assistente de 1ª execução travar em `input()`).
 - **O `conftest.py` também protege contra prompt real:** `prompt_toolkit.PromptSession()` sem `input=`/`output=` levanta `AssertionError` (no a-Shell abrir o terminal de verdade dá **segfault**; `isatty()` pode ser `True` mesmo com a saída capturada) e `library_cmd._interactive()` é falso por padrão. Teste de menu interativo troca `_interactive` e `_ask` na mão (ver `test_library_paineis.py`). Fixture autouse nova **não** deve pedir `monkeypatch`: isso muda a ordem de teardown dos fixtures dos módulos.
 - Telas em painéis têm testes em `tests/ui/` (`test_painel.py`, `test_library_paineis.py`, `test_stats_view`/`test_inspector_*` em `tests/unit/`): conferem título na borda, nenhuma linha acima da largura do terminal (inclusive CJK/emoji) e o conteúdo de cada painel. **Regra do dono:** quando teste e código divergem, o teste acompanha o código (exceção só para bug real, avisado antes).
 - Regra do projeto: bug corrigido ⇒ **teste de regressão** que falha antes e passa depois.
+- **Testes de propriedade** (`tests/ui/test_ui_propriedades.py`): quebra, preenchimento e corte de texto valem para qualquer mistura de ASCII/CJK/emoji; rodam com `hypothesis` (extra `dev`) e, sempre, com gerador fixo. `pytest -n auto` (xdist) roda em paralelo; `pytest-randomly` já embaralha a ordem.
 - Cobertura: `fail_under = 75` no `pyproject.toml`, mas o CI usa `--cov-fail-under=60` (ver §11).
 
 ---
@@ -249,17 +261,18 @@ Definidos em `commands.py`, roteados em `cli.py::_handle_commands`. `DOWNLOAD_CO
 | `ruff.yml` / `ruff-autofix.yml` | Lint e autofix (gera os commits “correções automáticas do Ruff”) |
 | `canary.yaml` | “Canário” diário da API do Qobuz (`tools/canary_check*.py`) — avisa quando o Qobuz muda algo |
 | `changelog.yml` | Gera changelog em tags (`tools/gerar_changelog.py`, formato Keep a Changelog) |
+| `qualidade.yml` | `vulture` (código sem uso; também toda segunda); **não bloqueia** o merge (`continue-on-error`). O `pip-audit` (CVEs nas dependências) é o job `auditoria-dependencias` do `tests.yml` |
 | `pypi.yml` | Publica no PyPI em *release* |
 | `docker.yml` | Build/publica imagem Docker |
 | `dependabot*.yml` | Atualizações e auto-merge |
 
 **Fonte única de dependências = `pyproject.toml`.** Depois de mudar dependências: `python tools/gerar_requirements.py` (atualiza `requirements.txt`). O Docker instala direto do pyproject (extras `speed,covers,watch,genius,analyze`).
 
-**Extras:** `speed` (rapidfuzz, brotli), `covers` (Pillow), `watch` (watchdog), `duplicates` (pyacoustid), `genius`, `analyze` (numpy), `enhanced` (aiolimiter), `all`, `dev`, `dev-full` (inclui `respx` para testes HTTPX). O extra `enhanced` é opcional: aiolimiter limita chamadas da API; o renderer próprio da UI continua ativo e responsivo, com fallback completo sem o extra. O cache de metadados usa `aiosqlite`, já presente no núcleo, e não adiciona dependência runtime.
+**Extras:** `speed` (rapidfuzz, brotli), `covers` (Pillow), `watch` (watchdog), `duplicates` (pyacoustid), `genius`, `analyze` (numpy), `enhanced` (aiolimiter), `all`, `dev` (tudo que o `pytest` precisa para rodar sem erro de coleta: pytest, asyncio, httpx, cov, randomly, xdist, hypothesis e `respx` para os testes HTTPX) e `dev-full` (`dev` + ruff, mypy, vulture, pip-audit). O extra `enhanced` é opcional: aiolimiter limita chamadas da API; o renderer próprio da UI continua ativo e responsivo, com fallback completo sem o extra. O cache de metadados usa `aiosqlite`, já presente no núcleo, e não adiciona dependência runtime.
 
 **Subir versão:** editar `qobuz_dl/__version__`; o commit costuma ser `Bump version to X.Y.Z`.
 
-**`tools/`:** `apple_cover_check.py`, `apple_porque.py`, `apple_text_compare.py` (diagnóstico da correspondência de capa Apple — explicam *por que* uma faixa foi aceita/rejeitada); `canary_check*.py`; `gerar_changelog.py`; `gerar_requirements.py`.
+**`tools/`:** `apple_cover_check.py`, `apple_porque.py`, `apple_text_compare.py` (diagnóstico da correspondência de capa Apple — explicam *por que* uma faixa foi aceita/rejeitada); `canary_check*.py`; `gerar_changelog.py`; `gerar_requirements.py`; `gerar_referencia.py` (gera `docs/COMANDOS.md`; `--check` só confere).
 
 ---
 
@@ -298,14 +311,13 @@ Pendências abertas também estão em `todo.md`.
 4. **README — linha `usage` dos comandos globais desatualizada:** não lista `tags`, `inspect`, `import-playlist`, `sync-favorites`, `scan`, `library`, `doctor`, `auth`, `user`.
 5. **Arquivos grandes:** `core.py` (~3600), `downloader.py` (~3700), `cli.py` (~2700); `utils.py` já caiu para ~1000 (capas Apple em `apple_cover.py`). Funções gigantes: `core._tui_select` (~1300 linhas), `apple_cover.get_apple_hq_cover` (~1000), `cli.async_main`, `retro_tags.retag_directory`, `downloader.download_release`. A quebra em módulos menores está em andamento (`download_utils.py`, `interactive_ui.py`, `stats_view.py` já extraídos). Ao extrair, mover **só** o que já tem teste.
 6. **`bundle.py`** depende do HTML/JS do Qobuz: quebra sem aviso quando o site muda (o canário existe para isso).
-7. **Testes placeholder:** `tests/unit/test_core_remaining_interactive_disabled.py` só tem testes `skip` (`pass`) criados para o iOS; a cobertura real do `interactive()` está em `test_core_interactive_branches.py` e testes estáticos.
+7. **Testes placeholder:** `tests/unit/test_core_remaining_interactive_disabled.py` só tem testes `skip` (`pass`) criados para o iOS; a cobertura real do `interactive()` está em `test_core_interativo_favoritos_e_artista.py` e testes estáticos.
 8. **Zip do projeto:** ao compactar para enviar, excluir `.coverage` e `.pytest_cache/` (estão no `.gitignore`, mas foram no zip e pesam ~3 MB).
 9. **Event loop:** nada síncrono e demorado (disco, `os.walk`, mutagen, HTTP) pode rodar direto numa função `async` — use `asyncio.to_thread`. O `LyricsEngine` usa um cliente HTTP **síncrono** (`make_sync_client`): chame `fetch_and_inject` sempre em thread. As letras retroativas são sequenciais por padrão e paralelas com `--max-workers` (teto 4, provedores limitam requisições); ao mexer na engine, não introduza estado compartilhado por arquivo. `tests/unit/test_sem_bloqueio_pesado_no_loop.py` (guarda por AST: falha se uma `async def` chamar I/O pesado direto; se a chamada for legítima, use `to_thread` ou liste a função em `PERMITIDOS` com o motivo), `tests/regression/test_loop_nao_bloqueia.py` e `tests/unit/test_retro_tagger_paralelo.py` guardam esse comportamento. **Nunca `asyncio.to_thread(shutil.rmtree, ...)`**: trava no a-Shell/iOS (`copyfile`/`copy2` em thread funcionam). Deixe o `rmtree` síncrono e registre em `PERMITIDOS`.
 10. **Arquivos soltos na raiz:** `aplicar_patch.py`, `corrigir_teste_banda.py`, `cascata-letras.patch`, `MERGE_NOTES.md` (relatório de um merge antigo) e `README-SINCRONIZACAO.md` parecem sobras; mover para `tools/`/`docs/` ou remover (decisão do dono).
-11. **Nomes de teste que não dizem o assunto:** ~21 arquivos em `tests/unit/` terminam em `_fixed`, `_fixed2/3`, `_extra`, `_paths`, `_remaining_branches` (e há `test_coverage_critical_paths.py`); renomear por assunto ou fundir.
-12. **Código sem uso no `ui.py`:** `center_cells` e `is_narrow` só são chamados por testes desde a remoção de `banner`/`kv`.
+11. **Código sem uso no `ui.py`:** `center_cells` e `is_narrow` só são chamados por testes desde a remoção de `banner`/`kv`.
 
-**Resolvidas em 2026-10-13** (não reabrir): `qobuz_dl/pyproject.toml` duplicado removido; teste `test_core_interactive_branches-2026-09-28.py` renomeado; `todo.md` reescrito; README com `—`/aspas curvas dentro de comandos corrigido.
+**Resolvidas em 2026-10-13** (não reabrir): `qobuz_dl/pyproject.toml` duplicado removido; teste `test_core_interativo_favoritos_e_artista-2026-09-28.py` renomeado; `todo.md` reescrito; README com `—`/aspas curvas dentro de comandos corrigido.
 
 ---
 
@@ -329,6 +341,10 @@ Mais recente primeiro. Uma linha por alteração pedida.
 
 | Data | Alteração | Arquivos principais |
 | :--- |:--- |:--- |
+| 2026-11-04 | Lote D: os 7 globais do `ui.py` (`_quiet`, `_verbose`, `_color_enabled`, `_unicode_enabled`, `_ui_mode`, `_pending_status`, `_ultima_linha_vazia`) viraram o objeto `ui.estado` (`EstadoUI`), com `redefinir_estado()` e `estado_temporario()`; sem `global` no estado. Testes que mexiam nos nomes antigos migrados; teste-guarda impede a volta | `qobuz_dl/ui.py`, `tests/unit/test_estado_ui.py`, `tests/unit/test_ui_state.py`, `tests/unit/test_saida_json.py` |
+| 2026-11-03 | Lote C: `--json` uniforme (`ui.emit_json`) em `library` e `stats` (e `config`/`duplicates`/`doctor` passam a usar o mesmo), `cli._saida_so_json` deixa só o JSON no terminal; `doctor --fix`; `docs/COMANDOS.md` gerado por `tools/gerar_referencia.py` e conferido por teste; códigos de saída documentados (`CODIGOS_DE_SAIDA`, `SAIDA_POR_COMANDO`). Aplicado sobre a árvore do dono (v2.6.8) | `qobuz_dl/ui.py`, `qobuz_dl/library_cmd.py`, `qobuz_dl/stats_view.py`, `qobuz_dl/doctor.py`, `qobuz_dl/commands.py`, `qobuz_dl/cli.py`, `tools/gerar_referencia.py`, `docs/COMANDOS.md`, `tests/unit/test_saida_json.py`, `tests/unit/test_doctor_fix.py`, `tests/unit/test_referencia_comandos.py` |
+| 2026-11-03 | Lote B: comandos `config` (show/path/get/set/reset), `duplicates` (`--mover`/`--desfazer`) e `cleanup`; `sync-db` e `watch` como subcomandos (as flags antigas seguem). Subcomandos viram flags em `cli._aplicar_atalhos`; `_pede_reset` evita rodar o assistente duas vezes em `config reset` | `qobuz_dl/config_cmd.py`, `qobuz_dl/duplicates_cmd.py`, `qobuz_dl/library_cleanup.py`, `qobuz_dl/commands.py`, `qobuz_dl/cli.py`, `qobuz_dl/home_screen.py`, `tests/unit/test_config_cmd.py`, `tests/unit/test_duplicates_cmd.py`, `tests/unit/test_library_cleanup.py`, `tests/unit/test_cli_comandos_novos.py` |
+| 2026-11-02 | Bug achado por teste de propriedade: `ui.wrap_indented`/`labeled_lines` mediam em caracteres (estouravam com CJK/emoji), agora em células; extras `dev` (xdist, hypothesis) e `dev-full` (vulture, pip-audit); workflow `qualidade.yml`; 20 testes `_fixed`/`_extra` renomeados por assunto | `qobuz_dl/ui.py`, `pyproject.toml`, `.github/workflows/qualidade.yml`, `tests/ui/test_ui_propriedades.py`, `tests/unit/` |
 | 2026-11-02 | Revisão dos `except Exception` (214 handlers: 24 relançam, 107 registram, 23 avisam, 70 não relançam nem registram, quase todos fallbacks de leitura/cosmética). `search_*` do `Client` engoliam qualquer erro da API e pareciam "sem resultados": agora dividem `Client._search` e avisam a causa; letras do Qobuz e keyring registram no DEBUG | `qobuz_dl/qopy.py`, `qobuz_dl/downloader.py`, `qobuz_dl/cli.py`, `tests/unit/test_qopy_busca_erro.py` |
 | 2026-11-02 | Largura/altura do terminal só por `ui.raw_width()`/`ui.raw_height()` (novo): `color.accent_preview`, a lista do `artists` e a altura da tabela do modo interativo deixaram de chamar `shutil.get_terminal_size`; teste-guarda impede a volta | `qobuz_dl/ui.py`, `qobuz_dl/color.py`, `qobuz_dl/artist_checklist.py`, `qobuz_dl/core.py`, `tests/ui/test_terminal_width.py`, `tests/unit/test_color.py` |
 | 2026-11-01 | Telas `inspect` (arquivo, pasta e auditoria) e `library`/`scan`/`sync-favorites` em painéis; nova classe `ui.Painel` e `ui.summary(..., lead=False)`; `ui.banner`/`section`/`kv` removidos; listagens do `library` seguem em uma linha por álbum | `qobuz_dl/ui.py`, `qobuz_dl/inspector.py`, `qobuz_dl/library_cmd.py`, `tests/ui/test_painel.py`, `tests/ui/test_library_paineis.py`, `CHANGELOG.md` |
@@ -345,10 +361,10 @@ Mais recente primeiro. Uma linha por alteração pedida.
 | 2026-10-21 | Preparação da versão 2.6.6: versão do pacote atualizada e notas de release para PyPI preparadas; metadados de licença migrados para SPDX com `LICENSE` incluído | `qobuz_dl/__init__.py`, `pyproject.toml`, `RELEASE_NOTES_2.6.6.md`, `SKILL.md` |
 | 2026-10-21 | TUI passou a exibir ANO no lugar de DURAÇÃO nas faixas; atalhos `n`/`m` de nova pesquisa/menu inicial foram movidos para fora da tabela e `b` retorna ao contexto/resultados do artista | `qobuz_dl/core.py`, `qobuz_dl/interactive_ui.py`, `tests/unit/test_get_table_layout.py`, `tests/unit/test_core_interactive_static.py`, `README.md`, `SKILL.md` |
 | 2026-10-21 | Atalhos `n`/`m`/`b` da TUI deixaram de ser registrados em menus de confirmação/filtro, onde não havia contexto para tratá-los; adicionado teste de regressão dos bindings | `qobuz_dl/core.py`, `tests/unit/test_core_tui.py`, `SKILL.md` |
-| 2026-10-21 | Modo interativo passou a ser rotativo, preservando a fila ao retornar ao menu inicial; revisão mostra artista/título; listas ganharam ordenação A-Z/ano por atalhos; Singles exibem FUNÇÃO quando há referência do artista pesquisado | `qobuz_dl/core.py`, `qobuz_dl/interactive_ui.py`, `qobuz_dl/artist_role.py`, `tests/unit/test_core_interactive_paths.py`, `tests/unit/test_core_metadata.py`, `tests/unit/test_get_table_layout.py`, `README.md`, `SKILL.md` |
+| 2026-10-21 | Modo interativo passou a ser rotativo, preservando a fila ao retornar ao menu inicial; revisão mostra artista/título; listas ganharam ordenação A-Z/ano por atalhos; Singles exibem FUNÇÃO quando há referência do artista pesquisado | `qobuz_dl/core.py`, `qobuz_dl/interactive_ui.py`, `qobuz_dl/artist_role.py`, `tests/unit/test_core_interativo_selecao_e_fila.py`, `tests/unit/test_core_metadata.py`, `tests/unit/test_get_table_layout.py`, `README.md`, `SKILL.md` |
 | 2026-10-20 | Extra opcional `enhanced` adicionado com aiolimiter para limitar chamadas assíncronas da API por event loop, configurável por `QOBUZ_API_RATE_LIMIT` e `QOBUZ_API_RATE_PERIOD`; renderer próprio da UI foi preservado para manter o layout responsivo do a-Shell | `pyproject.toml`, `qobuz_dl/qopy.py`, `tests/unit/test_qopy_api_call.py`, `README.md`, `SKILL.md` |
 | 2026-10-21 | Relatório HTML passou a ser gerado somente na finalização; cache SQLite assíncrono e limitado foi adicionado apenas para metadados de leitura; bancos receberam busy timeout, WAL oportunista, índices e backup pré-migração; RESPX entrou somente no extra de desenvolvimento | `qobuz_dl/postprocess.py`, `qobuz_dl/metadata_cache.py`, `qobuz_dl/qopy.py`, `qobuz_dl/db.py`, `qobuz_dl/library_db.py`, `pyproject.toml`, `tests/`, `README.md`, `SKILL.md` |
-| 2026-10-21 | Fluxo interativo refinado: fila sem duplicatas, resumo e revisão antes do download, confirmação para discografias grandes, opções de retorno nos submenus e rótulo de qualidade corrigido | `qobuz_dl/core.py`, `tests/unit/test_core_interactive_paths.py`, `README.md`, `SKILL.md` |
+| 2026-10-21 | Fluxo interativo refinado: fila sem duplicatas, resumo e revisão antes do download, confirmação para discografias grandes, opções de retorno nos submenus e rótulo de qualidade corrigido | `qobuz_dl/core.py`, `tests/unit/test_core_interativo_selecao_e_fila.py`, `README.md`, `SKILL.md` |
 | 2026-10-21 | `artists`: lista com checkbox (teclado e toque, busca, filtro) em `artist_checklist.py`; a tela agora é uma tabela igual à do modo interativo (bordas, cabeçalho, `➤`, fundo na linha atual, cartões em tela estreita); prompt de texto e sorteio usam a mesma tabela colorida, sem hiperlink OSC 8 (quebrava a borda no a-Shell); confirmar um artista cria a playlist com o nome em MAIÚSCULAS no Qobuz e só então grava a conferência (falha na playlist mantém pendente) | `qobuz_dl/artist_checklist.py`, `qobuz_dl/artist_review.py`, `tests/unit/test_artist_review.py`, `tests/unit/test_artist_checklist.py`, `README.md`, `SKILL.md` |
 | 2026-10-22 | `artists`: tela do artista (lançamentos pendentes), marcar todos (`A`), ordem novos primeiro (`S`), desfazer conferência (`↺`, confirma com 2º Enter, sem apagar playlist), marcações salvas em arquivo, id da playlist no banco (schema v5) e Atalhos (`--criar-playlist-vazia`) unificado com a confirmação | `qobuz_dl/artist_checklist.py`, `qobuz_dl/artist_review.py`, `qobuz_dl/library_db.py`, `tests/unit/test_artist_checklist.py`, `tests/unit/test_artist_review.py`, `README.md`, `SKILL.md` |
 | 2026-10-22 | `artists --sincronizar-checklist`: modo padrão só marca (não desfaz o que foi confirmado no a-Shell) e `--espelhar` opcional; mesma regra de "conferido" da tela; `needs_review`/`kept_verified`/`missing` no JSON; caminho opcional `[ARQUIVO]`; sem login nem rede (exceto `--atualizar-seguidos`); `allow_abbrev=False` no subcomando para o modo JSON do `cli.py` não ser contornado por abreviações | `qobuz_dl/artist_review.py`, `qobuz_dl/cli.py`, `qobuz_dl/commands.py`, `tests/unit/test_artist_review.py`, `README.md`, `SKILL.md` |
@@ -364,5 +380,5 @@ Mais recente primeiro. Uma linha por alteração pedida.
 | 2026-10-15 | Rótulos das opções na ajuda em português (`PASTA`, `DATA`, `PADRÃO`, `PREFIXO`, `FORMATO`, `GRAVADORA`, `BUSCA`, `URL_OU_ARQUIVO`, `N`, `QUALIDADE`…; só o `metavar`, os nomes internos como `args.SOURCE` não mudaram) e lista de chaves de `-ff`/`-fbff`/`-tf` movida para o painel "Chaves de formato" no fim da ajuda (`PAINEL_CHAVES` em `commands.py`; qualquer parser pode ter `paineis_extras`); corrigida vírgula que faltava entre `track_title_base` e `version`; testes novos | `qobuz_dl/commands.py`, `qobuz_dl/home_screen.py`, `tests/ui/test_ajuda_comando.py` |
 | 2026-10-15 | Ajuda de cada comando (`qobuz-dl <comando> -h`) passa a usar os mesmos painéis da tela inicial (antes era texto corrido do argparse, que não quebrava linha e estourava em tela estreita); `ColoredArgumentParser.print_help` monta os painéis a partir do próprio parser, com rede de segurança para o formato antigo; testes novos | `qobuz_dl/home_screen.py`, `qobuz_dl/commands.py`, `tests/ui/test_ajuda_comando.py` |
 | 2026-10-13 | Criação do SKILL.md com base na leitura do projeto (v2.6.5): mapa de módulos, comandos, fluxos, config, convenções, testes/CI, decisões e armadilhas | `SKILL.md` |
-| 2026-10-13 | Resolvidas as pendências do §11: README corrigido (`—` e aspas retas nos comandos), `qobuz_dl/pyproject.toml` duplicado removido, teste renomeado para `test_core_interactive_branches.py`, `todo.md` reescrito; SKILL.md restaurado (frontmatter e flags tinham sido alterados pela Pontuação Inteligente) e §11 reorganizado | `README.md`, `todo.md`, `pyproject.toml`, `SKILL.md`, `tests/unit/` |
+| 2026-10-13 | Resolvidas as pendências do §11: README corrigido (`—` e aspas retas nos comandos), `qobuz_dl/pyproject.toml` duplicado removido, teste renomeado para `test_core_interativo_favoritos_e_artista.py`, `todo.md` reescrito; SKILL.md restaurado (frontmatter e flags tinham sido alterados pela Pontuação Inteligente) e §11 reorganizado | `README.md`, `todo.md`, `pyproject.toml`, `SKILL.md`, `tests/unit/` |
 | 2026-10-13 | Pausa instrumental `• • •` passa a ficar 0,5 s **antes da próxima linha** (era 0,5 s depois do início da anterior); testes atualizados e 2 novos (par bilíngue, lacuna de exatamente 10 s) | `qobuz_dl/lyrics_engine.py`, `tests/unit/test_lyrics_lrc_format.py` |

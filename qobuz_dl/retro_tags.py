@@ -810,6 +810,10 @@ def _legend_lines() -> list:
     ]
 
 
+# Largura da coluna de rótulos do resumo: cabe o maior rótulo ("Capas Apple não
+# encontradas", 27) sem deslocar o ":" das demais linhas.
+_SUMMARY_LABEL_WIDTH = 28
+
 _COVER_OUTCOME_LABELS = (
     ("replaced", "capa trocada", GREEN),
     ("kept", "mantida (a atual já era igual ou maior)", MUTED),
@@ -836,7 +840,16 @@ def _summary_detail_lines(
             f" (faixas por campo):{RESET}"
         )
         for key, count in ranked[:top]:
-            lines.append(f"{CYAN} • {str(key).ljust(26)}:{RESET} {GREEN}{count}{OFF}")
+            lines.extend(
+                ui.resumo_linhas(
+                    str(key),
+                    count,
+                    cor_rotulo=CYAN,
+                    cor_valor=GREEN,
+                    reset=OFF,
+                    larg_rotulo=_SUMMARY_LABEL_WIDTH,
+                )
+            )
         if len(ranked) > top:
             lines.append(f"{MUTED}   … e mais {len(ranked) - top} campo(s){OFF}")
     outcomes: Mapping[str, int] = stats.get("cover_outcomes") or {}
@@ -846,7 +859,18 @@ def _summary_detail_lines(
         for outcome, text, color in _COVER_OUTCOME_LABELS:
             count = outcomes.get(outcome, 0)
             if count:
-                lines.append(f"{CYAN} • {text.ljust(44)}:{RESET} {color}{count}{OFF}")
+                lines.extend(
+                    ui.resumo_linhas(
+                        text,
+                        count,
+                        cor_rotulo=CYAN,
+                        cor_valor=color,
+                        reset=OFF,
+                        larg_rotulo=max(
+                            len(label) for _o, label, _c in _COVER_OUTCOME_LABELS
+                        ),
+                    )
+                )
     return lines
 
 
@@ -899,36 +923,38 @@ async def retag_directory(
     covers_only, tags_only = mode == "covers", mode == "tags"
 
     if not os.path.isdir(directory_path):
-        ui.emit(f"{RED}[!] A pasta não existe no dispositivo: '{directory_path}'{OFF}")
+        ui.emit_wrapped(
+            f"{RED}[!] A pasta não existe no dispositivo: '{directory_path}'{OFF}"
+        )
         return None
 
-    ui.emit(f"\n{CYAN}[*] Iniciando correção retroativa de tags...{OFF}")
-    ui.emit(f"{CYAN} • Pasta raiz  :{RESET} {directory_path}")
+    ui.emit_wrapped(f"\n{CYAN}[*] Iniciando correção retroativa de tags...{OFF}")
+    ui.emit_wrapped(f"{CYAN} • Pasta raiz  :{RESET} {directory_path}")
     if dry_run:
-        ui.emit(
+        ui.emit_wrapped(
             f"{YELLOW} • SIMULAÇÃO   :{RESET} nada será gravado na sua pasta "
             "(as alterações abaixo são o que SERIA feito)"
         )
     if covers_only:
-        ui.emit(
+        ui.emit_wrapped(
             f"{CYAN} • Modo        :{RESET} SOMENTE CAPAS (nenhuma tag será regravada)"
         )
     else:
         if tags_only:
-            ui.emit(
+            ui.emit_wrapped(
                 f"{CYAN} • Modo        :{RESET} SOMENTE TAGS "
                 "(a capa não é pesquisada nem alterada)"
             )
-        ui.emit(f"{CYAN} • Multi-tags  :{RESET} {multi_tags_label(settings)}")
+        ui.emit_wrapped(f"{CYAN} • Multi-tags  :{RESET} {multi_tags_label(settings)}")
     if tags_only:
-        ui.emit(f"{CYAN} • Capas Apple :{RESET} desligadas (modo só tags)")
+        ui.emit_wrapped(f"{CYAN} • Capas Apple :{RESET} desligadas (modo só tags)")
     else:
-        ui.emit(
+        ui.emit_wrapped(
             f"{CYAN} • Capas Apple :{RESET} procurando e substituindo quando validada"
         )
     ui.emit("")
     for legend_line in _legend_lines():
-        ui.emit(legend_line)
+        ui.emit_wrapped(legend_line)
 
     all_files = await asyncio.to_thread(find_audio_files, directory_path)
     files = [f for f in all_files if not (progress and progress.is_done(f))]
@@ -949,17 +975,19 @@ async def retag_directory(
     }
 
     if not all_files:
-        ui.emit(f"{YELLOW}[!] Nenhum arquivo .flac/.mp3 encontrado na pasta.{OFF}")
+        ui.emit_wrapped(
+            f"{YELLOW}[!] Nenhum arquivo .flac/.mp3 encontrado na pasta.{OFF}"
+        )
         return stats
 
     if stats["skipped_done"]:
-        ui.emit(
+        ui.emit_wrapped(
             f"{CYAN}[i] {stats['skipped_done']} arquivo(s) já processados e sem "
             f"alteração serão pulados (rode sem --incremental/--resume para "
             f"refazer tudo).{OFF}"
         )
     if not files:
-        ui.emit(
+        ui.emit_wrapped(
             f"{GREEN}[+] Nada a fazer: todos os arquivos já foram processados.{OFF}"
         )
         if progress and not dry_run:
@@ -1344,8 +1372,8 @@ async def retag_directory(
             # alterou, amarelo = atenção, cinza = nada a alterar.
             if not header_printed:
                 ui.emit("")
-            ui.emit(f"{state_color}{label} {name}{OFF}")
-            ui.emit(f"   {state_color}• {state_text}{OFF}")
+            ui.emit_wrapped(f"{state_color}{label} {name}{OFF}")
+            ui.emit_wrapped(f"   {state_color}• {state_text}{OFF}")
 
             if covers_only:
                 tags_color, tags_text = MUTED, "não tocadas (modo só capas)"
@@ -1363,7 +1391,7 @@ async def retag_directory(
                 ui.emit(f"{tags_color}{line}{OFF}")
             if tags_changed and not covers_only:
                 for diff_line in format_tag_diff(before_text, after_text):
-                    ui.emit(f"          {diff_line}")
+                    ui.emit_wrapped(f"          {diff_line}")
 
             if tags_only:
                 cover_color, cover_text = MUTED, "não tocada (modo só tags)"
@@ -1387,13 +1415,13 @@ async def retag_directory(
 
         ui.emit("")
         if dry_run:
-            ui.emit(
+            ui.emit_wrapped(
                 f"{GREEN}[+] Simulação concluída -- nenhum arquivo foi alterado.{OFF}"
             )
         else:
-            ui.emit(f"{GREEN}[+] Correção de tags concluída.{OFF}")
+            ui.emit_wrapped(f"{GREEN}[+] Correção de tags concluída.{OFF}")
         ui.emit("")
-        ui.emit(f"{CYAN} Resumo{' da simulação' if dry_run else ''}:{RESET}")
+        ui.emit_wrapped(f"{CYAN} Resumo{' da simulação' if dry_run else ''}:{RESET}")
         counts: Mapping[str, object] = stats
         for text_label, key, color_on, explanation in (
             (
@@ -1450,35 +1478,42 @@ async def retag_directory(
                 continue  # só aparece quando houve arquivos pulados
             value = counts[key]
             value_color = color_on if (color_on and value) else MUTED
-            ui.emit(
-                f"{CYAN} • {text_label.ljust(26)}:{RESET} "
-                f"{value_color}{value}{OFF}  {MUTED}{explanation}{OFF}"
-            )
+            for row in ui.resumo_linhas(
+                text_label,
+                value,
+                explanation,
+                cor_rotulo=CYAN,
+                cor_valor=value_color,
+                cor_explicacao=MUTED,
+                reset=OFF,
+                larg_rotulo=_SUMMARY_LABEL_WIDTH,
+            ):
+                ui.emit(row)
 
         for summary_line in _summary_detail_lines(stats, tags_only, dry_run):
-            ui.emit(summary_line)
+            ui.emit_wrapped(summary_line)
 
         if stats["no_id"]:
-            ui.emit(
+            ui.emit_wrapped(
                 f"{YELLOW}[i] Arquivos sem ID Qobuz não podem ser corrigidos "
                 f"automaticamente.{OFF}"
             )
 
         if journal is not None and not dry_run:
             if journal.recorded:
-                ui.emit(
+                ui.emit_wrapped(
                     f"{CYAN}[i] Para desfazer esta execução:{RESET} "
                     f"qobuz-dl tags --undo {journal.run_id}   "
                     f"{MUTED}({journal.recorded} arquivo"
                     f"{'s' if journal.recorded != 1 else ''} com backup){OFF}"
                 )
             if journal.unbacked:
-                ui.emit(
+                ui.emit_wrapped(
                     f"{YELLOW}[!] {journal.unbacked} arquivo(s) de formato não "
                     f"reconhecido ficaram sem backup para desfazer.{OFF}"
                 )
         elif dry_run and stats["updated"]:
-            ui.emit(
+            ui.emit_wrapped(
                 f"{CYAN}[i] Para aplicar de verdade, rode o mesmo comando sem "
                 f"--dry-run.{RESET}"
             )

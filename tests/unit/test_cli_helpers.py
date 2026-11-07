@@ -108,7 +108,7 @@ class TestTokenNoConfig:
 
     def test_ordem_de_prioridade_na_leitura(self, keyring_falso):
         config = _config(
-            user_auth_token="B", user_token="C", auth_token="D", password="E"
+            user_auth_token="B", user_token="C", auth_token="D", password="E" * 61
         )
         # Keyring vence tudo...
         keyring_falso.dados[(cli.KEYRING_SERVICE, "auth_token")] = "A"
@@ -121,7 +121,7 @@ class TestTokenNoConfig:
         config.remove_option("qobuz", "user_token")
         assert cli._load_token_from_all_locations(config) == "D"
         config.remove_option("qobuz", "auth_token")
-        assert cli._load_token_from_all_locations(config) == "E"
+        assert cli._load_token_from_all_locations(config) == "E" * 61
         config.remove_option("qobuz", "password")
         assert cli._load_token_from_all_locations(config) == ""
 

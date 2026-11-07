@@ -14,6 +14,52 @@ publicar, renomeie a seção para a nova versão e a data.
 ## [Não lançado]
 
 ### Adicionado
+- `.github/workflows/qualidade.yml`: `vulture` (código sem uso) em todo push/PR e toda segunda; não bloqueia o merge, o resultado vai para o resumo do job e para o artefato `vulture-report`.
+- `ui.wrap_ansi_line`, `ui.emit_wrapped` e `ui.resumo_linhas`: quebra de linhas coloridas pela largura da tela (recuo do `•`/`[x]` mantido; palavra maior que a linha, como um caminho, vai inteira para uma linha própria em vez de ser partida) e linhas de resumo que empilham a explicação em tela estreita.
+- Testes: `test_largura_40_colunas.py`, `test_core_tui_40_colunas.py` (prompt_toolkit real), `test_senha_e_token.py`, `test_guarda_excecoes.py`.
+
+### Alterado
+- Relatórios do `tags` e do `lyrics` passam a caber em terminais de 40 colunas (a-Shell no iPhone). O piso de `ui.report_width()` caiu de 60 para 32, como o dos painéis.
+- Resumo do `tags`: a coluna dos rótulos passou de 26 para 28 caracteres ("Capas Apple não encontradas", com 27, deslocava o `:`).
+
+### Corrigido
+- `config.ini`: o campo `password` deixou de receber o token. Um token guardado nele por versões antigas (valor com mais de 60 caracteres) é migrado para o keyring ou para `auth_token` e o campo é esvaziado; uma senha curta continua sendo senha e não é mais confundida com token em `_load_token_from_all_locations`.
+
+## [2.6.8] - 2026-11-05
+
+### Adicionado
+- `requirements-dev.txt`: `pip install -r requirements-dev.txt` instala o projeto editável já
+  com o extra `dev` (tudo o que o `pytest` precisa), num comando só.
+- `config` avisa quando o `config.ini` não existe ou está vazio (antes mostrava uma lista
+  vazia sem explicar); o JSON ganha `"estado"` (`ok`, `ausente` ou `vazio`) e o comando sai
+  com 1 nesses casos. `get`/`set` não criam arquivo.
+- Comandos que não precisam de login (`stats`, `library`, `doctor`, `config`, `duplicates`,
+  `cleanup`, `inspect`) e a ajuda (`-h`) não abrem mais o assistente de primeira execução
+  quando falta o `config.ini`; `doctor` avisa que o arquivo não existe. O assistente segue
+  para `dl`, `interactive` etc., `-r` e `config reset`.
+- `--json` em `library` (status, missing, list, history, reconcile) e em `stats`. Com
+  `--json` as mensagens de progresso ficam em silêncio e o terminal recebe o JSON, em
+  `doctor`, `library`, `stats`, `config` e `duplicates` (avisos e erros continuam aparecendo). `reset-stuck` e `unmark` recusam o `--json` (alteram o catálogo).
+- `doctor --fix`: corrige só o seguro (chmod 600 no `config.ini` e criar a pasta de
+  downloads que falta); nunca apaga nem reescreve nada. Com `--json` devolve
+  `{"correcoes": [...], "verificacoes": [...]}`.
+- `docs/COMANDOS.md`: referência de todos os comandos, apelidos, opções, padrões e códigos
+  de saída, gerada do parser por `tools/gerar_referencia.py`; um teste falha se ficar
+  desatualizada. Códigos de saída documentados: 0 deu certo, 1 falhou (no todo ou em
+  parte), 2 uso errado.
+- Comando `config`: `show` (padrão, com credenciais ocultas), `path`, `get CHAVE`,
+  `set CHAVE VALOR` e `reset`. O `set` altera só a linha da opção (comentários e ordem
+  ficam), confere o tipo (true/false, número), recusa credenciais (use `auth -l`) e grava
+  com permissão 0600; `--nova` cria uma opção que não existe. `config reset` pergunta
+  antes de sobrescrever (`-y` pula). Alias: `cfg`.
+- Comando `duplicates [PASTA]`: lista faixas repetidas e qual cópia ficaria (FLAC antes de
+  outros formatos, depois o maior arquivo). `--mover` leva as sobras para `_duplicatas/`
+  sem apagar, com diário; `--desfazer` devolve. Alias: `dups`.
+- Comando `cleanup [PASTA]`: simula por padrão; `--apagar` remove temporários de download
+  abandonados (`--idade HORAS`, padrão 24) e pastas vazias. Alias: `clean`.
+- Subcomandos `sync-db [PASTA]` e `watch [PASTA]`, equivalentes às flags `--sync-db` e
+  `--watch`. As flags antigas (`-r`, `-sc`, `--sync-db`, `--watch`, `--find-duplicates`)
+  continuam funcionando.
 - Pipeline de download: com `--max-workers` maior que 1, a vaga de rede é liberada assim
   que o arquivo baixa, e tags, capa, letras e verificação seguem em paralelo com os
   próximos downloads (`pipeline.py`). O teto de downloads simultâneos continua sendo o
@@ -60,6 +106,9 @@ publicar, renomeie a seção para a nova versão e a data.
   álbum inteiro, incluindo tags e capa).
 
 ### Alterado
+- Interno: o estado do terminal (`quiet`, `verbose`, cor, unicode, modo de UI e duas marcas
+  de linha) saiu de 7 variáveis globais do `ui.py` e foi para `ui.estado`. Sem mudança no
+  comportamento. Testes passam a usar `ui.estado` ou `ui.estado_temporario(...)`.
 - Resumo de fim de download (álbum, playlist, playlist importada e lote de faixas) ganhou a
   linha `Tempo total` e fica em uma única caixa; `Já existentes` aparece só quando há
   arquivos já baixados.
@@ -129,6 +178,10 @@ publicar, renomeie a seção para a nova versão e a data.
   pelo `retry`), em vez de atribuí-los de fora sem declaração.
 
 ### Corrigido
+- `ui.wrap_indented` e `ui.labeled_lines` (relatórios do `lyrics` e do `tags`) contavam
+  caracteres, não células de terminal: com japonês, coreano ou emoji a linha passava da
+  largura da tela em mais da metade dos casos. Agora medem em células (em ASCII o resultado
+  é igual ao do `textwrap` anterior). Achado por testes de propriedade.
 - Busca no catálogo (`search_albums`/`tracks`/`playlists`/`artists`): quando a API falhava
   (token vencido, rede fora), o erro era engolido e a busca parecia "sem resultados". O
   retorno continua `{}`, mas agora sai um aviso com o tipo e a causa do erro (o traço
@@ -153,6 +206,10 @@ publicar, renomeie a seção para a nova versão e a data.
   o cliente falso não tinha `get_user_playlists` e um handler de log deixado por
   outro teste jogava o aviso na saída capturada. O cliente falso foi completado e
   o `conftest.py` ganhou um fixture que desfaz o `ui.install_logging()` de cada teste.
+- `pip install -e ".[dev]"` agora traz o `respx` (antes só o `dev-full` trazia), então
+  `tests/network/test_qopy_respx.py` não interrompe mais a coleta do `pytest`.
+- `tests/unit/test_watcher.py` pula o arquivo quando o extra `[watch]` não está instalado,
+  em vez de abortar toda a suíte (caso do a-Shell).
 
 ### Removido
 - `tests/regression/test_dependencias.py`: cópia antiga (usava subprocesso, que trava no
@@ -162,6 +219,12 @@ publicar, renomeie a seção para a nova versão e a data.
   (fica só a da pasta `network`).
 
 ### Manutenção
+- Extras `dev`: `pytest-xdist` (`pytest -n auto`, desligado por padrão) e `hypothesis`
+  (testes de propriedade em `tests/ui/test_ui_propriedades.py`; sem ele os mesmos casos
+  rodam com gerador fixo). `dev-full`: `vulture` e `pip-audit`, usados pelo novo workflow
+  `qualidade.yml` (não bloqueia o merge; `pip-audit` também roda toda segunda).
+- 20 arquivos de `tests/unit/` com sufixo `_fixed`/`_extra` renomeados por assunto
+  (ex.: `test_downloader_faixa_avulsa.py`, `test_utils_m3u_e_filtros.py`).
 - Largura e altura do terminal só por `ui.raw_width()`/`ui.raw_height()` (esta é nova):
   `color.accent_preview`, a lista do `artists` e a altura da tabela do modo interativo
   não chamam mais `shutil.get_terminal_size`; o teste-guarda
@@ -240,7 +303,8 @@ publicar, renomeie a seção para a nova versão e a data.
   número de álbuns baixados entra no histórico do modo interativo e o limite em
   `pick_download_targets` é convertido com segurança para inteiro ou `None`.
 
-[Não lançado]: https://github.com/kaduvercosa/qobuz-dl-ultra/compare/v2.6.5.5...HEAD
+[Não lançado]: https://github.com/kaduvercosa/qobuz-dl-ultra/compare/v2.6.8...HEAD
+[2.6.8]: https://github.com/kaduvercosa/qobuz-dl-ultra/compare/v2.6.5.5...v2.6.8
 [2.6.5.5]: https://github.com/kaduvercosa/qobuz-dl-ultra/compare/v2.6.5.4...v2.6.5.5
 [2.6.5.4]: https://github.com/kaduvercosa/qobuz-dl-ultra/compare/v2.6.5.3...v2.6.5.4
 [2.6.5.3]: https://github.com/kaduvercosa/qobuz-dl-ultra/compare/v2.6.5.2...v2.6.5.3

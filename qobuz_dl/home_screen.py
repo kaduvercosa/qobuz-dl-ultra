@@ -61,6 +61,17 @@ EXEMPLOS = {
     "scan": ("scan [opções] [DIR]", "scan ~/Music --dry-run"),
     "library": ("library [ação] [opções]", "library missing --limit 20"),
     "doctor": ("doctor [--json]", "doctor"),
+    "config": (
+        "config [show|path|get|set|reset] [CHAVE] [VALOR]",
+        "config set default_quality 27",
+    ),
+    "duplicates": (
+        "duplicates [PASTA] [--mover | --desfazer]",
+        "duplicates ~/Music --mover",
+    ),
+    "cleanup": ("cleanup [PASTA] [--apagar] [--idade HORAS]", "cleanup --apagar"),
+    "sync-db": ("sync-db [PASTA]", "sync-db ~/Music"),
+    "watch": ("watch [PASTA]", "watch ~/Music"),
     "retry": ("retry [PASTA]", "retry ~/Music"),
     "import-playlist": (
         "import-playlist [-n NOME] [--auto] <URL ou arquivo>",

@@ -283,7 +283,40 @@ cd qobuz-dl-ultra
 pip3 install -r requirements.txt
 ```
 
-> **Recursos opcionais:** o `requirements.txt` e o `pip install qobuz-dl-ultra` trazem só o núcleo. Instale o que precisar: `pip install "qobuz-dl-ultra[covers]"` (Pillow), `[speed]`, `[watch]`, `[genius]`, `[duplicates]`, `[analyze]`, `[enhanced]` ou `[all]` para tudo. O extra `[enhanced]` instala aiolimiter, que protege chamadas à API contra rajadas; o layout de terminal continua usando o renderer próprio, responsivo e compatível com a-Shell. O comando `tags` **não depende do Pillow** para comparar capas (lê as dimensões do próprio JPEG/PNG); o Pillow só é usado para recompactar uma capa acima do limite de 16 MB do FLAC. No **a-Shell**, não instale extras: use o que já vem instalado. Rode `qobuz-dl doctor` para ver o que está disponível.
+> **Recursos opcionais:** o `requirements.txt` e o `pip install qobuz-dl-ultra` trazem só o núcleo; o resto é instalado por **extras**, que você escolhe na tabela abaixo.
+
+<a name="extras"></a>
+#### 🧩 Extras: o que instalar para cada recurso
+
+Pelo **PyPI** use `pip install "qobuz-dl-ultra[extra]"`. Pelo **código-fonte** (versão editável) use `pip install -e ".[extra]"`, dentro da pasta do projeto. Mantenha as aspas e combine extras com vírgula: `pip install -e ".[watch,covers]"`.
+
+| Extra | O que instala | Para quê | Comando (PyPI) |
+| :--- | :--- | :--- | :--- |
+| *(nenhum)* | núcleo | tudo o que o programa precisa para baixar, etiquetar e organizar | `pip install qobuz-dl-ultra` |
+| `speed` | rapidfuzz, brotli | comparação fuzzy mais rápida e respostas HTTP comprimidas | `pip install "qobuz-dl-ultra[speed]"` |
+| `covers` | Pillow | recompactar capas acima do limite de 16 MB do FLAC | `pip install "qobuz-dl-ultra[covers]"` |
+| `watch` | watchdog | `qobuz-dl watch` e `--watch` (injeta letras em arquivos novos) | `pip install "qobuz-dl-ultra[watch]"` |
+| `duplicates` | pyacoustid | detecção por impressão digital de áudio na flag `--find-duplicates` (precisa também do programa `fpcalc`) | `pip install "qobuz-dl-ultra[duplicates]"` |
+| `genius` | lyricsgenius | letras via Genius | `pip install "qobuz-dl-ultra[genius]"` |
+| `analyze` | numpy | análise espectral no `inspect` | `pip install "qobuz-dl-ultra[analyze]"` |
+| `enhanced` | aiolimiter | protege as chamadas à API contra rajadas | `pip install "qobuz-dl-ultra[enhanced]"` |
+| `all` | todos os acima | todos os recursos opcionais de uma vez | `pip install "qobuz-dl-ultra[all]"` |
+
+**Para desenvolver e rodar os testes** (só pelo código-fonte):
+
+| Quero | Comando |
+| :--- | :--- |
+| Versão editável já com tudo o que o `pytest` precisa (um comando só) | `pip install -r requirements-dev.txt` |
+| O mesmo, mais todos os recursos opcionais | `pip install -e ".[all,dev]"` |
+| Também ruff, mypy, vulture e pip-audit | `pip install -e ".[dev-full]"` |
+
+O `pip install -e .` sozinho instala apenas o núcleo (o pip não tem "extra padrão"); por isso existe o `requirements-dev.txt`.
+
+Notas:
+- O comando `tags` **não depende do Pillow** para comparar capas (lê as dimensões do próprio JPEG/PNG); o Pillow só entra para recompactar uma capa acima de 16 MB.
+- O `enhanced` é opcional: o layout de terminal continua usando o renderer próprio, responsivo e compatível com a-Shell.
+- `ffmpeg`/`ffprobe` (verificação de integridade) e `fpcalc` não vêm pelo pip: são programas do sistema.
+- No **a-Shell**, não instale os extras de recursos: use o que já vem instalado (só o `requirements-dev.txt`, se for rodar os testes). Rode `qobuz-dl doctor` para ver o que está disponível.
 
 *Execute o programa usando:* `python -m qobuz_dl`
 
@@ -758,6 +791,8 @@ qobuz-dl scan "/musica"                  # casa pastas do disco com o catálogo 
 qobuz-dl scan --dry-run --json rel.json  # classifica sem gravar e salva o relatório
 
 qobuz-dl library                         # status do catálogo
+qobuz-dl library --json                  # o mesmo em JSON (status, missing, list, history, reconcile)
+qobuz-dl stats --json                    # estatísticas em JSON (--artistas inclui a lista de artistas)
 qobuz-dl library missing                 # favoritos ainda não baixados
 qobuz-dl library history                 # últimas sincronizações
 qobuz-dl library reconcile [PASTA] [--fix] # sentinelas do disco ⇄ catálogo
@@ -770,7 +805,31 @@ qobuz-dl artists --sem-sincronizar       # usa o catálogo local sem consultar o
 qobuz-dl --quiet artists --json          # exporta artistas seguidos em JSON para Atalhos
 
 qobuz-dl doctor [--json]                 # diagnóstico: ambiente, config, keyring, bancos
+qobuz-dl doctor --fix                    # corrige o seguro: chmod 600 no config.ini e cria a pasta de downloads
+
+qobuz-dl config                          # mostra o config.ini (credenciais ocultas)
+qobuz-dl config path                     # só o caminho do arquivo
+qobuz-dl config get default_quality      # lê uma opção
+qobuz-dl config set default_quality 27   # altera uma opção (mantém os comentários)
+qobuz-dl config set --nova minha_opcao 1 # cria uma opção que ainda não existe
+qobuz-dl config reset [-y]               # recria o config.ini (pergunta antes; -y pula)
+
+qobuz-dl duplicates [PASTA]              # lista faixas repetidas e qual cópia ficaria
+qobuz-dl duplicates [PASTA] --mover      # leva as sobras para PASTA/_duplicatas (não apaga)
+qobuz-dl duplicates [PASTA] --desfazer   # devolve ao lugar o que o --mover tirou
+
+qobuz-dl cleanup [PASTA]                 # simula: .part abandonados e pastas vazias
+qobuz-dl cleanup [PASTA] --apagar        # remove de verdade (--idade HORAS; padrão 24)
+
+qobuz-dl sync-db [PASTA]                 # o mesmo que --sync-db
+qobuz-dl watch [PASTA]                   # o mesmo que --watch (extra [watch])
 ```
+
+**`config`, `duplicates` e `cleanup` não pedem login nem rede.** O `config set` recusa credenciais (use `qobuz-dl auth -l`), confere o tipo do valor (true/false, número) antes de gravar e mantém o arquivo com permissão 0600. O `duplicates` nunca apaga: o `--mover` guarda origem e destino em `_duplicatas/.movidos.json`, e o `--desfazer` usa esse diário. Fica a cópia FLAC (antes de outros formatos), depois a maior. O `cleanup` só mexe em temporários (`*.part`, `*.atomic.tmp`...) parados há mais de 24 h e em pastas sem nenhum arquivo; áudio, capas, letras e relatórios ficam intactos. As flags antigas `-r`, `-sc`, `--sync-db`, `--watch` e `--find-duplicates` continuam funcionando.
+
+**Saída em JSON.** `--json` funciona em `doctor`, `library`, `stats`, `config` e `duplicates`, e nesses casos as mensagens de progresso ficam em silêncio e o terminal recebe o JSON. Avisos e erros continuam aparecendo (no mesmo stream), então em caso de erro o resultado pode não ser um JSON válido: confira o código de saída antes de ler. Em `library`, `reset-stuck` e `unmark` recusam o `--json`, porque alteram o catálogo. O `scan --json ARQUIVO` é outra coisa: grava o relatório num arquivo. O `doctor --fix --json` devolve `{"correcoes": [...], "verificacoes": [...]}`.
+
+**Referência completa.** [`docs/COMANDOS.md`](docs/COMANDOS.md) lista todos os comandos, apelidos, opções, padrões e os códigos de saída (0 deu certo, 1 falhou no todo ou em parte, 2 uso errado). É gerada do próprio parser: `python tools/gerar_referencia.py`.
 
 **Revisão de artistas.**  
 

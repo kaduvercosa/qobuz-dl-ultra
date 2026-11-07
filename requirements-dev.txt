@@ -1,0 +1,13 @@
+# Instala o projeto em modo editavel (-e) JA COM tudo o que o pytest precisa
+# (extra `dev`: pytest, pytest-asyncio, pytest-httpx, pytest-cov, pytest-randomly,
+# pytest-xdist, hypothesis, respx). Um comando so':
+#
+#   pip install -r requirements-dev.txt
+#
+# O `pip install -e .` sozinho nao instala extras (o pip nao tem "extra padrao"),
+# e por isso este arquivo existe. No a-Shell use-o assim mesmo: o `dev` so tem
+# pacotes puros em Python.
+#
+# Para tambem instalar os recursos opcionais (Pillow, watchdog, numpy, genius...):
+#   pip install -e ".[all,dev]"
+-e .[dev]

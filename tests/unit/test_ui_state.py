@@ -40,12 +40,12 @@ def estado_limpo(monkeypatch):
         ui, "_track_view", type(ui._track_view)("test_view", default=None)
     )
     for nome, valor in (
-        ("_color_enabled", None),
-        ("_unicode_enabled", None),
-        ("_quiet", False),
-        ("_verbose", False),
+        ("color_enabled", None),
+        ("unicode_enabled", None),
+        ("quiet", False),
+        ("verbose", False),
     ):
-        monkeypatch.setattr(ui, nome, valor)
+        monkeypatch.setattr(ui.estado, nome, valor)
 
 
 def _sem_terminal(fd=None):
@@ -276,21 +276,22 @@ class TestCacheDeCapacidades:
 
 class TestConfigure:
     def test_none_mantem_o_valor_atual(self, estado_limpo, monkeypatch):
-        monkeypatch.setattr(ui, "_quiet", True)
-        monkeypatch.setattr(ui, "_verbose", True)
+        monkeypatch.setattr(ui.estado, "quiet", True)
+        monkeypatch.setattr(ui.estado, "verbose", True)
         ui.configure()
-        assert ui._quiet is True and ui._verbose is True
+        assert ui.estado.quiet is True and ui.estado.verbose is True
 
     def test_define_cada_flag(self, estado_limpo):
         ui.configure(quiet=True, verbose=True, color=False, unicode=False)
-        assert (ui._quiet, ui._verbose) == (True, True)
+        assert (ui.estado.quiet, ui.estado.verbose) == (True, True)
         assert ui.color_enabled() is False
         assert ui.unicode_enabled() is False
 
     def test_valores_viram_bool(self, estado_limpo):
         ui.configure(quiet=1, verbose=0, color=1, unicode="x")
-        assert ui._quiet is True and ui._verbose is False
-        assert ui._color_enabled is True and ui._unicode_enabled is True
+        assert ui.estado.quiet is True and ui.estado.verbose is False
+        assert ui.estado.color_enabled is True
+        assert ui.estado.unicode_enabled is True
 
     def test_c_so_devolve_o_codigo_com_cor_ligada(self, estado_limpo):
         ui.configure(color=True)
