@@ -30,6 +30,7 @@ import json
 import os
 import sys
 import webbrowser
+from typing import Any, Optional
 
 REPORT_FILENAME = ".report.json"
 
@@ -42,7 +43,7 @@ def carregar_report(caminho: str) -> dict:
         return json.load(f)
 
 
-def esc(valor) -> str:
+def esc(valor: Any) -> str:
     """Escape HTML special characters."""
     return html.escape(str(valor if valor is not None else ""))
 
@@ -66,7 +67,7 @@ _ESTADO_LABEL = {
 _TIPO_LABEL = {"album": "Álbum", "playlist": "Playlist", "faixa": "Faixa(s)"}
 
 
-def _fmt_dt(iso_str):
+def _fmt_dt(iso_str: Optional[str]) -> str:
     """'2026-09-02T07:50:37-03:00' -> '02.09.2026 -- 07:50'."""
     if not iso_str:
         return "-"
@@ -79,12 +80,12 @@ def _fmt_dt(iso_str):
         return str(iso_str)
 
 
-def _badge(texto, cor="chip"):
+def _badge(texto: Any, cor: str = "chip") -> str:
     """Generate HTML badge element."""
     return f'<span class="badge {cor}">{esc(texto)}</span>'
 
 
-def _renderizar_faixa(faixa, mostrar_artista_col):
+def _renderizar_faixa(faixa: dict[str, Any], mostrar_artista_col: bool) -> str:
     """Render HTML for a single track."""
     ident = faixa.get("identificacao", {}) or {}
     download = faixa.get("download", {}) or {}
@@ -439,7 +440,7 @@ def renderizar_html(report: dict) -> str:
 </html>"""
 
 
-def main():
+def main() -> None:
     """Main entry point for report viewer."""
     parser = argparse.ArgumentParser(
         description="Gera uma pagina HTML a partir de um .report.json."

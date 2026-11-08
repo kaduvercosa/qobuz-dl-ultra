@@ -20,9 +20,13 @@ import asyncio
 import os
 import time
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from qobuz_dl import postprocess, ui
 from qobuz_dl.download_utils import remove_missing_placeholder
+
+if TYPE_CHECKING:
+    from qobuz_dl.core import QobuzDL
 
 # Pastas que estão sendo baixadas agora: não mexer.
 _IN_PROGRESS_PREFIX = "[IN PROGRESS]"
@@ -129,7 +133,7 @@ _STATUS_LABEL = {
 }
 
 
-async def retry_album_folder(app, pending: PendingAlbum) -> dict[str, int]:
+async def retry_album_folder(app: QobuzDL, pending: PendingAlbum) -> dict[str, int]:
     """Repete as faixas pendentes de UM álbum e mostra o resultado.
 
     Devolve contagens: baixadas, indisponiveis (seguem puladas), falhas.
@@ -189,7 +193,7 @@ async def retry_album_folder(app, pending: PendingAlbum) -> dict[str, int]:
     return counts
 
 
-async def run_retry(app, root: str) -> int:
+async def run_retry(app: QobuzDL, root: str) -> int:
     """Executa o `retry` em `root`. Código de saída: 0 sem falhas, 1 com falhas."""
     root = os.path.expanduser(root)
     if not os.path.isdir(root):

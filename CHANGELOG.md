@@ -19,6 +19,7 @@ publicar, renomeie a seção para a nova versão e a data.
 - Testes: `test_largura_40_colunas.py`, `test_core_tui_40_colunas.py` (prompt_toolkit real), `test_senha_e_token.py`, `test_guarda_excecoes.py`.
 
 ### Alterado
+- Tipos: `duplicates_cmd`, `config_cmd`, `retry_missing` e `report_viewer` anotados; esses e `library_cleanup`, `library_organizer` e `quality_audit` entram na lista estrita do mypy (`disallow_untyped_defs`).
 - Relatórios do `tags` e do `lyrics` passam a caber em terminais de 40 colunas (a-Shell no iPhone). O piso de `ui.report_width()` caiu de 60 para 32, como o dos painéis.
 - Resumo do `tags`: a coluna dos rótulos passou de 26 para 28 caracteres ("Capas Apple não encontradas", com 27, deslocava o `:`).
 

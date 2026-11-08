@@ -26,7 +26,7 @@ import configparser
 import os
 import re
 import tempfile
-from typing import Any, Optional
+from typing import Any, Container, Optional
 
 from qobuz_dl import ui
 
@@ -56,7 +56,7 @@ def secao_padrao(cfg: configparser.ConfigParser) -> str:
     return "qobuz" if cfg.has_section("qobuz") else "DEFAULT"
 
 
-def _valor_visivel(chave: str, valor: str, sensiveis) -> str:
+def _valor_visivel(chave: str, valor: str, sensiveis: Container[str]) -> str:
     return OCULTO if chave.lower() in sensiveis and valor else valor
 
 
@@ -164,7 +164,7 @@ def _gravar_texto(caminho: str, texto: str) -> None:
 
 
 def dados_visiveis(
-    cfg: configparser.ConfigParser, sensiveis
+    cfg: configparser.ConfigParser, sensiveis: Container[str]
 ) -> dict[str, dict[str, str]]:
     """``{seção: {chave: valor}}`` com as credenciais trocadas por ``<redacted>``."""
     saida: dict[str, dict[str, str]] = {}
@@ -196,7 +196,14 @@ _AVISO_ESTADO = {
 }
 
 
-def _mostrar(cfg, config_file, db_path, library_db, sensiveis, como_json) -> int:
+def _mostrar(
+    cfg: configparser.ConfigParser,
+    config_file: str,
+    db_path: str,
+    library_db: str,
+    sensiveis: Container[str],
+    como_json: bool,
+) -> int:
     dados = dados_visiveis(cfg, sensiveis)
     estado = estado_do_arquivo(config_file, cfg)
     if como_json:
@@ -237,7 +244,7 @@ def cmd_config(
     config_file: str,
     db_path: str,
     library_db: str = "",
-    sensiveis=frozenset(),
+    sensiveis: Container[str] = frozenset(),
 ) -> int:
     """Executa ``config show|path|get|set``; devolve o código de saída."""
     acao = getattr(args, "action", None) or "show"

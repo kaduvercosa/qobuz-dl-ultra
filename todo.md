@@ -10,7 +10,7 @@
 
 - [ ] **Operações pequenas que ainda rodam no loop** (de propósito, microssegundos): `os.rename`/`os.remove`/`os.makedirs` do downloader e do `retro_tags`, `open()` do arquivo parcial em `http_download._attempt`, `input()` dos assistentes interativos. `shutil.rmtree` também fica síncrono: em thread ele trava no a-Shell (copyfile/copy2 em thread funcionam). Descobrir o motivo num PC/CI antes de tentar de novo. Se algum dia travar em armazenamento lento (iCloud/a-Shell), mover para `to_thread`; o teste-guarda já avisa se algo pesado entrar.
 - [ ] **Estado global:** `global` fora do `ui.py` (pools em `executors.py`, `_MB_SEM`, `_history`, cores em `cli.py`; o estado do `ui.py` já virou `ui.estado`). Um objeto de contexto trocaria os globais. Os `except Exception` foram revisados (ver *Concluído*): não há mais o que fazer em massa.
-- [ ] **Anotações de tipo:** ~560 funções sem retorno anotado; ao anotar um módulo, acrescentá-lo nos `overrides` do mypy.
+- [ ] **Anotações de tipo:** `mypy .` está limpo e o `mypy-baseline.txt` está vazio (qualquer erro novo derruba o CI). Módulos 100% anotados ficam em `[[tool.mypy.overrides]]` (44 hoje). Faltam ~700 funções, sobretudo em `ui.py` (106), `core.py` (59), `downloader.py` (58), `qopy.py` (48), `inspector.py` (43), `metadata.py` (41), `artist_checklist.py` (38), `cli.py` (37). Fluxo: anotar um módulo, rodar `python3 -m mypy .`, corrigir o que aparecer e só então acrescentá-lo aos `overrides`.
 - [ ] **`C901` desligado e `max-complexity = 55`:** reativar a regra e baixar o limite aos poucos, junto com a quebra das funções gigantes.
 
 ## Concluído recentemente

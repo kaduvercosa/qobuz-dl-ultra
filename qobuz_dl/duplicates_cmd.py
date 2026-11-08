@@ -26,7 +26,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
-from typing import Any, Optional
+from typing import Any, Awaitable, Callable, Optional
 
 from qobuz_dl import ui
 
@@ -35,7 +35,7 @@ DIARIO = ".movidos.json"
 _LISTA_MAX = 10
 
 
-def _chave_de_escolha(caminho: str):
+def _chave_de_escolha(caminho: str) -> tuple[int, int, int, str]:
     ext = os.path.splitext(caminho)[1].lower()
     try:
         tamanho = os.path.getsize(caminho)
@@ -171,7 +171,12 @@ def _painel_plano(plano: list[tuple[str, list[str]]], diretorio: str) -> None:
         ui.emit_always(f"   … e mais {len(plano) - _LISTA_MAX} grupo(s).")
 
 
-async def cmd_duplicates(args: Any, *, directory: str, buscar=None) -> int:
+async def cmd_duplicates(
+    args: Any,
+    *,
+    directory: str,
+    buscar: Optional[Callable[[str], Awaitable[dict[str, list[str]]]]] = None,
+) -> int:
     """Executa ``duplicates``; devolve o código de saída (0 ok, 1 erro parcial)."""
     diretorio = os.path.abspath(os.path.expanduser(directory))
     if not os.path.isdir(diretorio):
@@ -188,7 +193,9 @@ async def cmd_duplicates(args: Any, *, directory: str, buscar=None) -> int:
         return 1 if avisos else 0
 
     if buscar is None:
-        from qobuz_dl.sync import find_duplicate_tracks as buscar  # noqa: N813
+        from qobuz_dl.sync import find_duplicate_tracks
+
+        buscar = find_duplicate_tracks
 
     grupos = await buscar(diretorio)
     if not grupos:
