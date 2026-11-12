@@ -191,3 +191,37 @@ def _terminal_nao_interativo():
         yield
     finally:
         modulo._interactive = original
+
+
+@pytest.fixture(autouse=True)
+def _restaura_estado_do_ui():
+    """Devolve `ui.estado` ao que era antes do teste, passe o que passar.
+
+    `ui.unicode_enabled()` e `ui.color_enabled()` sao detectados na PRIMEIRA
+    chamada e ficam guardados em `ui.estado`. Se essa primeira chamada cair
+    num teste que troca o `sys.stdout` por um `io.StringIO()` (sem encoding),
+    o cache vira "sem Unicode" e vaza para o resto da sessao: todo painel
+    passa a sair em ASCII (`+- ... -+`) e os testes que esperam `╭─ ... ─╮`
+    falham. Como o pytest-randomly muda a ordem a cada execucao, a falha
+    aparecia e sumia sem motivo aparente.
+
+    Aqui o estado e' fotografado antes e restaurado depois de cada teste.
+    Nao pede o fixture `monkeypatch` (ver a nota do fixture de baixo); o
+    teardown roda depois do dos fixtures do proprio teste, entao o que eles
+    desfazem ja' voltou ao lugar quando este restaura.
+    """
+    import dataclasses
+
+    ui = sys.modules.get("qobuz_dl.ui")
+    antes = dataclasses.asdict(ui.estado) if ui is not None else None
+    yield
+    ui = sys.modules.get("qobuz_dl.ui")
+    if ui is None:
+        return
+    if antes is None:
+        # O teste foi o primeiro a importar o ui: o estado de antes era o
+        # padrao de fabrica.
+        ui.redefinir_estado()
+        return
+    for nome, valor in antes.items():
+        setattr(ui.estado, nome, valor)
