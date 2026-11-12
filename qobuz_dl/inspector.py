@@ -44,7 +44,7 @@ except ImportError:
 # Reaproveita o MESMO estilo visual do seletor principal (cores, "hovered",
 # etc.) -- assim o navegador de arquivos parece parte do mesmo programa,
 # não um widget à parte com visual diferente.
-from qobuz_dl.core import pt_style
+from qobuz_dl.core import como_texto_formatado, pt_style
 
 # O gráfico é gerado como HTML com SVG embutido (ver _gerar_grafico_html
 # abaixo), não como PNG -- por isso não depende de Pillow. Motivo: um PNG
@@ -370,15 +370,19 @@ async def _navegar_arquivos(diretorio_inicial: Any) -> Any:
         return [("class:footer", msg + "\n")]
 
     header_window = Window(
-        content=FormattedTextControl(text=get_header_text), dont_extend_height=True
+        content=FormattedTextControl(text=como_texto_formatado(get_header_text)),
+        dont_extend_height=True,
     )
     list_window = Window(
-        content=FormattedTextControl(text=get_list_text, focusable=True),
+        content=FormattedTextControl(
+            text=como_texto_formatado(get_list_text), focusable=True
+        ),
         scroll_offsets=ScrollOffsets(top=2, bottom=2),
         wrap_lines=False,
     )
     footer_window = Window(
-        content=FormattedTextControl(text=get_footer_text), dont_extend_height=True
+        content=FormattedTextControl(text=como_texto_formatado(get_footer_text)),
+        dont_extend_height=True,
     )
 
     layout = Layout(HSplit([header_window, list_window, footer_window]))

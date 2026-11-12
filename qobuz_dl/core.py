@@ -14,7 +14,7 @@ import re
 import sys
 import time
 from collections.abc import Awaitable, Callable, Iterable
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 import httpx
 from pathvalidate import sanitize_filename
@@ -23,7 +23,7 @@ try:
     from prompt_toolkit import PromptSession
     from prompt_toolkit.application import Application
     from prompt_toolkit.application.current import get_app
-    from prompt_toolkit.formatted_text import FormattedText
+    from prompt_toolkit.formatted_text import AnyFormattedText, FormattedText
     from prompt_toolkit.key_binding import KeyBindings
     from prompt_toolkit.layout.containers import (
         HSplit,
@@ -116,6 +116,20 @@ def _search_results_title(
 # test_get_table_layout.py) antes da extração. Reimportados aqui pra manter
 # todo o resto deste arquivo (e qualquer código externo que já fazia
 # `from qobuz_dl.core import pt_style` etc.) funcionando sem mudar nada.
+
+
+def como_texto_formatado(
+    funcao: Callable[[], list[tuple[str, str]]],
+) -> "Callable[[], AnyFormattedText]":
+    """Devolve ``funcao`` tipada como o prompt_toolkit espera (mesma função).
+
+    O prompt_toolkit novo tipa o texto como ``list[OneStyleAndTextTuple]`` e
+    ``list`` é invariante: ``list[tuple[str, str]]`` não passa no mypy, embora
+    seja válido em tempo de execução. O cast não muda o comportamento (e, ao
+    contrário de ``# type: ignore``, não vira "ignore sem uso" onde o erro não
+    existe: ``warn_unused_ignores`` está ligado).
+    """
+    return cast("Callable[[], AnyFormattedText]", funcao)
 
 
 async def _ask_search_query(
@@ -1394,7 +1408,7 @@ async def _tui_select(
         return res
 
     header_window = Window(
-        content=FormattedTextControl(text=get_header_text),
+        content=FormattedTextControl(text=como_texto_formatado(get_header_text)),
         dont_extend_height=True,
         # O título ocupa duas linhas no modo cartão e até cinco no modo tabela.
         # Limitar a altura impede que o cabeçalho roube espaço da lista.
@@ -1402,7 +1416,9 @@ async def _tui_select(
     )
 
     list_window = Window(
-        content=FormattedTextControl(text=get_list_text, focusable=True),
+        content=FormattedTextControl(
+            text=como_texto_formatado(get_list_text), focusable=True
+        ),
         # A lista é a única região flexível da tela. Sem peso explícito, alguns
         # terminais calculam sua altura a partir do conteúdo formatado e o
         # rodapé acaba visualmente sobrepondo o último cartão.
@@ -1431,7 +1447,7 @@ async def _tui_select(
         return Dimension.exact(_FOOTER_LINES)
 
     footer_window = Window(
-        content=FormattedTextControl(text=get_footer_text),
+        content=FormattedTextControl(text=como_texto_formatado(get_footer_text)),
         dont_extend_height=True,
         height=_footer_height,
     )

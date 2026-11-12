@@ -349,6 +349,7 @@ Mais recente primeiro. Uma linha por alteração pedida.
 
 | Data | Alteração | Arquivos principais |
 | :--- |:--- |:--- |
+| 2026-11-12 | mypy no CI: `core.como_texto_formatado` (cast) nos 6 `FormattedTextControl(text=...)` de `core.py` e `inspector.py` (o prompt_toolkit novo tipa o texto como `list[OneStyleAndTextTuple]`, invariante); cast e não `# type: ignore` por causa de `warn_unused_ignores` | `qobuz_dl/core.py`, `qobuz_dl/inspector.py`, `tests/unit/test_texto_formatado.py` |
 | 2026-11-12 | Teste `test_compacto_mostra_bem_mais_resultados_por_tela_que_o_cartao`: passa a contar só as linhas que a janela mostra de fato (`render_info`) e não o conteúdo inteiro (o cartão rola e guarda a lista toda; o compacto desenha só a fatia) | `tests/unit/test_core_tui_40_colunas.py` |
 | 2026-11-12 | OAuth por URL colada: a mensagem do `OAuthURLError` e `docs/AUTH_OAUTH.md` explicam que o navegador já logado não mostra URL de retorno (usar aba anônima ou `auth --oauth`); `.gitignore` ignora `aplicar_*.py` e `.backup_*/` | `qobuz_dl/oauth.py`, `docs/AUTH_OAUTH.md`, `.gitignore`, `tests/unit/test_oauth_colagem_url.py` |
 | 2026-11-12 | Mensagem do `OAuthURLError` para a URL da página do Qobuz agora cobre login E confirmação (mesma URL, sem `code_autorisation`) e indica `auth --oauth` sem `--oauth-no-browser`; no iPad/a-Shell o modo normal funciona e o de colar URL não recebe URL de retorno quando o navegador já está logado | `qobuz_dl/oauth.py` |
