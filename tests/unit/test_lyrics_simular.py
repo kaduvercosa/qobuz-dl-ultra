@@ -1,6 +1,5 @@
 """Lote 3 (integração): --dry-run, diário e progresso ligados ao retro_tagger."""
 
-import os
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 

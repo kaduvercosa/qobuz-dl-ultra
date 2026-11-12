@@ -9,6 +9,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 
 import pytest
 
@@ -110,6 +111,11 @@ def _metadados(extra=None):
 
 @pytest.fixture(scope="module")
 def audios(tmp_path_factory):
+    if sys.platform == "ios":
+        # Mesmo motivo de test_inspector_completo: no a-Shell o ffmpeg roda dentro
+        # do próprio processo do Python e trava de forma intermitente com a suíte
+        # inteira. O CI (macOS/Linux) continua rodando estes testes.
+        pytest.skip("ffmpeg real trava intermitente no a-Shell/iOS; coberto no CI")
     pasta = tmp_path_factory.mktemp("inspect_audios")
     capa = str(pasta / "capa.jpg")
     _ffmpeg("-f", "lavfi", "-i", "color=c=red:s=600x600:d=1", "-frames:v", "1", capa)
@@ -346,6 +352,8 @@ def test_integridade_de_arquivo_bom(audios):
 
 
 def test_integridade_detecta_arquivo_que_nao_e_audio(tmp_path):
+    if sys.platform == "ios":  # roda o ffmpeg real, igual à fixture `audios`
+        pytest.skip("ffmpeg real trava intermitente no a-Shell/iOS; coberto no CI")
     ruim = tmp_path / "falso.flac"
     ruim.write_bytes(b"isto nao e audio" * 500)
     resultado = inspect_data.verificar_integridade(str(ruim))

@@ -14,11 +14,19 @@ publicar, renomeie a seção para a nova versão e a data.
 ## [Não lançado]
 
 ### Adicionado
+- **Eventos em JSON** (`--events ARQUIVO`, `-` = stderr, ou `events_file` no `config.ini`): uma linha por evento (`sessao_iniciada`, `lancamento_iniciado`, `faixa`, `lancamento_concluido`, `sessao_concluida`), com `v`, `ts` e campos estáveis. Complementa o `--progress-json` (que segue igual, no stdout e só por faixa). Módulo novo `qobuz_dl/events.py`; os eventos saem do funil do `postprocess.py`. Formato em `docs/EVENTOS_E_HOOKS.md`.
+- **Hooks pós-download** (`qobuz_dl/hooks.py`): `--on-complete`, `--on-error` e `--on-finish` (comando no shell, com os dados em variáveis `QOBUZ_DL_*` e o JSON no stdin, nunca colados no texto do comando), `--webhook` (POST em JSON, com assinatura HMAC opcional), `--ntfy` (tópico ou servidor próprio) e `--rescan` (Navidrome/Subsonic, Plex, Jellyfin; roda uma vez no fim e só se baixou faixa nova). Tudo desligado por padrão; configuração por flag, variável `QOBUZ_DL_<CHAVE>` ou `config.ini`. As chaves de credencial (`ntfy`, `ntfy_token`, `webhook_url`, `webhook_secret`, `subsonic_password`, `plex_token`, `jellyfin_api_key`) aparecem como `<redacted>` no `config show` e não passam por `config set`. As chamadas aos servidores de música seguem a documentação de cada um, mas não foram testadas contra servidores reais.
+- Documentos: `docs/TEMPLATES.md` (variáveis de `folder_format` e `track_format`, que são conjuntos diferentes), `docs/EVENTOS_E_HOOKS.md` e `docs/config.example.ini` (modelo comentado do `config.ini`).
+- Testes: `test_events.py` e `test_hooks.py` (sem rede: cliente HTTP falso).
+- Modo interativo no celular: layout **compacto** (uma linha por item e painel de detalhes de 3 linhas no rodapé; cabem cerca de o dobro de resultados por tela que nos cartões). Nova opção `interactive_layout` no `config.ini` (`auto`, `cartao`, `compacto`, `tabela`; `qobuz-dl config set interactive_layout …` valida o valor). Com `auto`, tabela se couber, compacto até 72 colunas, cartão acima.
 - `.github/workflows/qualidade.yml`: `vulture` (código sem uso) em todo push/PR e toda segunda; não bloqueia o merge, o resultado vai para o resumo do job e para o artefato `vulture-report`.
 - `ui.wrap_ansi_line`, `ui.emit_wrapped` e `ui.resumo_linhas`: quebra de linhas coloridas pela largura da tela (recuo do `•`/`[x]` mantido; palavra maior que a linha, como um caminho, vai inteira para uma linha própria em vez de ser partida) e linhas de resumo que empilham a explicação em tela estreita.
 - Testes: `test_largura_40_colunas.py`, `test_core_tui_40_colunas.py` (prompt_toolkit real), `test_senha_e_token.py`, `test_guarda_excecoes.py`.
 
 ### Alterado
+- Cobertura mínima de **60% para 75%** (`pyproject.toml`, `tests.yml` e alvo do projeto no `codecov.yml`); medido 79,42% no a-Shell.
+- Em telas de até 72 colunas o padrão (`auto`) deixou de ser o cartão e passou a ser o compacto; para voltar, `qobuz-dl config set interactive_layout cartao`.
+- Tipos: `ui.py` (106 funções), `core.py` (59), `downloader.py` (58), `metadata.py` (47), `inspector.py` (43), `cli.py` (37), `artist_checklist.py` (38), `lyrics_engine.py` (31), `commands.py` (31), `utils.py` (24), `playlist_links.py` (23) e `retro_tagger.py` (21) 100% anotados e na lista estrita do mypy. Em `QobuzDL`, `quality` aceita `int | str` (a CLI passa o valor do config como texto) e `search_by_type` aceita `query=None` (favoritos).
 - Tipos: `duplicates_cmd`, `config_cmd`, `retry_missing` e `report_viewer` anotados; esses e `library_cleanup`, `library_organizer` e `quality_audit` entram na lista estrita do mypy (`disallow_untyped_defs`).
 - Relatórios do `tags` e do `lyrics` passam a caber em terminais de 40 colunas (a-Shell no iPhone). O piso de `ui.report_width()` caiu de 60 para 32, como o dos painéis.
 - Resumo do `tags`: a coluna dos rótulos passou de 26 para 28 caracteres ("Capas Apple não encontradas", com 27, deslocava o `:`).

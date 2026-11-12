@@ -6,11 +6,11 @@
 
 import argparse
 import os
+from typing import Any
 
 from qobuz_dl import ui
 from qobuz_dl.color import ANSI_BOLD
 from qobuz_dl.color import RESET as OFF
-
 
 # ----------------------------------------------------------------------------
 # Códigos de saída (documentados; `docs/COMANDOS.md` é gerado a partir daqui)
@@ -42,7 +42,13 @@ SAIDA_POR_COMANDO = {
 # de acordo com o tamanho do terminal (evita quebras de linha feias).
 # ----------------------------------------------------------------------------
 class CustomHelpFormatter(argparse.RawTextHelpFormatter):
-    def __init__(self, prog, indent_increment=2, max_help_position=50, width=None):
+    def __init__(
+        self,
+        prog: Any,
+        indent_increment: int = 2,
+        max_help_position: int = 50,
+        width: Any = None,
+    ) -> None:
         """Initialize formatter with terminal-aware width calculation."""
         try:
             term_width = ui.raw_width(fallback=(100, 24))
@@ -60,11 +66,11 @@ class CustomHelpFormatter(argparse.RawTextHelpFormatter):
 # e colore títulos e flags no terminal.
 # ----------------------------------------------------------------------------
 class ColoredArgumentParser(argparse.ArgumentParser):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         kwargs["formatter_class"] = CustomHelpFormatter
         super().__init__(*args, **kwargs)
 
-    def print_help(self, file=None):
+    def print_help(self, file: Any = None) -> None:
         """Imprime a ajuda em painéis (mesmo estilo da tela inicial)."""
         if file is None:
             import sys
@@ -78,7 +84,7 @@ class ColoredArgumentParser(argparse.ArgumentParser):
         file.write(texto.lstrip("\n") + "\n")
 
     # Ajuda em painéis ------------------------------------------------------
-    def _ajuda_em_paineis(self):
+    def _ajuda_em_paineis(self) -> str:
         from qobuz_dl.color import HIGHLIGHT, MUTED
         from qobuz_dl.home_screen import EXEMPLOS, render_ajuda_comando
 
@@ -148,7 +154,7 @@ class ColoredArgumentParser(argparse.ArgumentParser):
             negrito=negrito,
         )
 
-    def _ajuda_argparse(self):
+    def _ajuda_argparse(self) -> str:
         """Ajuda antiga (texto corrido do argparse, traduzida e colorida)."""
         help_text = self.format_help()
         help_text = help_text.replace(
@@ -200,7 +206,7 @@ PAINEL_CHAVES = (
 # ----------------------------------------------------------------------------
 # Pasta padrão de download.
 # ----------------------------------------------------------------------------
-def _default_download_folder():
+def _default_download_folder() -> str:
     """Return the default download folder based on environment (iOS-aware)."""
     ios_home = os.environ.get("QOBUZ_DL_IOS_HOME")
     if ios_home:
@@ -211,7 +217,7 @@ def _default_download_folder():
 # ----------------------------------------------------------------------------
 # Subcomando: "interactive" (aliases: "i", "fun")
 # ----------------------------------------------------------------------------
-def fun_args(subparsers, default_limit):
+def fun_args(subparsers: Any, default_limit: Any) -> Any:
     """Define the 'interactive' subcommand and its arguments."""
     interactive = subparsers.add_parser(
         "interactive",
@@ -248,7 +254,7 @@ def fun_args(subparsers, default_limit):
 # ----------------------------------------------------------------------------
 # Subcomando: "lucky"
 # ----------------------------------------------------------------------------
-def lucky_args(subparsers):
+def lucky_args(subparsers: Any) -> Any:
     """Define the 'lucky' subcommand and its arguments."""
     lucky = subparsers.add_parser(
         "lucky",
@@ -278,7 +284,7 @@ def lucky_args(subparsers):
 # ----------------------------------------------------------------------------
 # Subcomando: "dl"
 # ----------------------------------------------------------------------------
-def dl_args(subparsers):
+def dl_args(subparsers: Any) -> Any:
     """Define the 'dl' subcommand and its arguments."""
     download = subparsers.add_parser(
         "dl",
@@ -345,14 +351,15 @@ def dl_args(subparsers):
 # ----------------------------------------------------------------------------
 # Subcomando: "auth" (alias: "login")
 # ----------------------------------------------------------------------------
-def auth_args(subparsers):
+def auth_args(subparsers: Any) -> Any:
     """Define the 'auth' subcommand and its arguments."""
     auth = subparsers.add_parser(
         "auth",
         usage="qobuz-dl auth [opções]",
         description=(
             "Mostra o perfil, a assinatura, os limites e os dados da conta; com "
-            "-l/--login atualiza e-mail e token sem redefinir toda a configuração. "
+            "-l/--login atualiza e-mail e token manualmente; --oauth inicia "
+            "a autenticação pelo navegador, com alternativa de URL colada. "
             "Também responde por user, account, profile, me e info."
         ),
         help="exibe a conta e a assinatura, ou atualiza as credenciais de login",
@@ -363,6 +370,22 @@ def auth_args(subparsers):
         "--login",
         action="store_true",
         help="Atualizar e-mail e token de autenticação.",
+    )
+    auth.add_argument(
+        "--oauth",
+        action="store_true",
+        help=(
+            "Autenticar pela página oficial do Qobuz e capturar o token "
+            "automaticamente."
+        ),
+    )
+    auth.add_argument(
+        "--oauth-no-browser",
+        action="store_true",
+        help=(
+            "Usar OAuth sem callback local: exibe o link e aceita a URL de "
+            "retorno colada (iPad/EC2)."
+        ),
     )
     auth.add_argument(
         "--json",
@@ -382,7 +405,7 @@ def auth_args(subparsers):
 # ----------------------------------------------------------------------------
 # Subcomando: "lyrics"
 # ----------------------------------------------------------------------------
-def lyrics_args(subparsers, default_folder=None):
+def lyrics_args(subparsers: Any, default_folder: Any = None) -> Any:
     """Define the 'lyrics' subcommand and its arguments."""
     lyrics = subparsers.add_parser(
         "lyrics",
@@ -493,7 +516,7 @@ def lyrics_args(subparsers, default_folder=None):
 # ----------------------------------------------------------------------------
 # Subcomando: "tags"
 # ----------------------------------------------------------------------------
-def tags_args(subparsers, default_folder=None):
+def tags_args(subparsers: Any, default_folder: Any = None) -> Any:
     """Define the 'tags' subcommand (retroactive metadata tag correction)."""
     tags = subparsers.add_parser(
         "tags",
@@ -679,7 +702,7 @@ def tags_args(subparsers, default_folder=None):
 # ----------------------------------------------------------------------------
 # Subcomando: "sync-playlist" (alias: "sp")
 # ----------------------------------------------------------------------------
-def sync_playlist_args(subparsers):
+def sync_playlist_args(subparsers: Any) -> Any:
     """Define the 'sync-playlist' subcommand and its arguments."""
     sync_pl = subparsers.add_parser(
         "sync-playlist",
@@ -705,7 +728,7 @@ def sync_playlist_args(subparsers):
 # ----------------------------------------------------------------------------
 # Subcomando: "import-playlist" (alias: "ip")
 # ----------------------------------------------------------------------------
-def import_playlist_args(subparsers):
+def import_playlist_args(subparsers: Any) -> Any:
     """Define the 'import-playlist' subcommand and its arguments."""
     ip = subparsers.add_parser(
         "import-playlist",
@@ -755,7 +778,7 @@ def import_playlist_args(subparsers):
 # ----------------------------------------------------------------------------
 # Opções de saída no terminal (-v/--verbose, --quiet, --no-color)
 # ----------------------------------------------------------------------------
-def add_output_args(parser, suppress=False):
+def add_output_args(parser: Any, suppress: bool = False) -> Any:
     """Add output control arguments (--verbose, --quiet, --no-color, --log-level) to the parser."""
     kwargs = {"default": argparse.SUPPRESS} if suppress else {}
     group = parser.add_argument_group("saída no terminal")
@@ -802,7 +825,9 @@ def add_output_args(parser, suppress=False):
 # ----------------------------------------------------------------------------
 # Opções comuns de download
 # ----------------------------------------------------------------------------
-def add_common_arg(custom_parser, default_folder, default_quality):
+def add_common_arg(
+    custom_parser: Any, default_folder: Any, default_quality: Any
+) -> None:
     """Add common download arguments (quality, directory, formats, tags, etc.) to a subcommand parser."""
     custom_parser.paineis_extras = [PAINEL_CHAVES]
     custom_parser.add_argument(
@@ -1172,11 +1197,16 @@ def add_common_arg(custom_parser, default_folder, default_quality):
         ),
     )
 
+    # Eventos em JSON e hooks pós-download (--events, --on-complete, --webhook...).
+    from qobuz_dl.hooks import adicionar_args as _adicionar_args_hooks
+
+    _adicionar_args_hooks(custom_parser)
+
 
 # ----------------------------------------------------------------------------
 # Subcomando: "stats"
 # ----------------------------------------------------------------------------
-def stats_args(subparsers):
+def stats_args(subparsers: Any) -> Any:
     """Define the 'stats' subcommand and its arguments."""
     stats = subparsers.add_parser(
         "stats",
@@ -1195,7 +1225,7 @@ def stats_args(subparsers):
     return stats
 
 
-def inspect_args(subparsers):
+def inspect_args(subparsers: Any) -> Any:
     """Define the 'inspect' subcommand and its arguments."""
     inspect = subparsers.add_parser(
         "inspect",
@@ -1263,7 +1293,7 @@ def inspect_args(subparsers):
 # ----------------------------------------------------------------------------
 # Subcomando: "sync-favorites" (alias: "sf")  -- portado da ideia do libsync
 # ----------------------------------------------------------------------------
-def retry_args(subparsers, default_folder=None):
+def retry_args(subparsers: Any, default_folder: Any = None) -> Any:
     """Define the 'retry' subcommand and its arguments."""
     retry = subparsers.add_parser(
         "retry",
@@ -1291,7 +1321,7 @@ def retry_args(subparsers, default_folder=None):
     return retry
 
 
-def sync_favorites_args(subparsers):
+def sync_favorites_args(subparsers: Any) -> Any:
     """Define the 'sync-favorites' subcommand and its arguments."""
     sf = subparsers.add_parser(
         "sync-favorites",
@@ -1356,7 +1386,7 @@ def sync_favorites_args(subparsers):
 # ----------------------------------------------------------------------------
 # Subcomando: "artists" -- revisão manual de artistas seguidos
 # ----------------------------------------------------------------------------
-def artist_review_args(subparsers):
+def artist_review_args(subparsers: Any) -> Any:
     """Define a listagem alfabética e o sorteio de artistas para revisão."""
     artists = subparsers.add_parser(
         "artists",
@@ -1448,7 +1478,7 @@ def artist_review_args(subparsers):
 # ----------------------------------------------------------------------------
 # Subcomando: "scan"  -- casa pastas do disco com o catálogo (ideia do libsync)
 # ----------------------------------------------------------------------------
-def scan_args(subparsers):
+def scan_args(subparsers: Any) -> Any:
     """Define the 'scan' subcommand and its arguments."""
     scan = subparsers.add_parser(
         "scan",
@@ -1535,7 +1565,7 @@ LIBRARY_ACTIONS = [
 ]
 
 
-def library_args(subparsers):
+def library_args(subparsers: Any) -> Any:
     """Define the 'library' subcommand and its arguments."""
     lib = subparsers.add_parser(
         "library",
@@ -1587,7 +1617,7 @@ def library_args(subparsers):
 # ----------------------------------------------------------------------------
 # Subcomando: "organize" (alias: "rename")
 # ----------------------------------------------------------------------------
-def organize_args(subparsers):
+def organize_args(subparsers: Any) -> Any:
     """Define a reorganização local de arquivos já baixados."""
     organize = subparsers.add_parser(
         "organize",
@@ -1674,7 +1704,7 @@ def organize_args(subparsers):
 # ----------------------------------------------------------------------------
 # Subcomando: "doctor" (alias: "check")  -- diagnóstico (ideia do libsync)
 # ----------------------------------------------------------------------------
-def doctor_args(subparsers):
+def doctor_args(subparsers: Any) -> Any:
     """Define the 'doctor' subcommand and its arguments."""
     doc = subparsers.add_parser(
         "doctor",
@@ -1701,7 +1731,7 @@ def doctor_args(subparsers):
 # ----------------------------------------------------------------------------
 # Subcomando: "config"  -- ver e editar o config.ini sem abrir um editor
 # ----------------------------------------------------------------------------
-def config_args(subparsers):
+def config_args(subparsers: Any) -> Any:
     """Define the 'config' subcommand (show, path, get, set, reset)."""
     cfg = subparsers.add_parser(
         "config",
@@ -1749,7 +1779,7 @@ def config_args(subparsers):
 # ----------------------------------------------------------------------------
 # Subcomando: "duplicates"  -- faixas repetidas (lista, move, desfaz)
 # ----------------------------------------------------------------------------
-def duplicates_args(subparsers):
+def duplicates_args(subparsers: Any) -> Any:
     """Define the 'duplicates' subcommand."""
     dup = subparsers.add_parser(
         "duplicates",
@@ -1790,7 +1820,7 @@ def duplicates_args(subparsers):
 # ----------------------------------------------------------------------------
 # Subcomando: "cleanup"  -- temporários abandonados e pastas vazias
 # ----------------------------------------------------------------------------
-def cleanup_args(subparsers):
+def cleanup_args(subparsers: Any) -> Any:
     """Define the 'cleanup' subcommand."""
     clean = subparsers.add_parser(
         "cleanup",
@@ -1830,7 +1860,7 @@ def cleanup_args(subparsers):
 # ----------------------------------------------------------------------------
 # Subcomandos "sync-db" e "watch": o mesmo que as flags --sync-db e --watch
 # ----------------------------------------------------------------------------
-def sync_db_args(subparsers):
+def sync_db_args(subparsers: Any) -> Any:
     """Define 'sync-db' (equivale à flag legada --sync-db)."""
     sd = subparsers.add_parser(
         "sync-db",
@@ -1851,7 +1881,7 @@ def sync_db_args(subparsers):
     return sd
 
 
-def watch_args(subparsers):
+def watch_args(subparsers: Any) -> Any:
     """Define 'watch' (equivale à flag legada --watch)."""
     wt = subparsers.add_parser(
         "watch",
@@ -1876,7 +1906,11 @@ def watch_args(subparsers):
 # ----------------------------------------------------------------------------
 # Montagem do parser principal
 # ----------------------------------------------------------------------------
-def qobuz_dl_args(default_quality=6, default_limit=20, default_folder=None):
+def qobuz_dl_args(
+    default_quality: int | str = 6,
+    default_limit: int | str = 20,
+    default_folder: Any = None,
+) -> argparse.ArgumentParser:
     """Build and return the main ArgumentParser with all subcommands and global flags."""
     if default_folder is None:
         default_folder = _default_download_folder()

@@ -11,6 +11,7 @@ Pula sozinho se o ffmpeg ou o mutagen real não estiverem disponíveis.
 import os
 import shutil
 import subprocess
+import sys
 
 import pytest
 
@@ -28,8 +29,15 @@ try:  # o mutagen pode estar simulado/quebrado no ambiente (a-Shell, offline)
 except Exception:  # noqa: BLE001
     _MUTAGEN_REAL = False
 
+# No a-Shell o ffmpeg roda dentro do próprio processo do Python e trava de forma
+# intermitente com a suíte inteira (mesmo motivo de test_inspector_completo); o
+# CI (macOS/Linux) continua rodando estes testes.
 pytestmark = [
     pytest.mark.unit,
+    pytest.mark.skipif(
+        sys.platform == "ios",
+        reason="ffmpeg real trava intermitente no a-Shell/iOS; coberto no CI",
+    ),
     pytest.mark.skipif(not FFMPEG, reason="ffmpeg indisponível"),
     pytest.mark.skipif(not _MUTAGEN_REAL, reason="mutagen real indisponível"),
 ]

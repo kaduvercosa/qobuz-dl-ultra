@@ -182,6 +182,7 @@ class TestValidateConfigFormats:
             "isrc",
             "bit_depth",
             "sampling_rate",
+            "quality_tag",
             "track_number",
             "disc_number",
             "release_type",

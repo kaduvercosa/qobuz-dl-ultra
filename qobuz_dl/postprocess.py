@@ -20,6 +20,7 @@ from contextvars import ContextVar
 from datetime import datetime
 from typing import Any, Callable
 
+from qobuz_dl import events
 from qobuz_dl.fileio import atomic_write_json
 
 logger = logging.getLogger(__name__)
@@ -544,6 +545,15 @@ async def init_report(
         _recalc_cabecalho_dinamico(report)
         _recalc_resumo(report)
         await asyncio.to_thread(_save_report, path, report)
+        _ident = report.get("identificacao") or {}
+        events.lancamento_iniciado(
+            dirn,
+            tipo=report.get("tipo", tipo),
+            titulo=_ident.get("titulo", titulo),
+            artista=_ident.get("artista", ""),
+            item_id=_ident.get("id", item_id),
+            faixas=len(report.get("faixas") or []),
+        )
         return path
 
 
@@ -688,6 +698,26 @@ async def update_track_status(
         _recalc_cabecalho_dinamico(report)
         _recalc_resumo(report)
         await asyncio.to_thread(_save_report, path, report)
+        if is_new:
+            # Faixa avulsa: a pasta nasce aqui (não passou por init_report).
+            _ident = report.get("identificacao") or {}
+            events.lancamento_iniciado(
+                dirn,
+                tipo=report.get("tipo", tipo_default),
+                titulo=_ident.get("titulo", ""),
+                artista=_ident.get("artista", ""),
+                item_id=_ident.get("id", ""),
+                faixas=len(report.get("faixas") or []),
+            )
+        events.faixa(
+            dirn,
+            numero,
+            item_id,
+            titulo,
+            entrada["identificacao"].get("artista", ""),
+            situacao=download["situacao"],
+            motivo=motivo,
+        )
 
 
 async def resumable_track_ids(directory: str) -> set[str]:
@@ -767,6 +797,7 @@ async def finalize_report(
             await asyncio.to_thread(_save_report, path, report)
         finally:
             _render_html_context.reset(token)
+        events.lancamento_concluido(dirn, bool(completo), report)
 
 
 # ============================================================================

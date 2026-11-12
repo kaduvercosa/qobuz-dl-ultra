@@ -92,6 +92,9 @@ logger = logging.getLogger(__name__)
 # App ID padrão do Qobuz-DL Ultra. Só consultamos o bundle se a API rejeitar
 # explicitamente este identificador (ou se o usuário solicitar atualização manual).
 DEFAULT_APP_ID = "798273057"
+# OAuth uses the desktop app ID and its matching signing secret. Do not replace
+# this credential pair with the Web Player bundle during automatic recovery.
+OAUTH_APP_ID = "304027809"
 API_BASE_URL = "https://www.qobuz.com/api.json/0.2/"
 
 
@@ -119,7 +122,7 @@ def _is_app_id_rejection(exc: httpx.HTTPStatusError) -> bool:
     return any(marker in body for marker in markers)
 
 
-def _resolve_user_auth_token(client, token=None):
+def _resolve_user_auth_token(client: Any, token: Any = None) -> Any:
     """Resolve token de múltiplas fontes para evitar AttributeError em testes."""
     for value in (
         token,
@@ -171,7 +174,7 @@ def _retry_after_seconds(exc: BaseException, now: float | None = None) -> float 
     return seconds
 
 
-def _retry_wait(retry_state, exponential_wait) -> float:
+def _retry_wait(retry_state: Any, exponential_wait: Any) -> float:
     """Use Retry-After or jitter the exponential fallback wait."""
     outcome = retry_state.outcome
     exc = outcome.exception() if outcome is not None else None
@@ -188,7 +191,7 @@ class Client:
     O cliente principal da API Qobuz para o Qobuz-DL Ultra Edition.
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.session: httpx.AsyncClient | None = None
         # Valores neutros: ``Client.create`` preenche de verdade. Assim um
         # ``Client()`` recém-criado nunca fica com atributos inexistentes.
@@ -201,14 +204,14 @@ class Client:
         self.session_infos: Any = None  # "salt.info" do session/start
         self.session_key: Any = None  # chave derivada (HKDF) da sessão
         self._session_init_lock = asyncio.Lock()
-        self.user_info = {}
-        self.user_id = None
-        self.label = "Studio"
-        self.uat = None
-        self.user_auth_token = None
-        self._api_limiter = None
-        self._api_limiter_loop = None
-        self._metadata_cache = None
+        self.user_info: dict[str, Any] = {}
+        self.user_id: Any = None
+        self.label: str = "Studio"
+        self.uat: str | None = None
+        self.user_auth_token: str | None = None
+        self._api_limiter: Any = None
+        self._api_limiter_loop: Any = None
+        self._metadata_cache: MetadataCache | None = None
         if not os.environ.get("PYTEST_CURRENT_TEST") and os.environ.get(
             "QOBUZ_DL_DISABLE_METADATA_CACHE", ""
         ).strip().lower() not in {"1", "true", "yes", "on"}:
@@ -227,7 +230,7 @@ class Client:
         }
     )
 
-    def _metadata_cache_key(self, epoint, params):
+    def _metadata_cache_key(self, epoint: Any, params: Any) -> Any:
         if epoint not in self._CACHEABLE_ENDPOINTS or self._metadata_cache is None:
             return None
         return cache_key(epoint, params)
@@ -235,14 +238,14 @@ class Client:
     @classmethod
     async def create(
         cls,
-        email,
-        pwd,
-        app_id,
-        secrets,
-        user_auth_token=None,
-        force_english=True,
-        **kwargs,
-    ):
+        email: Any,
+        pwd: Any,
+        app_id: Any,
+        secrets: Any,
+        user_auth_token: Any = None,
+        force_english: bool = True,
+        **kwargs: Any,
+    ) -> Any:
         """Fabrica assincrona."""
         total_started = time.perf_counter()
         self = cls()
@@ -260,6 +263,9 @@ class Client:
         force_bundle_refresh = os.environ.get(
             "QOBUZ_DL_FORCE_BUNDLE_REFRESH", ""
         ).strip().lower() in {"1", "true", "yes", "on"}
+        # The OAuth desktop app and Web Player use different app-secret pairs.
+        # A Web Player refresh would silently invalidate a valid OAuth setup.
+        allow_bundle_refresh = self.id != OAUTH_APP_ID
         bundle_refreshed = False
 
         async def refresh_bundle(reason: str) -> bool:
@@ -307,8 +313,12 @@ class Client:
         # O bundle NÃO é consultado só porque o ID é o padrão nem porque faltam
         # segredos: a recuperação ocorre após uma rejeição explícita da API.
         # A variável de ambiente permanece como opção de atualização manual.
-        if force_bundle_refresh:
+        if force_bundle_refresh and allow_bundle_refresh:
             await refresh_bundle("forçada")
+        elif force_bundle_refresh:
+            logger.info(
+                "Atualização do bundle ignorada: a autenticação usa o APP_ID OAuth."
+            )
         else:
             logger.debug(
                 "Usando App ID %s; bundle adiado até uma rejeição da API.", self.id
@@ -368,7 +378,11 @@ class Client:
                 # Só tenta recuperar com o bundle em erros HTTP de cliente que
                 # podem indicar App ID inválido. Erros de rede/servidor não
                 # disparam uma busca lenta e desnecessária pelo bundle.
-                if not _is_app_id_rejection(exc) or bundle_refreshed:
+                if (
+                    not allow_bundle_refresh
+                    or not _is_app_id_rejection(exc)
+                    or bundle_refreshed
+                ):
                     raise
                 refreshed = await refresh_bundle(
                     "rejeição explícita do App ID durante autenticação"
@@ -389,7 +403,7 @@ class Client:
             except InvalidAppSecretError:
                 # Se não há segredos locais utilizáveis, só então recorre ao
                 # bundle para recuperá-los. Não atrasa o caminho normal.
-                if bundle_refreshed:
+                if bundle_refreshed or not allow_bundle_refresh:
                     raise
                 refreshed = await refresh_bundle("segredos ausentes ou inválidos")
                 if not refreshed:
@@ -400,6 +414,7 @@ class Client:
                 if (
                     getattr(self, "_secret_validation_all_invalid", False)
                     and not bundle_refreshed
+                    and allow_bundle_refresh
                 ):
                     # Só atualizar se todos os segredos foram rejeitados
                     # explicitamente; falhas de rede não disparam scraping.
@@ -416,17 +431,17 @@ class Client:
         _log_startup_timing("Client.create total", time.perf_counter() - total_started)
         return self
 
-    async def close(self):
+    async def close(self) -> None:
         if self.session is not None:
             await self.session.aclose()
 
-    async def __aenter__(self):
+    async def __aenter__(self) -> Any:
         return self
 
-    async def __aexit__(self, exc_type, exc, tb):
+    async def __aexit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
         await self.close()
 
-    def _normalize_json_strings(self, obj):
+    def _normalize_json_strings(self, obj: Any) -> Any:
         if isinstance(obj, str):
             if "..." in obj and "://" not in obj:
                 obj = obj.replace("...", "…")
@@ -438,7 +453,7 @@ class Client:
         else:
             return obj
 
-    def _token_candidates(self, user_auth_token=None):
+    def _token_candidates(self, user_auth_token: Any = None) -> Any:
         """Retorna o token efetivo, aceitando os nomes usados pelo projeto."""
         candidates = (
             user_auth_token,
@@ -447,7 +462,7 @@ class Client:
         )
         return next((str(token).strip() for token in candidates if token), "")
 
-    async def auth(self, email, pwd, user_auth_token=None):
+    async def auth(self, email: Any, pwd: Any, user_auth_token: Any = None) -> None:
         token = _resolve_user_auth_token(self, user_auth_token)
         if token:
             self.uat = token
@@ -469,10 +484,11 @@ class Client:
                 logger.info(
                     f"{YELLOW}[!] Conta gratuita detectada ou validacao ignorada.{OFF}"
                 )
-            self.uat = usr_info["user_auth_token"]
-            self.user_auth_token = self.uat
+            login_token: Any = usr_info["user_auth_token"]
+            self.uat = login_token
+            self.user_auth_token = login_token
             if self.session is not None:
-                self.session.headers.update({"X-User-Auth-Token": self.uat})
+                self.session.headers.update({"X-User-Auth-Token": login_token})
 
         try:
             # A consulta de perfil é informativa: não deve deixar o login preso
@@ -496,12 +512,16 @@ class Client:
                 ui.warn(
                     ui.tail("Logado, mas a assinatura está INATIVA", f"{sub['status']}")
                 )
+        except AuthenticationError:
+            # Token explicitamente rejeitado não pode ser tratado como uma
+            # simples falha informativa de perfil: o chamador precisa renovar.
+            raise
         except Exception:
             ui.warn("Validação do perfil ignorada.")
             self.label = "Studio"
             self.user_id = None
 
-    def _find_subscription(self, value):
+    def _find_subscription(self, value: Any) -> Any:
         """Procura somente dados reais de assinatura no JSON, sem inferencia falsa."""
         if isinstance(value, dict):
             direct = value.get("subscription")
@@ -597,7 +617,7 @@ class Client:
         self.user_info = raw.get("user", raw)
         return self.user_info
 
-    def _modern_sig(self, epoint, params, sec):
+    def _modern_sig(self, epoint: Any, params: Any, sec: Any) -> Any:
         object_, method = epoint.split("/")
         r_sig = [object_, method]
         for key in sorted(params):
@@ -610,10 +630,10 @@ class Client:
         return hashlib.md5("".join(r_sig).encode("utf-8")).hexdigest()
 
     @staticmethod
-    def _b64url_decode(value):
+    def _b64url_decode(value: Any) -> Any:
         return base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
 
-    def _derive_session_key(self):
+    def _derive_session_key(self) -> Any:
         """Derive session key from Qobuz API response."""
         if not _CRYPTO_AVAILABLE:
             raise RuntimeError(
@@ -628,7 +648,7 @@ class Client:
         )
         return hkdf.derive(bytes.fromhex(self.sec))
 
-    def _unwrap_track_key(self, key_token):
+    def _unwrap_track_key(self, key_token: Any) -> Any:
         """Unwrap encrypted track key."""
         if not _CRYPTO_AVAILABLE:
             raise RuntimeError(
@@ -643,7 +663,7 @@ class Client:
         return unpadder.update(padded) + unpadder.finalize()
 
     @asynccontextmanager
-    async def _api_rate_slot(self):
+    async def _api_rate_slot(self) -> Any:
         """Reserve one API slot when the optional limiter is installed."""
         if AsyncLimiter is None or not isinstance(self, Client):
             yield
@@ -660,7 +680,7 @@ class Client:
         async with self._api_limiter:
             yield
 
-    async def api_call(self, epoint, **kwargs):
+    async def api_call(self, epoint: Any, **kwargs: Any) -> Any:
         """Build, sign, execute, and normalize one Qobuz API request.
 
         ``_request_timeout`` and ``_max_attempts`` are internal controls used by
@@ -841,7 +861,7 @@ class Client:
                 logger.debug("Cache de metadados usado para '%s'.", epoint)
                 return cached
 
-        def _retryable(exc):
+        def _retryable(exc: Any) -> Any:
             if isinstance(exc, (httpx.RequestError, asyncio.TimeoutError)):
                 if epoint not in mutable_endpoints:
                     return True
@@ -908,8 +928,40 @@ class Client:
                     raise InvalidAppSecretError(
                         f"Invalid app secret: {body}.\n" + RESET
                     )
-                if epoint == "user/get" and resp.status_code == 400:
-                    return {}
+                if epoint == "user/get" and resp.status_code in {400, 401, 403}:
+                    body = resp.text.lower()
+                    app_rejection_markers = (
+                        "app_id",
+                        "app id",
+                        "application id",
+                        "invalid application",
+                        "unknown application",
+                    )
+                    invalid_token_markers = (
+                        "invalid token",
+                        "invalid user_auth_token",
+                        "user_auth_token",
+                        "unauthorized",
+                        "authentication",
+                        "token expired",
+                        "token is expired",
+                    )
+                    app_rejected = any(
+                        marker in body for marker in app_rejection_markers
+                    )
+                    token_rejected = any(
+                        marker in body for marker in invalid_token_markers
+                    )
+                    if app_rejected:
+                        resp.raise_for_status()
+                    if token_rejected or (
+                        resp.status_code in {401, 403} and not app_rejected
+                    ):
+                        raise AuthenticationError(
+                            "O Qobuz rejeitou o token de autenticação."
+                        )
+                    if resp.status_code == 400:
+                        return {}
                 resp.raise_for_status()
                 data = resp.json()
                 normalized = self._normalize_json_strings(data)
@@ -921,7 +973,7 @@ class Client:
                     await metadata_cache.set(metadata_key, normalized)
                 return normalized
 
-    async def multi_meta(self, epoint, key, id, type):
+    async def multi_meta(self, epoint: Any, key: Any, id: Any, type: Any) -> Any:
         offset = 0
         limit = 50
         while True:
@@ -939,10 +991,10 @@ class Client:
             if offset >= total_available:
                 break
 
-    async def get_track_meta(self, id):
+    async def get_track_meta(self, id: Any) -> Any:
         return await self.api_call("track/get", id=id)
 
-    async def get_track_lyrics_url(self, id):
+    async def get_track_lyrics_url(self, id: Any) -> Any:
         return await self.api_call("track/lyricsUrl", track_id=id)
 
     async def get_track_ids_from_list(self, tracks_list: list) -> list:
@@ -1016,7 +1068,7 @@ class Client:
         )
         return valid_track_ids
 
-    async def search_by_isrc(self, isrc: str):
+    async def search_by_isrc(self, isrc: str) -> Any:
         if not isrc:
             return None
         try:
@@ -1030,7 +1082,7 @@ class Client:
             logger.debug(f"Falha na pesquisa ISRC para {isrc}: {e}")
         return None
 
-    async def search_by_upc(self, upc: str):
+    async def search_by_upc(self, upc: str) -> Any:
         if not upc:
             return None
         try:
@@ -1076,7 +1128,7 @@ class Client:
             matched_ids.extend(fuzzy_ids)
         return matched_ids
 
-    async def _search(self, kind: str, query, limit):
+    async def _search(self, kind: str, query: Any, limit: Any) -> Any:
         """Busca no catálogo; em erro devolve ``{}`` (nenhum resultado) e AVISA.
 
         Os chamadores tratam ``{}`` como "sem resultado" e seguem, então a falha
@@ -1098,15 +1150,15 @@ class Client:
             logger.debug("Detalhe da falha na busca de %s", kind, exc_info=True)
             return {}
 
-    async def search_albums(self, query, limit=20):
+    async def search_albums(self, query: Any, limit: int = 20) -> Any:
         return await self._search("albums", query, limit)
 
-    async def search_tracks(self, query, limit=20):
+    async def search_tracks(self, query: Any, limit: int = 20) -> Any:
         return await self._search("tracks", query, limit)
 
     async def create_qobuz_playlist(
         self, name: str, description: str = "", is_public: bool = False
-    ):
+    ) -> Any:
         try:
             resp = await self.api_call(
                 "playlist/create",
@@ -1144,15 +1196,20 @@ class Client:
                 success = False
         return success
 
-    async def search_playlists(self, query, limit=20):
+    async def search_playlists(self, query: Any, limit: int = 20) -> Any:
         return await self._search("playlists", query, limit)
 
-    async def search_artists(self, query, limit=20):
+    async def search_artists(self, query: Any, limit: int = 20) -> Any:
         return await self._search("artists", query, limit)
 
     async def get_favorites(
-        self, fav_type="albums", limit=100, offset=0, *, strict=False
-    ):
+        self,
+        fav_type: str = "albums",
+        limit: int = 100,
+        offset: int = 0,
+        *,
+        strict: bool = False,
+    ) -> Any:
         """Return one page of favorites.
 
         Interactive browsing keeps the historical best-effort behavior. Sync
@@ -1174,11 +1231,11 @@ class Client:
 
     async def get_all_favorites(
         self,
-        fav_type="albums",
+        fav_type: str = "albums",
         *,
-        page_size=500,
-        max_pages=400,
-    ):
+        page_size: int = 500,
+        max_pages: int = 400,
+    ) -> Any:
         """Fetch every favorites page and return ``(items, reported_total)``.
 
         This is intentionally strict: malformed responses and network errors
@@ -1250,7 +1307,7 @@ class Client:
                 )
         raise RuntimeError("paginação de favoritos excedeu o limite de segurança")
 
-    def _playlist_user_id(self):
+    def _playlist_user_id(self) -> Any:
         user_id = getattr(self, "user_id", None)
         user = getattr(self, "user", None)
         if user_id is None and isinstance(user, dict):
@@ -1262,7 +1319,7 @@ class Client:
         return str(user_id)
 
     @staticmethod
-    def _playlist_matches_user(item, user_id, playlist_type):
+    def _playlist_matches_user(item: Any, user_id: Any, playlist_type: Any) -> Any:
         if not isinstance(item, dict) or item.get("id") is None:
             return False
         owner = item.get("owner")
@@ -1273,7 +1330,9 @@ class Client:
         own = str(owner_id) == user_id
         return own if playlist_type == "owner" else not own
 
-    async def get_user_playlists(self, limit=100, playlist_type="owner", offset=0):
+    async def get_user_playlists(
+        self, limit: int = 100, playlist_type: str = "owner", offset: int = 0
+    ) -> Any:
         """Return a relationship-filtered page, retaining raw pagination counts."""
         if playlist_type not in ("owner", "subscriber"):
             raise ValueError("playlist_type deve ser 'owner' ou 'subscriber'")
@@ -1335,8 +1394,8 @@ class Client:
         }
 
     async def get_all_user_playlists(
-        self, playlist_type="owner", *, page_size=50, max_pages=100
-    ):
+        self, playlist_type: str = "owner", *, page_size: int = 50, max_pages: int = 100
+    ) -> Any:
         """Advance by raw rows, not by the number surviving ownership filtering."""
         if playlist_type not in ("owner", "subscriber"):
             raise ValueError("playlist_type deve ser 'owner' ou 'subscriber'")
@@ -1371,17 +1430,17 @@ class Client:
                 return items, len(items)
         raise RuntimeError("paginação de playlists excedeu o limite de segurança")
 
-    async def add_favorite_album(self, album_id):
+    async def add_favorite_album(self, album_id: Any) -> Any:
         return await self.api_call(
             "favorite/create", album_ids=str(album_id), artist_ids="", track_ids=""
         )
 
-    async def add_favorite_track(self, track_id):
+    async def add_favorite_track(self, track_id: Any) -> Any:
         return await self.api_call(
             "favorite/create", track_ids=str(track_id), album_ids="", artist_ids=""
         )
 
-    async def add_favorite(self, item_id, item_type: str):
+    async def add_favorite(self, item_id: Any, item_type: str) -> Any:
         if item_type == "track":
             return await self.add_favorite_track(item_id)
         elif item_type == "album":
@@ -1389,7 +1448,9 @@ class Client:
         else:
             raise ValueError(f"Tipo de favorito desconhecido: {item_type}")
 
-    async def get_track_url(self, id, fmt_id, force_segments=False):
+    async def get_track_url(
+        self, id: Any, fmt_id: Any, force_segments: bool = False
+    ) -> Any:
         sub_info = self.check_subscription()
         if not sub_info["is_active"]:
             raise NoActiveSubscriptionError(
@@ -1424,10 +1485,10 @@ class Client:
             track["raw_key"] = self._unwrap_track_key(track["key"])
         return track
 
-    def get_artist_meta(self, id):
+    def get_artist_meta(self, id: Any) -> Any:
         return self.multi_meta("artist/get", "albums_count", id, None)
 
-    async def get_artist_tracks(self, id, limit=20):
+    async def get_artist_tracks(self, id: Any, limit: int = 20) -> Any:
         """Return the artist track collection, not the artist album pages."""
         response = await self.api_call(
             "artist/get", id=id, extra="tracks", limit=limit, offset=0
@@ -1436,16 +1497,16 @@ class Client:
         items = tracks.get("items", []) if isinstance(tracks, dict) else []
         return items[:limit] if isinstance(items, list) else []
 
-    def get_plist_meta(self, id):
+    def get_plist_meta(self, id: Any) -> Any:
         return self.multi_meta("playlist/get", "tracks_count", id, None)
 
-    def get_label_meta(self, id):
+    def get_label_meta(self, id: Any) -> Any:
         return self.multi_meta("label/get", "albums_count", id, None)
 
-    async def get_album_meta(self, id):
+    async def get_album_meta(self, id: Any) -> Any:
         return await self.api_call("album/get", id=id)
 
-    async def cfg_setup(self):
+    async def cfg_setup(self) -> None:
         """Valida os segredos em paralelo para reduzir a espera de inicialização.
 
         A validação é somente de leitura. Limitamos a concorrência para não
@@ -1462,7 +1523,7 @@ class Client:
         other_validation_errors = 0
         self._secret_validation_all_invalid = False
 
-        async def validate(secret):
+        async def validate(secret: Any) -> Any:
             nonlocal invalid_secret_errors, other_validation_errors
             try:
                 # A validação serve apenas para escolher um segredo. Use um
@@ -1490,7 +1551,7 @@ class Client:
         # requisições de uma vez quando a lista de segredos for grande.
         semaphore = asyncio.Semaphore(min(4, len(secrets)))
 
-        async def bounded_validate(secret):
+        async def bounded_validate(secret: Any) -> Any:
             async with semaphore:
                 return await validate(secret)
 

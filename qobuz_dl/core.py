@@ -13,6 +13,7 @@ import os
 import re
 import sys
 import time
+from collections.abc import Awaitable, Callable, Iterable
 from typing import Any, Optional
 
 import httpx
@@ -77,8 +78,12 @@ from qobuz_dl.interactive_ui import (
     _shade,  # noqa: F401 -- usado só em testes
     _short_duration,
     _short_quality,
+    compact_detail_lines,
+    compact_fragments,
+    compact_row_texts,
     prompt_style,
     pt_style,
+    resolve_layout,
 )
 
 _NAV_NEW_SEARCH = "__qobuz_nav_new_search__"
@@ -86,7 +91,9 @@ _NAV_HOME = "__qobuz_nav_home__"
 _NAV_ARTIST = "__qobuz_nav_artist__"
 
 
-def _search_results_title(query: str, category: str, sub_filter=None) -> str:
+def _search_results_title(
+    query: str, category: str, sub_filter: list[str] | None = None
+) -> str:
     """Inclui no título dos resultados o tipo de busca escolhido."""
     if category == "track":
         category_label = "FAIXAS"
@@ -111,7 +118,9 @@ def _search_results_title(query: str, category: str, sub_filter=None) -> str:
 # `from qobuz_dl.core import pt_style` etc.) funcionando sem mudar nada.
 
 
-async def _ask_search_query(kind_raw, fallback):
+async def _ask_search_query(
+    kind_raw: Any, fallback: Callable[[], Awaitable[Any]]
+) -> Any:
     """Tela de busca com o campo dentro de uma caixa (search_prompt.py); se o
     módulo ou o terminal não suportar, usa o prompt simples `fallback`."""
     try:
@@ -125,7 +134,12 @@ async def _ask_search_query(kind_raw, fallback):
     return await ask_query(kind_raw, fallback)
 
 
-async def _tui_select(title, options_dicts, is_multi=False, item_category="album"):
+async def _tui_select(
+    title: str,
+    options_dicts: list[Any],
+    is_multi: bool = False,
+    item_category: str = "album",
+) -> Any:
     """Tela de seleção em tela cheia (prompt_toolkit), usada por TODOS os
     menus interativos do programa: escolher tipo de busca, resultados de
     busca, ações sobre um artista, sim/não, escolha de qualidade, etc.
@@ -169,13 +183,13 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
     )
     sortable = item_category in {"album", "track", "playlist", "artist"}
 
-    def _sort_text(option):
+    def _sort_text(option: Any) -> str:
         if not isinstance(option, dict):
             return ""
         meta = option.get("meta", {})
         return str(meta.get("title") or meta.get("name") or "").casefold()
 
-    def _sort_year(option, reverse=False):
+    def _sort_year(option: Any, reverse: bool = False) -> tuple[int, int]:
         if not isinstance(option, dict):
             return (1, 0)
         meta = option.get("meta", {})
@@ -187,7 +201,7 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
             return (year == 0, year if year else 9999)
         return (year == 0, -year if year else 0)
 
-    def _sort_options(mode, event):
+    def _sort_options(mode: str, event: Any) -> None:
         nonlocal cursor_pos
         if not sortable or not options_dicts:
             return
@@ -218,11 +232,11 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
     # As teclas j/k existem em QUALQUER teclado (não exigem trocar de layout
     # nem apertar um modificador), o que ajuda bastante em apps SSH de
     # iPad/iPhone onde as setas às vezes ficam numa barra extra escondida.
-    def _move_up(event):
+    def _move_up(event: Any) -> None:
         nonlocal cursor_pos
         cursor_pos = max(0, cursor_pos - 1)
 
-    def _move_down(event):
+    def _move_down(event: Any) -> None:
         nonlocal cursor_pos
         if options_dicts:
             cursor_pos = min(len(options_dicts) - 1, cursor_pos + 1)
@@ -238,23 +252,23 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
     _PAGE_JUMP = 10
 
     @bindings.add("pageup")
-    def _(event):
+    def _(event: Any) -> None:
         nonlocal cursor_pos
         cursor_pos = max(0, cursor_pos - _PAGE_JUMP)
 
     @bindings.add("pagedown")
-    def _(event):
+    def _(event: Any) -> None:
         nonlocal cursor_pos
         if options_dicts:
             cursor_pos = min(len(options_dicts) - 1, cursor_pos + _PAGE_JUMP)
 
     @bindings.add("g")
-    def _(event):
+    def _(event: Any) -> None:
         nonlocal cursor_pos
         cursor_pos = 0
 
     @bindings.add("G")
-    def _(event):
+    def _(event: Any) -> None:
         nonlocal cursor_pos
         if options_dicts:
             cursor_pos = len(options_dicts) - 1
@@ -262,8 +276,8 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
     # --- Atalho numérico: dígitos 1-9 pulam DIRETO pro item daquela
     # posição (1 = primeiro item, 9 = nono). Útil em telas touch pra não
     # precisar "andar" o cursor manualmente até um item visível. ---
-    def _make_digit_jump(n):
-        def _jump(event):
+    def _make_digit_jump(n: int) -> Callable[[Any], None]:
+        def _jump(event: Any) -> None:
             nonlocal cursor_pos
             idx = n - 1
             if options_dicts and idx < len(options_dicts):
@@ -279,20 +293,20 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
     # girar a tela ou entrar/sair do modo Split View) e a UI fica com um
     # layout desatualizado até a próxima tecla ser pressionada. ---
     @bindings.add("r")
-    def _(event):
+    def _(event: Any) -> None:
         event.app.invalidate()
 
     if item_category != "filter":
 
         @bindings.add("n")
-        def _(event):
+        def _(event: Any) -> None:
             event.app.exit(result=(_NAV_NEW_SEARCH, -1))
 
         @bindings.add("m")
-        def _(event):
+        def _(event: Any) -> None:
             event.app.exit(result=(_NAV_HOME, -1))
 
-    def _ir_para_artista(event):
+    def _ir_para_artista(event: Any) -> None:
         event.app.exit(result=(_NAV_ARTIST, -1))
 
     # O atalho é registrado sem um "def" dentro do "if": um bloco com uma única
@@ -305,21 +319,21 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
     # sair e refazer a pesquisa. É especialmente útil para Singles, cuja API
     # costuma retornar muitos lançamentos em uma ordem pouco previsível.
     @bindings.add("a")
-    def _(event):
+    def _(event: Any) -> None:
         _sort_options("alpha", event)
 
     @bindings.add("y")
-    def _(event):
+    def _(event: Any) -> None:
         _sort_options("year_new", event)
 
     @bindings.add("Y")
-    def _(event):
+    def _(event: Any) -> None:
         _sort_options("year_old", event)
 
     if is_multi:
 
         @bindings.add("space")
-        def _(event):
+        def _(event: Any) -> None:
             # Alterna seleção do item sob o cursor (não confirma nada ainda)
             if not options_dicts:
                 return
@@ -329,7 +343,7 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
                 selected_indices.add(cursor_pos)
 
         @bindings.add("t")
-        def _(event):
+        def _(event: Any) -> None:
             # "Selecionar/desmarcar todos" -- alterna com base no estado atual
             if not options_dicts:
                 return
@@ -348,7 +362,7 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
                 selected_indices.update(selectable_indices)
 
     @bindings.add("enter")
-    def _(event):
+    def _(event: Any) -> None:
         # Em modo multi, se nada foi marcado com [espaço], confirma pelo
         # menos o item sob o cursor (evita "confirmar vazio" sem querer).
         if not options_dicts:
@@ -363,14 +377,14 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
             event.app.exit(result=(options_dicts[cursor_pos], cursor_pos))
 
     @bindings.add("c-c")
-    def _(event):
+    def _(event: Any) -> None:
         event.app.exit(exception=KeyboardInterrupt)
 
     # "esc" como alternativa ao Ctrl+C: em vários apps de terminal do iOS
     # (a-Shell, Termius) Ctrl exige um toque extra num modificador virtual,
     # enquanto Esc costuma ter uma tecla dedicada na barra de atalhos.
     @bindings.add("escape")
-    def _(event):
+    def _(event: Any) -> None:
         event.app.exit(exception=KeyboardInterrupt)
 
     # Linhas fixas fora da lista: cabeçalho = linha em branco + título +
@@ -387,7 +401,25 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
     # valor é medido no desenho em vez de fixo.
     card_state = {"below": 4}
 
-    def get_header_text():
+    def _layout_info(columns: int) -> tuple[str, Any, Any, Any]:
+        """Layout da lista para a largura atual: ``(layout, larguras, cabeçalhos,
+        bordas)``. ``layout`` é "tabela", "cartao" ou "compacto" (ver
+        ``interactive_ui.resolve_layout``); as três últimas só vêm preenchidas
+        na tabela."""
+        tabela_cabe, widths, headers, borders = _get_table_layout(
+            max(32, columns - 2),
+            is_multi,
+            item_category,
+            album_role=album_role_mode,
+        )
+        layout = resolve_layout(
+            ui.estado.layout_interativo, tabela_cabe, item_category, columns
+        )
+        if layout != "tabela":
+            return layout, [], [], {}
+        return layout, widths, headers, borders
+
+    def get_header_text() -> list[tuple[str, str]]:
         # Desenha o título + (se a tela for larga o bastante) o cabeçalho
         # da tabela com as bordas superiores ┌─┬─┐. Recalculado a cada
         # redesenho da tela (redimensionar terminal, mover cursor, etc.),
@@ -398,14 +430,8 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
         except Exception:
             columns = ui.raw_width()
 
-        table_columns = max(32, columns - 2)
-
-        is_table, widths, headers, borders = _get_table_layout(
-            table_columns,
-            is_multi,
-            item_category,
-            album_role=album_role_mode,
-        )
+        layout, widths, headers, borders = _layout_info(columns)
+        is_table = layout == "tabela"
 
         prefix_len = 5 if is_multi else 3
         hdr_pref = " " * prefix_len
@@ -442,7 +468,7 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
 
         return res
 
-    def _schedule_height_recheck():
+    def _schedule_height_recheck() -> None:
         # BUGFIX (última linha cortada até o primeiro clique): a fatia de
         # linhas da tabela é calculada com a altura do Window do desenho
         # ANTERIOR (render_info) ou, no primeiro desenho/depois de girar ou
@@ -450,7 +476,7 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
         # real, a última linha aparece cortada até algo forçar novo desenho.
         # Depois de cada desenho, compara a altura medida com a usada e, se
         # diferirem, pede UM redesenho (no máximo 3 seguidos, sem laço).
-        def _recheck():
+        def _recheck() -> None:
             try:
                 info = list_window.render_info
                 h = info.window_height if info is not None else 0
@@ -470,7 +496,7 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
             # Sem event loop ativo: o recheck é só cosmético.
             pass
 
-    def get_list_text():
+    def get_list_text() -> list[tuple[str, str]]:
         # ------------------------------------------------------------
         # Desenha CADA linha/cartão da lista de opções.
         #
@@ -495,20 +521,18 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
         except Exception:
             columns = ui.raw_width()
 
-        table_columns = max(32, columns - 2)
         # Em terminais estreitos (celulares), reduzir os detalhes do item
         # focado e do rodapé para preservar a área útil da lista.
         compact_mobile = ui.compact_mode(columns)
 
-        is_table, widths, headers, borders = _get_table_layout(
-            table_columns,
-            is_multi,
-            item_category,
-            album_role=album_role_mode,
-        )
+        layout, widths, headers, borders = _layout_info(columns)
+        is_table = layout == "tabela"
+        is_compact = layout == "compacto"
         res = []
 
-        def add_line(fragments, fill_bg=False):
+        def add_line(
+            fragments: Iterable[tuple[str, str]], fill_bg: bool = False
+        ) -> None:
             final_fragments = []
             current_w = 0
 
@@ -549,8 +573,11 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
         inner_w = max(10, columns - 6)
 
         def add_card_line(
-            fragments, hovered=False, is_checked=False, border_style="class:meta"
-        ):
+            fragments: Iterable[tuple[str, str]],
+            hovered: bool = False,
+            is_checked: bool = False,
+            border_style: str = "class:meta",
+        ) -> None:
             final_fragments = []
             current_w = 0
 
@@ -610,22 +637,29 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
         # desenhamos só essa fatia. A última borda da fatia é sempre └─┴─┘,
         # então a tabela fica sempre fechada e o conteúdo nunca passa da
         # altura da janela (o Window não precisa rolar).
-        if is_table:
+        # O layout COMPACTO usa a mesma fatia da tabela, mas com 1 linha por item
+        # (a tabela gasta 2: dados + borda).
+        if is_table or is_compact:
             try:
                 term_rows = get_app().output.get_size().rows
             except Exception:
                 term_rows = ui.raw_height()
             info = list_window.render_info
+            if is_compact:
+                # Título (2 linhas) + rodapé com detalhes, contador e atalhos.
+                fixed_rows = 2 + _footer_rows()
+            else:
+                fixed_rows = _HEADER_LINES + _FOOTER_LINES
             avail = (
                 info.window_height
                 if info is not None and info.window_height > 0
                 # -1: bottom_safe_area (1 linha) também sai da altura útil.
-                else term_rows - _HEADER_LINES - _FOOTER_LINES - 1
+                else term_rows - fixed_rows - 1
             )
             view["avail"] = avail
             _schedule_height_recheck()
             n_items = len(options_dicts)
-            k = max(1, avail // 2)
+            k = max(1, avail // (1 if is_compact else 2))
             margin = 1 if k >= 3 else 0
             top = view["top"]
             if cursor_pos < top + margin:
@@ -672,14 +706,14 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
             )
 
             # Borda superior e quinas desenhadas com linhas grossas se marcado
-            if not is_table:
+            if not is_table and not is_compact:
                 top_l = "┏" if checked else "╭"
                 top_r = "┓" if checked else "╮"
                 hz = "━" if checked else "─"
                 res.append((border_st, f" {top_l}{hz * (inner_w + 2)}{top_r}\n"))
 
             if item_category == "filter" and isinstance(opt, str):
-                if is_table:
+                if is_table or is_compact:
                     add_line([(tit_st, f"{prefix}{opt}")], fill_bg=hovered)
                 else:
                     add_card_line(
@@ -690,7 +724,7 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
                     )
 
             elif isinstance(opt, str):
-                if is_table:
+                if is_table or is_compact:
                     add_line([(row_st, f"{prefix}{opt}")], fill_bg=hovered)
                 else:
                     add_card_line(
@@ -745,7 +779,35 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
                         else:
                             display_typ_st = "class:type_track"
 
-                if item_category == "album":
+                if is_compact:
+                    # Uma linha por resultado: "título · artista     ano  24/96".
+                    principal, secundario, ano, qualidade = compact_row_texts(
+                        meta, item_category, columns, album_role=album_role_mode
+                    )
+                    sub_st = (
+                        "class:hovered"
+                        if hovered
+                        else ("class:highlight" if checked else "class:meta")
+                    )
+                    kind_style = {
+                        "prefix": style,
+                        "title": tit_st,
+                        "sub": sub_st,
+                        "fill": style,
+                        "year": sub_st,
+                        "quality": ql_st,
+                    }
+                    add_line(
+                        [
+                            (kind_style[kind], text)
+                            for kind, text in compact_fragments(
+                                prefix, principal, secundario, ano, qualidade, columns
+                            )
+                        ],
+                        fill_bg=hovered,
+                    )
+
+                elif item_category == "album":
                     tit_str = meta.get("title", "")
                     art = meta.get("artist", "")
                     yr = meta.get("year", "")
@@ -1159,7 +1221,9 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
                             )
 
             # Borda inferior e quinas desenhadas com linhas grossas se marcado
-            if not is_table:
+            if is_compact:
+                pass  # compacto: sem bordas, uma linha por item
+            elif not is_table:
                 bot_l = "┗" if checked else "╰"
                 bot_r = "┛" if checked else "╯"
                 hz = "━" if checked else "─"
@@ -1181,7 +1245,11 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
 
         return res
 
-    def get_footer_text():
+    def _footer_rows() -> int:
+        """Linhas que o rodapé ocupa agora (conta as quebras do texto desenhado)."""
+        return sum(text.count("\n") for _style, text in get_footer_text())
+
+    def get_footer_text() -> list[tuple[str, str]]:
         # Rodapé: borda inferior da tabela (se aplicável), contador de
         # selecionados (modo multi) e a dica de atalhos de teclado.
         """Generate footer text for file browser UI."""
@@ -1190,15 +1258,24 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
         except Exception:
             columns = ui.raw_width()
 
-        is_table, widths, headers, borders = _get_table_layout(
-            max(32, columns - 2),
-            is_multi,
-            item_category,
-            album_role=album_role_mode,
-        )
-        res = []
+        layout = _layout_info(columns)[0]
+        res: list[tuple[str, str]] = []
 
         compact_mobile = ui.compact_mode(columns)
+        if layout == "compacto" and options_dicts:
+            # Painel do item focado (a linha da lista é curta de propósito). Sempre
+            # com a mesma altura, para a lista não "pular" ao mudar de item.
+            focado = options_dicts[min(cursor_pos, len(options_dicts) - 1)]
+            meta = focado.get("meta", {}) if isinstance(focado, dict) else {}
+            res.extend(
+                (style, f"{text}\n")
+                for style, text in compact_detail_lines(
+                    meta if isinstance(focado, dict) else None,
+                    item_category,
+                    columns,
+                    album_role=album_role_mode,
+                )
+            )
         if options_dicts:
             if compact_mobile and is_multi:
                 # Contador curto e estável em telas estreitas.
@@ -1349,9 +1426,8 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
             columns = get_app().output.get_size().columns
         except Exception:
             columns = ui.raw_width()
-        if ui.compact_mode(columns):
-            footer_rows = sum(text.count("\n") for _style, text in get_footer_text())
-            return Dimension.exact(max(1, footer_rows))
+        if ui.compact_mode(columns) or _layout_info(columns)[0] == "compacto":
+            return Dimension.exact(max(1, _footer_rows()))
         return Dimension.exact(_FOOTER_LINES)
 
     footer_window = Window(
@@ -1371,22 +1447,15 @@ async def _tui_select(title, options_dicts, is_multi=False, item_category="album
     )
 
     def _table_is_active() -> bool:
-        """Avalia a cada redesenho se a tela comporta o layout em tabela"""
+        """Avalia a cada redesenho se o layout é uma fatia de itens (tabela ou compacto)"""
         try:
             columns = get_app().output.get_size().columns
         except Exception:
             columns = ui.raw_width()
 
-        table_columns = max(32, columns - 2)
-
-        table_enabled, _, _, _ = _get_table_layout(
-            table_columns,
-            is_multi,
-            item_category,
-            album_role=album_role_mode,
-        )
-
-        return bool(table_enabled)
+        # Tabela e compacto desenham a fatia de itens por conta própria (a
+        # rolagem do Window fica desligada); o cartão deixa o Window rolar.
+        return _layout_info(columns)[0] in ("tabela", "compacto")
 
     # Monta a tela cheia (header + lista rolável + rodapé) e bloqueia
     # aqui até o usuário confirmar (Enter) ou cancelar (Ctrl+C).
@@ -1450,31 +1519,31 @@ logger = logging.getLogger(__name__)
 class QobuzDL:
     def __init__(
         self,
-        directory="QobuzDownloads",
-        quality=6,
-        embed_art=False,
-        lucky_limit=1,
-        lucky_type="album",
-        interactive_limit=20,
-        ignore_singles_eps=False,
-        no_m3u_for_playlists=False,
-        quality_fallback=True,
-        cover_og_quality=False,
-        no_cover=False,
-        downloads_db=None,
-        folder_format="{artist} - {album} ({year}) [{bit_depth}B-{sampling_rate}kHz]",
-        track_format="{track_number} - {track_title}",
-        smart_discography=False,
-        fetch_lyrics=False,
-        no_lrc_files=False,
-        genius_token=None,
-        force_english=True,
-        no_credits=False,
+        directory: str = "QobuzDownloads",
+        quality: int | str = 6,
+        embed_art: bool = False,
+        lucky_limit: int = 1,
+        lucky_type: str = "album",
+        interactive_limit: int = 20,
+        ignore_singles_eps: bool = False,
+        no_m3u_for_playlists: bool = False,
+        quality_fallback: bool = True,
+        cover_og_quality: bool = False,
+        no_cover: bool = False,
+        downloads_db: str | None = None,
+        folder_format: str = "{artist} - {album} ({year}) [{bit_depth}B-{sampling_rate}kHz]",
+        track_format: str = "{track_number} - {track_title}",
+        smart_discography: bool = False,
+        fetch_lyrics: bool = False,
+        no_lrc_files: bool = False,
+        genius_token: str | None = None,
+        force_english: bool = True,
+        no_credits: bool = False,
         settings: Optional[QobuzDLSettings] = None,
         booklet_only: bool = False,
-        blacklist=None,
+        blacklist: str | None = None,
         playlist_as_albums: bool = False,
-    ):
+    ) -> None:
         """Initialize QobuzDL with download directory, quality settings, format patterns, and feature flags."""
         self.directory = create_and_return_dir(directory)
         self.quality = quality
@@ -1503,7 +1572,7 @@ class QobuzDL:
         self.booklet_only = booklet_only
         self.playlist_as_albums = playlist_as_albums
 
-        self.blacklist_patterns = []
+        self.blacklist_patterns: list[str] = []
         self.allowed_release_types: list[str] | None = None
         if blacklist and os.path.isfile(blacklist):
             try:
@@ -1519,7 +1588,9 @@ class QobuzDL:
             except Exception as e:
                 logger.error(f"{RED}[!] Failed to load blacklist: {e}{OFF}")
 
-    async def initialize_client(self, email, pwd, app_id, secrets):
+    async def initialize_client(
+        self, email: str, pwd: str, app_id: str, secrets: Any
+    ) -> None:
         """Faz login na API do Qobuz (qopy.Client) usando as credenciais
         vindas do config.ini/keyring. Chamado 1x logo depois de instanciar
         QobuzDL (exceto no comando "auth", que não precisa de sessão)."""
@@ -1536,7 +1607,7 @@ class QobuzDL:
             await old_client.close()
         ui.step(ui.tail("Qualidade máxima", QUALITIES[int(self.quality)]))
 
-    async def get_tokens(self):
+    async def get_tokens(self) -> Any:
         """Busca App ID + secrets "na hora" via bundle.py (scraping do
         bundle.js). Não é chamado no fluxo normal (que lê app_id/secrets já
         salvos no config.ini) -- serve como forma alternativa de obter
@@ -1556,7 +1627,9 @@ class QobuzDL:
         self.app_id = bundle.get_app_id()
         self.secrets = [secret for secret in bundle.get_secrets().values() if secret]
 
-    async def retry_album(self, album_id, album_dir, track_ids) -> bool:
+    async def retry_album(
+        self, album_id: Any, album_dir: str, track_ids: Iterable[Any]
+    ) -> bool:
         """Repete as faixas `track_ids` de um álbum já baixado (comando `retry`).
 
         Reusa o download normal de álbum, mas: grava na pasta `album_dir` (a que
@@ -1600,17 +1673,17 @@ class QobuzDL:
 
     async def download_from_id(
         self,
-        item_id,
-        album=True,
-        alt_path=None,
-        is_playlist=False,
-        playlist_index=None,
-        is_parallel=False,
-        position_pool=None,
-        suppress_header=False,
-        title=None,
+        item_id: Any,
+        album: bool = True,
+        alt_path: str | None = None,
+        is_playlist: bool = False,
+        playlist_index: Any = None,
+        is_parallel: bool = False,
+        position_pool: Any = None,
+        suppress_header: bool = False,
+        title: Any = None,
         suppress_track_summary: bool = False,
-    ):
+    ) -> Any:
         """Baixa UM item (álbum ou faixa) já sabendo o `item_id`. É o
         "menor" ponto de entrada de download -- handle_url(),
         download_list_of_urls() e download_from_playlist_file() todos
@@ -1712,7 +1785,7 @@ class QobuzDL:
             await asyncio.sleep(delay)
         return success
 
-    async def handle_url(self, url):
+    async def handle_url(self, url: str) -> Any:
         """Processa UMA URL do Qobuz. É o coração do comando `dl`.
 
         Fluxo:
@@ -2018,7 +2091,9 @@ class QobuzDL:
 
                 if pending_items:
 
-                    async def _bounded_track_download(_worker_index, entry):
+                    async def _bounded_track_download(
+                        _worker_index: int, entry: Any
+                    ) -> Any:
                         idx, item = entry
                         stagger_index = idx - 1
                         # Preserva o stagger inicial sem alocar uma task por faixa.
@@ -2094,7 +2169,7 @@ class QobuzDL:
         else:
             return await self.download_from_id(item_id, type_dict["album"])
 
-    def mark_url_done_in_file(self, txt_file, url_to_mark):
+    def mark_url_done_in_file(self, txt_file: str | None, url_to_mark: str) -> None:
         """Quando o download veio de um arquivo .txt de URLs (qobuz-dl dl
         lista.txt), marca a linha correspondente com "[DONE]" depois que
         aquela URL termina de baixar -- assim, se o processo for
@@ -2115,7 +2190,9 @@ class QobuzDL:
         except Exception as e:
             logger.error(f"{RED}Failed to update text file status: {e}{OFF}")
 
-    async def download_list_of_urls(self, urls, txt_file=None):
+    async def download_list_of_urls(
+        self, urls: list[str], txt_file: str | None = None
+    ) -> Any:
         """Ponto de entrada do comando `dl`: recebe uma lista de URLs (ou
         de caminhos de arquivo .txt, que caem em download_from_txt_file).
 
@@ -2207,14 +2284,14 @@ class QobuzDL:
                 else:
                     pending_track_urls.append((stagger_index, original_url, item_id))
 
-            async def _bounded_track_url(_worker_index, entry):
+            async def _bounded_track_url(_worker_index: int, entry: Any) -> Any:
                 stagger_index, original_url, item_id = entry
                 # Semáforo antes do stagger (ver nota no lote de playlist).
                 async with semaphore:
                     if stagger_index < batch_workers:
                         await asyncio.sleep(stagger_index * HEADER_STAGGER_DELAY)
 
-                    async def _baixar():
+                    async def _baixar() -> Any:
                         success = await self.download_from_id(
                             item_id,
                             False,
@@ -2267,7 +2344,7 @@ class QobuzDL:
                 if success:
                     self.mark_url_done_in_file(txt_file, original_url)
 
-    async def download_from_txt_file(self, txt_file):
+    async def download_from_txt_file(self, txt_file: str) -> Any:
         """Lê um arquivo .txt de URLs (uma por linha), ignora linhas vazias,
         comentários (#) e URLs já marcadas com [DONE] por
         mark_url_done_in_file(), valida cada URL com get_url_info() e
@@ -2300,7 +2377,7 @@ class QobuzDL:
         )
         await self.download_list_of_urls(valid_urls, txt_file=txt_file)
 
-    async def lucky_mode(self, query, download=True):
+    async def lucky_mode(self, query: str, download: bool = True) -> Any:
         """Comando `lucky`: busca `query` do tipo self.lucky_type
         (album/track/artist/playlist) e baixa os primeiros
         self.lucky_limit resultados, sem passar por nenhuma seleção manual."""
@@ -2324,13 +2401,13 @@ class QobuzDL:
 
     def _extract_rich_metadata(
         self,
-        i,
-        item_type,
-        mode_dict,
-        fav_subtype=None,
-        ref_artist=None,
-        show_role=False,
-    ):
+        i: dict[str, Any],
+        item_type: str,
+        mode_dict: Any,
+        fav_subtype: str | None = None,
+        ref_artist: Any = None,
+        show_role: bool = False,
+    ) -> dict[str, Any]:
         """Converte o JSON bruto da API do Qobuz (item `i`) num dict
         "meta" enxuto e pronto pra exibir na TUI (ver get_list_text em
         _tui_select). Aqui mora a HEURÍSTICA que classifica um álbum como
@@ -2489,8 +2566,14 @@ class QobuzDL:
         return meta_data
 
     async def search_by_type(
-        self, query, item_type, limit=10, lucky=False, fav_subtype=None, sub_filter=None
-    ):
+        self,
+        query: str | None,
+        item_type: str,
+        limit: int = 10,
+        lucky: bool = False,
+        fav_subtype: str | None = None,
+        sub_filter: list[str] | None = None,
+    ) -> Any:
         """Busca genérica na API do Qobuz, usada tanto pelo modo interativo
         quanto pelo `lucky`. `possibles` mapeia cada item_type pro método
         certo do client (search_albums/search_artists/etc.).
@@ -2612,7 +2695,7 @@ class QobuzDL:
                     or (item_type == "album" and sub_filter == ["single"])
                     else None
                 )
-                extract_kwargs = {}
+                extract_kwargs: dict[str, Any] = {}
                 if ref_artist is not None:
                     extract_kwargs["ref_artist"] = ref_artist
                 if item_type == "album" and sub_filter == ["single"]:
@@ -2626,7 +2709,7 @@ class QobuzDL:
                             "artists": "artist",
                             "playlists": "playlist",
                             "user_playlists": "playlist",
-                        }.get(fav_subtype, item_type)
+                        }.get(fav_subtype or "", item_type)
                         if item_type == "favorites"
                         else item_type
                     )
@@ -2680,7 +2763,7 @@ class QobuzDL:
             logger.info(f"{RED}Erro na busca: {e}{OFF}")
             return []
 
-    async def interactive(self, download=True):
+    async def interactive(self, download: bool = True) -> Any:
         """Modo interativo completo (comando `interactive`/`i`/`fun`, ou
         padrão quando nenhum subcomando é passado). Fluxo geral:
         1. Pergunta o QUE buscar (faixas/álbuns/singles/artistas/
@@ -2716,7 +2799,7 @@ class QobuzDL:
                 "⭐ Favorites",
             ]
 
-            async def _select_main_type():
+            async def _select_main_type() -> Any:
                 """Abre o menu inicial e traduz a opção para a API."""
                 while True:
                     scelta_res = await _tui_select(
@@ -2755,13 +2838,13 @@ class QobuzDL:
             final_url_list = []
             queue_labels: dict[str, str] = {}
 
-            def _item_label(item, fallback=""):
+            def _item_label(item: Any, fallback: str = "") -> str:
                 meta = item.get("meta", {}) if isinstance(item, dict) else {}
                 title = meta.get("title") or meta.get("name") or fallback
                 artist = meta.get("artist") or meta.get("owner")
                 return f"{artist} — {title}" if artist and title else str(title)
 
-            def _selection_navigation(selection):
+            def _selection_navigation(selection: Any) -> tuple[Any, Any]:
                 """Separa uma ação de navegação dos itens realmente escolhidos."""
                 entries = selection if isinstance(selection, list) else [selection]
                 cleaned = []
@@ -2782,14 +2865,14 @@ class QobuzDL:
                         cleaned.append(entry)
                 return action, cleaned
 
-            def _add_url(url, label=""):
+            def _add_url(url: str, label: str = "") -> None:
                 """Adiciona uma URL uma única vez à fila interativa."""
                 if url and url not in final_url_list:
                     final_url_list.append(url)
                 if url and label:
                     queue_labels.setdefault(url, label)
 
-            async def _review_queue():
+            async def _review_queue() -> Any:
                 """Permite remover itens selecionados antes do download."""
                 if not final_url_list:
                     return
@@ -2815,7 +2898,9 @@ class QobuzDL:
                     if index not in remove_indices
                 ]
 
-            async def _confirm_large_discography(artist_name, added_count):
+            async def _confirm_large_discography(
+                artist_name: str, added_count: int
+            ) -> bool:
                 """Evita adicionar uma discografia extensa sem confirmação."""
                 if added_count <= 20:
                     return True
@@ -2927,7 +3012,7 @@ class QobuzDL:
                     sys.stdout.write(ANSI_CLEAR_SCREEN)
                     sys.stdout.flush()
 
-                    async def _classic_prompt():
+                    async def _classic_prompt() -> Any:
                         """Prompt simples de antes (usado se a caixa falhar)."""
                         cols = min(ui.raw_width(), 80)
                         bar = "━" * cols
@@ -3333,7 +3418,7 @@ class QobuzDL:
         source: str,
         name: Optional[str] = None,
         auto: bool = False,
-    ):
+    ) -> Any:
         """Comando `import-playlist`/`ip`: importa uma playlist de outra
         plataforma (URL do Spotify/Deezer/Apple Music) ou de um arquivo
         exportado (TXT/CSV/JSON). Faz o "matching" das faixas no Qobuz e
@@ -3461,7 +3546,7 @@ class QobuzDL:
         name: Optional[str] = None,
         auto: bool = False,
         _preloaded_track_ids: Optional[list[Any]] = None,
-    ):
+    ) -> Any:
         """Baixa as faixas já "matcheadas" no Qobuz (track_ids) numa pasta
         própria da playlist. Pode ser chamado com um arquivo ainda não
         processado (`file_path`, faz o parsing+matching aqui mesmo) ou já
@@ -3586,7 +3671,9 @@ class QobuzDL:
 
             if pending_items:
 
-                async def _bounded_track_download(_worker_index, entry):
+                async def _bounded_track_download(
+                    _worker_index: int, entry: Any
+                ) -> Any:
                     idx, track_id = entry
                     stagger_index = idx - 1
                     async with semaphore:

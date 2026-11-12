@@ -96,7 +96,9 @@ def row_from_artist(artist: dict) -> Row:
 # ---------------------------------------------------------------------------
 
 
-def table_layout(columns: int, prefix_len: int = _PREFIX_COLS, with_open: bool = True):
+def table_layout(
+    columns: int, prefix_len: int = _PREFIX_COLS, with_open: bool = True
+) -> Any:
     """Devolve ``(é_tabela, larguras, cabeçalhos, bordas)``.
 
     Cai no modo cartão (``False``) quando sobra menos de ``_MIN_FLEX`` células
@@ -585,7 +587,7 @@ def list_fragments(
 
     res: list[tuple] = []
 
-    def h(kind: str, index: int):
+    def h(kind: str, index: int) -> Any:
         return handlers(kind, index) if handlers else None
 
     for index in shown:
@@ -705,7 +707,7 @@ def detail_fragments(
     if row is None:
         return [("class:meta", " Artista não encontrado.")]
 
-    def h(kind: str):
+    def h(kind: str) -> Any:
         return handlers(kind, 0) if handlers else None
 
     status, kind = state.status_of(row)
@@ -979,7 +981,7 @@ async def run_checklist(
         except Exception:
             return ui.raw_width(), ui.raw_height()
 
-    def open_profile(row) -> None:
+    def open_profile(row: Any) -> None:
         url = profile_url(row.artist_id)
         try:
             ok = bool(url_opener(url))
@@ -989,8 +991,8 @@ async def run_checklist(
             f"Perfil aberto: {row.name}." if ok else f"Não consegui abrir: {url}"
         )
 
-    def handlers(kind: str, index: int):
-        def on_click(event):
+    def handlers(kind: str, index: int) -> Any:
+        def on_click(event: Any) -> Any:
             if event.event_type != MouseEventType.MOUSE_UP:
                 return NotImplemented
             visible = state.visible()
@@ -1017,10 +1019,10 @@ async def run_checklist(
 
         return on_click
 
-    def get_header():
+    def get_header() -> Any:
         return header_fragments(state, size()[0])
 
-    def get_list():
+    def get_list() -> Any:
         columns, term_rows = size()
         info = listing.render_info
         if info is not None and info.window_height > 0:
@@ -1041,13 +1043,13 @@ async def run_checklist(
             return detail_fragments(state, columns, avail, handlers)
         return list_fragments(state, columns, avail, view, handlers)
 
-    def _schedule_recheck():
+    def _schedule_recheck() -> None:
         # Mesma correção do modo interativo (última linha cortada no a-Shell até
         # o primeiro toque): se a altura medida difere da usada, pede um
         # redesenho, no máximo 3 seguidos.
         import asyncio
 
-        def _recheck():
+        def _recheck() -> None:
             try:
                 info = listing.render_info
                 real = info.window_height if info is not None else 0
@@ -1067,7 +1069,7 @@ async def run_checklist(
             # Sem event loop ativo: o recheck é só cosmético.
             pass
 
-    def get_footer():
+    def get_footer() -> Any:
         return footer_fragments(state, size()[0])
 
     header = Window(
@@ -1103,115 +1105,115 @@ async def run_checklist(
         return max(1, int(view.get("per_page", 5)) - 1)
 
     @kb.add("up", filter=in_list)
-    def _up(event):
+    def _up(event: Any) -> None:
         state.move(-1)
 
     @kb.add("down", filter=in_list)
-    def _down(event):
+    def _down(event: Any) -> None:
         state.move(1)
 
     @kb.add("pageup", filter=in_list)
-    def _pgup(event):
+    def _pgup(event: Any) -> None:
         state.move(-page())
 
     @kb.add("pagedown", filter=in_list)
-    def _pgdn(event):
+    def _pgdn(event: Any) -> None:
         state.move(page())
 
     @kb.add("home", filter=normal)
-    def _home(event):
+    def _home(event: Any) -> None:
         state.first()
 
     @kb.add("end", filter=normal)
-    def _end(event):
+    def _end(event: Any) -> None:
         state.last()
 
     @kb.add("space", filter=normal)
     @kb.add("x", filter=normal)
-    def _toggle(event):
+    def _toggle(event: Any) -> None:
         state.toggle()
 
     @kb.add("a", filter=normal)
-    def _all(event):
+    def _all(event: Any) -> None:
         state.select_all_visible()
 
     @kb.add("s", filter=normal)
-    def _sort(event):
+    def _sort(event: Any) -> None:
         state.toggle_sort()
 
     @kb.add("d", filter=normal)
     @kb.add("right", filter=normal)
-    def _detail(event):
+    def _detail(event: Any) -> None:
         state.open_detail()
 
     @kb.add("o", filter=normal)
-    def _open(event):
+    def _open(event: Any) -> None:
         row = state.current()
         if row is not None:
             open_profile(row)
 
     @kb.add("/", filter=normal)
-    def _search(event):
+    def _search(event: Any) -> None:
         state.start_search()
 
     @kb.add("f", filter=normal)
-    def _filter(event):
+    def _filter(event: Any) -> None:
         state.toggle_only_pending()
 
     @kb.add("enter", filter=normal)
-    def _confirm(event):
+    def _confirm(event: Any) -> None:
         if state.request_confirm():
             event.app.exit(result=(ACTION_CONFIRM, state.selected_ids()))
 
     @kb.add("q", filter=normal)
-    def _quit(event):
+    def _quit(event: Any) -> None:
         if state.request_quit():
             event.app.exit(result=(ACTION_QUIT, []))
 
     @kb.add("escape", filter=normal, eager=True)
-    def _esc(event):
+    def _esc(event: Any) -> None:
         state.clear_filters()
 
     @kb.add("enter", filter=searching)
     @kb.add("escape", filter=searching, eager=True)
-    def _end_search(event):
+    def _end_search(event: Any) -> None:
         state.end_search()
 
     @kb.add("backspace", filter=searching)
-    def _backspace(event):
+    def _backspace(event: Any) -> None:
         state.backspace()
 
     @kb.add(Keys.Any, filter=searching)
-    def _typed(event):
+    def _typed(event: Any) -> None:
         if event.data and event.data.isprintable():
             state.type_char(event.data)
 
     # -- tela do artista --
     @kb.add("up", filter=in_detail)
-    def _d_up(event):
+    def _d_up(event: Any) -> None:
         state.scroll_detail(-1)
 
     @kb.add("down", filter=in_detail)
-    def _d_down(event):
+    def _d_down(event: Any) -> None:
         state.scroll_detail(1)
 
     @kb.add("pageup", filter=in_detail)
-    def _d_pgup(event):
+    def _d_pgup(event: Any) -> None:
         state.scroll_detail(-page())
 
     @kb.add("pagedown", filter=in_detail)
-    def _d_pgdn(event):
+    def _d_pgdn(event: Any) -> None:
         state.scroll_detail(page())
 
     @kb.add("o", filter=in_detail)
-    def _d_open(event):
+    def _d_open(event: Any) -> None:
         row = state.detail_row()
         if row is not None:
             open_profile(row)
 
     @kb.add("space", filter=in_detail)
     @kb.add("x", filter=in_detail)
-    def _d_toggle(event):
+    def _d_toggle(event: Any) -> None:
         state.toggle_detail()
 
     @kb.add("escape", filter=in_detail, eager=True)
@@ -1219,11 +1221,11 @@ async def run_checklist(
     @kb.add("backspace", filter=in_detail)
     @kb.add("q", filter=in_detail)
     @kb.add("enter", filter=in_detail)
-    def _d_back(event):
+    def _d_back(event: Any) -> None:
         state.close_detail()
 
     @kb.add("c-c")
-    def _interrupt(event):
+    def _interrupt(event: Any) -> None:
         event.app.exit(exception=KeyboardInterrupt)
 
     extra = Style.from_dict(

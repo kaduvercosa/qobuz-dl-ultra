@@ -27,6 +27,7 @@ def test_campos_e_padroes():
         "color_enabled",
         "unicode_enabled",
         "ui_mode",
+        "layout_interativo",
         "pending_status",
         "ultima_linha_vazia",
     }
@@ -34,6 +35,7 @@ def test_campos_e_padroes():
     assert (novo.quiet, novo.verbose) == (False, False)
     assert novo.color_enabled is None and novo.unicode_enabled is None
     assert novo.ui_mode is None
+    assert novo.layout_interativo == "auto"
 
 
 def test_redefinir_estado_volta_ao_padrao():

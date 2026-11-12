@@ -9,6 +9,7 @@ import logging
 import os
 import re
 import time
+from typing import Any
 
 import mutagen.id3 as id3
 from mutagen.flac import FLAC
@@ -84,7 +85,7 @@ def extract_track_id(file_path: str) -> str | None:
     return None
 
 
-def _lyrics_lookup_hints(file_path):
+def _lyrics_lookup_hints(file_path: Any) -> Any:
     """ISRC, UPC e duração (s) do arquivo: ajudam fontes que identificam a gravação
     exata (BiniLyrics). Qualquer falha de leitura devolve só o que deu."""
     hints: dict[str, str | int] = {}
@@ -120,7 +121,7 @@ def _lyrics_lookup_hints(file_path):
 _TIMED_LINE_RE = re.compile(r"^\s*\[(\d{2,}):(\d{2})\.(\d{2,3})\](.*)$")
 
 
-def _has_repeated_timestamp(lrc_text):
+def _has_repeated_timestamp(lrc_text: Any) -> bool:
     """True se dois versos DIFERENTES compartilham o mesmo timestamp -- é
     assim que o formato atual guarda original + tradução."""
     seen: dict[tuple[int, int, str], str] = {}
@@ -283,7 +284,7 @@ def _registrar_qobuz(chave: str) -> None:
         contador[chave] += 1
 
 
-def _registrar_falha_http(status) -> None:
+def _registrar_falha_http(status: Any) -> None:
     """Anota uma resposta que ficou 429/408/425/5xx mesmo após os retries."""
     if status == 429:
         _registrar_qobuz("limite")
@@ -301,7 +302,9 @@ def _erro_de_rede(exc: BaseException) -> bool:
     )
 
 
-async def fetch_qobuz_lyrics_raw(client, track_id, language=None):
+async def fetch_qobuz_lyrics_raw(
+    client: Any, track_id: Any, language: Any = None
+) -> Any:
     """
     Consulta diretamente o endpoint de letras do Qobuz usando assinatura do cliente.
     [FIX] Corrigido de r.status para r.status_code.
@@ -353,7 +356,7 @@ async def fetch_qobuz_lyrics_raw(client, track_id, language=None):
         return None
 
 
-def _lyrics_workers(settings):
+def _lyrics_workers(settings: Any) -> Any:
     """Faixas de letra em paralelo: `max_workers`, no máximo MAX_LYRICS_WORKERS (3).
 
     Acima disso o Qobuz responde 429 e as faixas ficam ADIADAS, sem baixar o
@@ -366,7 +369,7 @@ def _lyrics_workers(settings):
     return min(MAX_LYRICS_WORKERS, MAX_DOWNLOAD_WORKERS, max(1, workers))
 
 
-def _collect_audio_files(directory_path):
+def _collect_audio_files(directory_path: Any) -> Any:
     """Lista (ordenada) os .flac/.mp3 de uma pasta, recursivamente."""
     found = []
     for root, _, files in os.walk(directory_path):
@@ -377,7 +380,7 @@ def _collect_audio_files(directory_path):
     return found
 
 
-def _artista_do_album(album_artist, track_artist):
+def _artista_do_album(album_artist: Any, track_artist: Any) -> Any:
     """Artista mostrado/pesquisado: o do ÁLBUM (conciso, sem "A, B feat. C").
 
     Mesma regra do download: sem artista do álbum, ou "Various Artists",
@@ -389,7 +392,7 @@ def _artista_do_album(album_artist, track_artist):
     return album_artist
 
 
-def _read_basic_tags(file_path, ext):
+def _read_basic_tags(file_path: Any, ext: Any) -> Any:
     """Lê (título, artista do álbum, álbum) do arquivo; vazio sem a tag."""
     title, artist, album = "", "", ""
     if ext == ".flac":
@@ -485,7 +488,7 @@ def _descrever_letra(estado: dict) -> str:
     return " · ".join(partes)
 
 
-def _descrever_resultado(resultado) -> str:
+def _descrever_resultado(resultado: Any) -> str:
     """Resume a letra gravada, a partir do retorno de `fetch_and_inject`."""
     if not isinstance(resultado, dict):
         return ""
@@ -516,7 +519,7 @@ def _motivo_troca(estado: dict, esperado: str) -> str:
     )
 
 
-def _rank_letra_atual(estado: dict):
+def _rank_letra_atual(estado: dict) -> Any:
     """Prioridade da letra que o arquivo tem hoje.
 
     None = sem letra ou origem não registrada (arquivo antigo); RANK_PLAIN =
@@ -532,7 +535,7 @@ def _rank_letra_atual(estado: dict):
     )
 
 
-def _decidir_troca(estado: dict, melhor_rank: int, idioma_esperado: str):
+def _decidir_troca(estado: dict, melhor_rank: int, idioma_esperado: str) -> Any:
     """(precisa_trocar, motivo) para uma letra existente.
 
     `melhor_rank`: a melhor letra que o Qobuz pode dar agora (1 = bilíngue,
@@ -556,7 +559,13 @@ def _decidir_troca(estado: dict, melhor_rank: int, idioma_esperado: str):
 
 
 def _status_da_troca(
-    motivo, modo, estado, esperado, melhor, orig_lang, alvo_up
+    motivo: Any,
+    modo: Any,
+    estado: Any,
+    esperado: Any,
+    melhor: Any,
+    orig_lang: Any,
+    alvo_up: Any,
 ) -> tuple:
     """(status, descrição) de uma letra existente trocada pela do Qobuz."""
     bilingue = modo == "bilingue"
@@ -639,7 +648,7 @@ def _bloco_faixa(
     return linhas
 
 
-def _ler_album_e_artista(file_path: str):
+def _ler_album_e_artista(file_path: str) -> Any:
     """(álbum, artista do álbum) das tags; vazio quando não existem."""
     ext = os.path.splitext(file_path)[1].lower()
     album, artista = "", ""
@@ -658,15 +667,15 @@ def _ler_album_e_artista(file_path: str):
 
 
 async def process_retroactive_lyrics_async(
-    directory_path,
-    client,
-    genius_token=None,
-    settings=None,
+    directory_path: Any,
+    client: Any,
+    genius_token: Any = None,
+    settings: Any = None,
     *,
-    dry_run=False,
-    journal=None,
-    progress=None,
-):
+    dry_run: bool = False,
+    journal: Any = None,
+    progress: Any = None,
+) -> Any:
     """
     Varre a biblioteca e decide se cada faixa precisa de letra, traducao ou correcao.
 
@@ -779,12 +788,12 @@ async def process_retroactive_lyrics_async(
         digitos = len(str(total))
         por_pasta = collections.Counter(os.path.dirname(f) for f in files_to_check)
 
-        async def _registrar_progresso(file_path, status):
+        async def _registrar_progresso(file_path: Any, status: Any) -> None:
             """Anota o resultado da faixa (base do --resume/--incremental)."""
             if progress is not None and not dry_run:
                 await asyncio.to_thread(progress.record, file_path, status)
 
-        async def _processar_arquivo(index, file_path):
+        async def _processar_arquivo(index: Any, file_path: Any) -> Any:
             """Decide e aplica a letra de UM arquivo; devolve as linhas do bloco."""
             rotulo = f"[{index:0{digitos}d}/{total}]"
             file_name = os.path.basename(file_path)
@@ -856,7 +865,7 @@ async def process_retroactive_lyrics_async(
                     res = await client.search_tracks(search_query, limit=5)
                     items = res.get("tracks", {}).get("items", [])
 
-                    def normalize_text(value):
+                    def normalize_text(value: Any) -> Any:
                         """Normalize text for comparison (remove accents, lowercase, etc.)."""
                         return re.sub(r"[^a-z0-9]", "", str(value).lower())
 
@@ -959,7 +968,7 @@ async def process_retroactive_lyrics_async(
 
             resultado: dict = {}
 
-            async def _injetar(orig, trans, melhor_que=None):
+            async def _injetar(orig: Any, trans: Any, melhor_que: Any = None) -> Any:
                 """Grava a letra (em thread) e guarda o retorno para o bloco.
 
                 `melhor_que`: so aceita fontes de prioridade melhor que esta.
@@ -969,7 +978,7 @@ async def process_retroactive_lyrics_async(
                 extra = {"dry_run": True} if dry_run else {}
                 diario = None if dry_run else journal
 
-                def _gravar():
+                def _gravar() -> Any:
                     snap = diario.snapshot(file_path) if diario else None
                     try:
                         return engine.fetch_and_inject(
@@ -1277,7 +1286,7 @@ async def process_retroactive_lyrics_async(
 
             await _emitir(index, file_path, status, linhas)
 
-        async def _worker(_worker_index, entry):
+        async def _worker(_worker_index: Any, entry: Any) -> None:
             index, file_path = entry
             await _uma(index, file_path)
 
@@ -1397,15 +1406,15 @@ async def process_retroactive_lyrics_async(
 
 
 async def inject_lyrics_retroactively(
-    directory_path=None,
-    client=None,
-    genius_token=None,
-    settings=None,
+    directory_path: Any = None,
+    client: Any = None,
+    genius_token: Any = None,
+    settings: Any = None,
     *,
-    dry_run=False,
-    journal=None,
-    progress=None,
-):
+    dry_run: bool = False,
+    journal: Any = None,
+    progress: Any = None,
+) -> None:
     """
     Entrada publica: resolve a pasta configurada e inicia o processamento retroativo.
     [FIX] Arquivo agora esta completo, com fechamento correto e tratamento de erros.

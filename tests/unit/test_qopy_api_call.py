@@ -251,3 +251,27 @@ async def test_playlist_add_tracks_usa_uat_playlist_id_e_track_ids():
     assert params["user_auth_token"] == "token-abc"
     assert params["playlist_id"] == "42"
     assert params["track_ids"] == "1,2,3"
+
+
+@pytest.mark.parametrize("status", [401, 403])
+async def test_user_get_401_ou_403_sinaliza_token_rejeitado(status):
+    self, _ = _client(response=FakeResponse(status_code=status, text="unauthorized"))
+
+    with pytest.raises(AuthenticationError):
+        await qopy.Client.api_call(self, "user/get")
+
+
+async def test_user_get_400_com_token_expirado_sinaliza_autenticacao():
+    self, _ = _client(
+        response=FakeResponse(status_code=400, text="invalid user_auth_token")
+    )
+
+    with pytest.raises(AuthenticationError):
+        await qopy.Client.api_call(self, "user/get")
+
+
+async def test_user_get_app_id_rejeitado_nao_e_classificado_como_token():
+    self, _ = _client(response=FakeResponse(status_code=400, text="invalid app_id"))
+
+    with pytest.raises(httpx.HTTPStatusError):
+        await qopy.Client.api_call(self, "user/get")

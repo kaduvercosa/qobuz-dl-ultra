@@ -2,6 +2,7 @@
 
 import shutil
 import subprocess
+import sys
 
 import pytest
 
@@ -100,8 +101,12 @@ try:
 except Exception:  # noqa: BLE001
     _MUTAGEN_REAL = False
 
+# No a-Shell o ffmpeg roda dentro do próprio processo do Python e trava de forma
+# intermitente com a suíte inteira (mesmo motivo de test_inspector_completo); o
+# CI (macOS/Linux) continua rodando estes testes.
 reais = pytest.mark.skipif(
-    not (FFMPEG and _MUTAGEN_REAL), reason="ffmpeg ou mutagen real indisponível"
+    sys.platform == "ios" or not (FFMPEG and _MUTAGEN_REAL),
+    reason="ffmpeg/mutagen reais indisponíveis (ou ffmpeg trava no a-Shell/iOS)",
 )
 
 

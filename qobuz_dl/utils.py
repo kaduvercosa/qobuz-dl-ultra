@@ -56,11 +56,11 @@ class PartialFormatter(string.Formatter):
     # KeyError. Usado para montar nomes de arquivo/pasta a partir de tags
     # de metadados que podem não vir preenchidas na resposta da API.
 
-    def __init__(self, missing="n/a", bad_fmt="n/a"):
+    def __init__(self, missing: str = "n/a", bad_fmt: str = "n/a") -> None:
         """Initialize formatter with fallback values for missing or invalid fields."""
         self.missing, self.bad_fmt = missing, bad_fmt
 
-    def get_field(self, field_name, args, kwargs):
+    def get_field(self, field_name: Any, args: Any, kwargs: Any) -> Any:
         """Get a field value, returning None if missing instead of raising KeyError."""
         # Campo ausente: em vez de lançar KeyError/AttributeError, devolve
         # None para que format_field() substitua pelo valor `missing`.
@@ -70,7 +70,7 @@ class PartialFormatter(string.Formatter):
             val = None, field_name
         return val
 
-    def format_field(self, value, spec):
+    def format_field(self, value: Any, spec: Any) -> Any:
         """Format a field value, using fallbacks for empty/None values or invalid format specs."""
         # Valor vazio/None vira `self.missing`. Spec de formatação inválido
         # (ex.: aplicar formatação numérica a uma string) vira `self.bad_fmt`
@@ -85,7 +85,7 @@ class PartialFormatter(string.Formatter):
             raise
 
 
-def make_m3u(pl_directory, remote_items=None):
+def make_m3u(pl_directory: Any, remote_items: Any = None) -> None:
     # Gera um arquivo de playlist .m3u8 (UTF-8) a partir dos arquivos de
     # áudio presentes em `pl_directory`.
     #
@@ -111,7 +111,7 @@ def make_m3u(pl_directory, remote_items=None):
     pl_full_path = os.path.join(pl_directory, pl_name)
 
     # 1. Varre a pasta local e extrai as tags de cada arquivo de áudio.
-    def _read_info(f, audio_full_path):
+    def _read_info(f: Any, audio_full_path: Any) -> Any:
         # Lê as tags de UM arquivo (antes inline no loop do os.walk).
         info = {
             "path": audio_full_path,
@@ -193,7 +193,7 @@ def make_m3u(pl_directory, remote_items=None):
             if _f.get("title"):
                 by_title.setdefault(str(_f["title"]).strip().lower(), []).append(_f)
 
-        def _first_compatible(files, tid):
+        def _first_compatible(files: Any, tid: Any) -> Any:
             """Primeiro arquivo que não pertença a OUTRA faixa Qobuz."""
             for cand in files or []:
                 cand_id = cand.get("qobuz_id")
@@ -260,7 +260,7 @@ def make_m3u(pl_directory, remote_items=None):
     #    "Faixa 10").
     if not remote_items or len(ordered_files) == 0:
 
-        def natural_sort_key(s):
+        def natural_sort_key(s: Any) -> Any:
             """Generate a sort key for natural/human sorting of strings with numbers."""
             return [
                 int(text) if text.isdigit() else text.lower()
@@ -372,9 +372,9 @@ def smart_discography_filter(
         # chamada.
         def is_valid(
             album: dict,
-            _bit_depth=best_bit_depth,
-            _sampling_rate=best_sampling_rate,
-            _remaster_exists=remaster_exists,
+            _bit_depth: Any = best_bit_depth,
+            _sampling_rate: Any = best_sampling_rate,
+            _remaster_exists: Any = remaster_exists,
         ) -> bool:
             """Check if an album release type is valid (Album/EP/Single)."""
             return (
@@ -396,7 +396,7 @@ def smart_discography_filter(
     return items
 
 
-def format_duration(duration):
+def format_duration(duration: Any) -> Any:
     # Formata uma duração em segundos como string HH:MM:SS.
     """Format seconds into HH:MM:SS or MM:SS string."""
     return time.strftime("%H:%M:%S", time.gmtime(duration))
@@ -414,7 +414,7 @@ _DIRS_EXTRA = [
 ]
 
 
-def encontrar_binario(nome):
+def encontrar_binario(nome: Any) -> Any:
     # Procura um executável externo (ex.: ffmpeg, fpcalc) no PATH e nos
     # diretórios extras conhecidos, memorizando o resultado em cache.
     #
@@ -442,7 +442,7 @@ def encontrar_binario(nome):
     return caminho
 
 
-def _avisar(titulo, detalhe):
+def _avisar(titulo: Any, detalhe: Any) -> None:
     # Emite um aviso de duas partes (título curto + detalhe) já quebrado na
     # largura do terminal, via qobuz_dl.ui quando disponível.
     #
@@ -460,7 +460,7 @@ def _avisar(titulo, detalhe):
         logger.warning("%s %s", titulo, detalhe)
 
 
-def checar_binarios_externos(precisa_fpcalc=False):
+def checar_binarios_externos(precisa_fpcalc: bool = False) -> Any:
     # Verifica na inicialização os executáveis externos que o pip NÃO
     # instala: ffmpeg (checagem de integridade) e fpcalc/Chromaprint (usado
     # por --find-duplicates via pyacoustid). Avisa UMA vez, com instrução
@@ -501,7 +501,9 @@ def checar_binarios_externos(precisa_fpcalc=False):
     return resultado
 
 
-def verify_audio_integrity(filepath, timeout=180) -> tuple[bool | None, str]:
+def verify_audio_integrity(
+    filepath: Any, timeout: int = 180
+) -> tuple[bool | None, str]:
     # Verifica se um arquivo de áudio está corrompido, decodificando-o por
     # INTEIRO com o ffmpeg -- não só lendo metadados/tags (que é o que
     # ffprobe -show_format/-show_streams fazia antes).
@@ -560,7 +562,7 @@ def verify_audio_integrity(filepath, timeout=180) -> tuple[bool | None, str]:
     return True, ""
 
 
-def create_and_return_dir(directory):
+def create_and_return_dir(directory: Any) -> Any:
     # Cria (se necessário) e devolve o caminho absoluto de um diretório,
     # expandindo "~" quando presente.
     """Create directory if it doesn't exist and return the path."""
@@ -569,7 +571,7 @@ def create_and_return_dir(directory):
     return fix
 
 
-def get_url_info(url):
+def get_url_info(url: Any) -> Any:
     # Extrai o tipo de mídia (album/artist/track/playlist/label) e o ID de
     # uma URL do Qobuz via regex. Compatível com os formatos:
     #   https://www.qobuz.com/us-en/{type}/{name}/{id}
@@ -586,7 +588,7 @@ def get_url_info(url):
     return r.groups()
 
 
-def label_matches(label, filter_label) -> bool:
+def label_matches(label: Any, filter_label: Any) -> bool:
     """Diz se a gravadora (objeto "label" da API do Qobuz) casa com o filtro.
 
     Filtro numérico: precisa ser igual ao ID da gravadora. Qualquer filtro
@@ -604,7 +606,7 @@ def label_matches(label, filter_label) -> bool:
     return bool(name) and filter_label.lower() in name.lower()
 
 
-def normalize_label_filter(value):
+def normalize_label_filter(value: Any) -> Any:
     """Aceita nome, ID ou URL de gravadora do Qobuz e devolve o texto do filtro
     (só o caminho da URL conta: '?ref=...' é ignorado). Vazio vira None."""
     text = str(value or "").strip()
@@ -615,7 +617,7 @@ def normalize_label_filter(value):
     return text or None
 
 
-def filter_chunks_by_label(content, iterable_key, filter_label):
+def filter_chunks_by_label(content: Any, iterable_key: Any, filter_label: Any) -> Any:
     """Remove (no próprio `content`) os lançamentos de outras gravadoras da
     listagem de um artista. Itens sem o campo "label" ficam: serão conferidos de
     novo no download. Devolve (total, mantidos)."""
@@ -633,7 +635,7 @@ def filter_chunks_by_label(content, iterable_key, filter_label):
     return total, kept
 
 
-def release_date_key(item) -> str:
+def release_date_key(item: Any) -> str:
     """Data de lançamento (AAAA-MM-DD) de um resultado da busca; '' se não tem."""
     if not isinstance(item, dict):
         return ""
@@ -650,7 +652,7 @@ def release_date_key(item) -> str:
     return ""
 
 
-def sort_by_release_date(items) -> list:
+def sort_by_release_date(items: Any) -> list:
     """Do lançamento mais novo para o mais antigo (estável; sem data vai ao fim)."""
     return sorted(items, key=release_date_key, reverse=True)
 
@@ -719,12 +721,12 @@ def get_album_artist(qobuz_album: dict) -> list:
 #   >7 faixas   -> Album
 # ------------------------------------------------------------------------
 def classify_release_type(
-    title=None,
-    version=None,
-    track_count=0,
-    duration_seconds=0,
-    api_release_type=None,
-    item_type="unknown",
+    title: Any = None,
+    version: Any = None,
+    track_count: int | None = 0,
+    duration_seconds: int | None = 0,
+    api_release_type: Any = None,
+    item_type: str = "unknown",
 ) -> str:
     """
     Classifica o tipo de release. Prioridade (do mais confiavel pro menos):
@@ -852,7 +854,7 @@ def clean_filename(filename: str, legacy_charmap: bool = False) -> str:
         return invalid_chars_to_fullwidth(filename)
 
 
-def invalid_chars_to_fullwidth(filename):
+def invalid_chars_to_fullwidth(filename: Any) -> Any:
     # Converte caracteres ilegais em nomes de arquivo do Windows para os
     # equivalentes unicode "full-width" visualmente parecidos, em vez de
     # simplesmente removê-los ou trocar por "-".
@@ -906,7 +908,7 @@ def qobuz_track_title(item: dict) -> str:
 
 
 async def find_apple_cover(
-    session,
+    session: Any,
     album: dict,
     item: Optional[dict] = None,
     artist: Optional[str] = None,
@@ -959,7 +961,7 @@ async def find_apple_cover(
     )
 
 
-def get_config_paths():
+def get_config_paths() -> Any:
     # Resolve o diretório de configuração multiplataforma (Windows,
     # Linux/macOS e iOS/a-Shell) e devolve os caminhos padrão de
     # config.ini e do banco de dados dentro dele.

@@ -40,6 +40,28 @@ qobuz-dl interactive --ui comfortable
 ```
 
 `--ui auto` é o padrão e continua detectando a largura automaticamente.
+
+Nas listas de resultados (álbuns, faixas, artistas, playlists) o layout muda
+conforme a largura da tela:
+
+| Largura | Layout | O que aparece |
+| --- | --- | --- |
+| a partir de ~90 colunas | **tabela** | todas as colunas, com bordas |
+| até 72 colunas (celular) | **compacto** | uma linha por item (título, artista, ano, qualidade curta) e, no rodapé, um painel de 3 linhas com os detalhes do item sob o cursor |
+| entre os dois | **cartão** | um cartão de duas linhas por item |
+
+O compacto mostra bem mais resultados por tela que os cartões (num terminal
+de 40 colunas, 7 itens em vez de 4). Para fixar um layout, mude a opção
+`interactive_layout` do `config.ini` (`auto`, `cartao`, `compacto` ou
+`tabela`):
+
+```bash
+qobuz-dl config set interactive_layout cartao
+```
+
+Com `auto` (padrão), a tabela é usada quando cabe, o compacto até 72 colunas
+e o cartão acima disso. Menus simples (confirmações e filtros) continuam sempre
+iguais.
 Em dispositivos com pouco espaço livre, a verificação é automática: o programa
 estima o tamanho do álbum antes de começar e interrompe a operação com uma
 mensagem clara quando o download não cabe. Para desligá-la em um ambiente com
@@ -893,9 +915,33 @@ Artista marcado `[x]` na Nota que ganhou lançamento novo **não** é remarcado 
 
 **Sentinela.** Cada álbum baixado recebe um `.streamrip.json` (mesmo formato do libsync) com serviço, ID e faixas. Serve para reconstruir o estado após perder o banco e detectar pastas movidas. Desative com `--no-sentinel` ou `write_sentinel = false` no `config.ini` (útil em montagens somente-leitura).
 
+### 🔔 Eventos em JSON e Hooks pós-download (novo)
+
+Tudo desligado por padrão. Serve para ligar o programa a um painel, a um Atalho do iOS, a um script, ao seu servidor de música ou ao celular, sem interface web.
+
+```bash
+# Um evento JSON por linha (faixa, álbum e sessão) num arquivo; "-" usa o stderr
+qobuz-dl dl URL --events eventos.ndjson
+
+# Notificação no celular ao fim (ntfy.sh ou o seu servidor)
+qobuz-dl dl URL --ntfy meu-topico-dificil-de-adivinhar
+
+# Pedir ao Navidrome/Plex/Jellyfin que reescaneie (só se baixou faixa nova)
+qobuz-dl dl URL --rescan navidrome
+
+# Rodar um comando a cada álbum (dados em variáveis QOBUZ_DL_*)
+qobuz-dl dl URL --on-complete 'notify-send "$QOBUZ_DL_ARTISTA" "$QOBUZ_DL_TITULO"'
+```
+
+Também há `--on-error`, `--on-finish` e `--webhook URL` (POST em JSON, com assinatura HMAC opcional). As mesmas opções existem no `config.ini` e como variáveis `QOBUZ_DL_<CHAVE>`; tokens e senhas ficam ocultos no `qobuz-dl config`. No a-Shell (iOS) os comandos `--on-*` não rodam (o sistema não cria processos); `--webhook`, `--ntfy`, `--rescan` e `--events` funcionam.
+
+Formato dos eventos, variáveis, segurança e limites: [`docs/EVENTOS_E_HOOKS.md`](docs/EVENTOS_E_HOOKS.md). Modelo comentado do `config.ini`: [`docs/config.example.ini`](docs/config.example.ini).
+
 ### 🛠️ Principais Variáveis de Formatação
 
 Você pode personalizar profundamente seu `config.ini` ou usar as flags CLI `-ff` (Formato de Pasta) e `-tf` (Formato de Faixa) usando as variáveis abaixo. Você também pode usar o caractere `/` para criar subdiretórios aninhados automaticamente!
+
+> O nome da pasta e o nome do arquivo usam conjuntos **diferentes** de variáveis (por exemplo, `{label}` só existe na pasta). A lista separada por formato, com receitas, está em [`docs/TEMPLATES.md`](docs/TEMPLATES.md).
 
 #### 📝 Tabela de Referência de Variáveis Completas
 

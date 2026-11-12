@@ -33,7 +33,17 @@ from qobuz_dl import ui
 ACOES = ("show", "path", "get", "set", "reset")
 OCULTO = "<redacted>"
 
+# Opções com lista fechada de valores. Além de validar o `set`, elas são criadas
+# sozinhas quando o config.ini ainda não as tem (arquivos antigos): o usuário não
+# precisa saber do `--nova`.
+OPCOES_COM_LISTA: dict[str, tuple[str, ...]] = {
+    "interactive_layout": ui.LAYOUTS_INTERATIVOS,
+}
+
 _BOOLEANOS = {"true", "false", "1", "0", "yes", "no", "on", "off"}
+# `0` e `1` são ambíguos: tanto booleano quanto número (ex.: max_workers = 1).
+_BOOLEANOS_NUMERICOS = {"0", "1"}
+_BOOLEANOS_EM_TEXTO = _BOOLEANOS - _BOOLEANOS_NUMERICOS
 _SECAO = re.compile(r"^\s*\[(?P<nome>[^\]]+)\]\s*$")
 _CHAVE = re.compile(
     r"^(?P<recuo>[ \t]*)(?P<chave>[^\s=:#;][^=:]*?)(?P<sep>\s*[=:]\s*)(?P<valor>.*)$"
@@ -63,20 +73,38 @@ def _valor_visivel(chave: str, valor: str, sensiveis: Container[str]) -> str:
 def validar_valor(antigo: Optional[str], novo: str) -> None:
     """Confere se ``novo`` combina com o tipo do valor que já estava no arquivo.
 
-    Se o antigo era booleano (`true`/`false`...), o novo também tem de ser; se
-    era número inteiro, o novo tem de ser inteiro. Texto aceita qualquer coisa.
-    Sem valor antigo (chave nova) não há o que comparar.
+    Se o antigo era booleano em texto (`true`/`false`/`yes`/`no`/`on`/`off`), o
+    novo também tem de ser booleano; se era número inteiro, o novo tem de ser
+    inteiro. ``0`` e ``1`` são ambíguos (valem como número e como booleano), por
+    isso aceitam as duas formas: `config set max_workers 2` funciona mesmo com
+    ``max_workers = 1`` no arquivo. Texto aceita qualquer coisa. Sem valor antigo
+    (chave nova) não há o que comparar.
     """
     if antigo is None or antigo == "":
         return
-    if antigo.strip().lower() in _BOOLEANOS:
-        if novo.strip().lower() not in _BOOLEANOS:
+    velho = antigo.strip().lower()
+    atual = novo.strip().lower()
+    eh_inteiro = re.fullmatch(r"-?\d+", atual) is not None
+    if velho in _BOOLEANOS_EM_TEXTO:
+        if atual not in _BOOLEANOS:
             raise ConfigErro(
                 f"o valor atual ({antigo}) é verdadeiro/falso; use true ou false."
             )
-    elif re.fullmatch(r"-?\d+", antigo.strip()):
-        if not re.fullmatch(r"-?\d+", novo.strip()):
+    elif velho in _BOOLEANOS_NUMERICOS:
+        if atual not in _BOOLEANOS and not eh_inteiro:
+            raise ConfigErro(
+                f"o valor atual ({antigo}) é um número (ou verdadeiro/falso)."
+            )
+    elif re.fullmatch(r"-?\d+", velho):
+        if not eh_inteiro:
             raise ConfigErro(f"o valor atual ({antigo}) é um número inteiro.")
+
+
+def validar_opcao(chave: str, valor: str) -> None:
+    """Confere o valor de uma opção de lista fechada (ex.: ``interactive_layout``)."""
+    validos = OPCOES_COM_LISTA.get(chave.lower())
+    if validos and valor.strip().lower() not in validos:
+        raise ConfigErro(f"valores aceitos para {chave}: {', '.join(validos)}.")
 
 
 def definir_chave(
@@ -295,10 +323,16 @@ def cmd_config(
         try:
             antigo_ini = cfg.get(secao, chave) if cfg.has_option(secao, chave) else None
             validar_valor(antigo_ini, valor)
+            validar_opcao(chave, valor)
             with open(config_file, encoding="utf-8") as arquivo:
                 texto = arquivo.read()
             novo_texto, antigo = definir_chave(
-                texto, secao, chave, valor, criar=bool(getattr(args, "nova", False))
+                texto,
+                secao,
+                chave,
+                valor,
+                criar=bool(getattr(args, "nova", False))
+                or chave.lower() in OPCOES_COM_LISTA,
             )
         except ConfigErro as erro:
             ui.error(f"Não alterei nada: {erro}")

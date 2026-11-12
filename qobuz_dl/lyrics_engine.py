@@ -20,7 +20,7 @@ import os
 import re
 import threading
 from dataclasses import dataclass
-from typing import TypedDict
+from typing import Any, TypedDict
 
 from mutagen.flac import FLAC
 from mutagen.id3 import COMM, ID3, TXXX, USLT, ID3NoHeaderError
@@ -47,7 +47,7 @@ MIN_PAUSE_DURATION_MS = 500
 _LRC_TIMESTAMP_RE = re.compile(r"\[\d{2,}:\d{2}(?:\.\d+)?\]")
 
 
-def has_lrc_timestamps(text) -> bool:
+def has_lrc_timestamps(text: Any) -> bool:
     """True se `text` tem pelo menos uma marca de tempo LRC."""
     return bool(text) and bool(_LRC_TIMESTAMP_RE.search(text))
 
@@ -69,7 +69,7 @@ RANK_LRCLIB = 5
 RANK_PLAIN = 99  # letra sem marcas de tempo: pior que qualquer sincronizada
 
 
-def lyrics_source_rank(source, bilingual: bool = False):
+def lyrics_source_rank(source: Any, bilingual: bool = False) -> Any:
     """Prioridade (1 a 5) de uma letra sincronizada, pelo nome da fonte.
 
     None quando a fonte e' desconhecida/nao registrada (arquivos antigos).
@@ -115,7 +115,7 @@ _LAST_LINE_SLACK_S = 5
 MAX_QUERY_VARIANTS = 4
 
 
-def artist_variants(artist):
+def artist_variants(artist: Any) -> list[str]:
     """Artista exato primeiro; depois o artista principal (sem feat./lista)."""
     artist = (artist or "").strip()
     out = [artist] if artist else []
@@ -126,7 +126,7 @@ def artist_variants(artist):
     return out
 
 
-def title_variants(track):
+def title_variants(track: Any) -> list[str]:
     """Titulo exato primeiro; depois sem (feat. ...) e sem sufixo de remaster."""
     track = (track or "").strip()
     out = [track] if track else []
@@ -141,7 +141,7 @@ def title_variants(track):
     return out
 
 
-def query_variants(artist, track):
+def query_variants(artist: Any, track: Any) -> Any:
     """Pares (artista, titulo) a tentar, do mais exato ao mais tolerante."""
     pairs = []
     for t in title_variants(track):
@@ -152,7 +152,7 @@ def query_variants(artist, track):
     return pairs[:MAX_QUERY_VARIANTS]
 
 
-def lrc_fits_duration(text, duration):
+def lrc_fits_duration(text: Any, duration: Any) -> bool:
     """False se o ultimo verso comeca DEPOIS do fim da faixa (versao errada).
 
     Sem duracao conhecida ou sem timestamps, nao ha o que checar: True.
@@ -251,12 +251,14 @@ class LyricsEngine:
         "_provider_lrclib": "LRCLIB",
     }
 
-    def __init__(self, genius_token=None, session=None, settings=None):
+    def __init__(
+        self, genius_token: Any = None, session: Any = None, settings: Any = None
+    ) -> None:
         """Initialize lyrics engine with optional Genius token and HTTP session."""
         self.genius_token = genius_token
         self.genius = None
         self.settings = settings or QobuzDLSettings()
-        self._mxm_token = None
+        self._mxm_token: Any = None
 
         if self.genius_token and lyricsgenius:
             self.genius = lyricsgenius.Genius(
@@ -272,7 +274,7 @@ class LyricsEngine:
             self.session = session
             self._owns_session = False
 
-    def close(self):
+    def close(self) -> None:
         """
         Fecha somente a sessao criada por esta classe; sessoes externas
         continuam vivas.
@@ -284,13 +286,13 @@ class LyricsEngine:
                 logger.debug(f"Falha ao fechar sessao HTTP do LyricsEngine: {e}")
 
     @staticmethod
-    def _ms_to_lrc_timestamp(ms):
+    def _ms_to_lrc_timestamp(ms: Any) -> str:
         """Converte milissegundos para o formato LRC [MM:SS.mmm]."""
         minutes = ms // 60000
         seconds = (ms % 60000) / 1000.0
         return f"[{minutes:02d}:{seconds:06.3f}]"
 
-    def _qobuz_lines_to_lrc(self, lines, inject_intro=False):
+    def _qobuz_lines_to_lrc(self, lines: Any, inject_intro: bool = False) -> Any:
         """Converte linhas sincronizadas do Qobuz para LRC canonico.
 
         Linhas vazias ({"line": ""}) sao marcadores de pausa enviados pela
@@ -337,7 +339,7 @@ class LyricsEngine:
 
         return "\n".join(lrc_rows) if lrc_rows else None
 
-    def _normalize_lrc(self, lrc_text):
+    def _normalize_lrc(self, lrc_text: Any) -> str:
         """Normaliza uma letra LRC para o formato canonico do projeto."""
         if not lrc_text:
             return lrc_text
@@ -368,13 +370,15 @@ class LyricsEngine:
         return "\n".join(normalized)
 
     @staticmethod
-    def _qobuz_lines_to_plain(lines):
+    def _qobuz_lines_to_plain(lines: Any) -> Any:
         """Converte linhas sincronizadas para texto simples, uma linha por verso."""
         plain_rows = [(entry.get("line") or "").strip() for entry in lines]
         text = "\n".join(plain_rows).strip("\n")
         return text if text else None
 
-    def extract_qobuz_lyrics(self, lyrics_response, translation_response=None):
+    def extract_qobuz_lyrics(
+        self, lyrics_response: Any, translation_response: Any = None
+    ) -> Any:
         """
         Normaliza letra original e traducao do Qobuz em um formato interno.
         O resultado separa conteudo sincronizado, texto simples e idiomas.
@@ -430,7 +434,7 @@ class LyricsEngine:
 
         tags_re = re.compile(r"\[\d{2,}:\d{2}\.\d{2,3}\]")
 
-        def parse_lrc(lrc_text, is_translation=False):
+        def parse_lrc(lrc_text: Any, is_translation: bool = False) -> Any:
             # Só entram linhas com timestamp e texto: metadados LRC ([ti:],
             # [ar:]...) e linhas vazias são descartados, já que o cabeçalho é
             # gerado separadamente. Várias tags na mesma linha viram várias
@@ -448,7 +452,7 @@ class LyricsEngine:
         orig_lines = parse_lrc(original_lrc, is_translation=False)
         trans_lines = parse_lrc(translated_lrc, is_translation=True)
 
-        def tag_to_ms(tag):
+        def tag_to_ms(tag: Any) -> int:
             if not tag:
                 return -1
             m = re.match(r"\[(\d{2,}):(\d{2})\.(\d{2,3})\]", tag)
@@ -486,7 +490,7 @@ class LyricsEngine:
 
         return "\n".join(result)
 
-    def _inject_instrumental_pauses(self, lrc_text):
+    def _inject_instrumental_pauses(self, lrc_text: Any) -> str:
         """Pausas instrumentais agora vem das linhas vazias do proprio Qobuz.
 
         A antiga regra de intervalo > 10s foi desativada para não duplicar
@@ -496,8 +500,13 @@ class LyricsEngine:
         return lrc_text
 
     def _fetch_musixmatch_lyrics(
-        self, artist, title, album=None, duration=None, isrc=None
-    ):
+        self,
+        artist: Any,
+        title: Any,
+        album: Any = None,
+        duration: Any = None,
+        isrc: Any = None,
+    ) -> Any:
         """Busca letras sincronizadas no Musixmatch (sincrono).
 
         `album`, `duration` (s) e `isrc` sao dicas opcionais que ajudam a achar
@@ -590,7 +599,7 @@ class LyricsEngine:
     # LyricsCandidate (ou None). Excecoes de rede podem subir: quem chama
     # (fetch_and_inject) registra o erro e segue para a proxima fonte.
     # ------------------------------------------------------------------
-    def _provider_qobuz(self, query):
+    def _provider_qobuz(self, query: Any) -> Any:
         """Letra SINCRONIZADA enviada pela API do Qobuz (com traducao, se houver).
 
         Texto plano do Qobuz e' ignorado: sem timestamps, esta fonte nao serve.
@@ -637,7 +646,7 @@ class LyricsEngine:
             bilingual=bool(best),
         )
 
-    def _provider_binilyrics(self, query):
+    def _provider_binilyrics(self, query: Any) -> Any:
         """BiniLyrics: TTML estilo Apple Music (sync por palavra/linha).
 
         Precisa da duracao da faixa (a API exige segundos) e usa o ISRC ou o
@@ -725,7 +734,7 @@ class LyricsEngine:
             bilingual=bilingual,
         )
 
-    def _provider_musixmatch(self, query):
+    def _provider_musixmatch(self, query: Any) -> Any:
         """Musixmatch: so letra sincronizada (texto puro e' descartado).
 
         Usa album/duracao/ISRC como dicas; se com elas nao vier nada, repete so
@@ -742,7 +751,7 @@ class LyricsEngine:
                     return LyricsCandidate(text, "Musixmatch", True)
         return None
 
-    def _provider_lrclib(self, query):
+    def _provider_lrclib(self, query: Any) -> Any:
         """LRCLIB: so `syncedLyrics`.
 
         Para cada variante (artista, titulo) tenta com album + duracao e repete
@@ -823,7 +832,7 @@ class LyricsEngine:
             return LyricsCandidate(synced, "LRCLIB", True)
         return None
 
-    def _provider_genius(self, query):
+    def _provider_genius(self, query: Any) -> None:
         """Genius so tem texto puro: desativado (nunca devolve letra)."""
         return None
 
@@ -831,7 +840,9 @@ class LyricsEngine:
     # Gravacao e mensagens (compartilhadas por todas as fontes)
     # ------------------------------------------------------------------
     @staticmethod
-    def _delivery_message(candidate, embed_lyrics, save_lrc, ok, ident=""):
+    def _delivery_message(
+        candidate: Any, embed_lyrics: Any, save_lrc: Any, ok: Any, ident: str = ""
+    ) -> Any:
         """(tipo, mensagem) do resultado da gravação, no estilo da árvore.
 
         ``ident`` é o "[NN] título" da faixa: em modo paralelo a linha pode
@@ -863,8 +874,14 @@ class LyricsEngine:
         )
 
     def _deliver(
-        self, file_path, candidate, result, embed_lyrics, save_lrc, dry_run=False
-    ):
+        self,
+        file_path: Any,
+        candidate: Any,
+        result: Any,
+        embed_lyrics: Any,
+        save_lrc: Any,
+        dry_run: bool = False,
+    ) -> Any:
         """Grava a letra (metadata e/ou arquivo) e preenche `result`.
 
         `dry_run=True` só preenche `result`, como se tivesse gravado: nada vai ao
@@ -904,24 +921,24 @@ class LyricsEngine:
 
     def fetch_and_inject(
         self,
-        file_path,
-        artist,
-        track,
-        album,
-        save_lrc=True,
-        embed_lyrics=True,
-        qobuz_lyrics_response=None,
-        qobuz_translation_response=None,
-        track_number=None,
-        isrc=None,
-        duration=None,
-        quiet=False,
-        better_than=None,
-        buffer_output=False,
-        network_budget=None,
-        dry_run=False,
-        upc=None,
-    ):
+        file_path: Any,
+        artist: Any,
+        track: Any,
+        album: Any,
+        save_lrc: bool = True,
+        embed_lyrics: bool = True,
+        qobuz_lyrics_response: Any = None,
+        qobuz_translation_response: Any = None,
+        track_number: Any = None,
+        isrc: Any = None,
+        duration: Any = None,
+        quiet: bool = False,
+        better_than: Any = None,
+        buffer_output: bool = False,
+        network_budget: Any = None,
+        dry_run: bool = False,
+        upc: Any = None,
+    ) -> Any:
         """
         Percorre as fontes de LyricsEngine.PROVIDERS (Qobuz -> BiniLyrics ->
         Musixmatch -> LRCLIB) e grava a primeira letra SINCRONIZADA encontrada,
@@ -959,7 +976,7 @@ class LyricsEngine:
         """
         saida = []
 
-        def _escrever(linhas):
+        def _escrever(linhas: Any) -> None:
             if buffer_output:
                 saida.extend(linhas)
                 return
@@ -996,29 +1013,29 @@ class LyricsEngine:
 
     def _fetch_and_inject(
         self,
-        _escrever,
-        network_budget,
-        file_path,
-        artist,
-        track,
-        album,
-        save_lrc=True,
-        embed_lyrics=True,
-        qobuz_lyrics_response=None,
-        qobuz_translation_response=None,
-        track_number=None,
-        isrc=None,
-        duration=None,
-        quiet=False,
-        better_than=None,
-        dry_run=False,
-        upc=None,
-    ):
+        _escrever: Any,
+        network_budget: Any,
+        file_path: Any,
+        artist: Any,
+        track: Any,
+        album: Any,
+        save_lrc: bool = True,
+        embed_lyrics: bool = True,
+        qobuz_lyrics_response: Any = None,
+        qobuz_translation_response: Any = None,
+        track_number: Any = None,
+        isrc: Any = None,
+        duration: Any = None,
+        quiet: bool = False,
+        better_than: Any = None,
+        dry_run: bool = False,
+        upc: Any = None,
+    ) -> Any:
         """Corpo de `fetch_and_inject`; `_escrever(linhas)` e' o destino das linhas."""
         # "[NN] título": identifica a faixa em cada linha (modo paralelo).
         _ident = f"[{track_number}] {track}" if track_number else f"{track}"
 
-        def _tw(kind, msg):
+        def _tw(kind: Any, msg: Any) -> None:
             """Escreve a mensagem no estilo unificado (tag + árvore + cinza).
 
             Formata com `ui.tagged_lines` (sem escrever) e entrega ao destino:
@@ -1163,8 +1180,12 @@ class LyricsEngine:
         return result
 
     def _save_lrc_file(
-        self, audio_file_path, synced_lyrics, source=None, language=None
-    ):
+        self,
+        audio_file_path: Any,
+        synced_lyrics: Any,
+        source: Any = None,
+        language: Any = None,
+    ) -> bool:
         """
         Salva a letra sincronizada em .lrc com fonte e idioma no cabecalho.
         Retorna True/False para indicar sucesso. Letra plana (sem timestamps)
@@ -1199,8 +1220,13 @@ class LyricsEngine:
             return False
 
     def _inject_metadata(
-        self, file_path, lyrics, source=None, language=None, bilingual=False
-    ):
+        self,
+        file_path: Any,
+        lyrics: Any,
+        source: Any = None,
+        language: Any = None,
+        bilingual: bool = False,
+    ) -> bool:
         """
         FLAC usa campos Vorbis; MP3 usa USLT e TXXX para idioma/bilinguismo.
         Falhas de tagging sao REPORTADAS (tqdm.write + logger.debug com o

@@ -35,7 +35,8 @@ import shutil
 import sys
 import threading
 import unicodedata
-from typing import TypedDict
+from collections.abc import Callable, Iterable, Iterator
+from typing import Any, TypedDict
 
 from qobuz_dl.color import (
     ACCENT_DARK,
@@ -70,6 +71,10 @@ MEDIUM = 90  # iPad retrato, terminal de meia tela
 COMPACT_WIDTH = 72  # abaixo/igual: atalhos e metadados compactos na TUI
 # acima de MEDIUM -> "wide" (desktop, iPad paisagem)
 
+# Valores de `interactive_layout` (config.ini): como a lista de resultados do modo
+# interativo é desenhada. "auto" escolhe pela largura da tela.
+LAYOUTS_INTERATIVOS = ("auto", "cartao", "compacto", "tabela")
+
 
 @dataclasses.dataclass
 class EstadoUI:
@@ -82,6 +87,8 @@ class EstadoUI:
       ui_mode                override para terminais móveis: ``None`` preserva a
                              detecção automática pela largura; ``compact`` força
                              cartões/atalhos e ``comfortable`` privilegia detalhes
+      layout_interativo      como a lista de resultados do modo interativo é
+                             desenhada: ``auto``/``cartao``/``compacto``/``tabela``
       pending_status         há uma linha de status "em andamento" sem quebra
       ultima_linha_vazia     a última escrita terminou em linha em branco
 
@@ -96,6 +103,7 @@ class EstadoUI:
     color_enabled: bool | None = None
     unicode_enabled: bool | None = None
     ui_mode: str | None = None
+    layout_interativo: str = "auto"
     pending_status: bool = False
     ultima_linha_vazia: bool = False
 
@@ -103,14 +111,14 @@ class EstadoUI:
 estado = EstadoUI()
 
 
-def redefinir_estado():
+def redefinir_estado() -> None:
     """Volta todos os campos de `estado` ao padrão (cor e unicode serão redetectados)."""
     for campo in dataclasses.fields(EstadoUI):
         setattr(estado, campo.name, campo.default)
 
 
 @contextlib.contextmanager
-def estado_temporario(**campos):
+def estado_temporario(**campos: Any) -> Iterator[EstadoUI]:
     """Muda campos de `estado` dentro do bloco e restaura tudo ao sair.
 
     ``with ui.estado_temporario(quiet=True, color_enabled=False): ...``
@@ -134,7 +142,7 @@ LAYOUT_MEDIUM = "medium"
 LAYOUT_WIDE = "wide"
 
 
-def raw_width(fallback=FALLBACK):
+def raw_width(fallback: tuple[int, int] = FALLBACK) -> int:
     """Return the current terminal width without clamping.
 
     Prefer the live TTY size so resizing a terminal is reflected immediately.
@@ -163,7 +171,7 @@ def raw_width(fallback=FALLBACK):
         return fallback[0]
 
 
-def raw_height(fallback=FALLBACK):
+def raw_height(fallback: tuple[int, int] = FALLBACK) -> int:
     """Altura atual do terminal, em linhas (par do ``raw_width``).
 
     Mesma ordem de busca: tamanho do TTY ao vivo, depois ``LINES`` e por fim o
@@ -193,7 +201,7 @@ def raw_height(fallback=FALLBACK):
         return fallback[1]
 
 
-def width(max_width=MAX_WIDTH, min_width=MIN_WIDTH):
+def width(max_width: int = MAX_WIDTH, min_width: int = MIN_WIDTH) -> int:
     # Largura utilizável para desenhar blocos de texto, já com teto e piso
     # aplicados. Função única que substitui os cálculos redundantes que
     # existiam espalhados por vários arquivos do projeto.
@@ -213,12 +221,14 @@ ALBUM_BOX_COLS = 90
 PAINEL_COLS = 72
 
 
-def report_width():
+def report_width() -> int:
     """Largura dos relatórios retroativos (entre REPORT_MIN e REPORT_MAX)."""
     return width(max_width=REPORT_MAX_WIDTH, min_width=REPORT_MIN_WIDTH)
 
 
-def _wrap_prefixed(text, width, first_prefix, next_prefix):
+def _wrap_prefixed(
+    text: Any, width: int, first_prefix: str, next_prefix: str
+) -> list[str]:
     """Quebra ``text`` em linhas de no máximo ``width`` CÉLULAS, com prefixos.
 
     ``first_prefix`` abre a primeira linha e ``next_prefix`` as seguintes. Mede
@@ -230,7 +240,7 @@ def _wrap_prefixed(text, width, first_prefix, next_prefix):
     prefix = first_prefix
     current = ""
 
-    def room():
+    def room() -> int:
         return max(1, int(width) - _cell_width(prefix))
 
     for word in str(text).split():
@@ -258,7 +268,7 @@ def _wrap_prefixed(text, width, first_prefix, next_prefix):
     return lines
 
 
-def _recuo_de_continuacao(visivel):
+def _recuo_de_continuacao(visivel: str) -> int:
     """Recuo das linhas seguintes de uma linha quebrada: o da própria linha,
     mais o que o marcador (``•`` ou ``[x]``) ocupa, para o texto alinhar."""
     recuo = len(visivel) - len(visivel.lstrip(" "))
@@ -270,7 +280,7 @@ def _recuo_de_continuacao(visivel):
     return recuo
 
 
-def wrap_ansi_line(linha, cols=None):
+def wrap_ansi_line(linha: Any, cols: int | None = None) -> list[str]:
     """Quebra uma linha COM cores ANSI para caber em ``cols`` colunas.
 
     Mede em células, ignorando as sequências de cor. Quebra entre palavras, mantém
@@ -304,7 +314,7 @@ def wrap_ansi_line(linha, cols=None):
     return linhas or [linha]
 
 
-def emit_wrapped(linha, cols=None):
+def emit_wrapped(linha: Any, cols: int | None = None) -> None:
     """``emit`` de uma linha com cores que não passa da largura do relatório.
 
     Aceita ``\n`` dentro do texto: cada trecho é quebrado separadamente.
@@ -315,17 +325,17 @@ def emit_wrapped(linha, cols=None):
 
 
 def resumo_linhas(
-    rotulo,
-    valor,
-    explicacao="",
+    rotulo: str,
+    valor: Any,
+    explicacao: str = "",
     *,
-    cor_rotulo="",
-    cor_valor="",
-    cor_explicacao="",
-    reset="",
-    larg_rotulo=26,
-    cols=None,
-):
+    cor_rotulo: str = "",
+    cor_valor: str = "",
+    cor_explicacao: str = "",
+    reset: str = "",
+    larg_rotulo: int = 26,
+    cols: int | None = None,
+) -> list[str]:
     """Linhas de uma linha de resumo "• Rótulo : valor  explicação".
 
     Em tela larga, rótulos alinhados na mesma coluna (``larg_rotulo`` é o do maior
@@ -348,21 +358,21 @@ def resumo_linhas(
     return saida
 
 
-def wrap_indented(text, indent, cols=None):
+def wrap_indented(text: Any, indent: int, cols: int | None = None) -> list[str]:
     """Quebra ``text`` em linhas que cabem em ``cols``, com recuo fixo."""
     cols = cols or report_width()
     prefix = " " * indent
     return _wrap_prefixed(text, cols - 1, prefix, prefix) or [prefix]
 
 
-def labeled_lines(label, text, cols):
+def labeled_lines(label: str, text: Any, cols: int) -> list[str]:
     """Linha "   Rótulo  texto" com continuação alinhada sob o texto."""
     return _wrap_prefixed(text, cols - 1, f"   {pad_cells(label, 6)} ", " " * 10) or [
         f"   {label}"
     ]
 
 
-def layout():
+def layout() -> str:
     # Classifica a largura atual do terminal em narrow/medium/wide, para
     # que outras funções decidam como se adaptar (empilhar valor, quebrar
     # linha, etc.).
@@ -379,13 +389,13 @@ def layout():
     return LAYOUT_WIDE
 
 
-def is_narrow():
+def is_narrow() -> bool:
     # Atalho para checagens rápidas de "estou em tela estreita?".
     """Check whether the terminal is below the narrow-layout breakpoint."""
     return layout() == LAYOUT_NARROW
 
 
-def compact_mode(columns=None):
+def compact_mode(columns: int | None = None) -> bool:
     """Return whether dense/card rendering should be used."""
     if estado.ui_mode == "compact":
         return True
@@ -394,7 +404,7 @@ def compact_mode(columns=None):
     return (raw_width() if columns is None else columns) <= COMPACT_WIDTH
 
 
-def progress_ncols():
+def progress_ncols() -> int:
     # Largura usada pelas barras de progresso do tqdm.
     # Com teto em MAX_WIDTH: sem isso, numa janela muito larga a barra de
     # progresso ocuparia a tela inteira.
@@ -409,7 +419,7 @@ def progress_ncols():
 # chamada de emit().
 
 
-def _detect_color():
+def _detect_color() -> bool:
     # Decide se é seguro emitir sequências ANSI de cor.
     # Delega para color._detect_color_capability() em vez de reimplementar
     # a regra aqui -- assim as duas partes do projeto nunca divergem sobre
@@ -421,14 +431,14 @@ def _detect_color():
     return _detect_color_capability()
 
 
-def _detect_unicode():
+def _detect_unicode() -> bool:
     # Assume unicode disponível se a codificação do stdout contiver "utf".
     """Detect if Unicode glyphs are supported by the terminal."""
     enc = (getattr(sys.stdout, "encoding", None) or "").lower()
     return "utf" in enc
 
 
-def color_enabled():
+def color_enabled() -> bool:
     # Getter com cache preguiçoso (lazy) para o resultado de _detect_color().
     """Check if color output is currently enabled."""
     if estado.color_enabled is None:
@@ -436,7 +446,7 @@ def color_enabled():
     return estado.color_enabled
 
 
-def unicode_enabled():
+def unicode_enabled() -> bool:
     # Getter com cache preguiçoso para o resultado de _detect_unicode().
     """Check if Unicode output is currently enabled."""
     if estado.unicode_enabled is None:
@@ -444,7 +454,14 @@ def unicode_enabled():
     return estado.unicode_enabled
 
 
-def configure(quiet=None, verbose=None, color=None, unicode=None, ui_mode=None):
+def configure(
+    quiet: bool | None = None,
+    verbose: bool | None = None,
+    color: bool | None = None,
+    unicode: bool | None = None,
+    ui_mode: str | None = None,
+    layout_interativo: str | None = None,
+) -> None:
     # Ponto único de ajuste do comportamento global da UI. Chamado uma vez,
     # no boot da CLI, com os valores vindos dos argumentos de linha de
     # comando. Parâmetros None são ignorados (mantêm o valor atual).
@@ -461,9 +478,13 @@ def configure(quiet=None, verbose=None, color=None, unicode=None, ui_mode=None):
         if ui_mode not in ("auto", "compact", "comfortable"):
             raise ValueError(f"modo de UI inválido: {ui_mode}")
         estado.ui_mode = None if ui_mode == "auto" else ui_mode
+    if layout_interativo is not None:
+        if layout_interativo not in LAYOUTS_INTERATIVOS:
+            raise ValueError(f"layout interativo inválido: {layout_interativo}")
+        estado.layout_interativo = layout_interativo
 
 
-def c(code):
+def c(code: str) -> str:
     # Devolve o código ANSI passado, ou string vazia quando a cor está
     # desligada. Usado em toda função de emit para envolver texto com cor
     # sem precisar de um `if color_enabled()` em cada chamada.
@@ -471,26 +492,26 @@ def c(code):
     return code if color_enabled() else ""
 
 
-def _glyph(fancy, plain):
+def _glyph(fancy: str, plain: str) -> str:
     # Escolhe entre o glifo unicode "bonito" e o equivalente ASCII simples,
     # dependendo do suporte detectado do terminal.
     """Return a Unicode glyph if supported, otherwise return ASCII fallback."""
     return fancy if unicode_enabled() else plain
 
 
-def heavy_bar_char():
+def heavy_bar_char() -> str:
     # Caractere usado nas barras/separadores grossos (títulos, banners).
     """Return the heavy bar character for progress bars (Unicode-aware)."""
     return _glyph("\u2501", "=")  # ━
 
 
-def light_bar_char():
+def light_bar_char() -> str:
     # Caractere usado em separadores finos.
     """Return the light bar character for progress bars (Unicode-aware)."""
     return _glyph("\u2500", "-")  # ─
 
 
-def block_char():
+def block_char() -> str:
     # Caractere usado para preencher barras de progresso proporcionais
     # (ex.: bar_gauge no ranking de artistas).
     """Return the block character for bar gauges (Unicode-aware)."""
@@ -505,7 +526,7 @@ def block_char():
 # por cima, fazendo "Logando..." virar "Logado: OK" na mesma linha.
 
 
-def _status_inline_supported():
+def _status_inline_supported() -> bool:
     # So' sobrescreve em terminal interativo; em pipe/CI/arquivo cada mensagem
     # continua em sua propria linha (sem \r nem codigos ANSI no log).
     try:
@@ -514,7 +535,7 @@ def _status_inline_supported():
         return False
 
 
-def _clear_pending_locked():
+def _clear_pending_locked() -> None:
     # Chamado dentro do print_lock: apaga a linha de status pendente.
     if estado.pending_status:
         estado.pending_status = False
@@ -526,7 +547,7 @@ def _clear_pending_locked():
             pass
 
 
-def step_inline(message):
+def step_inline(message: Any) -> None:
     """Print a progress step WITHOUT newline; the next message replaces it."""
     if estado.quiet:
         return
@@ -545,7 +566,7 @@ def step_inline(message):
         estado.pending_status = True
 
 
-def emit(text="", end="\n"):
+def emit(text: Any = "", end: str = "\n") -> None:
     # ÚNICO ponto de escrita no terminal usado pelo restante do módulo (e,
     # por extensão, por todo o programa via as funções ok/warn/error/etc.).
     # Usa tqdm.write() quando disponível, para que barras de progresso
@@ -564,13 +585,13 @@ def emit(text="", end="\n"):
 # branco. Serve só a `separator()`, para não empilhar duas linhas em branco.
 
 
-def _registrar_saida(text, end):
+def _registrar_saida(text: Any, end: str) -> None:
     estado.ultima_linha_vazia = end == "\n" and (
         str(text) == "" or str(text).endswith("\n")
     )
 
 
-def separator():
+def separator() -> None:
     # Linha em branco entre seções (ex.: preparação -> faixas). Não empilha:
     # se a última saída já terminou em linha em branco (como a caixa do
     # cabeçalho), não escreve outra. Sem lock aqui: emit() já o pega e o
@@ -580,7 +601,7 @@ def separator():
         emit("")
 
 
-def _write_locked(text, end):
+def _write_locked(text: Any, end: str) -> None:
     # Implementação real da escrita, já dentro do print_lock.
     # Tenta tqdm.write primeiro; se tqdm não estiver disponível, cai para
     # print() comum; se o terminal não suportar os caracteres unicode do
@@ -603,7 +624,7 @@ def _write_locked(text, end):
             )
 
 
-def emit_always(text="", end="\n"):
+def emit_always(text: Any = "", end: str = "\n") -> None:
     # Igual a emit(), mas ignora --quiet. Reservado para mensagens que o
     # usuário precisa ver mesmo em modo silencioso: erros fatais e prompts
     # de confirmação.
@@ -614,7 +635,7 @@ def emit_always(text="", end="\n"):
         _registrar_saida(text, end)
 
 
-def emit_json(data):
+def emit_json(data: Any) -> None:
     """Imprime ``data`` como JSON (UTF-8, recuo 2) na saída padrão, mesmo com --quiet.
 
     É o único jeito de um comando falar JSON: `--json` em `library`, `stats`,
@@ -628,7 +649,13 @@ _track_index = contextvars.ContextVar("ui_track_index", default="")
 _INDEX_AFTER_LABEL = re.compile(r"(: )\[\d+(?:[./]\d+)?\]\s+")
 
 
-def format_index(track, total=None, disc=None, disc_total=1, playlist=False):
+def format_index(
+    track: Any,
+    total: Any = None,
+    disc: Any = None,
+    disc_total: Any = 1,
+    playlist: bool = False,
+) -> str:
     """01/18 (disco único) | 02.05 (vários CDs: disco.faixa) | 05 (playlist)."""
     try:
         t = int(track)
@@ -648,7 +675,11 @@ def format_index(track, total=None, disc=None, disc_total=1, playlist=False):
         return f"{t:02d}"
 
 
-def index_from_meta(track_meta, album_meta=None, display_index=None):
+def index_from_meta(
+    track_meta: dict[str, Any] | None,
+    album_meta: dict[str, Any] | None = None,
+    display_index: Any = None,
+) -> str:
     track_meta = track_meta or {}
     album_meta = album_meta or {}
     nested = track_meta.get("album") or {}
@@ -661,11 +692,11 @@ def index_from_meta(track_meta, album_meta=None, display_index=None):
     )
 
 
-def set_track_index(value):
+def set_track_index(value: str | None) -> contextvars.Token[str]:
     return _track_index.set(value or "")
 
 
-def reset_track_index(token):
+def reset_track_index(token: contextvars.Token[str]) -> None:
     try:
         _track_index.reset(token)
     except ValueError:
@@ -673,13 +704,15 @@ def reset_track_index(token):
         pass
 
 
-def run_in_executor(loop, executor, fn, *args):
+def run_in_executor(
+    loop: Any, executor: Any, fn: Callable[..., Any], *args: Any
+) -> Any:
     """run_in_executor que PRESERVA o contexto (o do asyncio puro não preserva)."""
     ctx = contextvars.copy_context()
     return loop.run_in_executor(executor, ctx.run, fn, *args)
 
 
-def faint(text):
+def faint(text: Any) -> str:
     """Cinza apagado (métricas), mais escuro que o dim()."""
     return f"{c(GRAY)}{text}{c(RESET)}"
 
@@ -705,17 +738,19 @@ _track_view: contextvars.ContextVar[_TrackView | None] = contextvars.ContextVar(
 )
 
 
-def begin_track_view(parallel=False):
+def begin_track_view(
+    parallel: bool = False,
+) -> contextvars.Token[_TrackView | None]:
     return _track_view.set(
         {"parallel": bool(parallel), "audio": "", "lyrics": [], "existing": False}
     )
 
 
-def end_track_view(token):
+def end_track_view(token: contextvars.Token[_TrackView | None]) -> None:
     _track_view.reset(token)
 
 
-def finish_track_view(title, success):
+def finish_track_view(title: Any, success: bool) -> None:
     state = _track_view.get()
     if not state or not success or state["existing"]:
         return
@@ -724,7 +759,7 @@ def finish_track_view(title, success):
     _emit_kind("done", tail(f"{label} {title}", details))
 
 
-def _tagged(color, tag, message):
+def _tagged(color: str, tag: str, message: Any) -> list[str]:
     idx = _track_index.get()
     marca = f"[{idx}]" if idx else f"[{tag}]"
     largura_marca = _cell_width(marca) + 1
@@ -806,7 +841,7 @@ _KINDS = {
 }
 
 
-def tagged_lines(kind, message):
+def tagged_lines(kind: str, message: Any) -> list[str]:
     # Devolve as linhas já formatadas (tag colorida, quebra, métricas em cinza)
     # SEM escrevê-las. Para código que roda dentro do `print_lock` (que não é
     # reentrante) e por isso não pode chamar ok()/step()/... sem travar.
@@ -830,7 +865,7 @@ def tagged_lines(kind, message):
     return _tagged(color, tag, message)
 
 
-def _emit_tagged(color, tag, message, sempre=False):
+def _emit_tagged(color: str, tag: str, message: Any, sempre: bool = False) -> None:
     # Emite cada linha produzida por _tagged() separadamente, escolhendo
     # entre emit() e emit_always() conforme o parâmetro `sempre`.
     """Emit a tagged message with consistent formatting."""
@@ -839,31 +874,31 @@ def _emit_tagged(color, tag, message, sempre=False):
         escrever(linha)
 
 
-def ok(message):
+def ok(message: Any) -> None:
     # Mensagem de sucesso -- prefixo "[+]" verde.
     """Print a success message (green checkmark)."""
     _emit_tagged(SUCCESS, "+", message)
 
 
-def _emit_kind(kind, message):
+def _emit_kind(kind: str, message: Any) -> None:
     color, tag = _KINDS[kind]
     _emit_tagged(color, tag, message)
 
 
-def progress(message):
+def progress(message: Any) -> None:
     if _track_view.get():
         message = str(message).replace("Em Progresso:", "Baixando:", 1)
     _emit_kind("progress", message)
 
 
-def search(message):
+def search(message: Any) -> None:
     state = _track_view.get()
     if state and not state["parallel"]:
         message = f"{tree_mid()} {message}"
     _emit_kind("search", message)
 
 
-def done(message):
+def done(message: Any) -> None:
     state = _track_view.get()
     if state is None:
         _emit_kind("done", message)
@@ -874,23 +909,23 @@ def done(message):
         _emit_kind("lyrics", tail(f"{tree_mid()} Áudio transferido", state["audio"]))
 
 
-def lyrics(message):
+def lyrics(message: Any) -> None:
     _emit_kind("lyrics", message)
 
 
-def step(message):
+def step(message: Any) -> None:
     # Mensagem de etapa em andamento -- prefixo "[*]" na cor de destaque.
     """Print a progress step message (arrow icon)."""
     _emit_tagged(HIGHLIGHT, "*", message)
 
 
-def info(message):
+def info(message: Any) -> None:
     # Informação neutra, sem prefixo colorido nem quebra automática de tag.
     """Print an informational message (info icon)."""
     emit(message)
 
 
-def warn(message):
+def warn(message: Any) -> None:
     # Mensagem de aviso -- prefixo "[!]" amarelo. Ignora --quiet (usa
     # emit_always): a própria ajuda da flag promete "mostra apenas avisos
     # e erros", então um aviso suprimido por --quiet contradiz a promessa
@@ -900,14 +935,14 @@ def warn(message):
     _emit_tagged(WARNING, "!", message, sempre=True)
 
 
-def error(message):
+def error(message: Any) -> None:
     # Mensagem de erro -- prefixo "[!]" vermelho. Ignora --quiet (usa
     # emit_always) porque erro é informação que o usuário sempre precisa ver.
     """Print an error message (red X icon)."""
     _emit_tagged(ERROR, "!", message, sempre=True)
 
 
-def skip(message):
+def skip(message: Any) -> None:
     # Item ignorado/pulado -- cinza; faixa já existente é aviso amarelo.
     """Print a skip/omit message (yellow circle icon)."""
     state = _track_view.get()
@@ -929,7 +964,7 @@ def skip(message):
         _emit_tagged(GRAY, "-", message)
 
 
-def detail(message, indent=4):
+def detail(message: Any, indent: int = 4) -> None:
     # Linha secundária: comunica hierarquia pelo RECUO, não pela cor (texto
     # sai na cor padrão do terminal). Quebra automaticamente na largura
     # disponível, respeitando o recuo.
@@ -943,14 +978,14 @@ def detail(message, indent=4):
         emit(f"{c(RESET)}{pad}{line}")
 
 
-def debug(message):
+def debug(message: Any) -> None:
     # Só aparece quando --verbose está ativo.
     """Print a debug message if verbose mode is active."""
     if estado.verbose:
         emit(f"{c(MUTED)}[debug] {message}{c(RESET)}")
 
 
-def blank():
+def blank() -> None:
     # Atalho para uma linha em branco.
     """Print a blank line unless quiet mode is active."""
     emit("")
@@ -959,7 +994,9 @@ def blank():
 # --------------------------------------------------------------------------
 # Estrutura visual (regras divisórias)
 # --------------------------------------------------------------------------
-def rule(char=None, cols=None, color=HIGHLIGHT):
+def rule(
+    char: str | None = None, cols: int | None = None, color: str = HIGHLIGHT
+) -> None:
     # Linha divisória de largura total (usa a largura do terminal por
     # padrão, ou `cols` se especificado).
     """Print a horizontal rule line."""
@@ -1033,7 +1070,7 @@ _BOX_STYLES = {
 BOX_RULE = None
 
 
-def box_style_name():
+def box_style_name() -> str:
     """Nome do estilo de caixa em uso (respeita Unicode e QOBUZ_DL_BOX)."""
     if not unicode_enabled():
         return "ascii"
@@ -1041,7 +1078,7 @@ def box_style_name():
     return name if name in _BOX_STYLES else "round"
 
 
-def box_width(cols=None):
+def box_width(cols: int | None = None) -> int:
     """Largura total da caixa: teto compacto, nunca a linha inteira do terminal."""
     if cols is not None:
         n = int(cols)
@@ -1051,7 +1088,9 @@ def box_width(cols=None):
     return max(BOX_MIN, min(n, width() - 1))
 
 
-def box(title, lines, cols=None, color=HIGHLIGHT):
+def box(
+    title: Any, lines: Iterable[Any], cols: int | None = None, color: str = HIGHLIGHT
+) -> list[str]:
     """Monta uma caixa fechada e devolve a lista de linhas prontas.
 
     ``title`` vai embutido na borda de cima. ``lines`` aceita texto com ANSI
@@ -1086,7 +1125,14 @@ def box(title, lines, cols=None, color=HIGHLIGHT):
     return out
 
 
-def emit_box(title, lines, cols=None, color=HIGHLIGHT, always=False, lead=True):
+def emit_box(
+    title: Any,
+    lines: Iterable[Any],
+    cols: int | None = None,
+    color: str = HIGHLIGHT,
+    always: bool = False,
+    lead: bool = True,
+) -> None:
     """Imprime a caixa numa única escrita (as linhas nunca se intercalam).
 
     A caixa sai com uma linha em branco depois e, com ``lead=True``, outra
@@ -1098,7 +1144,13 @@ def emit_box(title, lines, cols=None, color=HIGHLIGHT, always=False, lead=True):
     escrever(inicio + "\n".join(box(title, lines, cols=cols, color=color)) + "\n")
 
 
-def header(kind, rows, cols=None, fit=False, lead=True):
+def header(
+    kind: Any,
+    rows: Iterable[tuple[Any, Any]],
+    cols: int | None = None,
+    fit: bool = False,
+    lead: bool = True,
+) -> None:
     # Cabeçalho de operação (álbum, faixa, playlist, lote de urls): caixa
     # fechada com o tipo embutido na borda de cima e os pares rótulo/valor
     # alinhados dentro. Valores longos quebram com recuo (nunca cortam) e a
@@ -1123,7 +1175,9 @@ def header(kind, rows, cols=None, fit=False, lead=True):
     emit_box(str(kind), _kv_lines(rows, inner), cols=cols, lead=lead)
 
 
-def _kv_lines(rows, inner, label_width=None):
+def _kv_lines(
+    rows: Iterable[tuple[Any, Any]], inner: int, label_width: int | None = None
+) -> list[str]:
     """Linhas "RÓTULO  valor" alinhadas para dentro de uma caixa de ``inner`` células.
 
     Valores longos quebram com recuo (nunca cortam). ``label_width`` fixa a
@@ -1154,51 +1208,51 @@ class Painel:
     de uma vez com ``emit``; o painel todo sai numa única escrita.
     """
 
-    def __init__(self, title, cols=None):
+    def __init__(self, title: Any, cols: int | None = None) -> None:
         self.title = str(title)
         self.cols = PAINEL_COLS if cols is None else cols
-        self._items = []
+        self._items: list[tuple[Any, ...]] = []
 
     # -- montagem (todas devolvem o próprio painel, para encadear) ----------
-    def kv(self, label, value):
+    def kv(self, label: Any, value: Any) -> "Painel":
         self._items.append(("kv", str(label), str(value)))
         return self
 
-    def _msg(self, tone, text):
+    def _msg(self, tone: str, text: Any) -> "Painel":
         self._items.append(("msg", tone, str(text)))
         return self
 
-    def ok(self, text):
+    def ok(self, text: Any) -> "Painel":
         return self._msg("ok", text)
 
-    def warn(self, text):
+    def warn(self, text: Any) -> "Painel":
         return self._msg("warn", text)
 
-    def error(self, text):
+    def error(self, text: Any) -> "Painel":
         return self._msg("err", text)
 
-    def info(self, text):
+    def info(self, text: Any) -> "Painel":
         return self._msg("info", text)
 
-    def text(self, text, indent=0):
+    def text(self, text: Any, indent: int = 0) -> "Painel":
         """Linha de texto normal (cor padrão), com recuo."""
         self._items.append(("text", int(indent), str(text)))
         return self
 
-    def detail(self, text, indent=0):
+    def detail(self, text: Any, indent: int = 0) -> "Painel":
         """Linha de apoio em cinza, com recuo."""
         self._items.append(("detail", int(indent), str(text)))
         return self
 
-    def rule(self):
+    def rule(self) -> "Painel":
         self._items.append(("rule",))
         return self
 
-    def __bool__(self):
+    def __bool__(self) -> bool:
         return bool(self._items)
 
     # -- desenho -------------------------------------------------------------
-    def lines(self):
+    def lines(self) -> list[str | None]:
         """Linhas internas da caixa (sem a moldura)."""
         inner = box_width(self.cols) - 4
         rst = c(RESET)
@@ -1206,7 +1260,7 @@ class Painel:
             (_cell_width(item[1]) for item in self._items if item[0] == "kv"),
             default=0,
         )
-        out = []
+        out: list[str | None] = []
         for item in self._items:
             kind = item[0]
             if kind == "kv":
@@ -1229,7 +1283,7 @@ class Painel:
                 out.append(BOX_RULE)
         return out
 
-    def emit(self, lead=True):
+    def emit(self, lead: bool = True) -> None:
         """Imprime o painel (nada, se estiver vazio)."""
         if self._items:
             emit_box(self.title, self.lines(), cols=self.cols, lead=lead)
@@ -1245,7 +1299,15 @@ _TONES = {
 }
 
 
-def summary(title, rows, notes=(), cols=None, subtitle="", elapsed=None, lead=True):
+def summary(
+    title: Any,
+    rows: Iterable[tuple[Any, Any, str]],
+    notes: Iterable[Any] = (),
+    cols: int | None = None,
+    subtitle: str = "",
+    elapsed: float | None = None,
+    lead: bool = True,
+) -> None:
     # Painel de resumo (fim de álbum/faixa/playlist/lote). `rows` são tuplas
     # (rótulo, valor, tom) com tom em ok/warn/err/info; o valor sai alinhado
     # à direita. `notes` aceita dois formatos: tupla (rótulo, valor, tom), que
@@ -1287,17 +1349,17 @@ def summary(title, rows, notes=(), cols=None, subtitle="", elapsed=None, lead=Tr
 
 
 def summary_downloads(
-    kind,
-    name,
-    success,
-    total,
-    skipped=0,
-    failed=0,
-    notes=(),
-    existing=0,
-    elapsed=None,
-    total_bytes=None,
-):
+    kind: Any,
+    name: Any,
+    success: int,
+    total: int,
+    skipped: int = 0,
+    failed: int = 0,
+    notes: Iterable[Any] = (),
+    existing: int = 0,
+    elapsed: float | None = None,
+    total_bytes: float | None = None,
+) -> None:
     """Resumo consolidado dos resultados de download.
 
     `elapsed` (segundos) acrescenta "Tempo total"; `total_bytes` acrescenta
@@ -1329,12 +1391,12 @@ def summary_downloads(
 # --------------------------------------------------------------------------
 # Árvore de progresso (glifos com fallback ASCII)
 # --------------------------------------------------------------------------
-def tree_last():
+def tree_last() -> str:
     """Ramo final da árvore (``└─``); no fallback ASCII, crase + hífen."""
     return _glyph("\u2514\u2500", "`-")
 
 
-def dim(text):
+def dim(text: Any) -> str:
     """Texto em cinza dentro de uma mensagem; sem cor, devolve o texto.
 
     Usa ``GRAY`` (cinza fixo) e não ``MUTED``: o esmaecido (SGR 2) só reduz a
@@ -1348,7 +1410,7 @@ _TAIL_GAP = "   "  # respiro entre o nome da faixa e as métricas
 _TAIL_MARK = "\x1f"  # separa o nome das métricas até `_tagged` montar a linha
 
 
-def tail(message, text):
+def tail(message: str, text: Any) -> str:
     """Anexa ``text`` ao fim de ``message``; ``_tagged`` põe o respiro e o cinza.
 
     Só para mensagens de ``ok``/``step``/``warn``/``skip``/``error`` (passam por
@@ -1359,12 +1421,12 @@ def tail(message, text):
     return f"{message}{_TAIL_MARK}{text}"
 
 
-def join_meta(*parts):
+def join_meta(*parts: Any) -> str:
     """Junta métricas com ``·`` (ou vírgula sem Unicode), ignorando as vazias."""
     return _glyph(" \u00b7 ", ", ").join(str(p) for p in parts if p)
 
 
-def stats_text(size_bytes, seconds):
+def stats_text(size_bytes: float | None, seconds: float | None) -> str:
     """Métricas de uma conclusão (``78.3 MB · 6.2 s``); vazio sem dados.
 
     Só tamanho e tempo (sem velocidade): num download retomado a velocidade
@@ -1379,7 +1441,7 @@ def stats_text(size_bytes, seconds):
     return join_meta(*parts)
 
 
-def format_elapsed(seconds):
+def format_elapsed(seconds: Any) -> str:
     """Duração para o resumo: ``8.4 s``, ``1 min 42 s``, ``1 h 02 min``."""
     secs = max(0.0, float(seconds))
     if secs < 59.95:
@@ -1392,7 +1454,7 @@ def format_elapsed(seconds):
     return f"{minutes} min {sec:02d} s"
 
 
-def format_bytes(size):
+def format_bytes(size: Any) -> str:
     """Tamanho legível (base 1000): ``312 MB``, ``3.1 MB``, ``850 KB``."""
     value = max(0.0, float(size))
     for unit in ("B", "KB", "MB", "GB", "TB"):
@@ -1404,7 +1466,7 @@ def format_bytes(size):
     return f"{value:.0f} TB"  # inalcançável; satisfaz o type checker
 
 
-def format_speed(size, seconds):
+def format_speed(size: Any, seconds: Any) -> str:
     """Velocidade média: ``3.1 MB/s``; vazio se não houver tempo medido."""
     try:
         if float(seconds) <= 0:
@@ -1414,7 +1476,7 @@ def format_speed(size, seconds):
         return ""
 
 
-def format_clock(seconds):
+def format_clock(seconds: Any) -> str:
     """Duração de uma faixa/álbum para o cabeçalho: ``06:09`` ou ``01:14:24``."""
     try:
         total = int(round(float(seconds)))
@@ -1429,17 +1491,17 @@ def format_clock(seconds):
     return f"{minutes:02d}:{sec:02d}"
 
 
-def elapsed_row(seconds):
+def elapsed_row(seconds: Any) -> tuple[str, str, str]:
     """Linha ``Tempo total`` dos resumos, no mesmo formato das demais."""
     return ("Tempo total", format_elapsed(seconds), "info")
 
 
-def tree_mid():
+def tree_mid() -> str:
     """Ramo intermediário da árvore (``├─``); ASCII: ``|-``."""
     return _glyph("\u251c\u2500", "|-")
 
 
-def bar_gauge(value, peak, max_blocks=None):
+def bar_gauge(value: float, peak: float | None, max_blocks: int | None = None) -> str:
     # Barrinha horizontal proporcional (ex.: ranking de artistas por
     # quantidade de faixas). `max_blocks` é derivado da largura real do
     # terminal quando não informado, em vez de um número fixo -- isso evita
@@ -1455,7 +1517,7 @@ def bar_gauge(value, peak, max_blocks=None):
 _ANSI_ESCAPE = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\))")
 
 
-def _cell_width(text):
+def _cell_width(text: Any) -> int:
     """Measure terminal cells, ignoring ANSI control sequences."""
     clean = _ANSI_ESCAPE.sub("", str(text))
     try:
@@ -1471,7 +1533,7 @@ def _cell_width(text):
         return total
 
 
-def _wrap_lines(text, limit):
+def _wrap_lines(text: Any, limit: Any) -> list[str]:
     """Wrap text by terminal-cell width, including wide Unicode characters.
 
     Words are kept intact where possible; a single overlong token is split by
@@ -1514,7 +1576,7 @@ def _wrap_lines(text, limit):
     return lines or [""]
 
 
-def wrapped(text, indent=0, cols=None):
+def wrapped(text: Any, indent: int = 0, cols: int | None = None) -> None:
     # Texto corrido quebrado na largura do terminal, com recuo opcional.
     # Emite RESET no início de CADA linha de propósito: garante que texto
     # explicativo sempre saia na cor padrão do terminal, sem herdar cor de
@@ -1526,7 +1588,7 @@ def wrapped(text, indent=0, cols=None):
         emit(f"{c(RESET)}{pad}{line}")
 
 
-def truncate(text, limit):
+def truncate(text: Any, limit: Any) -> str:
     """Truncate text by terminal-cell width, adding an ellipsis if needed."""
     text = str(text)
     limit = max(0, int(limit))
@@ -1549,7 +1611,7 @@ def truncate(text, limit):
     return result + "..."
 
 
-def pad_cells(text, cols):
+def pad_cells(text: Any, cols: Any) -> str:
     """Completa ``text`` com espaços à direita até ``cols`` células de terminal.
 
     ``str.ljust``/``f"{x:<n}"`` contam caracteres, não células: emoji e
@@ -1559,7 +1621,7 @@ def pad_cells(text, cols):
     return text + " " * max(0, int(cols) - _cell_width(text))
 
 
-def center_cells(text, cols):
+def center_cells(text: Any, cols: Any) -> str:
     """Centraliza ``text`` em ``cols`` células (igual a ``str.center`` em ASCII)."""
     text = truncate(text, cols)
     pad = max(0, int(cols) - _cell_width(text))
@@ -1577,7 +1639,7 @@ class TqdmLoggingHandler(logging.Handler):
     # mesmo tqdm.write que as barras de progresso do downloader, em vez de
     # escrever direto no stdout por cima delas.
 
-    def __init__(self, bypass_quiet=False):
+    def __init__(self, bypass_quiet: bool = False) -> None:
         """Initialize logging handler that respects quiet mode unless bypass_quiet is True."""
         super().__init__()
         # bypass_quiet=True quando --log-level foi passado explicitamente:
@@ -1588,7 +1650,7 @@ class TqdmLoggingHandler(logging.Handler):
         # o comportamento padrao (quiet/verbose) descrito em --help.
         self.bypass_quiet = bypass_quiet
 
-    def emit(self, record):
+    def emit(self, record: logging.LogRecord) -> None:
         """Print a message unless quiet mode is active."""
         try:
             msg = self.format(record)
@@ -1606,7 +1668,7 @@ class TqdmLoggingHandler(logging.Handler):
             emit(msg)
 
 
-def install_logging(level=None):
+def install_logging(level: int | None = None) -> TqdmLoggingHandler:
     # Substitui os handlers do logger raiz pelo TqdmLoggingHandler. Deve
     # ser chamado uma vez, no início da CLI, depois de configure().
     """Configure Python logging to route through the UI system."""

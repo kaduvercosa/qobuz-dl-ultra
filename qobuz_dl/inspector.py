@@ -87,7 +87,7 @@ def _obter_info_mp3(audio: object) -> _InfoMP3:
     return cast(_InfoMP3, info)
 
 
-def _detectar_pasta_padrao():
+def _detectar_pasta_padrao() -> str:
     """
     Decide de onde o navegador de arquivos deve abrir quando o usuário NÃO
     digita uma pasta -- olhando pra que tipo de dispositivo/SO está
@@ -156,7 +156,7 @@ def _detectar_pasta_padrao():
     return os.getcwd()
 
 
-def _listar_diretorio(caminho):
+def _listar_diretorio(caminho: Any) -> Any:
     """
     Lista um diretório pra navegação: subpastas primeiro (ordem alfabética,
     sem contar maiúsc/minúsc), depois arquivos de áudio reconhecidos --
@@ -201,7 +201,7 @@ def _listar_diretorio(caminho):
     return entradas
 
 
-async def _navegar_arquivos(diretorio_inicial):
+async def _navegar_arquivos(diretorio_inicial: Any) -> Any:
     """
     Navegador de arquivos em tela cheia. Retorna o caminho do arquivo de
     áudio escolhido, ou None se o usuário cancelou (Esc/Ctrl+C).
@@ -226,7 +226,7 @@ async def _navegar_arquivos(diretorio_inicial):
         "erro": None,
     }
 
-    def _recarregar():
+    def _recarregar() -> None:
         """Reload the file list in the file browser."""
         estado["entradas"] = _listar_diretorio(estado["dir"])
         estado["cursor"] = min(estado["cursor"], max(0, len(estado["entradas"]) - 1))
@@ -235,10 +235,10 @@ async def _navegar_arquivos(diretorio_inicial):
 
     bindings = KeyBindings()
 
-    def _mover(delta):
+    def _mover(delta: Any) -> Any:
         """Move cursor in the file browser."""
 
-        def _fn(event):
+        def _fn(event: Any) -> None:
             if estado["entradas"]:
                 estado["cursor"] = max(
                     0, min(len(estado["entradas"]) - 1, estado["cursor"] + delta)
@@ -256,26 +256,26 @@ async def _navegar_arquivos(diretorio_inicial):
     bindings.add("j")(_mover(1))
 
     @bindings.add("pageup")
-    def _(event):
+    def _(event: Any) -> None:
         if estado["entradas"]:
             estado["cursor"] = max(0, estado["cursor"] - 10)
 
     @bindings.add("pagedown")
-    def _(event):
+    def _(event: Any) -> None:
         if estado["entradas"]:
             estado["cursor"] = min(len(estado["entradas"]) - 1, estado["cursor"] + 10)
 
     @bindings.add("g")
-    def _(event):
+    def _(event: Any) -> None:
         estado["cursor"] = 0
 
     @bindings.add("G")
-    def _(event):
+    def _(event: Any) -> None:
         if estado["entradas"]:
             estado["cursor"] = len(estado["entradas"]) - 1
 
-    def _make_digit_jump(n):
-        def _fn(event):
+    def _make_digit_jump(n: Any) -> Any:
+        def _fn(event: Any) -> None:
             idx = n - 1
             if estado["entradas"] and idx < len(estado["entradas"]):
                 estado["cursor"] = idx
@@ -285,7 +285,7 @@ async def _navegar_arquivos(diretorio_inicial):
     for _digito in range(1, 10):
         bindings.add(str(_digito))(_make_digit_jump(_digito))
 
-    def _entrar_ou_escolher(event):
+    def _entrar_ou_escolher(event: Any) -> None:
         """Enter directory or select file."""
         if not estado["entradas"]:
             return
@@ -302,7 +302,7 @@ async def _navegar_arquivos(diretorio_inicial):
     bindings.add("right")(_entrar_ou_escolher)
     bindings.add("l")(_entrar_ou_escolher)
 
-    def _voltar(event):
+    def _voltar(event: Any) -> None:
         """Go back to parent directory."""
         pai = os.path.dirname(estado["dir"].rstrip(os.sep))
         # Já está na raiz do sistema de arquivos (dirname("/") == "/",
@@ -318,21 +318,21 @@ async def _navegar_arquivos(diretorio_inicial):
     bindings.add("backspace")(_voltar)
 
     @bindings.add("r")
-    def _(event):
+    def _(event: Any) -> None:
         # Força redesenho -- útil se o terminal não reagir sozinho a girar
         # a tela do iPad/iPhone (mesmo atalho do seletor principal).
         _recarregar()
         event.app.invalidate()
 
     @bindings.add("c-c")
-    def _(event):
+    def _(event: Any) -> None:
         event.app.exit(result=None)
 
     @bindings.add("escape")
-    def _(event):
+    def _(event: Any) -> None:
         event.app.exit(result=None)
 
-    def get_header_text():
+    def get_header_text() -> list[tuple[str, str]]:
         """Generate header text for file browser UI."""
         return [
             ("class:title", "\n === Escolha um arquivo de áudio ===\n\n"),
@@ -340,7 +340,7 @@ async def _navegar_arquivos(diretorio_inicial):
             ("class:meta", ""),
         ]
 
-    def get_list_text():
+    def get_list_text() -> list[tuple[str, str]]:
         """Generate list text for file browser UI."""
         res = []
         if not estado["entradas"]:
@@ -361,7 +361,7 @@ async def _navegar_arquivos(diretorio_inicial):
 
         return res
 
-    def get_footer_text():
+    def get_footer_text() -> list[tuple[str, str]]:
         """Generate footer text for file browser UI."""
         msg = (
             " [↑↓/jk] Mover   [→/l/Enter] Entrar/Escolher   [←/h] Voltar   "
@@ -393,7 +393,7 @@ async def _navegar_arquivos(diretorio_inicial):
     return await app.run_async()
 
 
-def _formatar_tamanho(num_bytes):
+def _formatar_tamanho(num_bytes: Any) -> str:
     """Format file size in human-readable format."""
     for unidade in ("B", "KB", "MB", "GB"):
         if num_bytes < 1024:
@@ -402,7 +402,7 @@ def _formatar_tamanho(num_bytes):
     return f"{num_bytes:.1f} TB"
 
 
-def _extrair_tudo(caminho):
+def _extrair_tudo(caminho: Any) -> Any:
     """
     Extrai TODOS os dados de um arquivo de áudio: informações técnicas do
     stream (codec, sample rate, profundidade de bits, canais, duração,
@@ -529,7 +529,9 @@ def _extrair_tudo(caminho):
     return dados
 
 
-def _checar_genuinidade(caminho, sample_rate, duracao_s):
+def _checar_genuinidade(
+    caminho: Any, sample_rate: Any, duracao_s: Any
+) -> dict[str, Any]:
     """
     Heurística de "isso é genuinamente lossless/hi-res, ou é upsample de
     uma fonte lossy disfarçado de FLAC/hi-res?": decodifica algumas
@@ -727,7 +729,7 @@ _CSS_VARS_CLARO = {
 }
 
 
-def _suavizar(valores, janela=11):
+def _suavizar(valores: Any, janela: int = 11) -> Any:
     # Média móvel simples -- a curva crua do FFT é serrilhada demais pra
     # quem não é engenheiro de áudio enxergar o que importa (o formato
     # geral e onde o corte acontece). Suavizar deixa só o essencial
@@ -744,7 +746,7 @@ def _suavizar(valores, janela=11):
     ]
 
 
-def _esc(txt):
+def _esc(txt: Any) -> str:
     # Escapa texto antes de embutir em HTML/SVG -- o nome da faixa vem
     # do nome do arquivo do usuário, que pode ter "&", "<", ">" etc.
     """Escape HTML special characters."""
@@ -753,7 +755,7 @@ def _esc(txt):
     return html.escape(str(txt), quote=True)
 
 
-def _gerar_grafico_html(caminho_audio, genuinidade):
+def _gerar_grafico_html(caminho_audio: Any, genuinidade: Any) -> Any:
     """
     Gera um gráfico de resposta em frequência como um arquivo HTML
     autocontido (SVG embutido, CSS embutido, sem dependências externas
@@ -807,11 +809,11 @@ def _gerar_grafico_html(caminho_audio, genuinidade):
     db_min = piso_db - 10
     db_max = pico_db + 5
 
-    def _x_px(hz):
+    def _x_px(hz: Any) -> float:
         """Calculate X position for cover art pixels."""
         return x0 + (hz / nyquist_hz) * (x1 - x0) if nyquist_hz else x0
 
-    def _y_px(db):
+    def _y_px(db: Any) -> float:
         """Calculate Y position for cover art pixels."""
         db_clamp = max(db_min, min(db_max, db))
         return y1 - (db_clamp - db_min) / (db_max - db_min) * (y1 - y0)
@@ -981,7 +983,7 @@ def _gerar_grafico_html(caminho_audio, genuinidade):
         f'{px_corte + 4:.1f},{y_curva_no_corte - 8:.1f}" fill="var(--cor-texto)"/>'
     )
 
-    def _css(d):
+    def _css(d: Any) -> str:
         """Generate CSS for cover art pixel display."""
         return ";".join(f"{k}:{v}" for k, v in d.items())
 
@@ -1100,7 +1102,7 @@ def _gerar_grafico_html(caminho_audio, genuinidade):
     return destino
 
 
-def _mostrar_autenticidade(caminho, genuinidade):
+def _mostrar_autenticidade(caminho: Any, genuinidade: Any) -> None:
     """Painel "AUTENTICIDADE": veredito da heurística espectral + gráfico em HTML."""
     painel = ui.Painel("🔬 AUTENTICIDADE (heurística espectral)")
     if genuinidade is None:
@@ -1132,7 +1134,7 @@ def _mostrar_autenticidade(caminho, genuinidade):
     painel.emit(lead=False)
 
 
-def _mostrar_capas(capas):
+def _mostrar_capas(capas: Any) -> None:
     painel = ui.Painel(f"🖼️  CAPAS EMBUTIDAS ({len(capas)})")
     if not capas:
         painel.warn("Nenhuma capa embutida no arquivo.")
@@ -1160,7 +1162,7 @@ def _mostrar_capas(capas):
     painel.emit(lead=False)
 
 
-def _mostrar_letras(letras):
+def _mostrar_letras(letras: Any) -> None:
     painel = ui.Painel("🎤 LETRAS")
     if letras["embutida"]:
         tipo = "sincronizada" if letras["sincronizada"] else "sem sincronia"
@@ -1182,7 +1184,7 @@ def _mostrar_letras(letras):
     painel.emit(lead=False)
 
 
-def _mostrar_diagnostico(problemas):
+def _mostrar_diagnostico(problemas: Any) -> None:
     painel = ui.Painel("🩺 DIAGNÓSTICO (mesmos avisos do `tags --report`)")
     if not problemas:
         painel.ok("Nada a corrigir: tags, IDs do Qobuz e capa estão completos.")
@@ -1197,7 +1199,7 @@ def _mostrar_diagnostico(problemas):
     painel.emit(lead=False)
 
 
-def _mostrar_ffmpeg(detalhes):
+def _mostrar_ffmpeg(detalhes: Any) -> None:
     painel = ui.Painel("🧪 INTEGRIDADE E VOLUME (ffmpeg)")
     integ = detalhes.get("integridade") or {}
     if integ.get("ok") is True:
@@ -1228,7 +1230,7 @@ def _mostrar_ffmpeg(detalhes):
     painel.emit(lead=False)
 
 
-def _mostrar_detalhes(detalhes):
+def _mostrar_detalhes(detalhes: Any) -> None:
     """Relatório completo organizado em painéis (tags por assunto, capas, letras...)."""
     arquivo = ui.Painel("🔍 INSPETOR DE ÁUDIO")
     for chave, valor in detalhes["tecnico"].items():
@@ -1251,7 +1253,9 @@ def _mostrar_detalhes(detalhes):
         _mostrar_ffmpeg(detalhes)
 
 
-def _mostrar_relatorio(caminho, dados, genuinidade, detalhes=None):
+def _mostrar_relatorio(
+    caminho: Any, dados: Any, genuinidade: Any, detalhes: Any = None
+) -> None:
     """Display full tag report for audio file.
 
     `detalhes` (de `inspect_data.ler_arquivo`) traz o relatório organizado; sem
@@ -1284,7 +1288,7 @@ def _mostrar_relatorio(caminho, dados, genuinidade, detalhes=None):
     _mostrar_autenticidade(caminho, genuinidade)
 
 
-def _json_autenticidade(genuinidade):
+def _json_autenticidade(genuinidade: Any) -> Any:
     if not genuinidade:
         return None
     chaves = ("disponivel", "motivo", "cor", "mensagem", "corte_hz", "nyquist_hz")
@@ -1294,12 +1298,14 @@ def _json_autenticidade(genuinidade):
     return saida
 
 
-def _imprimir_json(dados):
+def _imprimir_json(dados: Any) -> None:
     # print() direto: a saída tem de ser só o JSON, mesmo com --quiet
     print(json.dumps(dados, ensure_ascii=False, indent=2, default=str))
 
 
-def _analisar_arquivo(caminho, completo, espectro, falar=True):
+def _analisar_arquivo(
+    caminho: Any, completo: Any, espectro: Any, falar: bool = True
+) -> Any:
     """(detalhes, genuinidade) de um arquivo; levanta a exceção se ele é ilegível.
 
     falar=False: sem mensagens de andamento (para a saída `--json` ficar limpa).
@@ -1319,7 +1325,9 @@ def _analisar_arquivo(caminho, completo, espectro, falar=True):
     return detalhes, genuinidade
 
 
-def _inspecionar_pasta(pasta, completo, json_saida, auditar=False):
+def _inspecionar_pasta(
+    pasta: Any, completo: Any, json_saida: Any, auditar: bool = False
+) -> int:
     """`inspect PASTA --resumo`: uma entrada por faixa e os totais da pasta.
 
     Com `auditar`, confere também a qualidade que a pasta e o comentário de cada
@@ -1440,7 +1448,7 @@ def _inspecionar_pasta(pasta, completo, json_saida, auditar=False):
     return 0
 
 
-def _mostrar_auditoria(pasta, auditoria):
+def _mostrar_auditoria(pasta: Any, auditoria: Any) -> None:
     """Caixa de resumo + detalhes da auditoria de qualidade."""
     erradas = auditoria["pastas_erradas"]
     comentarios = auditoria["comentarios_errados"]
@@ -1476,13 +1484,13 @@ def _mostrar_auditoria(pasta, auditoria):
 
 
 async def run_inspector(
-    diretorio_inicial=None,
-    json_saida=False,
-    resumo=False,
-    completo=False,
-    espectro=True,
-    auditar=False,
-):
+    diretorio_inicial: Any = None,
+    json_saida: bool = False,
+    resumo: bool = False,
+    completo: bool = False,
+    espectro: bool = True,
+    auditar: bool = False,
+) -> int:
     """
     Ponto de entrada do `qobuz-dl inspect`.
 
@@ -1532,7 +1540,7 @@ async def run_inspector(
     return 0
 
 
-async def comparar_com_qobuz(client, settings, caminho):
+async def comparar_com_qobuz(client: Any, settings: Any, caminho: Any) -> int:
     """`inspect ARQUIVO --comparar`: o que o `tags` mudaria neste arquivo (só simula).
 
     Roda o mesmo código do `tags --dry-run` numa cópia temporária do arquivo:

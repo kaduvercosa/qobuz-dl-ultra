@@ -14,7 +14,7 @@ import sys
 
 import pytest
 
-from qobuz_dl import core
+from qobuz_dl import core, ui
 
 pytestmark = pytest.mark.unit
 
@@ -45,6 +45,13 @@ pytestmark = [
         reason="entrada simulada do prompt_toolkit trava o Python no iOS/a-Shell",
     ),
 ]
+
+
+@pytest.fixture(autouse=True)
+def _layout_cartao():
+    """Este arquivo testa o CARTÃO; em tela estreita o padrão ("auto") é o compacto."""
+    with ui.estado_temporario(layout_interativo="cartao"):
+        yield
 
 
 def _opcoes(n=30):

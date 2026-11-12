@@ -2,7 +2,7 @@
 
 import pytest
 
-from qobuz_dl import core
+from qobuz_dl import core, ui
 
 pytestmark = pytest.mark.unit
 
@@ -139,6 +139,8 @@ async def test_legenda_compacta_explica_atalhos_sem_exceder_largura(
     monkeypatch.setattr(Size, "columns", columns)
     monkeypatch.setattr(core, "Application", FakeApplication)
     monkeypatch.setattr(core, "get_app", lambda: FakeApplication.last)
+    # Legenda do CARTÃO; o compacto (padrão em tela estreita) tem testes próprios.
+    monkeypatch.setattr(ui.estado, "layout_interativo", "cartao")
     options = [{"meta": {"title": "A", "artist": "B", "type": "Album"}}]
 
     await core._tui_select("Álbuns", options, is_multi=True, item_category="album")

@@ -7,7 +7,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from qobuz_dl import cli, library_cmd as lc, stats_view, ui
+from qobuz_dl import cli, stats_view, ui
+from qobuz_dl import library_cmd as lc
 from qobuz_dl.commands import qobuz_dl_args
 from qobuz_dl.library_db import LibraryDB
 

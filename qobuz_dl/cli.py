@@ -22,6 +22,7 @@ import sys
 import tempfile
 import threading
 import time
+from collections.abc import Callable
 from datetime import datetime
 from typing import Any, Optional
 
@@ -94,10 +95,18 @@ _SENSITIVE_CONFIG_KEYS = {
     "secrets",
     "user_auth_token",
     "user_token",
+    # Hooks (hooks.py): o tópico do ntfy e a URL do webhook funcionam como senha.
+    "ntfy",
+    "ntfy_token",
+    "webhook_url",
+    "webhook_secret",
+    "subsonic_password",
+    "plex_token",
+    "jellyfin_api_key",
 }
 
 
-def _write_config_secure(config, config_file):
+def _write_config_secure(config: Any, config_file: Any) -> None:
     """Grava o INI atomicamente e limita sua leitura ao usuário atual."""
     parent = os.path.dirname(os.path.abspath(config_file))
     os.makedirs(parent, mode=0o700, exist_ok=True)
@@ -126,7 +135,7 @@ def _write_config_secure(config, config_file):
         raise
 
 
-def _redacted_config(config):
+def _redacted_config(config: Any) -> str:
     """Serializa uma cópia do INI sem revelar credenciais no terminal."""
     safe = configparser.ConfigParser(interpolation=None)
     for key, value in config.defaults().items():
@@ -173,7 +182,7 @@ def _saida_so_json(argv: list) -> bool:
     return "--json" in argv and any(a in _COMANDOS_JSON for a in argv)
 
 
-def _bootstrap_ui():
+def _bootstrap_ui() -> None:
     """Configure UI system early based on command-line flags before argparse runs."""
     argv = sys.argv[1:]
     ui.configure(
@@ -200,7 +209,7 @@ def _keyring_save(key: str, value: str) -> bool:
         return False
 
 
-def _keyring_load(key: str):
+def _keyring_load(key: str) -> Any:
     """Retrieve a credential from the OS keyring. Returns None if not found or on error."""
     try:
         return keyring.get_password(KEYRING_SERVICE, key)
@@ -209,7 +218,7 @@ def _keyring_load(key: str):
         return None
 
 
-def _save_token_in_both_config_keys(config, token: str) -> None:
+def _save_token_in_both_config_keys(config: Any, token: str) -> None:
     """Mantém user_token e user_auth_token sincronizados no config.ini."""
     token = (token or "").strip()
     if not token:
@@ -240,7 +249,7 @@ def _separar_senha_e_token(valor_password: str) -> tuple[str, str]:
     return valor, ""
 
 
-def _load_token_from_all_locations(config, section="qobuz"):
+def _load_token_from_all_locations(config: Any, section: str = "qobuz") -> Any:
     """Lê o token usando todos os nomes legados/atuais."""
     disable_keyring = config.getboolean(section, "disable_keyring", fallback=False)
     keyring_token = "" if disable_keyring else (_keyring_load("auth_token") or "")
@@ -258,7 +267,7 @@ def _load_token_from_all_locations(config, section="qobuz"):
     return ""
 
 
-def validate_config_formats(formats_to_check: dict):
+def validate_config_formats(formats_to_check: dict) -> None:
     """Validate folder_format and track_format patterns for typos and unknown placeholders."""
     VALID_KEYS = {
         "artist",
@@ -280,6 +289,7 @@ def validate_config_formats(formats_to_check: dict):
         "format",
         "bit_depth",
         "sampling_rate",
+        "quality_tag",
         "album_version",
         "version_tag",
         "disc_count",
@@ -342,9 +352,14 @@ def validate_config_formats(formats_to_check: dict):
         sys.exit(1)
 
 
+def _titulo(texto: str, cor: str = "") -> str:
+    """Título de seção do assistente: [ TEXTO ] em negrito e na cor de destaque."""
+    return f"{ui.c(ANSI_BOLD)}{cor}[ {texto.upper()} ]{OFF}"
+
+
 def _pick_accent_color() -> str:
     """Interactive accent color picker for the config wizard. Returns RGB string."""
-    ui.emit(f"\n{BG}[?] Cor de destaque do programa:{OFF}")
+    ui.emit(f"\n{_titulo('Cor de destaque do programa', ACCENT)}")
     ui.wrapped("Aparece em nomes de faixas, cabeçalhos, barras e progresso.", indent=4)
     ui.blank()
 
@@ -403,7 +418,7 @@ def _pick_accent_color() -> str:
     if confirm in ("n", "nao", "no"):
         return _pick_accent_color()
 
-    ui.emit(f"\n {GREEN}Cor salva: {escape}━━ {name.strip()}{OFF}\n")
+    ui.emit(f"\n {GREEN}Cor salva: {escape}━━ {name.strip()}{OFF}")
     return rgb
 
 
@@ -420,7 +435,7 @@ _UNDO_STATUS_TEXT = {
 }
 
 
-def _handle_tags_suggest_names(target_dir: str, settings) -> int:
+def _handle_tags_suggest_names(target_dir: str, settings: Any) -> int:
     """`tags --suggest-names`: só lê as tags da pasta; não consulta o Qobuz nem grava."""
     from qobuz_dl import name_suggest
     from qobuz_dl.metadata import _nomes_protegidos
@@ -485,8 +500,9 @@ def auth_failure_hint(exc: BaseException) -> str:
         word in text for word in ("401", "unauthorized", "invalid token", "token")
     ):
         return (
-            "O token pode ter expirado ou sido revogado. Informe um novo token: "
-            "python3 -m qobuz_dl auth -l"
+            "O token pode ter expirado ou sido revogado. Autentique novamente "
+            "com 'qobuz-dl auth --oauth' ou atualize manualmente com "
+            "'qobuz-dl auth -l'."
         )
     if "keyring" in name or "keyring" in text:
         return (
@@ -515,7 +531,7 @@ def auth_failure_hint(exc: BaseException) -> str:
     return "Rode: qobuz-dl doctor para diagnosticar o ambiente e a configuração."
 
 
-def _choose_tags_mode(arguments) -> None:
+def _choose_tags_mode(arguments: Any) -> None:
     """Pergunta o que o `tags` deve atualizar quando o usuário não disse (só em terminal).
 
     Sem terminal interativo (script, cron, pipe) ou com --tags-only/--covers-only/
@@ -585,7 +601,7 @@ def _handle_tags_report(target_dir: str, destination: str) -> int:
     return 0
 
 
-def _handle_tags_undo(arguments, base_dir: str) -> int:
+def _handle_tags_undo(arguments: Any, base_dir: str) -> int:
     """`tags --undo [ID]` e `tags --undo-list`. Não consulta o Qobuz. Devolve o exit code."""
     from qobuz_dl import tags_journal
 
@@ -664,7 +680,7 @@ _LYRICS_UNDO_STATUS_TEXT = {
 }
 
 
-def _handle_lyrics_undo(arguments, base_dir: str) -> int:
+def _handle_lyrics_undo(arguments: Any, base_dir: str) -> int:
     """`lyrics --undo [ID]` e `lyrics --undo-list`. Não consulta o Qobuz."""
     from qobuz_dl import lyrics_journal
 
@@ -762,8 +778,39 @@ def _purge_databases(config_path: str, downloads_db: str) -> list[str]:
     return removed
 
 
-async def _reset_config(config_file: str):
+async def _obter_oauth_validado(
+    confirm: bool = False, accent: str | None = None
+) -> tuple[dict[str, str], dict[str, Any]]:
+    """Obtém credenciais OAuth e valida-as sem gravar a configuração."""
+    from qobuz_dl.oauth import login as oauth_login
+    from qobuz_dl.qopy import Client
+
+    creds = await oauth_login(confirm=confirm, accent=accent)
+    client = None
+    try:
+        client = await Client.create(
+            email=creds.get("email", ""),
+            pwd="",
+            app_id=creds["app_id"],
+            secrets=[creds["app_secret"]],
+            user_auth_token=creds["user_auth_token"],
+            force_english=True,
+        )
+        profile = await client.get_user_profile()
+        if not isinstance(profile, dict) or not profile:
+            profile = getattr(client, "user_info", {}) or {}
+        if not isinstance(profile, dict) or not profile:
+            raise RuntimeError("O Qobuz não retornou um perfil válido.")
+        return creds, profile
+    finally:
+        if client is not None:
+            await client.close()
+
+
+async def _reset_config(config_file: str) -> None:
     """Run the interactive configuration wizard and save the result to config_file."""
+    from qobuz_dl.oauth import OAuthSkipped
+
     if ui.width() >= 41:
         logging.info(f"\n{BG}[ QOBUZ-DL-ULTRA - CONFIGURAÇÃO INICIAL ]{OFF}")
     else:
@@ -776,29 +823,71 @@ async def _reset_config(config_file: str):
     config["qobuz"]["accent_color"] = accent_rgb
     C_ACCENT = ui.c(f"\033[38;2;{accent_rgb}m") if accent_rgb else ui.c(YELLOW)
 
-    email = input("Digite seu e-mail do Qobuz:\n- ").strip()
+    oauth_ok = False
+    oauth_creds: dict[str, str] = {}
+    oauth_profile: dict[str, Any] = {}
+    account_language = "pt"
+    account_language_detected = False
+
+    ui.emit(f"\n{_titulo('Autenticação da conta Qobuz', C_ACCENT)}")
+    ui.emit(
+        "O login OAuth será tentado primeiro; se não funcionar, "
+        "você poderá usar o token do Web Player."
+    )
+    try:
+        oauth_creds, oauth_profile = await _obter_oauth_validado(
+            confirm=True, accent=C_ACCENT
+        )
+        oauth_ok = True
+        email = oauth_creds.get("email", "").strip()
+        auth_token = oauth_creds["user_auth_token"]
+        account_info = oauth_profile.get("user", oauth_profile)
+        if isinstance(account_info, dict):
+            language_code = account_info.get("language_code")
+            if isinstance(language_code, str) and language_code.strip():
+                account_language = language_code.strip().lower()
+                account_language_detected = True
+        ui.ok("Autenticação OAuth concluída e validada.")
+    except OAuthSkipped:
+        email = ""
+        auth_token = ""
+        ui.emit(f"{C_ACCENT}[!] OAuth ignorado. Continuando com o token manual.{OFF}")
+    except (KeyboardInterrupt, EOFError):
+        ui.warn("OAuth cancelado. Você pode continuar com o login manual.")
+        email = ""
+        auth_token = ""
+    except Exception as exc:
+        from qobuz_dl.oauth import OAuthURLError
+
+        if isinstance(exc, OAuthURLError):
+            ui.warn(str(exc))
+        else:
+            ui.warn(f"Não foi possível concluir o OAuth ({type(exc).__name__}).")
+        ui.detail("Continuando com a autenticação manual pelo Web Player.")
+        email = ""
+        auth_token = ""
+
+    if not oauth_ok:
+        email = input("Digite seu e-mail do Qobuz:\n- ").strip()
+        ui.emit(
+            f"\n{C_ACCENT}[!] Obtenha seu Token no navegador "
+            f"(F12 > Application/Storage > Local Storage > token).{OFF}"
+        )
+        auth_token = input("Cole o token do seu navegador aqui:\n- ").strip()
+
     config["qobuz"]["email"] = email
-
-    ui.emit(
-        f"\n{C_ACCENT}[!] ATENÇÃO: A API Qobuz bloqueou login direto por senha para apps de terceiros.{OFF}"
-    )
-    ui.emit(
-        f"{C_ACCENT}[!] Obtenha seu Token no navegador (F12 > Application/Storage > Local Storage > token).{OFF}"
-    )
-
-    auth_token = input("Cole o token do seu navegador aqui:\n- ").strip()
-
-    # CORREÇÃO: Salva em user_token E user_auth_token
     config["qobuz"]["password"] = ""
     config["qobuz"]["user_token"] = auth_token
     config["qobuz"]["user_auth_token"] = auth_token
 
-    ui.emit(f"\n{C_ACCENT}[?] Armazenamento de Senhas (OS Keyring):{OFF}")
+    ui.emit(f"\n{_titulo('Armazenamento de senhas (OS Keyring)', C_ACCENT)}")
     ui.emit(
-        " Por padrão, os tokens são guardados criptografados no cofre do sistema operacional."
+        " Por padrão, os tokens são guardados criptografados "
+        "no cofre do sistema operacional."
     )
     ui.emit(
-        " Em ambientes sem interface gráfica (Linux headless, Docker, NAS), isso pode falhar."
+        " Em ambientes sem interface gráfica (Linux headless, Docker, NAS), "
+        "isso pode falhar."
     )
 
     disable_kr = (
@@ -813,104 +902,86 @@ async def _reset_config(config_file: str):
 
     if use_keyring and _keyring_save("auth_token", auth_token):
         config["qobuz"]["auth_token"] = ""
+        config["qobuz"]["user_token"] = ""
+        config["qobuz"]["user_auth_token"] = ""
     else:
         config["qobuz"]["auth_token"] = auth_token
+        if use_keyring and auth_token:
+            config["qobuz"]["disable_keyring"] = "true"
+            ui.warn("Keyring indisponível: o token será salvo no config.ini protegido.")
 
-    #### MUDANÇAS COMEÇAM AQUI
-    # ------------------------------------------------------------------
-    # Credenciais da API: precisam existir antes de criar o cliente.
-    # ------------------------------------------------------------------
-    logging.info(
-        f"\n{C_ACCENT}Obtendo credenciais da API via [bundle.js]. "
-        f"Por favor, aguarde...{OFF}"
-    )
-
-    bundle = await Bundle.create()
-    fetched_app_id = str(bundle.get_app_id())
-    fetched_secrets = [s for s in bundle.get_secrets().values() if s]
-
-    config["qobuz"]["app_id"] = fetched_app_id
-    config["qobuz"]["secrets"] = ",".join(fetched_secrets)
-
-    logging.info(f"{GREEN}[+] app_id e secrets obtidos com sucesso.{OFF}")
-
-    # ------------------------------------------------------------------
-    # Login e idioma padrão da conta.
-    # ------------------------------------------------------------------
-    account_language = "pt"
-    account_language_detected = False
-
-    logging.info(
-        f"\n{C_ACCENT}Testando login com o e-mail e o token informados...{OFF}"
-    )
-
-    from qobuz_dl.qopy import Client as _Client
-
-    try:
-        _test_client = await _Client.create(
-            email,
-            "",
-            fetched_app_id,
-            fetched_secrets,
-            user_auth_token=auth_token,
+    # OAuth usa o par de credenciais da aplicação desktop; o login manual
+    # continua usando exclusivamente as credenciais extraídas do Web Player.
+    if oauth_ok:
+        config["qobuz"]["app_id"] = oauth_creds["app_id"]
+        config["qobuz"]["secrets"] = oauth_creds["app_secret"]
+        config["qobuz"]["auth_method"] = "oauth"
+        if oauth_creds.get("email"):
+            config["qobuz"]["email"] = oauth_creds["email"]
+        ui.ok("Credenciais OAuth da aplicação configuradas.")
+    else:
+        logging.info(
+            f"\n{C_ACCENT}Obtendo credenciais da API via [bundle.js]. "
+            f"Por favor, aguarde...{OFF}"
         )
+        bundle = await Bundle.create()
+        fetched_app_id = str(bundle.get_app_id())
+        fetched_secrets = [s for s in bundle.get_secrets().values() if s]
+        config["qobuz"]["app_id"] = fetched_app_id
+        config["qobuz"]["secrets"] = ",".join(fetched_secrets)
+        config["qobuz"]["auth_method"] = "web_player"
+        logging.info(f"{GREEN}[+] app_id e secrets obtidos com sucesso.{OFF}")
+
+        logging.info(
+            f"\n{C_ACCENT}Testando login com o e-mail e o token informados...{OFF}"
+        )
+        from qobuz_dl.qopy import Client as _Client
 
         try:
-            # O login normalmente já consulta e armazena o perfil.
-            account_info = getattr(_test_client, "user_info", {}) or {}
-
-            if isinstance(account_info, dict):
-                account_info = account_info.get("user", account_info)
-
-            if not isinstance(account_info, dict):
-                account_info = {}
-
-            language_code = account_info.get("language_code")
-
-            # Só repete a consulta se o perfil carregado não trouxe idioma.
-            if not isinstance(language_code, str) or not language_code.strip():
-                try:
-                    raw_account_info = await _test_client.api_call(
-                        "user/get",
-                        _request_timeout=httpx.Timeout(8.0, connect=3.0),
-                        _max_attempts=1,
-                    )
-
-                    if isinstance(raw_account_info, dict):
-                        account_info = raw_account_info.get("user", raw_account_info)
-                        if isinstance(account_info, dict):
-                            language_code = account_info.get("language_code")
-                except Exception:
-                    # A detecção de idioma não deve impedir a configuração.
-                    language_code = None
-
-            if isinstance(language_code, str) and language_code.strip():
-                account_language = language_code.strip().lower()
-                account_language_detected = True
-
-        finally:
-            await _test_client.close()
-
-        logging.info(
-            f"{GREEN}[+] Login realizado com sucesso! "
-            f"Suas credenciais estão corretas.{OFF}"
-        )
-
-    except Exception as exc:
-        logging.info(
-            f"{RED}[!] Falha ao logar com este e-mail/token: {exc}{OFF}\n"
-            f"{YELLOW}[!] A configuração foi salva mesmo assim -- "
-            f"confira seu e-mail/token e rode 'qdl -r' de novo "
-            f"(ou 'qdl auth -l') se precisar corrigi-los.{OFF}"
-        )
-
-    if account_language_detected:
-        ui.emit(f"\n{GREEN}[+] Idioma padrão da conta Qobuz: {account_language}{OFF}")
-    else:
-        ui.emit(
-            f"\n{YELLOW}[!] Não foi possível detectar o idioma da conta. "
-            f"Usando o padrão: {account_language}{OFF}"
-        )
+            _test_client = await _Client.create(
+                email,
+                "",
+                fetched_app_id,
+                fetched_secrets,
+                user_auth_token=auth_token,
+            )
+            try:
+                account_info = getattr(_test_client, "user_info", {}) or {}
+                if isinstance(account_info, dict):
+                    account_info = account_info.get("user", account_info)
+                if not isinstance(account_info, dict):
+                    account_info = {}
+                language_code = account_info.get("language_code")
+                if not isinstance(language_code, str) or not language_code.strip():
+                    try:
+                        raw_account_info = await _test_client.api_call(
+                            "user/get",
+                            _request_timeout=httpx.Timeout(8.0, connect=3.0),
+                            _max_attempts=1,
+                        )
+                        if isinstance(raw_account_info, dict):
+                            account_info = raw_account_info.get(
+                                "user", raw_account_info
+                            )
+                            if isinstance(account_info, dict):
+                                language_code = account_info.get("language_code")
+                    except Exception:
+                        language_code = None
+                if isinstance(language_code, str) and language_code.strip():
+                    account_language = language_code.strip().lower()
+                    account_language_detected = True
+            finally:
+                await _test_client.close()
+            logging.info(
+                f"{GREEN}[+] Login realizado com sucesso! "
+                f"Suas credenciais estão corretas.{OFF}"
+            )
+        except Exception as exc:
+            logging.info(
+                f"{RED}[!] Falha ao logar com este e-mail/token: {exc}{OFF}\n"
+                f"{YELLOW}[!] A configuração foi salva; confira suas credenciais "
+                f"e use 'qdl auth -l' se precisar corrigi-las.{OFF}"
+            )
 
     # Guarda o idioma da conta separado de uma possível escolha manual.
     config["qobuz"]["account_language"] = account_language
@@ -1028,6 +1099,7 @@ async def _reset_config(config_file: str):
     )
 
     config["qobuz"]["default_limit"] = "500"
+    config["qobuz"]["interactive_layout"] = "auto"
     config["qobuz"]["no_m3u"] = "false"
     config["qobuz"]["albums_only"] = "false"
     config["qobuz"]["no_fallback"] = "false"
@@ -1073,7 +1145,7 @@ async def _reset_config(config_file: str):
     config["qobuz"]["multiple_disc_track_format"] = (
         "{disc_number}.{track_number} - {track_title}"
     )
-    config["qobuz"]["max_workers"] = "1"
+    config["qobuz"]["max_workers"] = "3"
 
     _write_config_secure(config, config_file)
     logging.info(f"\n{GREEN}[+] Configuração salva com sucesso em {config_file}!{OFF}")
@@ -1090,7 +1162,7 @@ async def _reset_config(config_file: str):
     _print_welcome_screen()
 
 
-def _remove_leftovers(directory: str):
+def _remove_leftovers(directory: str) -> None:
     """Remove temporary download files from the specified directory."""
     for pattern in [".*.tmp", "~tmp_*.tmp"]:
         search_dir = os.path.join(directory, "**", pattern)
@@ -1113,7 +1185,7 @@ def _format_timestamp(ts: Optional[int]) -> str:
         return str(ts)
 
 
-def _formatar_valor(valor):
+def _formatar_valor(valor: Any) -> Any:
     """Normaliza um valor bruto da API para exibição legível."""
     if valor in (None, ""):
         return "N/A"
@@ -1124,7 +1196,7 @@ def _formatar_valor(valor):
 
 def _imprimir_campos_extras(
     dados: dict, titulo: str, ja_mostrados: set, indent: str = " "
-):
+) -> None:
     """Imprime campos extras do JSON da API."""
     extras = {k: v for k, v in dados.items() if k not in ja_mostrados}
     if not extras:
@@ -1155,9 +1227,206 @@ def _imprimir_campos_extras(
             ui.emit(f"{indent}• {chave}: {_formatar_valor(valor)}")
 
 
+async def _oauth_auth_command(
+    config_file: str, no_browser: bool = False, confirm: bool = False
+) -> bool:
+    """Autentica pelo OAuth oficial sem substituir o fluxo manual existente.
+
+    As credenciais só são gravadas depois de o token ser trocado, validado e
+    aceito pelo cliente atual. O par APP_ID/secret OAuth é mantido separado do
+    par extraído do Web Player em ``bundle.py``.
+    """
+    # O OAuth pode ser o primeiro login: nesse caso ainda não existe
+    # config.ini. ConfigParser.read() aceita arquivo ausente e começamos com
+    # uma configuração vazia; ela só será persistida após validar o token.
+    config = configparser.ConfigParser(interpolation=None)
+    if os.path.isfile(config_file):
+        config.read(config_file, encoding="utf-8")
+    # OAuth também é o primeiro login: não exigir que o assistente antigo
+    # crie um config.ini antes. Um arquivo mínimo será gravado somente depois
+    # de o fluxo OAuth e a validação do cliente serem concluídos.
+    if not config.has_section("qobuz"):
+        config.add_section("qobuz")
+    section = "qobuz"
+    email = config.get(section, "email", fallback="")
+    force_english = not config.getboolean(section, "native_lang", fallback=False)
+    disable_keyring = config.getboolean(section, "disable_keyring", fallback=False)
+
+    from qobuz_dl.oauth import OAuthSkipped
+    from qobuz_dl.oauth import login as oauth_login
+
+    try:
+        ui.emit("\nIniciando autenticação OAuth oficial do Qobuz...")
+        creds = await oauth_login(no_browser=no_browser, confirm=confirm)
+        token = creds["user_auth_token"]
+        app_id = creds["app_id"]
+        app_secret = creds["app_secret"]
+    except OAuthSkipped:
+        ui.warn("OAuth ignorado. Nenhuma configuração foi alterada.")
+        return False
+    except (KeyboardInterrupt, EOFError):
+        ui.warn("Autenticação cancelada. Nenhuma configuração foi alterada.")
+        return False
+    except Exception as exc:
+        from qobuz_dl.oauth import OAuthURLError
+
+        if isinstance(exc, OAuthURLError):
+            # Mensagem própria (sem token nem código): pode ser mostrada.
+            ui.error(str(exc))
+        else:
+            ui.error(f"Não foi possível concluir o OAuth ({type(exc).__name__}).")
+            ui.detail(
+                "Confira a conexão e tente novamente; em ambiente remoto, "
+                "use --oauth-no-browser."
+            )
+        ui.warn("Nenhuma configuração foi alterada.")
+        return False
+
+    # Valida também pelo cliente usado pelo downloader. Isso evita persistir um
+    # token OAuth que tenha sido emitido, mas não funcione na aplicação atual.
+    from qobuz_dl.qopy import Client
+
+    client = None
+    try:
+        client = await Client.create(
+            email=creds.get("email") or email,
+            pwd="",
+            app_id=app_id,
+            secrets=[app_secret],
+            user_auth_token=token,
+            force_english=force_english,
+        )
+        user_info = await client.get_user_profile()
+        if not isinstance(user_info, dict) or not user_info:
+            raise RuntimeError("O Qobuz não retornou um perfil válido.")
+    except Exception as exc:
+        ui.error(
+            "O OAuth retornou credenciais, mas o Qobuz-DL-Ultra não conseguiu "
+            f"validá-las ({type(exc).__name__})."
+        )
+        ui.detail(auth_failure_hint(exc))
+        ui.warn(
+            "As credenciais anteriores foram preservadas. "
+            "Use 'qobuz-dl auth -l' para manter a autenticação manual."
+        )
+        return False
+    finally:
+        if client is not None:
+            await client.close()
+
+    # Só altera a configuração depois de todas as validações.
+    if section == "qobuz" and not config.has_section("qobuz"):
+        config.add_section("qobuz")
+    if creds.get("email"):
+        config.set(section, "email", creds["email"])
+    config.set(section, "app_id", app_id)
+    config.set(section, "secrets", app_secret)
+    config.set(section, "auth_method", "oauth")
+    config.set(section, "password", "")
+    _save_token_in_both_config_keys(config, token)
+
+    previous_keyring_token = (
+        _keyring_load("auth_token") if not disable_keyring else None
+    )
+    saved_in_keyring = not disable_keyring and _keyring_save("auth_token", token)
+    if saved_in_keyring:
+        config.set(section, "auth_token", "")
+        config.set(section, "user_token", "")
+        config.set(section, "user_auth_token", "")
+    else:
+        config.set(section, "auth_token", token)
+        if not disable_keyring:
+            config.set(section, "disable_keyring", "true")
+            ui.warn(
+                "Keyring indisponível: o token será salvo no config.ini protegido "
+                "com permissão restrita ao usuário."
+            )
+
+    try:
+        _write_config_secure(config, config_file)
+    except OSError as exc:
+        ui.error("Não foi possível salvar a configuração OAuth.")
+        ui.detail(type(exc).__name__)
+        if saved_in_keyring:
+            if previous_keyring_token:
+                _keyring_save("auth_token", previous_keyring_token)
+            else:
+                try:
+                    keyring.delete_password(KEYRING_SERVICE, "auth_token")
+                except Exception:
+                    # Desfazer em melhor esforço: se o keyring já está indisponível,
+                    # o que importa é não mascarar o erro de gravação do config.
+                    pass
+            ui.warn(
+                "O armazenamento seguro foi restaurado; o config.ini anterior "
+                "foi preservado."
+            )
+        return False
+
+    display_name = (
+        creds.get("display_name") or user_info.get("display_name") or "conta Qobuz"
+    )
+    ui.ok(f"Autenticação OAuth concluída e validada: {display_name}.")
+    ui.info("APP_ID, segredo compatível e token foram salvos com segurança.")
+    return True
+
+
+async def _initialize_client_with_auth_recovery(
+    qobuz: QobuzDL,
+    config_file: str,
+    email: str,
+    password: str,
+    app_id: str,
+    secrets: list[str],
+    token: str,
+    force_english: bool,
+) -> None:
+    """Inicializa o cliente e renova credenciais apenas em rejeição explícita."""
+    from qobuz_dl.exceptions import AuthenticationError
+
+    try:
+        await qobuz.initialize_client(email, password, app_id, secrets)
+        return
+    except AuthenticationError:
+        ui.warn("O Qobuz rejeitou o token atual. É necessário autenticar novamente.")
+
+    # A recuperação automática usa OAuth para evitar pedir ao usuário que
+    # extraia novamente o token do navegador. O fluxo manual continua disponível
+    # explicitamente em `auth -l` e não é alterado por esta recuperação.
+    ui.step("Renovando a autenticação OAuth...")
+    renewed = await _oauth_auth_command(config_file, confirm=True)
+
+    if not renewed:
+        raise AuthenticationError(
+            "Não foi possível renovar as credenciais da conta Qobuz."
+        )
+
+    config = configparser.ConfigParser(interpolation=None)
+    config.read(config_file, encoding="utf-8")
+    section = "qobuz" if config.has_section("qobuz") else "DEFAULT"
+    new_email = config.get(section, "email", fallback=email)
+    new_password = config.get(section, "password", fallback="")
+    new_app_id = config.get(section, "app_id", fallback=app_id)
+    new_secrets = [
+        value.strip()
+        for value in config.get(section, "secrets", fallback="").split(",")
+        if value.strip()
+    ] or secrets
+    new_token = _load_token_from_all_locations(config, section)
+    new_force_english = not config.getboolean(
+        section, "native_lang", fallback=not force_english
+    )
+    if not new_token:
+        raise AuthenticationError("A renovação não retornou um token utilizável.")
+
+    qobuz.settings.user_auth_token = new_token
+    qobuz.force_english = new_force_english
+    await qobuz.initialize_client(new_email, new_password, new_app_id, new_secrets)
+
+
 async def _auth_command(
     config_file: str, update_credentials: bool = False, show_json: bool = False
-):
+) -> bool:
     """Subcomando unificado para gerenciar conta e assinatura."""
     from qobuz_dl.qopy import Client
 
@@ -1196,6 +1465,24 @@ async def _auth_command(
 
         token = new_token
         update_credentials = True
+        if config.get(section, "auth_method", fallback="").strip().lower() == "oauth":
+            try:
+                ui.info(
+                    "Atualizando o par de credenciais do Web Player "
+                    "para o token manual..."
+                )
+                bundle = await Bundle.create()
+                app_id = str(bundle.get_app_id()).strip()
+                secrets = [secret for secret in bundle.get_secrets().values() if secret]
+                if not app_id or not secrets:
+                    raise RuntimeError("O bundle não retornou credenciais utilizáveis.")
+                config.set(section, "app_id", app_id)
+                config.set(section, "secrets", ",".join(secrets))
+                config.set(section, "auth_method", "web_player")
+            except Exception as exc:
+                ui.error("Não foi possível preparar as credenciais do Web Player.")
+                ui.detail(type(exc).__name__)
+                return False
     else:
         ui.emit(
             f"\n\r{CYAN}[*] Consultando dados da conta e assinatura no Qobuz...{OFF}{ANSI_CLEAR_LINE}"
@@ -1254,6 +1541,11 @@ async def _auth_command(
             _save_token_in_both_config_keys(config, token)
             config.set(section, "email", email)
             config.set(section, "password", "")
+            if (
+                config.get(section, "auth_method", fallback="").strip().lower()
+                != "oauth"
+            ):
+                config.set(section, "auth_method", "web_player")
             saved_in_keyring = not disable_keyring and _keyring_save(
                 "auth_token", token
             )
@@ -1307,7 +1599,7 @@ async def _auth_command(
             f" • Loja / Idioma: {user_info.get('store', 'N/A')} ({user_info.get('language_code', 'N/A')})"
         )
 
-        def format_date_br(d_str):
+        def format_date_br(d_str: Any) -> str:
             if not d_str:
                 return "N/A"
             try:
@@ -1468,10 +1760,10 @@ async def _garantir_assinatura_ativa(qobuz: QobuzDL) -> bool:
     return True
 
 
-async def _handle_commands(qobuz: QobuzDL, arguments):
+async def _handle_commands(qobuz: QobuzDL, arguments: Any) -> None:
     """Roteia argumentos para o comando apropriado."""
 
-    def sigint_handler(sig, frame):
+    def sigint_handler(sig: Any, frame: Any) -> None:
         ui.error("Download interrompido manualmente pelo usuário.")
         ui.warn("Arquivos parciais foram enviados para a lixeira.")
         try:
@@ -1573,7 +1865,7 @@ _LOGO_FONT = {
 _LOGO_BLOCK = "\u2588"
 
 
-def _render_logo_word(word: str):
+def _render_logo_word(word: str) -> list[str]:
     letters = list(word)
     rows = ["" for _ in range(5)]
     for i, ch in enumerate(letters):
@@ -1585,7 +1877,7 @@ def _render_logo_word(word: str):
     return rows
 
 
-def _print_logo(cols: int):
+def _print_logo(cols: int) -> None:
     line1 = _render_logo_word("QOBUZ-DL")
     line2 = _render_logo_word("ULTRA")
     art_width = len(line1[0])
@@ -1603,7 +1895,9 @@ def _print_logo(cols: int):
             ui.emit_always(f"{CYAN}{pad_short}{row}{OFF}")
 
 
-def _extract_subcommands(parser: argparse.ArgumentParser):
+def _extract_subcommands(
+    parser: argparse.ArgumentParser,
+) -> list[tuple[str, str | None, str | None]]:
     subparsers_action = None
     for action in parser._actions:
         if isinstance(action, argparse._SubParsersAction):
@@ -1625,7 +1919,7 @@ def _extract_subcommands(parser: argparse.ArgumentParser):
     return result
 
 
-def _extract_global_flags(parser: argparse.ArgumentParser):
+def _extract_global_flags(parser: argparse.ArgumentParser) -> Any:
     result = []
     for action in parser._actions:
         if isinstance(action, (argparse._HelpAction, argparse._SubParsersAction)):
@@ -1672,7 +1966,7 @@ _FLAG_DESCRIPTIONS_PT = {
 }
 
 
-def _start_update_probe(timeout: float = 1.2):
+def _start_update_probe(timeout: float = 1.2) -> Callable[[], Any]:
     """Começa a consultar o PyPI em segundo plano; devolve `esperar()`.
 
     A consulta roda enquanto a tela inicial é montada, então quase não soma
@@ -1683,7 +1977,7 @@ def _start_update_probe(timeout: float = 1.2):
         return lambda: None
     achado: list = []
 
-    def _consultar():
+    def _consultar() -> None:
         try:
             achado.append(update_check.nova_versao_disponivel(timeout=timeout))
         except Exception as e:
@@ -1692,14 +1986,14 @@ def _start_update_probe(timeout: float = 1.2):
     worker = threading.Thread(target=_consultar, daemon=True)
     worker.start()
 
-    def _esperar():
+    def _esperar() -> Any:
         worker.join(timeout + 0.3)
         return achado[0] if achado else None
 
     return _esperar
 
 
-def _print_welcome_screen():
+def _print_welcome_screen() -> None:
     from qobuz_dl import __version__
     from qobuz_dl.home_screen import render_aviso_update, render_home
 
@@ -1802,7 +2096,7 @@ def _pede_reset(argv: list) -> bool:
     )
 
 
-def _aplicar_atalhos(arguments) -> None:
+def _aplicar_atalhos(arguments: Any) -> None:
     """Converte os subcomandos novos nas flags que o resto do fluxo já entende.
 
     `config reset` -> `--reset`; `sync-db [PASTA]` -> `--sync-db [PASTA]`;
@@ -1831,7 +2125,7 @@ def _confirmar_reset() -> bool:
     return resposta in ("s", "sim", "y", "yes")
 
 
-def _pasta_da_biblioteca(argumento, padrao: str) -> str:
+def _pasta_da_biblioteca(argumento: Any, padrao: str) -> str:
     """Pasta pedida no comando ou a do config.ini (relativa à home no iOS)."""
     pasta = os.path.expanduser(argumento or padrao)
     if IOS_HOME and not os.path.isabs(pasta):
@@ -1871,11 +2165,18 @@ def _dispensa_assistente(argv: list) -> bool:
         return False
     if any(a in ("-h", "--help") for a in argv):
         return True
-    comando = next((a for a in argv if not a.startswith("-")), None)
+    comando = _find_command(argv)
+    # O primeiro login OAuth não pode disparar o assistente legado, que pede
+    # e-mail/token do Web Player. A configuração mínima é criada após validar
+    # as credenciais OAuth, dentro de _oauth_auth_command.
+    comandos_auth = {"auth", "login", "user", "account", "profile", "me", "info"}
+    oauth_solicitado = "--oauth" in argv or "--oauth-no-browser" in argv
+    if comando in comandos_auth and oauth_solicitado:
+        return True
     return comando in _COMANDOS_SEM_ASSISTENTE
 
 
-async def _initial_checks():
+async def _initial_checks() -> None:
     if not os.path.isdir(CONFIG_PATH) or not os.path.isfile(CONFIG_FILE):
         os.makedirs(CONFIG_PATH, exist_ok=True)
         argv = sys.argv[1:]
@@ -1896,7 +2197,7 @@ async def _initial_checks():
             sys.exit(0)
 
 
-def _find_command(argv: list):
+def _find_command(argv: list) -> str | None:
     """Primeiro argumento que é o nome (ou apelido) de um subcomando; None se não há."""
     parser = qobuz_dl_args()
     sub_action = next(
@@ -1925,7 +2226,7 @@ def _config_directory_if_exists() -> Optional[str]:
     return path if os.path.isdir(path) else None
 
 
-def check_for_updates():
+def check_for_updates() -> None:
     try:
         from qobuz_dl import __version__
 
@@ -1957,6 +2258,7 @@ class CliConfig:
     default_folder: str = "Qobuz Downloads"
     default_quality: str = "6"
     default_limit: str = "20"
+    interactive_layout: str = "auto"
     fetch_lyrics: bool = False
     legacy_charmap: bool = False
     no_credits_config: bool = False
@@ -2049,6 +2351,15 @@ def _load_cli_config(config: configparser.ConfigParser, started: float) -> CliCo
         cfg.default_folder = os.path.join(IOS_HOME, cfg.default_folder)
 
     cfg.default_limit = config.get(section, "default_limit")
+    layout = config.get(section, "interactive_layout", fallback="auto")
+    layout = layout.strip().lower()
+    if layout not in ui.LAYOUTS_INTERATIVOS:
+        ui.warn(
+            f"interactive_layout = '{layout}' não existe no config.ini; usando 'auto' "
+            f"(valores: {', '.join(ui.LAYOUTS_INTERATIVOS)})."
+        )
+        layout = "auto"
+    cfg.interactive_layout = layout
     cfg.default_quality = config.get(section, "default_quality")
     cfg.no_m3u = config.getboolean(section, "no_m3u", fallback=False)
     cfg.albums_only = config.getboolean(section, "albums_only", fallback=False)
@@ -2075,12 +2386,12 @@ def _load_cli_config(config: configparser.ConfigParser, started: float) -> CliCo
     return cfg
 
 
-async def async_main():
+async def async_main() -> None:
     main_started = time.perf_counter()
     await _initial_checks()
     _startup_timing("checagens iniciais concluídas", main_started)
 
-    async def _async_check_updates():
+    async def _async_check_updates() -> None:
         try:
             loop = asyncio.get_running_loop()
             await loop.run_in_executor(None, check_for_updates)
@@ -2306,7 +2617,19 @@ async def async_main():
     except (configparser.Error, KeyError) as error:
         arguments = qobuz_dl_args().parse_args()
         _aplicar_atalhos(arguments)
-        if not arguments.reset:
+        oauth_primeiro_login = getattr(arguments, "command", None) in (
+            "auth",
+            "login",
+            "user",
+            "account",
+            "profile",
+            "me",
+            "info",
+        ) and (
+            getattr(arguments, "oauth", False)
+            or getattr(arguments, "oauth_no_browser", False)
+        )
+        if not arguments.reset and not oauth_primeiro_login:
             sys.exit(
                 f"{RED}Configuração inválida ou corrompida ({error}).\n{RESET}{YELLOW}Execute 'python -m qobuz_dl -r' para consertar isto.{RESET}"
             )
@@ -2345,6 +2668,7 @@ async def async_main():
         verbose=getattr(arguments, "verbose", False),
         color=False if getattr(arguments, "no_color", False) else None,
         ui_mode=getattr(arguments, "ui", "auto"),
+        layout_interativo=cfg.interactive_layout,
     )
     _log_level_arg = getattr(arguments, "log_level", None)
     ui.install_logging(
@@ -2390,6 +2714,19 @@ async def async_main():
         "me",
         "info",
     ):
+        use_oauth = getattr(arguments, "oauth", False) or getattr(
+            arguments, "oauth_no_browser", False
+        )
+        if use_oauth:
+            if getattr(arguments, "login", False):
+                ui.error("Use --oauth ou --login; as duas modalidades são exclusivas.")
+                sys.exit(2)
+            success = await _oauth_auth_command(
+                CONFIG_FILE,
+                no_browser=getattr(arguments, "oauth_no_browser", False),
+            )
+            sys.exit(0 if success else 1)
+
         is_login = getattr(arguments, "login", False) or (
             "--login" in sys.argv or "-l" in sys.argv or arguments.command in ("login",)
         )
@@ -2531,7 +2868,7 @@ async def async_main():
         embed_pref = config.getboolean(section, "embed_lyrics", fallback=True)
         trans_lang = config.get(section, "lyrics_translation_lang", fallback="pt")
         lyrics_workers = getattr(arguments, "max_workers", None) or config.get(
-            section, "max_workers", fallback="1"
+            section, "max_workers", fallback="3"
         )
         local_settings = QobuzDLSettings(
             lrc_files=lrc_pref, embed_lyrics=embed_pref, max_workers=lyrics_workers
@@ -2846,17 +3183,38 @@ async def async_main():
         "me",
         "info",
     ):
-        await qobuz.initialize_client(email, password, app_id, secrets)
+        await _initialize_client_with_auth_recovery(
+            qobuz,
+            CONFIG_FILE,
+            email,
+            password,
+            app_id,
+            secrets,
+            token,
+            force_english,
+        )
 
+    from qobuz_dl import __version__ as _versao_pacote
+    from qobuz_dl import hooks as _hooks
+
+    # None (e custo zero) quando o comando não baixa ou nada foi configurado.
+    _automacao = _hooks.preparar(arguments, config, section, _versao_pacote)
+    _sessao_ok = False
+    _interrompida = False
     try:
         await _handle_commands(qobuz, arguments)
+        _sessao_ok = True
+    except KeyboardInterrupt:
+        _interrompida = True
+        raise
     finally:
+        await _hooks.encerrar(_automacao, _sessao_ok, _interrompida)
         if hasattr(qobuz, "client") and qobuz.client:
             await qobuz.client.close()
     await update_task
 
 
-def _watch_target(arguments) -> str | None:
+def _watch_target(arguments: Any) -> str | None:
     """Pasta a observar: `--watch [PASTA]` (global) ou `lyrics --watch [PASTA]`.
 
     "DEFAULT" = a pasta do config.ini. None = não é para observar nada.
@@ -2868,7 +3226,7 @@ def _watch_target(arguments) -> str | None:
     return getattr(arguments, "watch", None) or None
 
 
-def _is_local_checklist_sync(arguments) -> bool:
+def _is_local_checklist_sync(arguments: Any) -> bool:
     """True quando ``artists --sincronizar-checklist`` só precisa do banco local."""
     return (
         arguments.command in ("artists", "artist-review")
@@ -2898,7 +3256,7 @@ def _extract_checklist_json(captured: str) -> dict | None:
     return None
 
 
-def main():
+def main() -> None:
     from qobuz_dl.fdlimit import raise_open_file_limit
 
     raise_open_file_limit()

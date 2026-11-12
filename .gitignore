@@ -41,3 +41,6 @@ htmlcov/
 /.ruff_cache/**
 config/
 musicas/
+# Ferramentas de aplicar mudanças (não fazem parte do projeto)
+/aplicar_*.py
+/.backup_*/

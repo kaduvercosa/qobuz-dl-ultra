@@ -185,7 +185,7 @@ branch = true
 
 [tool.coverage.report]
 precision = 2
-fail_under = 60  # igual ao --cov-fail-under do CI e ao codecov.yml; suba os três juntos
+fail_under = 75  # igual ao --cov-fail-under do CI e ao alvo do projeto no codecov.yml; suba os três juntos
 skip_covered = false
 exclude_also = [
     # Guarda de entrypoint (__main__.py): nunca roda sob pytest, cobrir
@@ -242,14 +242,19 @@ exclude = [
 module = [
     "qobuz_dl",
     "qobuz_dl.__main__",
+    "qobuz_dl.artist_checklist",
     "qobuz_dl.artist_review",
     "qobuz_dl.bundle",
+    "qobuz_dl.cli",
     "qobuz_dl.color",
+    "qobuz_dl.commands",
     "qobuz_dl.concurrency",
     "qobuz_dl.config_cmd",
     "qobuz_dl.constants",
+    "qobuz_dl.core",
     "qobuz_dl.db",
     "qobuz_dl.doctor",
+    "qobuz_dl.downloader",
     "qobuz_dl.duplicates_cmd",
     "qobuz_dl.exceptions",
     "qobuz_dl.executors",
@@ -258,23 +263,29 @@ module = [
     "qobuz_dl.fileio",
     "qobuz_dl.fuzzy",
     "qobuz_dl.http_download",
+    "qobuz_dl.inspector",
     "qobuz_dl.library_cleanup",
     "qobuz_dl.library_db",
     "qobuz_dl.library_organizer",
     "qobuz_dl.library_scan",
     "qobuz_dl.lyrics_comment",
+    "qobuz_dl.lyrics_engine",
     "qobuz_dl.lyrics_journal",
     "qobuz_dl.lyrics_progress",
+    "qobuz_dl.metadata",
     "qobuz_dl.metadata_cache",
     "qobuz_dl.name_suggest",
     "qobuz_dl.paths",
+    "qobuz_dl.playlist_links",
     "qobuz_dl.pipeline",
     "qobuz_dl.playlist_import",
     "qobuz_dl.postprocess",
     "qobuz_dl.qobuz_notes_sync",
+    "qobuz_dl.qopy",
     "qobuz_dl.quality_audit",
     "qobuz_dl.report_viewer",
     "qobuz_dl.resilient_http",
+    "qobuz_dl.retro_tagger",
     "qobuz_dl.retry_missing",
     "qobuz_dl.sentinel",
     "qobuz_dl.stats_view",
@@ -282,7 +293,9 @@ module = [
     "qobuz_dl.tags_journal",
     "qobuz_dl.tags_progress",
     "qobuz_dl.track_identity",
+    "qobuz_dl.ui",
     "qobuz_dl.update_check",
+    "qobuz_dl.utils",
     "qobuz_dl.watcher",
 ]
 disallow_untyped_defs = true

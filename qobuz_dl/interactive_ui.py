@@ -27,6 +27,7 @@ from prompt_toolkit.styles import Style
 from prompt_toolkit.utils import get_cwidth
 
 from qobuz_dl.color import _ACCENT
+from qobuz_dl.ui import LAYOUTS_INTERATIVOS
 
 # --------------------------------------------------------------------------
 # Deriva o tema visual do prompt_toolkit (pt_style/prompt_style) a partir da
@@ -290,3 +291,247 @@ def _get_table_layout(columns, is_multi, item_category, album_role=False):
         headers,
         {"top": top_border, "mid": mid_border, "bot": bot_border},
     )
+
+
+# ============================================================================
+# LAYOUT COMPACTO (uma linha por resultado) -- para telas estreitas/celular.
+#
+# O cartão gasta ~4 linhas por resultado (borda, título, artista, borda) e o
+# focado cresce para ~7: num celular cabem 4 ou 5 resultados por tela. Aqui cada
+# resultado é UMA linha ("título · artista        ano  24/96") e os detalhes do
+# item focado aparecem num painel curto no rodapé. Tudo abaixo é função pura
+# (texto entra, texto sai), sem prompt_toolkit de verdade, para poder ser testada
+# sem abrir a tela; o desenho em si fica em `core._tui_select`.
+# ============================================================================
+LAYOUTS = LAYOUTS_INTERATIVOS
+
+# No modo "auto", telas com até esta largura usam o compacto; acima disso, e sem
+# espaço para a tabela, ficam os cartões (tablets, janelas médias).
+LARGURA_MAXIMA_COMPACTO_AUTO = 72
+
+# Linhas do painel de detalhes do item focado (título em até 2 + 1 de dados).
+LINHAS_DETALHE = 3
+
+
+def resolve_layout(
+    preferencia,
+    tabela_cabe,
+    item_category,
+    columns,
+    largura_max_compacto=LARGURA_MAXIMA_COMPACTO_AUTO,
+):
+    """Escolhe "tabela", "cartao" ou "compacto" para a lista de resultados.
+
+    ``preferencia`` vem do config.ini (``interactive_layout``); valor inválido
+    vale "auto". Menus simples (sim/não, escolha de ação: categoria fora de
+    ``_MIN_FLEX``) ficam sempre em cartão. Em "auto": a tabela se couber; senão
+    o compacto em tela estreita (``columns <= largura_max_compacto``) e o cartão
+    nas demais. ``tabela`` sem espaço para ela cai no compacto.
+    """
+    if item_category not in _MIN_FLEX:
+        return "cartao"
+    pref = preferencia if preferencia in LAYOUTS else "auto"
+    if pref == "cartao":
+        return "cartao"
+    if pref == "compacto":
+        return "compacto"
+    if tabela_cabe:
+        return "tabela"
+    if pref == "tabela":
+        return "compacto"
+    return "compacto" if columns <= largura_max_compacto else "cartao"
+
+
+def _fit(texto, largura):
+    """Corta ``texto`` para caber em ``largura`` células, com "…" no fim."""
+    texto = "" if texto is None else str(texto)
+    if largura <= 0:
+        return ""
+    if get_cwidth(texto) <= largura:
+        return texto
+    if largura == 1:
+        return "…"
+    saida, usado = "", 0
+    for char in texto:
+        cw = get_cwidth(char)
+        if usado + cw > largura - 1:
+            break
+        saida += char
+        usado += cw
+    return saida + "…"
+
+
+def _linhas_do_titulo(texto, largura, maximo=2):
+    """Quebra ``texto`` por células em até ``maximo`` linhas (a última com "…")."""
+    texto = "" if texto is None else str(texto)
+    linhas: list[str] = []
+    while texto and len(linhas) < maximo:
+        if len(linhas) == maximo - 1:
+            linhas.append(_fit(texto, largura))
+            break
+        corte, usado = 0, 0
+        for char in texto:
+            cw = get_cwidth(char)
+            if usado + cw > largura:
+                break
+            usado += cw
+            corte += 1
+        corte = max(1, corte)
+        if corte < len(texto):
+            # Prefere quebrar num espaço, se ele não deixar a linha pela metade.
+            espaco = texto.rfind(" ", 0, corte)
+            if espaco > corte // 2:
+                corte = espaco + 1
+        linhas.append(texto[:corte].rstrip())
+        texto = texto[corte:].lstrip()
+    return linhas
+
+
+def compact_row_texts(meta, item_category, columns, album_role=False):
+    """Textos de uma linha do layout compacto: ``(principal, secundario, ano, qualidade)``.
+
+    ``principal`` é o título/nome; ``secundario`` o artista (álbum/faixa), o criador
+    (playlist) ou, na lista de álbuns de UM artista (``album_role``), o tipo/função,
+    já que o artista seria sempre o mesmo. ``ano`` só aparece onde sobra largura
+    (a partir de 56 colunas) ou na lista de álbuns de um artista, onde ele ordena
+    a leitura. ``qualidade`` vem abreviada ("24/96").
+    """
+    meta = meta or {}
+    quality = _short_quality(meta.get("quality", "")) if meta.get("quality") else ""
+    year = str(meta.get("year", "") or "").strip()
+    mostrar_ano = bool(year) and (
+        columns >= 56 or bool(album_role and meta.get("show_role"))
+    )
+    if item_category == "playlist":
+        count = meta.get("count", "")
+        return (
+            str(meta.get("name", "")),
+            str(meta.get("owner", "")),
+            "",
+            f"{count} fx" if count != "" else "",
+        )
+    if item_category == "artist":
+        count = meta.get("count", "")
+        return (
+            str(meta.get("name", "")),
+            "",
+            "",
+            f"{count} lanç." if count != "" else "",
+        )
+    if album_role and meta.get("show_role"):
+        secundario = str(meta.get("role") or meta.get("type") or "")
+    else:
+        secundario = str(meta.get("artist", ""))
+    return (
+        str(meta.get("title", "")),
+        secundario,
+        year if mostrar_ano else "",
+        quality,
+    )
+
+
+def compact_fragments(prefix, principal, secundario, ano, qualidade, columns):
+    """Fragmentos ``(tipo, texto)`` de UMA linha compacta, com no máximo ``columns - 1``
+    células (a última coluna fica livre, como nas demais linhas da tela).
+
+    Tipos: ``prefix``, ``title``, ``sub``, ``fill``, ``year``, ``quality``. O
+    título só é cortado depois de o secundário e o ano terem cedido espaço; a
+    qualidade (curta e de largura fixa) à direita é a última coisa a sair.
+    """
+    limite = max(1, columns - 1)
+    direita = []
+    if ano:
+        direita.append(("year", ano))
+    if qualidade:
+        if direita:
+            direita.append(("fill", " "))
+        direita.append(("quality", qualidade))
+    largura_direita = sum(get_cwidth(t) for _k, t in direita)
+    sobra = limite - get_cwidth(prefix) - (largura_direita + 1 if direita else 0)
+    if sobra < 8 and ano:  # sem espaço: o ano cai primeiro
+        direita = [(k, t) for k, t in direita if k == "quality"]
+        largura_direita = sum(get_cwidth(t) for _k, t in direita)
+        sobra = limite - get_cwidth(prefix) - (largura_direita + 1 if direita else 0)
+    if sobra < 4:  # tela minúscula: só o título, sem nada à direita
+        direita, largura_direita = [], 0
+        sobra = limite - get_cwidth(prefix)
+
+    if secundario and sobra >= 24 and get_cwidth(principal) > sobra * 0.62:
+        # Título comprido não pode comer o artista inteiro: reserva ~38%.
+        titulo = _fit(principal, int(sobra * 0.62))
+    else:
+        titulo = _fit(principal, sobra)
+    fragmentos = [("prefix", prefix), ("title", titulo)]
+    usado = get_cwidth(prefix) + get_cwidth(titulo)
+    folga = sobra - get_cwidth(titulo)
+    if secundario and folga >= 6:
+        sub = _fit(f" · {secundario}", folga)
+        fragmentos.append(("sub", sub))
+        usado += get_cwidth(sub)
+    if direita:
+        miolo = max(1, limite - usado - largura_direita)
+        fragmentos.append(("fill", " " * miolo))
+        fragmentos.extend(direita)
+    return fragmentos
+
+
+def compact_detail_lines(meta, item_category, columns, album_role=False):
+    """Painel de detalhes do item focado: ``LINHAS_DETALHE`` linhas, ``(estilo, texto)``.
+
+    Até 2 linhas com o título inteiro (a linha da lista pode tê-lo cortado) e 1
+    linha de dados separados por " · ", na ordem de importância; o dado que não
+    cabe é pulado, e o primeiro (artista) é cortado em vez de sumir. Sempre
+    devolve ``LINHAS_DETALHE`` entradas (as sobras vazias), para o rodapé não
+    mudar de altura quando o cursor passa por itens com e sem detalhes.
+    """
+    largura = max(8, columns - 2)
+    meta = meta or {}
+    titulo = meta.get("title") or meta.get("name") or ""
+    linhas = [("class:item_title", f" {t}") for t in _linhas_do_titulo(titulo, largura)]
+
+    quality = meta.get("quality", "")
+    partes = []
+    if item_category in {"album", "track"}:
+        if meta.get("artist"):
+            partes.append(f"👤 {meta['artist']}")
+        if item_category == "track" and meta.get("album"):
+            partes.append(f"💿 {meta['album']}")
+        if meta.get("year"):
+            partes.append(f"📅 {str(meta['year']).strip()}")
+        if album_role and meta.get("show_role"):
+            tipo = meta.get("role_full") or meta.get("role")
+        else:
+            tipo = meta.get("type")
+        if tipo and tipo != "--":
+            partes.append(f"🎭 {tipo}")
+        if quality:
+            partes.append(f"🎚 {quality}")
+        if item_category == "album" and meta.get("tracks_count"):
+            partes.append(f"{meta['tracks_count']} faixas")
+        if meta.get("duration") and meta["duration"] != "--:--":
+            partes.append(_short_duration(meta["duration"]))
+    elif item_category == "playlist":
+        if meta.get("owner"):
+            partes.append(f"👤 {meta['owner']}")
+        if meta.get("count") not in (None, ""):
+            partes.append(f"{meta['count']} faixas")
+        if meta.get("duration") and meta["duration"] != "--:--":
+            partes.append(_short_duration(meta["duration"]))
+    elif item_category == "artist":
+        if meta.get("count") not in (None, ""):
+            partes.append(f"{meta['count']} lançamentos")
+
+    dados = ""
+    for parte in partes:
+        candidato = f"{dados} · {parte}" if dados else parte
+        if get_cwidth(candidato) <= largura:
+            dados = candidato
+        elif not dados:
+            dados = _fit(parte, largura)
+    if dados:
+        linhas.append(("class:meta", f" {dados}"))
+
+    linhas = linhas[:LINHAS_DETALHE]
+    while len(linhas) < LINHAS_DETALHE:
+        linhas.append(("", ""))
+    return linhas

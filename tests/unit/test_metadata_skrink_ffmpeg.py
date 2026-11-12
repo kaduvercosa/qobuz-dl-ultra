@@ -9,6 +9,7 @@ não depende do Pillow. Pula sozinho se não houver ffmpeg.
 import builtins
 import shutil
 import subprocess
+import sys
 
 import pytest
 
@@ -16,8 +17,15 @@ from qobuz_dl import metadata
 
 FFMPEG = shutil.which("ffmpeg")
 
+# No a-Shell o ffmpeg roda dentro do próprio processo do Python e trava de forma
+# intermitente com a suíte inteira (mesmo motivo de test_inspector_completo); o
+# CI (macOS/Linux) continua rodando estes testes.
 pytestmark = [
     pytest.mark.unit,
+    pytest.mark.skipif(
+        sys.platform == "ios",
+        reason="ffmpeg real trava intermitente no a-Shell/iOS; coberto no CI",
+    ),
     pytest.mark.skipif(not FFMPEG, reason="ffmpeg indisponível"),
 ]
 

@@ -1,7 +1,5 @@
 """Testes sem rede para retry seletivo e cooldown HTTP compartilhado."""
 
-import asyncio
-
 import httpx
 import pytest
 

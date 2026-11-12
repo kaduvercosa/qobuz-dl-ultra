@@ -78,3 +78,14 @@ async def test_sucesso_nao_gera_aviso(cliente, caplog):
     with caplog.at_level(logging.WARNING, logger="qobuz_dl.qopy"):
         await c.search_albums("x")
     assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+
+
+async def test_auth_repassa_token_rejeitado_no_user_get(monkeypatch):
+    cliente = Client()
+
+    async def rejeitar(*args, **kwargs):
+        raise AuthenticationError("token expirado")
+
+    monkeypatch.setattr(cliente, "api_call", rejeitar)
+    with pytest.raises(AuthenticationError):
+        await cliente.auth("conta@example.com", "", "token-expirado")

@@ -99,7 +99,7 @@ from .lyrics_engine import LYRICS_NETWORK_BUDGET, LyricsEngine
 FALLBACK_TIERS = [27, 7, 6, 5]
 
 
-def _flatten_artists(artist_data):
+def _flatten_artists(artist_data: Any) -> str:
     """Flatten an artist value to the string used by download metadata."""
     if isinstance(artist_data, list) and artist_data:
         return str(artist_data[0])
@@ -160,7 +160,7 @@ def _get_dir_lock(dirn: str) -> asyncio.Lock:
     return _dir_locks.setdefault(dirn, asyncio.Lock())
 
 
-def safe_print(*args, **kwargs):
+def safe_print(*args: Any, **kwargs: Any) -> None:
     """
     Funcao de print thread-safe. Evita falhas visuais na interface
     ("guerra de cursores") quando varias threads de download tentam
@@ -190,7 +190,7 @@ _TIPO_LANCAMENTO_ROTULO = {
 }
 
 
-def quality_request_label(quality) -> str:
+def quality_request_label(quality: Any) -> str:
     """Qualidade PEDIDA (1 a 27) em texto, para cabecalhos de playlist/lote."""
     try:
         return _QUALIDADE_PEDIDA.get(int(quality), "")
@@ -198,7 +198,7 @@ def quality_request_label(quality) -> str:
         return ""
 
 
-def release_type_label(tipo) -> str:
+def release_type_label(tipo: Any) -> str:
     """Tipo do lancamento para o cabecalho ('Álbum', 'EP', 'Single'...)."""
     tipo = str(tipo or "").strip()
     if not tipo or tipo == "Desconhecido":
@@ -206,12 +206,12 @@ def release_type_label(tipo) -> str:
     return _TIPO_LANCAMENTO_ROTULO.get(tipo, tipo)
 
 
-def clock_label(seconds) -> str:
+def clock_label(seconds: Any) -> str:
     """Duracao em ``MM:SS`` ou ``HH:MM:SS``; vazio quando nao ha dado."""
     return ui.format_clock(seconds)
 
 
-def destination_label(path, base=None) -> str:
+def destination_label(path: Any, base: Any = None) -> str:
     """Pasta de destino para o cabecalho: relativa a ``base`` quando couber."""
     if not path:
         return ""
@@ -226,7 +226,7 @@ def destination_label(path, base=None) -> str:
     return path
 
 
-def _album_duration_seconds(album_meta) -> float:
+def _album_duration_seconds(album_meta: Any) -> float:
     """Duracao total do album: campo da API ou soma das faixas."""
     try:
         duration = album_meta.get("duration")
@@ -251,7 +251,7 @@ def print_download_header(kind: str, rows: list) -> None:
     ui.header(kind, shown)
 
 
-def emit_progress_json(settings, event, **fields):
+def emit_progress_json(settings: Any, event: Any, **fields: Any) -> None:
     """
     Emite uma linha JSON em stdout descrevendo um evento de progresso
     (inicio/fim de faixa), para frontends externos (scripts, apps) conseguirem
@@ -270,7 +270,7 @@ def emit_progress_json(settings, event, **fields):
 def _build_letras_report(
     resultado: Optional[dict],
     translation_lang: Optional[str],
-    qobuz_translation_response,
+    qobuz_translation_response: Any,
 ) -> dict:
     """
     Traduz o dict de retorno de LyricsEngine.fetch_and_inject() pro
@@ -365,7 +365,7 @@ _COVER_SOURCES: dict = {}
 _PROGRESS_NOTES: dict = {}
 
 
-def _progress_tail(track_name, size_mb=None):
+def _progress_tail(track_name: Any, size_mb: Any = None) -> str:
     """Métricas da linha "Em Progresso": tamanho (se conhecido) + nota da capa."""
     tamanho = f"{size_mb:.1f} MB" if size_mb is not None else ""
     return ui.join_meta(tamanho, _PROGRESS_NOTES.get(track_name, ""))
@@ -390,7 +390,7 @@ class Download:
 
     def __init__(
         self,
-        client,
+        client: Any,
         item_id: str,
         path: str,
         quality: int,
@@ -399,21 +399,21 @@ class Download:
         downgrade_quality: bool = False,
         cover_og_quality: bool = False,
         no_cover: bool = False,
-        folder_format=None,
-        track_format=None,
+        folder_format: Any = None,
+        track_format: Any = None,
         fetch_lyrics: bool = False,
         no_lrc_files: bool = False,
         genius_token: Optional[str] = None,
         no_credits: bool = False,
         settings: Optional[QobuzDLSettings] = None,
-        download_db=None,
+        download_db: Any = None,
         is_playlist: bool = False,
         playlist_track_number: Optional[int] = None,
         booklet_only: bool = False,
         playlist_as_albums: bool = False,
         playlist_title: Optional[str] = None,
         playlist_id: Optional[str] = None,
-    ):
+    ) -> None:
         """Initialize downloader with client, item ID, quality settings, and formatting options."""
         self.client = client
         self.item_id = item_id
@@ -466,10 +466,10 @@ class Download:
         self,
         track: bool = True,
         is_parallel: bool = False,
-        position_pool=None,
+        position_pool: Any = None,
         suppress_header: bool = False,
         suppress_track_summary: bool = False,
-    ):
+    ) -> Any:
         """Download an item by ID and type (album, track, artist, etc.)."""
         self.folder_format = self._original_folder_format
         self.track_format = self._original_track_format
@@ -490,7 +490,7 @@ class Download:
         finally:
             await self.close_session()
 
-    async def close_session(self):
+    async def close_session(self) -> None:
         """Close the HTTP session and release resources."""
         if hasattr(self, "lyrics_engine"):
             try:
@@ -507,19 +507,19 @@ class Download:
 
     async def _process_track(
         self,
-        idx,
-        i,
+        idx: Any,
+        i: Any,
         *,
-        dirn,
-        album_meta,
-        is_multiple,
-        is_parallel,
-        position_pool,
-        semaphore,
-        report_track,
-        cover_source=None,
-        pipeline=None,
-    ):
+        dirn: Any,
+        album_meta: Any,
+        is_multiple: Any,
+        is_parallel: Any,
+        position_pool: Any,
+        semaphore: Any,
+        report_track: Any,
+        cover_source: Any = None,
+        pipeline: Any = None,
+    ) -> Any:
         """Processa e baixa UMA faixa do álbum.
 
         Decide se a faixa é pulada (não-streamable ou apenas amostra),
@@ -565,7 +565,7 @@ class Download:
                 is_mp3 = True if int(self.quality) == 5 else False
                 letras_info: dict[str, object] = {}
 
-                async def _baixar_e_marcar():
+                async def _baixar_e_marcar() -> Any:
                     # Resultado POR CHAMADA (como `letras_out`): um atributo
                     # único no objeto era sobrescrito por outra faixa em
                     # paralelo e, nos caminhos de falha que não o definiam,
@@ -636,7 +636,9 @@ class Download:
                 await report_track(i, t_num, "pulada", "Apenas amostra/demo (30s)")
                 return "skipped"
 
-    async def _absorb_playlist_copies(self, dest_files=None, dest_dir=None, **reg):
+    async def _absorb_playlist_copies(
+        self, dest_files: Any = None, dest_dir: Any = None, **reg: Any
+    ) -> None:
         """Álbum/faixa avulsa concluído: tira das playlists a cópia duplicada.
 
         `dest_files`: {id da faixa: caminho do arquivo no álbum}; ou
@@ -675,7 +677,7 @@ class Download:
                 f"{os.path.basename(kept)}"
             )
 
-    async def download_release(self, suppress_header=False):
+    async def download_release(self, suppress_header: bool = False) -> Any:
         """Download a full album/release with all tracks."""
         album_meta = await self.client.get_album_meta(self.item_id)
 
@@ -867,7 +869,7 @@ class Download:
         try:
             original_sigint = signal.getsignal(signal.SIGINT)
 
-            def custom_sigint_handler(sig, frame):
+            def custom_sigint_handler(sig: Any, frame: Any) -> None:
                 """Handle Ctrl+C during downloads."""
                 abort_event.set()
                 raise KeyboardInterrupt
@@ -947,7 +949,9 @@ class Download:
             )
             pipeline_kw = {"pipeline": pipeline_ctx} if pipeline_ctx is not None else {}
 
-            async def _report_track(i, t_num, status, motivo="", letras=None):
+            async def _report_track(
+                i: Any, t_num: Any, status: Any, motivo: str = "", letras: Any = None
+            ) -> None:
                 """Report track download result to JSON progress stream."""
                 await postprocess.update_track_status(
                     dirn,
@@ -969,7 +973,7 @@ class Download:
                     letras=letras,
                 )
 
-            async def process_track(idx, i):
+            async def process_track(idx: Any, i: Any) -> Any:
                 """Repassa pra `self._process_track` (ver docstring dela --
                 extraída daqui pra ser testável isoladamente). Só existe
                 como função aninhada ainda porque fecha sobre variáveis
@@ -1037,7 +1041,7 @@ class Download:
             results = [None] * len(album_tracks)
             album_track_items = list(enumerate(album_tracks))
 
-            async def _bounded_process_track(_worker_index, entry):
+            async def _bounded_process_track(_worker_index: Any, entry: Any) -> Any:
                 idx, track = entry
                 # `retry`: só as faixas pedidas; as demais passam em silêncio.
                 _so_estas = getattr(self, "only_track_ids", None)
@@ -1304,10 +1308,10 @@ class Download:
     async def download_track(
         self,
         is_parallel: bool = False,
-        position_pool=None,
+        position_pool: Any = None,
         suppress_header: bool = False,
         suppress_track_summary: bool = False,
-    ):
+    ) -> Any:
         """Download a single track file from Qobuz."""
         _track_started = time.monotonic()  # "Tempo total" do resumo da faixa
         parse = await self.client.get_track_url(self.item_id, self.quality)
@@ -1747,7 +1751,7 @@ class Download:
         return {**track_metadata, "album": novo_album}
 
     async def _download_and_tag(
-        self, *args, suppress_track_summary: bool = False, **kwargs
+        self, *args: Any, suppress_track_summary: bool = False, **kwargs: Any
     ) -> bool:
         """Apply tags and present a final status only after all processing."""
         claimed_paths: list[str] = []
@@ -1779,19 +1783,19 @@ class Download:
 
     async def _download_and_tag_impl(
         self,
-        root_dir,
-        tmp_count,
-        track_url_dict,
-        track_metadata,
-        album_or_track_metadata,
-        is_track,
-        is_mp3,
-        multiple=None,
-        is_parallel=False,
-        position_pool=None,
-        embed_cover_path=None,
+        root_dir: Any,
+        tmp_count: Any,
+        track_url_dict: Any,
+        track_metadata: Any,
+        album_or_track_metadata: Any,
+        is_track: Any,
+        is_mp3: Any,
+        multiple: Any = None,
+        is_parallel: bool = False,
+        position_pool: Any = None,
+        embed_cover_path: Any = None,
         letras_out: Optional[dict] = None,
-        cover_source=None,
+        cover_source: Any = None,
         display_index: Optional[int] = None,
         _claimed: Optional[list] = None,
         outcome_out: Optional[dict] = None,
@@ -1842,7 +1846,7 @@ class Download:
         ):
             clean_playlist_format = "{artist} - {track_title}"
 
-            def _safe_name(text):
+            def _safe_name(text: Any) -> Any:
                 """Torna um trecho seguro para uso em nome de arquivo."""
                 return sanitize_filename(
                     clean_filename(text, legacy_charmap=legacy_flag),
@@ -2040,7 +2044,9 @@ class Download:
                     f"{TIER_NAMES[attempt_fmt]}..."
                 )
 
-            async def get_fresh_url(fmt=attempt_fmt, force_segments=False):
+            async def get_fresh_url(
+                fmt: Any = attempt_fmt, force_segments: bool = False
+            ) -> Any:
                 """Obtain a fresh download URL from Qobuz API."""
                 return await self.client.get_track_url(
                     track_metadata["id"], fmt_id=fmt, force_segments=force_segments
@@ -2262,7 +2268,7 @@ class Download:
                             f"sem tradução em {translation_lang.upper()} no Qobuz"
                         )
 
-            def _inject_lyrics_and_print():
+            def _inject_lyrics_and_print() -> Any:
                 """Inject lyrics into audio file and print status.
 
                 A busca de letras e' rede com esperas (cooldown de 429). Ela
@@ -2318,7 +2324,7 @@ class Download:
             and not abort_event.is_set()
         ):
 
-            def _run_verify():
+            def _run_verify() -> Any:
                 """Run post-download audio integrity verification."""
                 return verify_audio_integrity(final_file)
 
@@ -2391,7 +2397,9 @@ class Download:
         return True
 
     @staticmethod
-    def _get_filename_attr(track_artist, track_metadata: dict, album_metadata: dict):
+    def _get_filename_attr(
+        track_artist: Any, track_metadata: dict, album_metadata: dict
+    ) -> dict[str, Any]:
         """Get a filename attribute with fallback chain."""
 
         album_artist_raw = get_album_artist(album_metadata)
@@ -2424,7 +2432,13 @@ class Download:
         }
 
     @staticmethod
-    def _get_track_attr(meta, track_title, bit_depth, sampling_rate, file_format):
+    def _get_track_attr(
+        meta: Any,
+        track_title: Any,
+        bit_depth: Any,
+        sampling_rate: Any,
+        file_format: Any,
+    ) -> dict[str, Any]:
         """Get a track attribute with fallback chain."""
         album_meta = meta.get("album", {})
 
@@ -2496,7 +2510,13 @@ class Download:
         }
 
     @staticmethod
-    def _get_album_attr(meta, album_title, file_format, bit_depth, sampling_rate):
+    def _get_album_attr(
+        meta: Any,
+        album_title: Any,
+        file_format: Any,
+        bit_depth: Any,
+        sampling_rate: Any,
+    ) -> dict[str, Any]:
         """Get an album attribute with fallback chain."""
 
         album_artist_raw = get_album_artist(meta)
@@ -2551,7 +2571,9 @@ class Download:
             "release_type": _tipo_lancamento,
         }
 
-    async def _get_format(self, item_dict, is_track_id=False, track_url_dict=None):
+    async def _get_format(
+        self, item_dict: Any, is_track_id: bool = False, track_url_dict: Any = None
+    ) -> Any:
         """Get format string (FLAC/MP3) from quality and stream info."""
         if not is_track_id:
             if "tracks" not in item_dict or not item_dict["tracks"].get("items"):
@@ -2595,14 +2617,14 @@ class Download:
 
     def _determine_formats(
         self,
-        album_meta,
-        album_attr,
-        tracks_meta,
-        track_attr,
-        is_track,
-        file_format,
+        album_meta: Any,
+        album_attr: Any,
+        tracks_meta: Any,
+        track_attr: Any,
+        is_track: Any,
+        file_format: Any,
         settings: QobuzDLSettings,
-    ):
+    ) -> None:
         """Determine folder and track filename formats."""
         format_combinations = [
             (
@@ -2689,8 +2711,14 @@ class Download:
         self.track_format = DEFAULT_TRACK
 
     def _generate_tracklist(
-        self, meta, dirn, album_title, file_format, bit_depth, sampling_rate
-    ):
+        self,
+        meta: Any,
+        dirn: Any,
+        album_title: Any,
+        file_format: Any,
+        bit_depth: Any,
+        sampling_rate: Any,
+    ) -> None:
         """Generate a text file listing all tracks in the release."""
         if self.no_credits or abort_event.is_set():
             return
@@ -2787,13 +2815,15 @@ class Download:
         except Exception as e:
             ui.error(f"Erro criando booklet: {e}")
 
-    async def _fetch_qobuz_lyrics_json(self, track_id, language=None):
+    async def _fetch_qobuz_lyrics_json(
+        self, track_id: Any, language: Any = None
+    ) -> Any:
         """Fetch lyrics JSON from Qobuz API."""
         return await fetch_qobuz_lyrics_json(
             self.client, self.http_session, track_id, language
         )
 
-    def _append_lyrics_to_booklet(self, dirn, album_title):
+    def _append_lyrics_to_booklet(self, dirn: Any, album_title: Any) -> None:
         """Append lyrics to digital booklet text file."""
         if abort_event.is_set():
             return
@@ -2850,7 +2880,7 @@ class Download:
                 logger.debug(f"Falha ao anexar letras ao Digital Booklet: {e}")
 
 
-def _get_description(item: dict, track_title, multiple=None):
+def _get_description(item: dict, track_title: Any, multiple: Any = None) -> Any:
     """Get album description from metadata."""
     downloading_title = (
         f"{track_title} [{item.get('bit_depth', '')}/{item.get('sampling_rate', '')}]"
@@ -2861,14 +2891,14 @@ def _get_description(item: dict, track_title, multiple=None):
 
 
 async def _tqdm_download_atomic(
-    url_or_callable,
-    fname,
-    track_name,
+    url_or_callable: Any,
+    fname: Any,
+    track_name: Any,
     *,
-    is_parallel=False,
-    session=None,
-    position_pool=None,
-):
+    is_parallel: bool = False,
+    session: Any = None,
+    position_pool: Any = None,
+) -> None:
     """Baixa áudio em ``.part`` e promove atomicamente após validar o corpo."""
     if abort_event.is_set():
         return
@@ -2953,13 +2983,13 @@ async def _tqdm_download_atomic(
 
 
 async def tqdm_download(
-    url_or_callable,
-    fname,
-    track_name,
-    is_parallel=False,
-    session=None,
-    position_pool=None,
-):
+    url_or_callable: Any,
+    fname: Any,
+    track_name: Any,
+    is_parallel: bool = False,
+    session: Any = None,
+    position_pool: Any = None,
+) -> Any:
     """Download file with tqdm progress bar and atomic finalization."""
     return await _tqdm_download_atomic(
         url_or_callable,
@@ -2971,7 +3001,9 @@ async def tqdm_download(
     )
 
 
-async def fetch_qobuz_lyrics_json(client, http_session, track_id, language=None):
+async def fetch_qobuz_lyrics_json(
+    client: Any, http_session: Any, track_id: Any, language: Any = None
+) -> Any:
     """Fetch lyrics JSON from Qobuz API.
 
     Letra e' um extra: se o Qobuz pedir uma pausa longa (429), o orcamento de
@@ -3020,7 +3052,7 @@ async def fetch_qobuz_lyrics_json(client, http_session, track_id, language=None)
         return None
 
 
-def _get_title(item_dict):
+def _get_title(item_dict: Any) -> Any:
     """Get base track title without version."""
     item_title = item_dict.get("title")
     version = item_dict.get("version")
@@ -3033,7 +3065,7 @@ def _get_title(item_dict):
     return item_title
 
 
-def _resolve_art_url(item, art_size, og_quality=False):
+def _resolve_art_url(item: Any, art_size: Any, og_quality: bool = False) -> Any:
     """
     Aplica a mesma substituicao de resolucao que sempre foi feita
     internamente (troca o "_600." da URL pelo tamanho pedido). Extraida
@@ -3049,16 +3081,16 @@ def _resolve_art_url(item, art_size, og_quality=False):
 
 
 async def _get_extra(
-    item,
-    dirn,
-    extra="cover.jpg",
-    art_size=None,
-    og_quality=False,
-    session=None,
-    label="file",
-    is_parallel=False,
-    position_pool=None,
-):
+    item: Any,
+    dirn: Any,
+    extra: str = "cover.jpg",
+    art_size: Any = None,
+    og_quality: bool = False,
+    session: Any = None,
+    label: str = "file",
+    is_parallel: bool = False,
+    position_pool: Any = None,
+) -> None:
     """Get extra/description from goodies metadata."""
     if abort_event.is_set():
         return
@@ -3082,7 +3114,9 @@ async def _get_extra(
         ui.skip(f"Pulando {label} '{extra}': URL inacessível ({e})")
 
 
-async def _download_bytes_with_limit(url, session, max_bytes, headers=None):
+async def _download_bytes_with_limit(
+    url: Any, session: Any, max_bytes: Any, headers: Any = None
+) -> Any:
     """
     Baixa uma URL inteira em memoria, abortando cedo se passar de
     max_bytes (sem gastar banda/tempo baixando o resto de uma imagem
@@ -3130,21 +3164,21 @@ _APPLE_HEADERS = {
 }
 
 
-def _apple_release_kind(album):
+def _apple_release_kind(album: Any) -> Any:
     """Atalho para utils.qobuz_release_kind (mesma regra do comando `tags`)."""
     return qobuz_release_kind(album)
 
 
 async def _try_apple_cover_bytes(
-    session,
-    artist=None,
-    album=None,
-    upc=None,
-    isrc=None,
-    track_title=None,
-    release_kind=None,
-    album_tracks=None,
-):
+    session: Any,
+    artist: Any = None,
+    album: Any = None,
+    upc: Any = None,
+    isrc: Any = None,
+    track_title: Any = None,
+    release_kind: Any = None,
+    album_tracks: Any = None,
+) -> Any:
     """
     Tenta achar E baixar a capa da Apple, em cascata de resolucoes ate
     caber em MAX_COVER_BYTES. Devolve os bytes prontos, ou None se a
@@ -3209,7 +3243,7 @@ async def _try_apple_cover_bytes(
     return None
 
 
-async def _fetch_qobuz_cover_bytes(qobuz_item, art_size, session):
+async def _fetch_qobuz_cover_bytes(qobuz_item: Any, art_size: Any, session: Any) -> Any:
     """Fetch cover art bytes from Qobuz CDN."""
     qobuz_url = _resolve_art_url(qobuz_item, art_size)
     return await _download_bytes_with_limit(
@@ -3218,26 +3252,26 @@ async def _fetch_qobuz_cover_bytes(qobuz_item, art_size, session):
 
 
 async def _get_cover_and_embed(
-    item,
-    dirn,
-    save_cover,
-    embed_art,
-    saved_name,
-    embed_name,
-    saved_art_size,
-    embedded_art_size,
-    session=None,
-    is_parallel=False,
-    position_pool=None,
-    artist=None,
-    album=None,
-    upc=None,
-    isrc=None,
-    track_title=None,
-    release_kind=None,
-    notas=None,
-    album_tracks=None,
-):
+    item: Any,
+    dirn: Any,
+    save_cover: Any,
+    embed_art: Any,
+    saved_name: Any,
+    embed_name: Any,
+    saved_art_size: Any,
+    embedded_art_size: Any,
+    session: Any = None,
+    is_parallel: bool = False,
+    position_pool: Any = None,
+    artist: Any = None,
+    album: Any = None,
+    upc: Any = None,
+    isrc: Any = None,
+    track_title: Any = None,
+    release_kind: Any = None,
+    notas: Any = None,
+    album_tracks: Any = None,
+) -> Any:
     """
     Baixa a capa salva (cover.jpg) e a capa de embed.
 
@@ -3291,7 +3325,9 @@ async def _get_cover_and_embed(
     if not precisa_salva and not precisa_embed:
         return _COVER_SOURCES.get(chave_origem)
 
-    async def _gravar(caminho, dados, rotulo, rotulo_origem):
+    async def _gravar(
+        caminho: Any, dados: Any, rotulo: Any, rotulo_origem: Any
+    ) -> bool:
         """Write cover image bytes to disk."""
         try:
             async with aiofiles.open(caminho, "wb") as f:
@@ -3337,7 +3373,7 @@ async def _get_cover_and_embed(
 
     gravou_qobuz = False
 
-    def _origem_qobuz():
+    def _origem_qobuz() -> str | None:
         # So' afirma "Qobuz" se alguma imagem da Qobuz foi de fato gravada.
         if not gravou_qobuz:
             return _COVER_SOURCES.get(chave_origem)
@@ -3386,14 +3422,14 @@ async def _get_cover_and_embed(
 
 
 async def tqdm_download_segments(
-    track_url_dict,
-    fname,
-    track_name,
-    is_parallel=False,
-    session=None,
-    segment_workers=None,
-    position_pool=None,
-):
+    track_url_dict: Any,
+    fname: Any,
+    track_name: Any,
+    is_parallel: bool = False,
+    session: Any = None,
+    segment_workers: Any = None,
+    position_pool: Any = None,
+) -> None:
     """Download file using segmented approach with progress bar."""
     if abort_event.is_set():
         return
@@ -3412,7 +3448,7 @@ async def tqdm_download_segments(
     timeout_cfg = httpx.Timeout(60.0, connect=10.0)
     http = session or make_client(follow_redirects=True, timeout=timeout_cfg)
 
-    async def get_seg_size(seg_num):
+    async def get_seg_size(seg_num: Any) -> Any:
         """Get optimal segment size for segmented downloads."""
         url = url_template.replace("$SEGMENT$", str(seg_num))
         try:
@@ -3459,7 +3495,7 @@ async def tqdm_download_segments(
         ncols = None
         dynamic_ncols = True
 
-    async def fetch_segment_fluid(seg_num):
+    async def fetch_segment_fluid(seg_num: Any) -> Any:
         """Fetch a single segment with retries and error handling."""
         url = url_template.replace("$SEGMENT$", str(seg_num))
         seg_data = bytearray()
@@ -3625,7 +3661,7 @@ async def tqdm_download_segments(
             position_pool.release(position)
 
 
-def _get_qobuz_segment_uuid(segment_data):
+def _get_qobuz_segment_uuid(segment_data: Any) -> bytes | None:
     """Extract UUID from Qobuz streaming URL."""
     pos = 0
     while pos + 24 <= len(segment_data):
@@ -3638,7 +3674,7 @@ def _get_qobuz_segment_uuid(segment_data):
     return None
 
 
-def _decrypt_qobuz_segment(segment_data, raw_key, segment_uuid):
+def _decrypt_qobuz_segment(segment_data: Any, raw_key: Any, segment_uuid: Any) -> bytes:
     """Decrypt a Qobuz audio segment using AES."""
     if segment_uuid is None:
         return bytes(segment_data)
@@ -3687,8 +3723,12 @@ def _decrypt_qobuz_segment(segment_data, raw_key, segment_uuid):
 
 
 async def _download_goodies(
-    album_meta, dirn, session=None, is_parallel=False, position_pool=None
-):
+    album_meta: Any,
+    dirn: Any,
+    session: Any = None,
+    is_parallel: bool = False,
+    position_pool: Any = None,
+) -> None:
     """Download digital booklets and bonus PDFs."""
     if abort_event.is_set():
         return
@@ -3714,7 +3754,7 @@ async def _download_goodies(
         logger.error(f"{RED}Erro ao baixar goodies: {e}", exc_info=True)
 
 
-async def _musicbrainz_ids(track_metadata: dict, album_meta: dict):
+async def _musicbrainz_ids(track_metadata: dict, album_meta: dict) -> Any:
     """IDs do MusicBrainz só se título, versão, álbum e artista conferirem.
 
     Nunca levanta exceção: qualquer problema vira None (a faixa é tagueada
@@ -3745,7 +3785,7 @@ async def _musicbrainz_ids(track_metadata: dict, album_meta: dict):
         return None
 
 
-def _clean_embed_art(dirn, settings=None):
+def _clean_embed_art(dirn: Any, settings: Any = None) -> None:
     """Clean and optimize embedded artwork for size/quality."""
     embed_file = os.path.join(dirn, EMB_COVER_NAME)
     if os.path.exists(embed_file):

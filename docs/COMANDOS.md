@@ -104,6 +104,13 @@ Busca interativa: procura faixas/álbuns e escolhe o que baixar na hora.
 | `--segment-workers` | `N` | threads usadas internamente no fallback de download segmentado |  |
 | `--no-pipeline` |  | desliga o pipeline de download (por padrão, com --max-workers > 1, a vaga de rede é liberada assim que o arquivo baixa e as tags, letras e verificação rodam em paralelo com os próximos downloads) |  |
 | `--adaptive-workers` |  | ajusta o número de downloads simultâneos: corta pela metade quando há falha de rede ou bloqueio e sobe 1 a cada 4 downloads bons (nunca passa de --max-workers) |  |
+| `--events` | `ARQUIVO` | grava um evento JSON por linha (progresso de faixas e álbuns) em ARQUIVO; use - para o stderr |  |
+| `--on-complete` | `COMANDO` | roda COMANDO ao concluir cada álbum/faixa/playlist (dados em QOBUZ_DL_*) |  |
+| `--on-error` | `COMANDO` | roda COMANDO quando um álbum/faixa/playlist termina incompleto |  |
+| `--on-finish` | `COMANDO` | roda COMANDO uma vez, no fim da sessão de download |  |
+| `--webhook` | `URL` | envia os eventos concluídos por POST (JSON) para esta URL |  |
+| `--ntfy` | `TOPICO_OU_URL` | notifica no ntfy (tópico, ou URL do seu servidor) ao fim da sessão |  |
+| `--rescan` | `SERVIDORES` | pede ao servidor de música que reescaneie a biblioteca se baixou arquivo novo: navidrome, subsonic, plex, jellyfin (separe com vírgula) |  |
 | `-v`, `--verbose` |  | mostra mensagens de diagnóstico (nível DEBUG) |  |
 | `--quiet` |  | mostra apenas avisos e erros (bom para cron/scripts) |  |
 | `--no-color` |  | desliga as cores ANSI (respeita também a variável NO_COLOR) |  |
@@ -185,6 +192,13 @@ Baixa por URL de álbum, faixa, artista, gravadora ou playlist do Qobuz, ou um a
 | `--segment-workers` | `N` | threads usadas internamente no fallback de download segmentado |  |
 | `--no-pipeline` |  | desliga o pipeline de download (por padrão, com --max-workers > 1, a vaga de rede é liberada assim que o arquivo baixa e as tags, letras e verificação rodam em paralelo com os próximos downloads) |  |
 | `--adaptive-workers` |  | ajusta o número de downloads simultâneos: corta pela metade quando há falha de rede ou bloqueio e sobe 1 a cada 4 downloads bons (nunca passa de --max-workers) |  |
+| `--events` | `ARQUIVO` | grava um evento JSON por linha (progresso de faixas e álbuns) em ARQUIVO; use - para o stderr |  |
+| `--on-complete` | `COMANDO` | roda COMANDO ao concluir cada álbum/faixa/playlist (dados em QOBUZ_DL_*) |  |
+| `--on-error` | `COMANDO` | roda COMANDO quando um álbum/faixa/playlist termina incompleto |  |
+| `--on-finish` | `COMANDO` | roda COMANDO uma vez, no fim da sessão de download |  |
+| `--webhook` | `URL` | envia os eventos concluídos por POST (JSON) para esta URL |  |
+| `--ntfy` | `TOPICO_OU_URL` | notifica no ntfy (tópico, ou URL do seu servidor) ao fim da sessão |  |
+| `--rescan` | `SERVIDORES` | pede ao servidor de música que reescaneie a biblioteca se baixou arquivo novo: navidrome, subsonic, plex, jellyfin (separe com vírgula) |  |
 | `-v`, `--verbose` |  | mostra mensagens de diagnóstico (nível DEBUG) |  |
 | `--quiet` |  | mostra apenas avisos e erros (bom para cron/scripts) |  |
 | `--no-color` |  | desliga as cores ANSI (respeita também a variável NO_COLOR) |  |
@@ -280,6 +294,13 @@ Baixa os N primeiros resultados de uma busca no Qobuz, sem passar URL.
 | `--segment-workers` | `N` | threads usadas internamente no fallback de download segmentado |  |
 | `--no-pipeline` |  | desliga o pipeline de download (por padrão, com --max-workers > 1, a vaga de rede é liberada assim que o arquivo baixa e as tags, letras e verificação rodam em paralelo com os próximos downloads) |  |
 | `--adaptive-workers` |  | ajusta o número de downloads simultâneos: corta pela metade quando há falha de rede ou bloqueio e sobe 1 a cada 4 downloads bons (nunca passa de --max-workers) |  |
+| `--events` | `ARQUIVO` | grava um evento JSON por linha (progresso de faixas e álbuns) em ARQUIVO; use - para o stderr |  |
+| `--on-complete` | `COMANDO` | roda COMANDO ao concluir cada álbum/faixa/playlist (dados em QOBUZ_DL_*) |  |
+| `--on-error` | `COMANDO` | roda COMANDO quando um álbum/faixa/playlist termina incompleto |  |
+| `--on-finish` | `COMANDO` | roda COMANDO uma vez, no fim da sessão de download |  |
+| `--webhook` | `URL` | envia os eventos concluídos por POST (JSON) para esta URL |  |
+| `--ntfy` | `TOPICO_OU_URL` | notifica no ntfy (tópico, ou URL do seu servidor) ao fim da sessão |  |
+| `--rescan` | `SERVIDORES` | pede ao servidor de música que reescaneie a biblioteca se baixou arquivo novo: navidrome, subsonic, plex, jellyfin (separe com vírgula) |  |
 | `-v`, `--verbose` |  | mostra mensagens de diagnóstico (nível DEBUG) |  |
 | `--quiet` |  | mostra apenas avisos e erros (bom para cron/scripts) |  |
 | `--no-color` |  | desliga as cores ANSI (respeita também a variável NO_COLOR) |  |
@@ -412,6 +433,13 @@ Sincroniza uma pasta local com uma playlist do Qobuz (baixa o que falta, remove 
 | `--segment-workers` | `N` | threads usadas internamente no fallback de download segmentado |  |
 | `--no-pipeline` |  | desliga o pipeline de download (por padrão, com --max-workers > 1, a vaga de rede é liberada assim que o arquivo baixa e as tags, letras e verificação rodam em paralelo com os próximos downloads) |  |
 | `--adaptive-workers` |  | ajusta o número de downloads simultâneos: corta pela metade quando há falha de rede ou bloqueio e sobe 1 a cada 4 downloads bons (nunca passa de --max-workers) |  |
+| `--events` | `ARQUIVO` | grava um evento JSON por linha (progresso de faixas e álbuns) em ARQUIVO; use - para o stderr |  |
+| `--on-complete` | `COMANDO` | roda COMANDO ao concluir cada álbum/faixa/playlist (dados em QOBUZ_DL_*) |  |
+| `--on-error` | `COMANDO` | roda COMANDO quando um álbum/faixa/playlist termina incompleto |  |
+| `--on-finish` | `COMANDO` | roda COMANDO uma vez, no fim da sessão de download |  |
+| `--webhook` | `URL` | envia os eventos concluídos por POST (JSON) para esta URL |  |
+| `--ntfy` | `TOPICO_OU_URL` | notifica no ntfy (tópico, ou URL do seu servidor) ao fim da sessão |  |
+| `--rescan` | `SERVIDORES` | pede ao servidor de música que reescaneie a biblioteca se baixou arquivo novo: navidrome, subsonic, plex, jellyfin (separe com vírgula) |  |
 | `-v`, `--verbose` |  | mostra mensagens de diagnóstico (nível DEBUG) |  |
 | `--quiet` |  | mostra apenas avisos e erros (bom para cron/scripts) |  |
 | `--no-color` |  | desliga as cores ANSI (respeita também a variável NO_COLOR) |  |
@@ -466,6 +494,8 @@ Mostra a conta e a assinatura (perfil, plano, limites; --json traz o bruto) ou a
 | Opção | Valor | O que faz | Padrão |
 | :--- | :--- | :--- | :--- |
 | `-l`, `--login` |  | Atualizar e-mail e token de autenticação. |  |
+| `--oauth` |  | Autenticar pela página oficial do Qobuz e capturar o token automaticamente. |  |
+| `--oauth-no-browser` |  | Usar OAuth sem callback local: exibe o link e aceita a URL de retorno colada (iPad/EC2). |  |
 | `--json` |  | Exibe o JSON bruto retornado pelo endpoint user/get |  |
 | `-v`, `--verbose` |  | mostra mensagens de diagnóstico (nível DEBUG) |  |
 | `--quiet` |  | mostra apenas avisos e erros (bom para cron/scripts) |  |
@@ -566,6 +596,13 @@ Sincroniza os favoritos da conta com o catálogo local (novos/removidos) e baixa
 | `--segment-workers` | `N` | threads usadas internamente no fallback de download segmentado |  |
 | `--no-pipeline` |  | desliga o pipeline de download (por padrão, com --max-workers > 1, a vaga de rede é liberada assim que o arquivo baixa e as tags, letras e verificação rodam em paralelo com os próximos downloads) |  |
 | `--adaptive-workers` |  | ajusta o número de downloads simultâneos: corta pela metade quando há falha de rede ou bloqueio e sobe 1 a cada 4 downloads bons (nunca passa de --max-workers) |  |
+| `--events` | `ARQUIVO` | grava um evento JSON por linha (progresso de faixas e álbuns) em ARQUIVO; use - para o stderr |  |
+| `--on-complete` | `COMANDO` | roda COMANDO ao concluir cada álbum/faixa/playlist (dados em QOBUZ_DL_*) |  |
+| `--on-error` | `COMANDO` | roda COMANDO quando um álbum/faixa/playlist termina incompleto |  |
+| `--on-finish` | `COMANDO` | roda COMANDO uma vez, no fim da sessão de download |  |
+| `--webhook` | `URL` | envia os eventos concluídos por POST (JSON) para esta URL |  |
+| `--ntfy` | `TOPICO_OU_URL` | notifica no ntfy (tópico, ou URL do seu servidor) ao fim da sessão |  |
+| `--rescan` | `SERVIDORES` | pede ao servidor de música que reescaneie a biblioteca se baixou arquivo novo: navidrome, subsonic, plex, jellyfin (separe com vírgula) |  |
 | `-v`, `--verbose` |  | mostra mensagens de diagnóstico (nível DEBUG) |  |
 | `--quiet` |  | mostra apenas avisos e erros (bom para cron/scripts) |  |
 | `--no-color` |  | desliga as cores ANSI (respeita também a variável NO_COLOR) |  |

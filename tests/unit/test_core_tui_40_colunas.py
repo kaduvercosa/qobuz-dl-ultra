@@ -16,7 +16,7 @@ import sys
 
 import pytest
 
-from qobuz_dl import core
+from qobuz_dl import core, ui
 
 try:
     from prompt_toolkit.application import Application, create_app_session
@@ -87,7 +87,7 @@ def _linhas_visiveis(app):
     return saida
 
 
-async def _rodar(categoria):
+async def _rodar(categoria, layout="cartao", rolar=3):
     class Saida(DummyOutput):
         def get_size(self):
             return Size(rows=LINHAS, columns=COLUNAS)
@@ -104,7 +104,10 @@ async def _rodar(categoria):
     core.Application = Captura
     linhas = []
     try:
-        with create_pipe_input() as entrada:
+        with (
+            ui.estado_temporario(layout_interativo=layout),
+            create_pipe_input() as entrada,
+        ):
             with create_app_session(input=entrada, output=Saida()):
                 tarefa = asyncio.ensure_future(
                     core._tui_select(
@@ -115,7 +118,7 @@ async def _rodar(categoria):
                     )
                 )
                 await asyncio.sleep(0.3)
-                for _ in range(3):
+                for _ in range(rolar):
                     linhas.extend(_linhas_visiveis(capturado["app"]))
                     entrada.send_text("j")
                     await asyncio.sleep(0.12)
@@ -126,12 +129,116 @@ async def _rodar(categoria):
     return linhas
 
 
+@pytest.mark.parametrize("layout", ["cartao", "compacto"])
 @pytest.mark.parametrize("categoria", sorted(_OPCOES))
-def test_nenhuma_linha_passa_de_40_colunas(categoria):
-    linhas = asyncio.run(_rodar(categoria))
+def test_nenhuma_linha_passa_de_40_colunas(categoria, layout):
+    linhas = asyncio.run(_rodar(categoria, layout))
     assert linhas, "a tela não desenhou nada"
     largas = sorted(
         {(core.get_cwidth(t), t) for t in linhas if core.get_cwidth(t) > COLUNAS},
         reverse=True,
     )
     assert not largas, f"linhas acima de {COLUNAS} colunas: {largas[:5]}"
+
+
+def _marcadas(linhas):
+    return [t for t in linhas if "➤" in t]
+
+
+def test_compacto_mostra_bem_mais_resultados_por_tela_que_o_cartao():
+    """O motivo do layout: na mesma tela de 40x24 cabem muito mais itens."""
+
+    async def _contar(layout):
+        class Saida(DummyOutput):
+            def get_size(self):
+                return Size(rows=LINHAS, columns=COLUNAS)
+
+        capturado = {}
+
+        class Captura(Application):
+            def __init__(self, *a, **k):
+                super().__init__(*a, **k)
+                capturado["app"] = self
+
+        opcoes = [
+            {"meta": dict(_OPCOES["album"], title=f"Álbum {i}"), "url": f"u{i}"}
+            for i in range(30)
+        ]
+        original = core.Application
+        core.Application = Captura
+        try:
+            with (
+                ui.estado_temporario(layout_interativo=layout),
+                create_pipe_input() as entrada,
+            ):
+                with create_app_session(input=entrada, output=Saida()):
+                    tarefa = asyncio.ensure_future(
+                        core._tui_select(
+                            "=== teste ===",
+                            opcoes,
+                            is_multi=True,
+                            item_category="album",
+                        )
+                    )
+                    await asyncio.sleep(0.3)
+                    texto = "\n".join(_linhas_visiveis(capturado["app"]))
+                    entrada.send_text("\r")
+                    await asyncio.wait_for(tarefa, 5)
+        finally:
+            core.Application = original
+        return sum(f"Álbum {i}" in texto for i in range(30))
+
+    assert asyncio.run(_contar("compacto")) >= 2 * asyncio.run(_contar("cartao"))
+
+
+def test_compacto_o_item_focado_nunca_sai_da_tela():
+    """Percorre a lista inteira: a linha com o cursor (➤) tem de estar sempre visível."""
+    linhas_por_passo = []
+
+    async def _percorrer():
+        class Saida(DummyOutput):
+            def get_size(self):
+                return Size(rows=LINHAS, columns=COLUNAS)
+
+        capturado = {}
+
+        class Captura(Application):
+            def __init__(self, *a, **k):
+                super().__init__(*a, **k)
+                capturado["app"] = self
+
+        opcoes = [
+            {"meta": dict(_OPCOES["album"], title=f"Álbum {i}"), "url": f"u{i}"}
+            for i in range(30)
+        ]
+        original = core.Application
+        core.Application = Captura
+        try:
+            with (
+                ui.estado_temporario(layout_interativo="compacto"),
+                create_pipe_input() as entrada,
+            ):
+                with create_app_session(input=entrada, output=Saida()):
+                    tarefa = asyncio.ensure_future(
+                        core._tui_select(
+                            "=== teste ===",
+                            opcoes,
+                            is_multi=True,
+                            item_category="album",
+                        )
+                    )
+                    await asyncio.sleep(0.3)
+                    for _ in range(35):  # passa do fim: confere o limite também
+                        linhas_por_passo.append(_linhas_visiveis(capturado["app"]))
+                        entrada.send_text("j")
+                        await asyncio.sleep(0.08)
+                    entrada.send_text("\r")
+                    await asyncio.wait_for(tarefa, 5)
+        finally:
+            core.Application = original
+
+    asyncio.run(_percorrer())
+    sem_cursor = [
+        i for i, linhas in enumerate(linhas_por_passo) if not _marcadas(linhas)
+    ]
+    assert not sem_cursor, f"cursor fora da tela nos passos {sem_cursor}"

@@ -85,7 +85,9 @@ NOMES_COM_VIRGULA = frozenset(
 _PH_ABRE, _PH_FECHA = "", ""
 
 
-def _nomes_protegidos(qobuz_album=None, qobuz_item=None, settings=None) -> list:
+def _nomes_protegidos(
+    qobuz_album: Any = None, qobuz_item: Any = None, settings: Any = None
+) -> list:
     """Nomes com vírgula que não devem ser quebrados, do mais longo ao mais curto.
 
     União de: lista embutida, config (settings.artists_with_comma) e nomes de
@@ -110,7 +112,7 @@ def _nomes_protegidos(qobuz_album=None, qobuz_item=None, settings=None) -> list:
     return sorted(nomes, key=len, reverse=True)
 
 
-def _split_protegido(texto, sep: str, protegidos) -> list:
+def _split_protegido(texto: Any, sep: str, protegidos: Any) -> list:
     """Como ``texto.split(sep)``, mas sem quebrar nomes protegidos.
 
     Cada nome protegido (sem diferenciar maiúsculas, só como palavra inteira) é
@@ -124,7 +126,7 @@ def _split_protegido(texto, sep: str, protegidos) -> list:
     for nome in protegidos or ():
         padrao = re.compile(r"(?<!\w)" + re.escape(nome) + r"(?!\w)", re.IGNORECASE)
 
-        def _troca(m):
+        def _troca(m: Any) -> Any:
             marcador = f"{_PH_ABRE}{len(restaurar)}{_PH_FECHA}"
             restaurar[marcador] = m.group(0)
             return marcador
@@ -140,7 +142,7 @@ def _split_protegido(texto, sep: str, protegidos) -> list:
     return partes
 
 
-def _valores_multi(chave: str, valor, multi_out=None):
+def _valores_multi(chave: str, valor: Any, multi_out: Any = None) -> Any:
     """Lista a gravar numa tag multivalorada (ou None se não é multivalorada).
 
     Prefere a lista EXATA montada em ``_get_tags_to_add`` (que sabe que
@@ -242,7 +244,7 @@ LOCAL_GENRE_MAP = {
 
 
 # # Move artigos iniciais para o final: "The Beatles" -> "Beatles, The".
-def _make_sort_name(name) -> str:
+def _make_sort_name(name: Any) -> str:
     """
     Deriva o nome de ordenacao movendo artigos iniciais pro fim.
     "The Beatles" -> "Beatles, The"
@@ -296,7 +298,7 @@ def _get_title_with_version(title: str = "", version: str = "") -> str:
 
 
 # # Monta o título de uma faixa, incluindo versão e obra clássica quando existir.
-def _get_title(track_dict):
+def _get_title(track_dict: Any) -> Any:
     """Get base track title without version."""
     title = track_dict["title"]
     version = track_dict.get("version")
@@ -317,7 +319,7 @@ def _format_copyright(s: str) -> str:
     return s
 
 
-def _eh_various_artists(qobuz_album: dict, settings=None) -> bool:
+def _eh_various_artists(qobuz_album: dict, settings: Any = None) -> bool:
     """True se o álbum-artista está na lista de coletâneas (various_artists_aliases)."""
     aliases = getattr(settings, "various_artists_aliases", None) or frozenset()
     if not aliases:
@@ -343,7 +345,7 @@ def _tracktotal_do_disco(qobuz_album: dict, qobuz_item: dict) -> str:
     return str(total)
 
 
-def _numeracao_continua(qobuz_album: dict, qobuz_item: dict):
+def _numeracao_continua(qobuz_album: dict, qobuz_item: dict) -> Any:
     """Numeração contínua (1..N) das faixas de um álbum com vários discos.
 
     Retorna (numero, total) quando o álbum tem mais de um disco E a lista de
@@ -363,7 +365,7 @@ def _numeracao_continua(qobuz_album: dict, qobuz_item: dict):
     if len(items) != total:
         return None
 
-    def _ordem(t):
+    def _ordem(t: Any) -> Any:
         try:
             disco = int(t.get("media_number") or 1)
         except (TypeError, ValueError):
@@ -416,7 +418,7 @@ _CREDIT_ROLES = {
 }
 
 
-def _extract_credits(performers_str, protegidos=()) -> dict:
+def _extract_credits(performers_str: Any, protegidos: Any = ()) -> dict:
     """Extrai créditos de produção do texto `performers` da API.
 
     O texto vem como "Nome, Funcao1, Funcao2 - Outro Nome, Funcao". Devolve
@@ -446,7 +448,7 @@ def track_artist_names(qobuz_album: dict, qobuz_item: dict) -> list:
     return list(multi.get("ARTIST") or [])
 
 
-def _escrever_ids_musicbrainz_id3(audio, mb_tags: dict) -> None:
+def _escrever_ids_musicbrainz_id3(audio: Any, mb_tags: dict) -> None:
     """Frames ID3 no padrão do Picard: UFID da gravação e TXXX de álbum/artista."""
     faixa = mb_tags.get("MUSICBRAINZ_TRACKID")
     if faixa:
@@ -466,12 +468,12 @@ def _escrever_ids_musicbrainz_id3(audio, mb_tags: dict) -> None:
         audio.add(id3.TXXX(encoding=3, desc="MusicBrainz Artist Id", text=valores))
 
 
-def _tem_valor(valor) -> bool:
+def _tem_valor(valor: Any) -> bool:
     """True se a API trouxe um valor utilizável (None e texto vazio não contam)."""
     return valor is not None and str(valor).strip() != ""
 
 
-def _numero_de_total(numero, total):
+def _numero_de_total(numero: Any, total: Any) -> Any:
     """Formata "n/total" para TRCK/TPOS; só "n" sem total; None sem número."""
     if not _tem_valor(numero):
         return None
@@ -480,7 +482,7 @@ def _numero_de_total(numero, total):
     return f"{numero}/{total}"
 
 
-def _get_cover_path(root_dir, override=None):
+def _get_cover_path(root_dir: Any, override: Any = None) -> Any:
     """
     Auxiliary function to locate the embedded cover art path.
     """
@@ -498,7 +500,7 @@ def _get_cover_path(root_dir, override=None):
 
 
 # # Normaliza nomes para comparação de duplicidade sem diferença de acentos/caixa.
-def _normalize_name(name) -> str:
+def _normalize_name(name: Any) -> str:
     """Removes accents, invisible spaces, and converts to lowercase for strict duplicate checking."""
     if isinstance(name, list):
         name = ", ".join(str(n) for n in name if n)
@@ -517,7 +519,9 @@ _FFMPEG_QUALITIES = (2, 3, 4, 5, 7, 9, 12, 16)
 _FFMPEG_SCALES = (0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2)
 
 
-def _run_ffmpeg_jpeg(ffmpeg, image_path, out_path, quality, scale=None):
+def _run_ffmpeg_jpeg(
+    ffmpeg: Any, image_path: Any, out_path: Any, quality: Any, scale: Any = None
+) -> Any:
     """Roda o ffmpeg uma vez e devolve os bytes do JPEG gerado (ou None)."""
     import subprocess
 
@@ -549,7 +553,7 @@ def _run_ffmpeg_jpeg(ffmpeg, image_path, out_path, quality, scale=None):
         return None
 
 
-def _shrink_with_ffmpeg(image_path, max_bytes):
+def _shrink_with_ffmpeg(image_path: Any, max_bytes: Any) -> Any:
     """Mesma estratégia do Pillow (qualidade primeiro, depois dimensões), via ffmpeg.
 
     Devolve os bytes do JPEG ou None se não houver ffmpeg, se ele falhar ou se
@@ -578,7 +582,7 @@ def _shrink_with_ffmpeg(image_path, max_bytes):
 
 
 # # Recompacta a capa em memória para respeitar o limite do bloco FLAC.
-def _shrink_image_to_fit(image_path, max_bytes):
+def _shrink_image_to_fit(image_path: Any, max_bytes: Any) -> Any:
     """
     Recompacta/redimensiona uma imagem ate' caber em max_bytes, priorizando
     a qualidade -- so' reduz o minimo necessario pra caber no limite.
@@ -643,7 +647,7 @@ def _shrink_image_to_fit(image_path, max_bytes):
         return None
 
 
-def _get_cover_source(tags) -> str:
+def _get_cover_source(tags: Any) -> str:
     """Lê a origem da capa armazenada nas tags"""
     if not tags:
         return COVER_SOURCE_UNKNOWN
@@ -656,7 +660,7 @@ def _get_cover_source(tags) -> str:
     return str(value or COVER_SOURCE_UNKNOWN).strip()
 
 
-def _set_cover_source(tags, source: Optional[str]) -> None:
+def _set_cover_source(tags: Any, source: Optional[str]) -> None:
     """Grava ou remove a origem da capa"""
     if source:
         tags[COVER_SOURCE_TAG] = str(source).strip()
@@ -664,7 +668,7 @@ def _set_cover_source(tags, source: Optional[str]) -> None:
         tags.pop(COVER_SOURCE_TAG, None)
 
 
-def _cover_comment_line(source: Optional[str]):
+def _cover_comment_line(source: Optional[str]) -> str:
     """Gera a linha legível da origem da capa"""
     return f"Capa: {source or COVER_SOURCE_UNKNOWN}"
 
@@ -676,7 +680,7 @@ _FLAC_COVER_COMMENT_PREFIXES = ("Capa embutida:", "Capa:")
 _MP3_COVER_COMMENT_PREFIXES = ("Cover:", "Capa:")
 
 
-def _extract_flac_cover_comment_lines(values) -> list:
+def _extract_flac_cover_comment_lines(values: Any) -> list:
     """Linhas de capa de um COMMENT Vorbis (str ou lista de str)."""
     if not values:
         return []
@@ -691,7 +695,7 @@ def _extract_flac_cover_comment_lines(values) -> list:
     return lines
 
 
-def _extract_mp3_cover_comment_segments(text) -> list:
+def _extract_mp3_cover_comment_segments(text: Any) -> list:
     """Trechos de capa de um COMM ID3 (linha única separada por ' | ')."""
     if not text:
         return []
@@ -705,7 +709,7 @@ def _extract_mp3_cover_comment_segments(text) -> list:
     return segments
 
 
-def _id3_comment_frame(audio):
+def _id3_comment_frame(audio: Any) -> Any:
     """Primeiro frame COMM com texto (None se não houver)."""
     try:
         frames = audio.getall("COMM")
@@ -718,7 +722,7 @@ def _id3_comment_frame(audio):
     return None
 
 
-def _id3_comment_text(audio) -> str:
+def _id3_comment_text(audio: Any) -> str:
     """Texto do primeiro frame COMM não vazio ('' se não houver)."""
     frame = _id3_comment_frame(audio)
     if frame is None:
@@ -730,7 +734,7 @@ def _id3_comment_text(audio) -> str:
 
 
 # # Embute a capa no FLAC; se necessário, usa uma cópia recompactada sem alterar cover.jpg.
-def _dimensions_from_header(data):
+def _dimensions_from_header(data: Any) -> Any:
     """(largura, altura) lidas só do cabeçalho de JPEG, PNG, GIF ou WebP.
 
     Python puro, sem Pillow: no a-Shell o Pillow é opcional (usa-se o que já vem
@@ -795,7 +799,7 @@ def _dimensions_from_header(data):
     return None
 
 
-def _image_dimensions(image_data):
+def _image_dimensions(image_data: Any) -> Any:
     """Retorna (largura, altura) de bytes de imagem; None se inválidos.
 
     Usa o Pillow quando ele funciona e, sem ele, lê o cabeçalho direto
@@ -815,7 +819,7 @@ _COVER_COMPARE = threading.local()
 _SQUARE_TOLERANCE = 0.03  # 3% de diferença entre largura e altura ainda é "quadrada"
 
 
-def _is_square(dimensions) -> bool:
+def _is_square(dimensions: Any) -> bool:
     """True se (largura, altura) é praticamente quadrada."""
     largura, altura = dimensions
     return abs(largura - altura) <= _SQUARE_TOLERANCE * max(largura, altura)
@@ -832,7 +836,7 @@ def last_cover_compare_reason() -> Optional[str]:
     return getattr(_COVER_COMPARE, "reason", None)
 
 
-def should_replace_embedded_cover(filename, candidate_path):
+def should_replace_embedded_cover(filename: Any, candidate_path: Any) -> Any:
     """Decide se a capa candidata tem resolução superior à já embutida.
 
     A política é conservadora: se já existe uma capa e não for possível
@@ -903,7 +907,7 @@ def should_replace_embedded_cover(filename, candidate_path):
         return False
 
 
-def _embed_flac_img(root_dir, audio: FLAC, cover_override=None):
+def _embed_flac_img(root_dir: Any, audio: FLAC, cover_override: Any = None) -> None:
     """Embed cover art in FLAC file."""
     cover_image = _get_cover_path(root_dir, override=cover_override)
 
@@ -946,7 +950,7 @@ def _embed_flac_img(root_dir, audio: FLAC, cover_override=None):
 
 
 # # Adiciona a capa como frame APIC no ID3 do MP3.
-def _embed_id3_img(root_dir, audio: id3.ID3, cover_override=None):
+def _embed_id3_img(root_dir: Any, audio: id3.ID3, cover_override: Any = None) -> None:
     """Embed cover art in MP3 file."""
     cover_image = _get_cover_path(root_dir, override=cover_override)
 
@@ -977,7 +981,7 @@ def _embed_id3_img(root_dir, audio: id3.ID3, cover_override=None):
 
 
 # # Aplica tags Vorbis, comentário técnico, capa e salva o FLAC final.
-def _khz_label(rate) -> str:
+def _khz_label(rate: Any) -> str:
     """Taxa de amostragem em kHz sem casa decimal inutil: 96.0 -> '96'."""
     try:
         if float(rate).is_integer():
@@ -989,7 +993,7 @@ def _khz_label(rate) -> str:
     return str(rate)
 
 
-def _flac_real_quality(audio) -> tuple[Optional[int], Optional[float]]:
+def _flac_real_quality(audio: Any) -> tuple[Optional[int], Optional[float]]:
     """Retorna bits e taxa reais do FLAC, ou (None, None) sem dados confiáveis."""
     info = getattr(audio, "info", None)
     bits = getattr(info, "bits_per_sample", None)
@@ -1001,7 +1005,7 @@ def _flac_real_quality(audio) -> tuple[Optional[int], Optional[float]]:
     return bits, rate / 1000
 
 
-def _mp3_real_bitrate_kbps(filename) -> Optional[int]:
+def _mp3_real_bitrate_kbps(filename: Any) -> Optional[int]:
     """Bitrate real do MP3 no disco, em kbps."""
     try:
         from mutagen.mp3 import MP3
@@ -1016,7 +1020,7 @@ def _mp3_real_bitrate_kbps(filename) -> Optional[int]:
     return round(bitrate / 1000)
 
 
-def _same_quality(real_bit, real_rate, max_bit, max_rate) -> bool:
+def _same_quality(real_bit: Any, real_rate: Any, max_bit: Any, max_rate: Any) -> bool:
     """True quando o arquivo baixado já está na qualidade máxima do catálogo."""
     try:
         return (
@@ -1028,19 +1032,19 @@ def _same_quality(real_bit, real_rate, max_bit, max_rate) -> bool:
 
 
 def tag_flac(
-    filename,
-    root_dir,
-    final_name,
+    filename: Any,
+    root_dir: Any,
+    final_name: Any,
     d: dict,
-    album,
-    istrack=True,
-    em_image=False,
+    album: Any,
+    istrack: bool = True,
+    em_image: bool = False,
     settings: Optional[QobuzDLSettings] = None,
-    embed_cover_path=None,
-    musicbrainz_ids=None,
+    embed_cover_path: Any = None,
+    musicbrainz_ids: Any = None,
     cover_source: Optional[str] = None,
     preserve_cover_info: bool = False,
-):
+) -> None:
     """Apply tags to FLAC file.
 
     preserve_cover_info: quando a capa NÃO é regravada (em_image=False), mantém
@@ -1223,19 +1227,19 @@ def tag_flac(
 
 # # Aplica frames ID3, comentário técnico, capa e salva o MP3 final.
 def tag_mp3(
-    filename,
-    root_dir,
-    final_name,
-    d,
-    album,
-    istrack=True,
-    em_image=False,
+    filename: Any,
+    root_dir: Any,
+    final_name: Any,
+    d: Any,
+    album: Any,
+    istrack: bool = True,
+    em_image: bool = False,
     settings: Optional[QobuzDLSettings] = None,
-    embed_cover_path=None,
-    musicbrainz_ids=None,
+    embed_cover_path: Any = None,
+    musicbrainz_ids: Any = None,
     cover_source: Optional[str] = None,
     preserve_cover_info: bool = False,
-):
+) -> None:
     """Apply tags to MP3 file (preserve_cover_info: ver tag_flac)."""
     if settings is None:
         settings = QobuzDLSettings()
@@ -1445,8 +1449,8 @@ def tag_mp3(
 
 
 def replace_cover_only(
-    filename,
-    cover_path,
+    filename: Any,
+    cover_path: Any,
     cover_source: Optional[str] = None,
     settings: Optional[QobuzDLSettings] = None,
 ) -> bool:
@@ -1538,10 +1542,10 @@ def _get_tags_to_add(
     qobuz_album: dict,
     qobuz_item: dict,
     settings: Optional[QobuzDLSettings] = None,
-    musicbrainz_ids=None,
+    musicbrainz_ids: Any = None,
     multi_out: Optional[dict] = None,
     istrack: bool = True,
-):
+) -> Any:
     """Build dictionary of tags to add based on settings.
 
     multi_out: se informado (dict), recebe as LISTAS exatas dos campos
@@ -1629,13 +1633,13 @@ def _get_tags_to_add(
                 if normalized_name and normalized_name not in structured_artist_lookup:
                     structured_artist_lookup[normalized_name] = artist_name.strip()
 
-        def restore_artist_spelling(name):
+        def restore_artist_spelling(name: Any) -> Any:
             """Restores accents from structured Qobuz artist data."""
             clean_name = name.strip()
             normalized_name = _normalize_name(clean_name)
             return structured_artist_lookup.get(normalized_name, clean_name)
 
-        def add_unique_artist(name):
+        def add_unique_artist(name: Any) -> None:
             """Adds an artist once while preserving API spelling."""
             if not name or not name.strip():
                 return

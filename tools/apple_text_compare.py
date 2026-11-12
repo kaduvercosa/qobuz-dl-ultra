@@ -27,7 +27,6 @@ from qobuz_dl.apple_cover import titulo_album_comparavel  # noqa: E402
 from qobuz_dl.utils import (  # noqa: E402
     extrair_essencia,
     extrair_titulo_comparavel,
-    extrair_titulo_completo,
     marcadores_versao,
     score_artista,
 )

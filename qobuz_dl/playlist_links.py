@@ -31,7 +31,7 @@ import json
 import logging
 import os
 import sqlite3
-from typing import TypedDict
+from typing import Any, TypedDict
 
 from qobuz_dl.constants import PLAYLIST_FOLDER
 
@@ -52,19 +52,19 @@ class _AbsorbStats(TypedDict):
 # --------------------------------------------------------------------------
 # Caminhos
 # --------------------------------------------------------------------------
-def playlist_root(directory):
+def playlist_root(directory: Any) -> Any:
     """<downloads>/Playlist"""
     return os.path.join(
         os.path.abspath(os.path.expanduser(str(directory))), PLAYLIST_FOLDER
     )
 
 
-def _is_under(path, root):
+def _is_under(path: Any, root: Any) -> Any:
     path, root = os.path.abspath(path), os.path.abspath(root)
     return path != root and os.path.commonpath([path, root]) == root
 
 
-def playlist_dir_for(path, root):
+def playlist_dir_for(path: Any, root: Any) -> Any:
     """Pasta da playlist (1º nível dentro de `root`) que contém `path`."""
     if not _is_under(path, root):
         return None
@@ -75,11 +75,11 @@ def playlist_dir_for(path, root):
 # --------------------------------------------------------------------------
 # Links (.playlist_links.json)
 # --------------------------------------------------------------------------
-def _links_path(pl_dir):
+def _links_path(pl_dir: Any) -> Any:
     return os.path.join(pl_dir, LINKS_FILENAME)
 
 
-def load_links(pl_dir):
+def load_links(pl_dir: Any) -> Any:
     """{id: caminho relativo à pasta da playlist}. Arquivo ilegível = vazio."""
     try:
         with open(_links_path(pl_dir), encoding="utf-8") as f:
@@ -90,7 +90,7 @@ def load_links(pl_dir):
         return {}
 
 
-def save_links(pl_dir, links):
+def save_links(pl_dir: Any, links: Any) -> None:
     path = _links_path(pl_dir)
     if not links:
         with contextlib.suppress(OSError):
@@ -104,7 +104,7 @@ def save_links(pl_dir, links):
     os.replace(tmp, path)
 
 
-def add_link(pl_dir, track_id, target_path):
+def add_link(pl_dir: Any, track_id: Any, target_path: Any) -> None:
     links = load_links(pl_dir)
     links[str(track_id)] = os.path.relpath(
         os.path.abspath(target_path), os.path.abspath(pl_dir)
@@ -112,7 +112,7 @@ def add_link(pl_dir, track_id, target_path):
     save_links(pl_dir, links)
 
 
-def remove_link(pl_dir, track_id):
+def remove_link(pl_dir: Any, track_id: Any) -> bool:
     links = load_links(pl_dir)
     if links.pop(str(track_id), None) is not None:
         save_links(pl_dir, links)
@@ -120,7 +120,7 @@ def remove_link(pl_dir, track_id):
     return False
 
 
-def valid_links(pl_dir):
+def valid_links(pl_dir: Any) -> Any:
     """{id: caminho absoluto} só dos links cujo arquivo ainda existe."""
     out = {}
     for tid, rel in load_links(pl_dir).items():
@@ -130,7 +130,7 @@ def valid_links(pl_dir):
     return out
 
 
-def link_existing_track(pl_dir, track_id, existing_path):
+def link_existing_track(pl_dir: Any, track_id: Any, existing_path: Any) -> bool:
     """Playlist pulou uma faixa porque ela já existe em outra pasta (álbum ou
     outra playlist): registra o link pra ela aparecer no .m3u. True se criou."""
     if not pl_dir or not existing_path or not os.path.isfile(existing_path):
@@ -150,7 +150,7 @@ def link_existing_track(pl_dir, track_id, existing_path):
 # --------------------------------------------------------------------------
 # Tags
 # --------------------------------------------------------------------------
-def read_track_id(path):
+def read_track_id(path: Any) -> Any:
     """ID Qobuz gravado na tag (QDL_TRACK_ID ou QOBUZTRACKID) ou None."""
     try:
         if path.lower().endswith(".flac"):
@@ -172,7 +172,7 @@ def read_track_id(path):
         return None
 
 
-def audio_rank(path):
+def audio_rank(path: Any) -> Any:
     """Tupla comparável de qualidade: FLAC > MP3; depois bits, taxa/bitrate.
     None se não der pra ler (nesse caso nada é apagado)."""
     try:
@@ -193,7 +193,7 @@ def audio_rank(path):
         return None
 
 
-def scan_track_paths(directory, reader=read_track_id):
+def scan_track_paths(directory: Any, reader: Any = read_track_id) -> Any:
     """{id: [caminhos]} de todos os áudios sob `directory`."""
     out: dict[str, list[str]] = {}
     for root, _dirs, files in os.walk(directory):
@@ -210,7 +210,7 @@ def scan_track_paths(directory, reader=read_track_id):
 # Banco de downloads (tabela `downloads`, ver db.py)
 # --------------------------------------------------------------------------
 @contextlib.contextmanager
-def _conn(db_path):
+def _conn(db_path: Any) -> Any:
     c = sqlite3.connect(db_path, timeout=_SQLITE_TIMEOUT)
     try:
         yield c
@@ -219,7 +219,7 @@ def _conn(db_path):
         c.close()
 
 
-def _db_rows(db_path, ids):
+def _db_rows(db_path: Any, ids: Any) -> Any:
     """[(id, saved_path)] das faixas (media_type='track') já registradas."""
     ids = [str(i) for i in ids]
     rows = []
@@ -240,7 +240,7 @@ def _db_rows(db_path, ids):
     return [(str(a), b or "") for a, b in rows]
 
 
-def _db_set_path(db_path, track_id, new_path):
+def _db_set_path(db_path: Any, track_id: Any, new_path: Any) -> None:
     try:
         with _conn(db_path) as c:
             c.execute(
@@ -251,7 +251,7 @@ def _db_set_path(db_path, track_id, new_path):
         logger.debug("Falha ao atualizar caminho no banco: %s", e)
 
 
-def _db_register_tracks(db_path, files, reg):
+def _db_register_tracks(db_path: Any, files: Any, reg: Any) -> Any:
     """Uma linha por faixa do álbum (INSERT OR IGNORE). Retorna quantas entraram."""
     n = 0
     try:
@@ -285,7 +285,7 @@ def _db_register_tracks(db_path, files, reg):
 # --------------------------------------------------------------------------
 # .m3u e limpeza
 # --------------------------------------------------------------------------
-def _rewrite_m3u(pl_dir, mapping):
+def _rewrite_m3u(pl_dir: Any, mapping: Any) -> None:
     """Troca, nos .m3u/.m3u8 da pasta, o caminho antigo pelo novo (mantém a
     ordem e os #EXTINF). `mapping`: {caminho_abs_antigo: caminho_abs_novo}."""
     try:
@@ -314,7 +314,7 @@ def _rewrite_m3u(pl_dir, mapping):
                 f.write("\n".join(lines))
 
 
-def _move_or_drop_lrc(src, dst):
+def _move_or_drop_lrc(src: Any, dst: Any) -> None:
     """.lrc ao lado do arquivo apagado: vai pro álbum se lá não houver, senão some."""
     s = os.path.splitext(src)[0] + ".lrc"
     if not os.path.isfile(s):
@@ -327,7 +327,7 @@ def _move_or_drop_lrc(src, dst):
             os.replace(s, d)
 
 
-def _prune_empty_dirs(start, stop):
+def _prune_empty_dirs(start: Any, stop: Any) -> None:
     """Remove pastas vazias de `start` subindo até (sem incluir) `stop`."""
     cur = os.path.abspath(start)
     stop = os.path.abspath(stop)
@@ -343,13 +343,13 @@ def _prune_empty_dirs(start, stop):
 # Operação principal
 # --------------------------------------------------------------------------
 def absorb_playlist_copies_sync(
-    library_root,
-    db_path,
-    dest_files,
-    reg=None,
-    reader=read_track_id,
-    ranker=audio_rank,
-):
+    library_root: Any,
+    db_path: Any,
+    dest_files: Any,
+    reg: Any = None,
+    reader: Any = read_track_id,
+    ranker: Any = audio_rank,
+) -> Any:
     """Faz as faixas em `dest_files` ({id: caminho no álbum}) existirem só no
     álbum. Retorna {"absorbed": [(id, antigo, novo)], "kept": [caminhos],
     "registered": n}."""
@@ -432,13 +432,15 @@ def absorb_playlist_copies_sync(
     return stats
 
 
-async def absorb_playlist_copies(library_root, db_path, dest_files, reg=None):
+async def absorb_playlist_copies(
+    library_root: Any, db_path: Any, dest_files: Any, reg: Any = None
+) -> Any:
     """Versão assíncrona (roda em thread): ver absorb_playlist_copies_sync."""
     return await asyncio.to_thread(
         absorb_playlist_copies_sync, library_root, db_path, dest_files, reg
     )
 
 
-def scan_dest_folder(dest_dir, reader=read_track_id):
+def scan_dest_folder(dest_dir: Any, reader: Any = read_track_id) -> Any:
     """{id: caminho} do que está numa pasta de álbum (1º arquivo por id)."""
     return {tid: paths[0] for tid, paths in scan_track_paths(dest_dir, reader).items()}
