@@ -12,6 +12,7 @@ força.
 
 import asyncio
 import os
+import re
 import sys
 
 import pytest
@@ -145,6 +146,22 @@ def _marcadas(linhas):
     return [t for t in linhas if "➤" in t]
 
 
+def _linhas_na_tela(app):
+    """Só as linhas que as janelas mostram de fato.
+
+    Diferente de `_linhas_visiveis` (conteúdo inteiro): o cartão deixa o Window
+    rolar, então o conteúdo dele tem a lista toda mesmo que poucos itens apareçam.
+    """
+    saida = []
+    for janela in app.layout.find_all_windows():
+        info = getattr(janela, "render_info", None)
+        if info is None:
+            continue
+        for numero in range(info.first_visible_line(), info.last_visible_line() + 1):
+            saida.append("".join(t[1] for t in info.ui_content.get_line(numero)))
+    return saida
+
+
 def test_compacto_mostra_bem_mais_resultados_por_tela_que_o_cartao():
     """O motivo do layout: na mesma tela de 40x24 cabem muito mais itens."""
 
@@ -181,12 +198,12 @@ def test_compacto_mostra_bem_mais_resultados_por_tela_que_o_cartao():
                         )
                     )
                     await asyncio.sleep(0.3)
-                    texto = "\n".join(_linhas_visiveis(capturado["app"]))
+                    texto = "\n".join(_linhas_na_tela(capturado["app"]))
                     entrada.send_text("\r")
                     await asyncio.wait_for(tarefa, 5)
         finally:
             core.Application = original
-        return sum(f"Álbum {i}" in texto for i in range(30))
+        return len(set(re.findall(r"Álbum (\d+)", texto)))
 
     assert asyncio.run(_contar("compacto")) >= 2 * asyncio.run(_contar("cartao"))
 
