@@ -937,6 +937,75 @@ Também há `--on-error`, `--on-finish` e `--webhook URL` (POST em JSON, com ass
 
 Formato dos eventos, variáveis, segurança e limites: [`docs/EVENTOS_E_HOOKS.md`](docs/EVENTOS_E_HOOKS.md). Modelo comentado do `config.ini`: [`docs/config.example.ini`](docs/config.example.ini).
 
+### 📲 Baixar por um Atalho do iOS (a-Shell "Execute Long Command")
+
+Com `--atalho`, o download roda dentro da ação **Execute Long Command** do a-Shell e avisa cada etapa no banner do iOS (barra de progresso e Dynamic Island).
+
+```bash
+# No Atalho, em "Execute Long Command" (todos os links num comando só):
+qobuz-dl dl --atalho "LINK1" "LINK2" "LINK3"
+
+# Teste sem baixar nada (álbum, playlist e 2 faixas, com 1 falha):
+python3 -m qobuz_dl.atalho
+```
+
+- **Banner:** o iOS mostra só um título (~30 caracteres) e, embaixo, o `N of M` com o total de todos os links. Por isso o título gira a cada 3 s: andamento (`Álbum 2/3 · faixa 4/14`), etapa atual (`Gravando tags e capa`) e nome do item. Uma falha (`⚠ Faixa 7 falhou · segue`) fica parada por cerca de 8 s e o rodízio volta. O total cresce conforme cada link é lido e a barra nunca volta.
+- **Álbum, playlist, faixa e lote de faixas:** o total do álbum e o da playlist são conhecidos antes de baixar (a playlist é anunciada antes da 1ª faixa). Se todos os links forem de faixa, o total é o número de links. Na playlist "como álbuns" (`playlist_as_albums`) o total vai sendo descoberto faixa a faixa.
+- **Texto no fim:** o Execute Long Command só devolve a saída quando termina. No modo atalho o terminal fica mudo (sem cores nem redesenho de linha; avisos e erros continuam saindo). O resumo começa pelo status e pelos totais (é o que a notificação mostra) e segue com um bloco por tipo, com o tipo entre colchetes (`[ ÁLBUM ]`, `[ PLAYLIST ]`, `[ FAIXA ]` ou `[ FAIXAS AVULSAS ]`; no plural quando há mais de um). Cada item leva `✓` (tudo certo) ou `⚠` (falha ou pendência), os detalhes alinhados logo abaixo e as faixas que falharam. Links da fila que não baixaram aparecem em `[ LINKS QUE FALHARAM ]`. O banner usa o mesmo rótulo (`[ ÁLBUM ] 2/3 · faixa 4/12`). Mostre com **Show Notification** ou **Show Result**.
+
+  Exemplo do resumo final:
+
+  ```text
+  Concluído com 1 falha · 4 min 12 s
+  12 novas · 1 falha
+
+  [ ÁLBUM ]
+  ✓ Artista A — Primeiro álbum
+    5 faixas · 1 min 40 s
+
+  [ PLAYLIST ]
+  ⚠ Minha playlist
+    5 novas · 1 falha · 2 min 05 s
+      falhou: 04 Nome da faixa
+
+  [ FAIXAS AVULSAS ]
+  ✓ 2 faixas
+  ```
+- **`--atalho-json`:** acrescenta no fim uma linha JSON (`{"ok":true,"albuns":3,"novas":35,"falhas":0}`) para o Atalho decidir o que fazer. Fica desligado por padrão porque quebra feio no alerta.
+- **Parar:** o iOS roda um comando longo por vez e o botão de parar só atua entre comandos. Com todos os links num comando, ele não interrompe no meio; para poder parar entre álbuns, use um Execute Long Command por link (o banner recomeça a cada link).
+- **Fila de links (acrescentar com um download rodando):** o iOS só roda um Long Command por vez, mas um Atalho rápido (**Execute Command**) pode gravar links numa fila que o comando em andamento lê sozinho.
+
+  ```bash
+  # Atalho rápido "Adicionar à fila" (Execute Command): o link vem do Compartilhar
+  python3 -m qobuz_dl.fila adicionar "LINK"
+
+  # Execute Long Command: baixa os links dados e depois esvazia a fila, um por vez
+  qobuz-dl dl --atalho @fila          # ou: dl --atalho LINK1 @fila
+
+  python3 -m qobuz_dl.fila listar     # o que está esperando, baixando e falhou
+  python3 -m qobuz_dl.fila repetir    # devolve à fila os links que falharam
+  python3 -m qobuz_dl.fila limpar     # esvazia (aceita: tudo | pendentes | falhos)
+  ```
+
+  O alerta do "adicionar" diz se há download rodando (`Há um download em andamento: este link entra sozinho.`) ou não (`Nenhum download rodando: inicie o Long Command.`): use o texto num **If** do Atalho para iniciar o Long Command só quando for preciso. Link repetido ou que não é do Qobuz é recusado. O banner ganha a tela `Fila: 2 esperando · link 3/5` e o resumo final traz `Fila: 5 links · 1 não baixou` e a lista dos links que falharam. A fila fica em `fila/`, ao lado do `config.ini`, um arquivo por link (por isso dois Atalhos nunca se atrapalham). O comando termina quando a fila esvazia: esperar parado faria o iOS cancelar por falta de progresso. Cada link baixa sozinho, sem o paralelismo do lote de faixas. Um link adicionado depois do fim fica pendente até o próximo Long Command.
+
+  **Nome e artista:** o `adicionar` (confirmação) e o `listar` mostram `[ ÁLBUM ] Artista — Título`, não o id. O nome vem da API pública do Qobuz (com o `app_id` e o token da conta do `config.ini`, que o Qobuz às vezes exige (se o token for recusado, tenta sem ele); até 4 s por link, 8 s no total do `listar`) e fica em `nomes.json`, na pasta da fila, então cada link é consultado uma vez. Sem rede ou sem resposta, aparece `[ ÁLBUM ] <id>` (ou o trecho do link, quando ele tem). Quando a consulta falha, a última linha diz o motivo (`Sem o nome: HTTP 400: …`, `Sem o nome: URLError: …`); se aparecer `Álbum <id>` sem colchetes, o `fila.py` do a-Shell ainda é o antigo. `QOBUZ_DL_FILA_REDE=0` desliga a consulta.
+
+  **Confirmação do Atalho:** depois do `Se`/`Caso contrário` (link recebido ou colado), mostre o **Resultado do Se** com **Mostrar**, não o `output` de um dos dois Execute: o `output` de um ramo que não rodou vem vazio e nada aparece.
+
+  **Vigia contra travamento:** se nada andar por 7 min (nenhum byte baixado, evento ou linha de progresso), o programa cancela o download travado, devolve o link à fila e mostra `⚠ Travou: sem sinal de vida há 7 min 05 s; cancelado` no resumo. Se o processo nem assim responder em 20 s (laço bloqueado, thread presa), ele **se encerra à força** e solta a marca “download em andamento”, para o Atalho seguinte não ficar recusando (`Outro download da fila já está rodando`). Ao fim da sessão, se o Python não sair sozinho em 15 s, também sai à força, em vez de ficar rodando em segundo plano no a-Shell. `QOBUZ_DL_ATALHO_LIMITE_S=600` muda o tempo; `0` desliga o vigia.
+
+  **No iPad o banner só mostra o anel.** O iOS desenha apenas o botão de parar e o anel de progresso (o título do `progress` só aparece onde há Dynamic Island); o programa não consegue mudar isso. Para ver as informações mesmo assim:
+
+  - **Andamento ao vivo:** quem baixa grava o que o banner diria (etapa da partida, `[ ÁLBUM ] 1 · faixa 4/12` e o nome do álbum). `python3 -m qobuz_dl.fila listar`, como **Execute Command** (roda ao lado do Long Command), mostra na hora `Download em andamento.` e `Agora: Lady Gaga — Chromatica`, também em `dl LINK` sem fila. Deixe a opção LISTAR FILA do menu para isso.
+  - **Aviso antes de baixar:** em BAIXAR DIRETAMENTE, antes do Long Command, ponha um **Execute Command** com `python3 -m qobuz_dl.fila nome "Entrada do Atalho"` (devolve `[ ÁLBUM ] Artista — Título`) e um **Mostrar Notificação** com esse resultado.
+
+- **Partida:** o iOS cancela o Long Command que fica muito tempo sem informar progresso, e o programa leva um tempo para carregar, entrar na conta e ler o link. Por isso o banner começa no primeiro segundo (`Qobuz · carregando · 2 s`, `Qobuz · entrando na conta · 9 s`, `Qobuz · lendo o link · 13 s`), com os segundos subindo de 2 em 2, até o banner normal assumir. Só com `--atalho` na linha de comando o aviso sai já na importação do programa. O título anda desde o início do programa (`Qobuz · lendo a configuração · 4 s` → `preparando` → `entrando na conta` → `lendo o link`), também com `QOBUZ_DL_ATALHO=1` sem a flag. No iPad o banner mostra só o botão de parar e o **anel** (o título não aparece), então cada etapa da partida também avança o anel (`1/6` → `5/6`, sem fechar); ao começar o download o anel passa a contar as faixas. Se um `progress` falhar de passagem, o banner tenta de novo no tique seguinte em vez de ficar parado (só desiste se o `progress` nunca funcionou). Na fila de links, antes de o álbum aparecer, o título alterna entre `Fila · link 1/1` e `Qobuz · lendo o link · N s`.
+- **Anel de progresso (downloads grandes):** o iOS pode cancelar o Long Command que fica muito tempo sem informar progresso (no Atalho aparece como erro ou `timeout`, e o download segue vivo em segundo plano). Cada faixa vale 1000 unidades do anel: os bytes baixados ocupam de 0 a 85 % dela e os 15 % finais são reserva para o pós-processamento (conversão, tags, capa, letras), por isso o iOS pode mostrar `3400 of 12000` em vez de `3 of 12` (o título continua com `faixa 4/12`). Se por 8 s nada mexer (pós-processamento, rede parada, leitura de uma playlist enorme), o anel avança 1 unidade, **sempre**: mesmo com o progresso real parado ou atrás do anel; se a reserva acabar, o total cresce para o anel nunca parar. O anel nunca volta atrás e só fecha com todas as faixas prontas. `QOBUZ_DL_ATALHO_ESCALA=1` volta a contar só faixas prontas; `QOBUZ_DL_ATALHO_BATIDA_S=15` muda o tempo e `0` desliga o avanço. `python3 -m qobuz_dl.atalho` mostra o anel andando dentro de cada faixa simulada.
+- **Se der erro no Atalho:** `timeout` (erro desconhecido) costuma ser o iOS desistindo do comando; o programa pode continuar rodando em segundo plano e, nesse caso, a tentativa seguinte mostra `Another long command is already running`. Feche o a-Shell no seletor de apps, espere um minuto e rode de novo. Se o banner da partida parar num passo (por exemplo `entrando na conta`), é ali que o comando trava.
+- **Ligar sem flag:** `QOBUZ_DL_ATALHO=1` vale só para comandos que baixam.
+- **Precisa do comando `progress`** do a-Shell com suporte a Long Command; sem ele, o banner some sozinho e o download segue. Fora do iOS só o texto final muda.
+
 ### 🛠️ Principais Variáveis de Formatação
 
 Você pode personalizar profundamente seu `config.ini` ou usar as flags CLI `-ff` (Formato de Pasta) e `-tf` (Formato de Faixa) usando as variáveis abaixo. Você também pode usar o caractere `/` para criar subdiretórios aninhados automaticamente!

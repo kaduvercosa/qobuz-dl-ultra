@@ -31,7 +31,7 @@ from tqdm import tqdm
 
 import qobuz_dl.metadata as metadata
 import qobuz_dl.postprocess as postprocess
-from qobuz_dl import musicbrainz, ui
+from qobuz_dl import musicbrainz, progresso_bytes, ui, vigia
 from qobuz_dl.color import (
     OFF,
     RED,
@@ -97,6 +97,14 @@ from .lyrics_engine import LYRICS_NETWORK_BUDGET, LyricsEngine
 
 # Ordem de fallback de qualidade quando o tier pedido falha por motivo de rede/servidor (NAO usado para faixas indisponiveis -- ver _PermanentDownloadError). 27=Hi-Res >96kHz | 7=Hi-Res 96kHz | 6=CD 16bit/44.1kHz | 5=MP3 320kbps
 FALLBACK_TIERS = [27, 7, 6, 5]
+
+# Downloads fatiados (hi-res em segmentos): sem retomada no meio do arquivo, então
+# cada trecho precisa aguentar quedas curtas da rede (celular, tela bloqueada)
+# antes de a faixa inteira falhar.
+SEGMENTO_TENTATIVAS = 8
+SEGMENTO_LEITURA_S = 60.0  # espera por dados de um trecho antes de reconectar
+SEGMENTO_CONEXAO_S = 15.0
+SEGMENTO_ESPERA_MAX_S = 60  # espera máxima entre uma tentativa e a seguinte
 
 
 def _flatten_artists(artist_data: Any) -> str:
@@ -2932,6 +2940,8 @@ async def _tqdm_download_atomic(
         ui.progress(ui.tail(f"Em Progresso: {track_name}", _progress_tail(track_name)))
 
     def on_progress(downloaded: int, total: int | None) -> None:
+        vigia.pulso()  # bytes chegando = não está travado (vigia do modo Atalho)
+        progresso_bytes.registrar(str(fname), downloaded, total)  # anel do Atalho
         if bar is None:
             return
         if total is not None and bar.total != total:
@@ -2973,6 +2983,7 @@ async def _tqdm_download_atomic(
     except DownloadError as exc:
         raise RuntimeError(f"Falha definitiva após 5 tentativas: {exc}") from exc
     finally:
+        progresso_bytes.concluir(str(fname))
         if bar is not None:
             bar.close()
         if owns_session:
@@ -3495,14 +3506,20 @@ async def tqdm_download_segments(
         ncols = None
         dynamic_ncols = True
 
+    _baixados = [0]  # bytes já baixados (o tqdm desligado do modo paralelo não conta)
+
+    def _contar_bytes(delta: int) -> None:
+        _baixados[0] = max(_baixados[0] + delta, 0)
+        progresso_bytes.registrar(str(fname), _baixados[0], total_size or None)
+
     async def fetch_segment_fluid(seg_num: Any) -> Any:
         """Fetch a single segment with retries and error handling."""
         url = url_template.replace("$SEGMENT$", str(seg_num))
         seg_data = bytearray()
 
         async for attempt in AsyncRetrying(
-            stop=stop_after_attempt(5),
-            wait=wait_exponential(multiplier=2, min=2, max=32),
+            stop=stop_after_attempt(SEGMENTO_TENTATIVAS),
+            wait=wait_exponential(multiplier=2, min=2, max=SEGMENTO_ESPERA_MAX_S),
             retry=retry_if_not_exception_type((KeyboardInterrupt, SystemExit)),
             reraise=True,
         ):
@@ -3513,20 +3530,29 @@ async def tqdm_download_segments(
                 if attempt.retry_state.attempt_number > 1:
                     if seg_data:
                         bar.update(-len(seg_data))
+                        _contar_bytes(-len(seg_data))
                     _n = attempt.retry_state.attempt_number
                     ui.warn(
                         f"Reconectando segmento {seg_num}. "
-                        f"Tentativa {_n}/5 para {track_name}"
+                        f"Tentativa {_n}/{SEGMENTO_TENTATIVAS} para {track_name}"
                     )
 
                 seg_data.clear()
-                async with http.stream("GET", url, timeout=15) as r:
+                async with http.stream(
+                    "GET",
+                    url,
+                    timeout=httpx.Timeout(
+                        SEGMENTO_LEITURA_S, connect=SEGMENTO_CONEXAO_S
+                    ),
+                ) as r:
                     r.raise_for_status()
                     async for chunk in r.aiter_bytes(chunk_size=524288):
                         if abort_event.is_set():
                             return bytearray()
                         seg_data.extend(chunk)
+                        vigia.pulso()
                         bar.update(len(chunk))
+                        _contar_bytes(len(chunk))
                 return seg_data
 
     try:
@@ -3638,6 +3664,7 @@ async def tqdm_download_segments(
             raise Exception(f"Download fatiado falhou: {e}") from e
 
     finally:
+        progresso_bytes.concluir(str(fname))
         if os.path.isfile(tmp_fname):
             try:
                 os.remove(tmp_fname)

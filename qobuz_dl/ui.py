@@ -91,6 +91,9 @@ class EstadoUI:
                              desenhada: ``auto``/``cartao``/``compacto``/``tabela``
       pending_status         há uma linha de status "em andamento" sem quebra
       ultima_linha_vazia     a última escrita terminou em linha em branco
+      espelho                função opcional chamada com o texto de CADA mensagem
+                             (mesmo em --quiet); o modo Atalho (atalho.py) usa
+                             para mostrar a etapa atual no banner do iOS
 
     Existe UMA instância, `ui.estado`. Para mexer: `ui.configure(...)` no boot
     do programa; em teste, `monkeypatch.setattr(ui.estado, "quiet", True)` ou
@@ -106,6 +109,7 @@ class EstadoUI:
     layout_interativo: str = "auto"
     pending_status: bool = False
     ultima_linha_vazia: bool = False
+    espelho: Any = None
 
 
 estado = EstadoUI()
@@ -566,6 +570,17 @@ def step_inline(message: Any) -> None:
         estado.pending_status = True
 
 
+def _espelhar_saida(text: Any) -> None:
+    """Repassa o texto a `estado.espelho`, se houver. Nunca atrapalha a escrita."""
+    funcao = estado.espelho
+    if funcao is None:
+        return
+    try:
+        funcao(text)
+    except Exception:
+        estado.espelho = None  # um espelho com defeito se desliga sozinho
+
+
 def emit(text: Any = "", end: str = "\n") -> None:
     # ÚNICO ponto de escrita no terminal usado pelo restante do módulo (e,
     # por extensão, por todo o programa via as funções ok/warn/error/etc.).
@@ -573,6 +588,7 @@ def emit(text: Any = "", end: str = "\n") -> None:
     # ativas sejam apagadas e redesenhadas ao redor da mensagem em vez de
     # serem cortadas ao meio. Respeita --quiet (não imprime nada).
     """Print a message unless quiet mode is active."""
+    _espelhar_saida(text)
     if estado.quiet:
         return
     with print_lock:
@@ -629,6 +645,7 @@ def emit_always(text: Any = "", end: str = "\n") -> None:
     # usuário precisa ver mesmo em modo silencioso: erros fatais e prompts
     # de confirmação.
     """Print a message regardless of quiet mode (for critical output)."""
+    _espelhar_saida(text)
     with print_lock:
         _clear_pending_locked()
         _write_locked(text, end)

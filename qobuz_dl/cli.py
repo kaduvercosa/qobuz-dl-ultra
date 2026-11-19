@@ -185,10 +185,12 @@ def _saida_so_json(argv: list) -> bool:
 def _bootstrap_ui() -> None:
     """Configure UI system early based on command-line flags before argparse runs."""
     argv = sys.argv[1:]
+    # Modo Atalho do iOS: terminal mudo e sem cores desde o primeiro texto.
+    atalho = "--atalho" in argv
     ui.configure(
-        quiet="--quiet" in argv or _saida_so_json(argv),
+        quiet="--quiet" in argv or atalho or _saida_so_json(argv),
         verbose=("--verbose" in argv or "-v" in argv),
-        color=False if "--no-color" in argv else None,
+        color=False if ("--no-color" in argv or atalho) else None,
     )
     ui.install_logging()
 
@@ -1795,7 +1797,7 @@ async def _handle_commands(qobuz: QobuzDL, arguments: Any) -> None:
 
     try:
         if arguments.command == "dl":
-            await qobuz.download_list_of_urls(arguments.SOURCE)
+            await _baixar_fontes(qobuz, arguments.SOURCE)
         elif arguments.command in ("sync-playlist", "sp"):
             from qobuz_dl.playlist_links import playlist_root
             from qobuz_dl.sync_playlist import sync_playlist
@@ -2096,6 +2098,28 @@ def _pede_reset(argv: list) -> bool:
     )
 
 
+async def _baixar_fontes(qobuz: Any, fontes: list[str]) -> None:
+    """`dl`: baixa as URLs. `@fila` também esvazia a fila de links do Atalho
+    (`python3 -m qobuz_dl.fila adicionar LINK`), um link por vez."""
+    from qobuz_dl import atalho as _atalho
+    from qobuz_dl import fila as _fila
+
+    if _fila.TOKEN not in fontes:
+        await qobuz.download_list_of_urls(fontes)
+        return
+    modo = _atalho.ativo()
+    try:
+        await _fila.consumir(
+            qobuz.download_list_of_urls,
+            [f for f in fontes if f != _fila.TOKEN],
+            ao_link=modo.definir_link if modo else None,
+            problemas=modo.problemas if modo else None,
+            ao_falhar=modo.registrar_link_falho if modo else None,
+        )
+    except _fila.FilaOcupada as exc:
+        ui.warn(str(exc))
+
+
 def _aplicar_atalhos(arguments: Any) -> None:
     """Converte os subcomandos novos nas flags que o resto do fluxo já entende.
 
@@ -2386,9 +2410,36 @@ def _load_cli_config(config: configparser.ConfigParser, started: float) -> CliCo
     return cfg
 
 
+def _atalho_pedido(argv: list[str]) -> bool:
+    """O modo Atalho foi pedido (flag ou ambiente) para um comando que baixa?"""
+    from qobuz_dl import atalho as _atalho
+
+    pedido = _atalho.ligado(argparse.Namespace(atalho="--atalho" in argv))
+    return pedido and _find_command(argv) in _atalho.COMANDOS_DE_DOWNLOAD
+
+
+def _partida_antecipada() -> None:
+    """Modo Atalho: o banner do iOS passa a andar desde o início do `async_main`.
+
+    Sem isto o título ficava em "carregando" até a leitura do config terminar
+    (o batimento só nascia mais adiante). Vale também para `QOBUZ_DL_ATALHO=1`
+    sem `--atalho` na linha de comando (o aviso da importação só ouve a flag).
+    """
+    from qobuz_dl import _partida
+
+    argv = sys.argv[1:]
+    if not _partida.ligado():
+        if not _atalho_pedido(argv):
+            return
+        _partida.ligar()
+    _partida.fase("lendo a configuração")
+    _partida.iniciar_batimento()
+
+
 async def async_main() -> None:
     main_started = time.perf_counter()
     await _initial_checks()
+    _partida_antecipada()
     _startup_timing("checagens iniciais concluídas", main_started)
 
     async def _async_check_updates() -> None:
@@ -2663,10 +2714,22 @@ async def async_main() -> None:
     track_format = cfg.track_format
 
     _aplicar_atalhos(arguments)
+    from qobuz_dl import atalho as _atalho
+
+    modo_atalho = _atalho.aplicavel(arguments)  # --atalho ou QOBUZ_DL_ATALHO=1
+    from qobuz_dl import _partida
+
+    if modo_atalho:
+        # Avisa o iOS desde já (o login pode demorar e o Long Command é
+        # cancelado se ficar muito tempo sem progresso); o `--atalho` na linha
+        # de comando já ligou isto na importação do pacote.
+        _partida.ligar()
+        _partida.fase("preparando")
+        _partida.iniciar_batimento()
     ui.configure(
-        quiet=getattr(arguments, "quiet", False),
+        quiet=getattr(arguments, "quiet", False) or modo_atalho,
         verbose=getattr(arguments, "verbose", False),
-        color=False if getattr(arguments, "no_color", False) else None,
+        color=False if getattr(arguments, "no_color", False) or modo_atalho else None,
         ui_mode=getattr(arguments, "ui", "auto"),
         layout_interativo=cfg.interactive_layout,
     )
@@ -3183,6 +3246,7 @@ async def async_main() -> None:
         "me",
         "info",
     ):
+        _partida.fase("entrando na conta")
         await _initialize_client_with_auth_recovery(
             qobuz,
             CONFIG_FILE,
@@ -3193,12 +3257,18 @@ async def async_main() -> None:
             token,
             force_english,
         )
+        _partida.fase("lendo o link")
 
     from qobuz_dl import __version__ as _versao_pacote
     from qobuz_dl import hooks as _hooks
 
     # None (e custo zero) quando o comando não baixa ou nada foi configurado.
     _automacao = _hooks.preparar(arguments, config, section, _versao_pacote)
+    # Modo Atalho do iOS (--atalho): banner de progresso + resumo em texto puro.
+    _modo_atalho = _atalho.preparar(
+        arguments, _versao_pacote, automacao_ativa=_automacao is not None
+    )
+    _partida.parar()  # o modo completo assume o banner (ou não há banner)
     _sessao_ok = False
     _interrompida = False
     try:
@@ -3209,6 +3279,7 @@ async def async_main() -> None:
         raise
     finally:
         await _hooks.encerrar(_automacao, _sessao_ok, _interrompida)
+        await _atalho.encerrar(_modo_atalho, _sessao_ok, _interrompida)
         if hasattr(qobuz, "client") and qobuz.client:
             await qobuz.client.close()
     await update_task
@@ -3303,10 +3374,30 @@ def main() -> None:
             raise SystemExit(exit_code)
         return
 
+    codigo = 0
     try:
         asyncio.run(async_main())
     except KeyboardInterrupt:
+        codigo = 1
         sys.exit(1)
+    except SystemExit as exc:
+        codigo = (
+            exc.code if isinstance(exc.code, int) else (0 if exc.code is None else 1)
+        )
+        raise
+    except BaseException:
+        codigo = 1
+        raise
+    finally:
+        _armar_saida_do_atalho(codigo)
+
+
+def _armar_saida_do_atalho(codigo: int) -> None:
+    """Modo Atalho: se o Python não sair sozinho, sai à força (não fica no a-Shell)."""
+    from qobuz_dl import vigia
+
+    if vigia.limite_do_ambiente() > 0 and _atalho_pedido(sys.argv[1:]):
+        vigia.armar_saida(codigo)
 
 
 if __name__ == "__main__":

@@ -111,6 +111,8 @@ Busca interativa: procura faixas/álbuns e escolhe o que baixar na hora.
 | `--webhook` | `URL` | envia os eventos concluídos por POST (JSON) para esta URL |  |
 | `--ntfy` | `TOPICO_OU_URL` | notifica no ntfy (tópico, ou URL do seu servidor) ao fim da sessão |  |
 | `--rescan` | `SERVIDORES` | pede ao servidor de música que reescaneie a biblioteca se baixou arquivo novo: navidrome, subsonic, plex, jellyfin (separe com vírgula) |  |
+| `--atalho` |  | modo Atalho do iOS (a-Shell 'Execute Long Command'): avisa cada etapa no banner do iOS, deixa o terminal silencioso e devolve um resumo em texto puro no fim |  |
+| `--atalho-json` |  | com --atalho: acrescenta ao resumo final uma linha JSON ({"ok":true,"albuns":3,"novas":35,"falhas":0}) para o Atalho ler |  |
 | `-v`, `--verbose` |  | mostra mensagens de diagnóstico (nível DEBUG) |  |
 | `--quiet` |  | mostra apenas avisos e erros (bom para cron/scripts) |  |
 | `--no-color` |  | desliga as cores ANSI (respeita também a variável NO_COLOR) |  |
@@ -125,7 +127,7 @@ Baixa por URL de álbum, faixa, artista, gravadora ou playlist do Qobuz, ou um a
 
 | Opção | Valor | O que faz | Padrão |
 | :--- | :--- | :--- | :--- |
-| `URL_OU_ARQUIVO` | `URL_OU_ARQUIVO` | uma ou mais URLs (separadas por espaço) ou um arquivo de texto |  |
+| `URL_OU_ARQUIVO` | `URL_OU_ARQUIVO` | uma ou mais URLs (separadas por espaço) ou um arquivo de texto; @fila baixa também a fila de links do modo Atalho (python3 -m qobuz_dl.fila adicionar LINK) |  |
 | `-b`, `--blacklist` | `ARQUIVO` | Caminho para um arquivo de texto contendo palavras-chave para ignorar (blacklist) |  |
 | `--filter-label` | `GRAVADORA` | Baixa só lançamentos desta gravadora (nome, ID numérico ou URL da gravadora no Qobuz) |  |
 | `--dry-run` |  | Simula o que seria baixado sem fazer o download de fato. |  |
@@ -199,6 +201,8 @@ Baixa por URL de álbum, faixa, artista, gravadora ou playlist do Qobuz, ou um a
 | `--webhook` | `URL` | envia os eventos concluídos por POST (JSON) para esta URL |  |
 | `--ntfy` | `TOPICO_OU_URL` | notifica no ntfy (tópico, ou URL do seu servidor) ao fim da sessão |  |
 | `--rescan` | `SERVIDORES` | pede ao servidor de música que reescaneie a biblioteca se baixou arquivo novo: navidrome, subsonic, plex, jellyfin (separe com vírgula) |  |
+| `--atalho` |  | modo Atalho do iOS (a-Shell 'Execute Long Command'): avisa cada etapa no banner do iOS, deixa o terminal silencioso e devolve um resumo em texto puro no fim |  |
+| `--atalho-json` |  | com --atalho: acrescenta ao resumo final uma linha JSON ({"ok":true,"albuns":3,"novas":35,"falhas":0}) para o Atalho ler |  |
 | `-v`, `--verbose` |  | mostra mensagens de diagnóstico (nível DEBUG) |  |
 | `--quiet` |  | mostra apenas avisos e erros (bom para cron/scripts) |  |
 | `--no-color` |  | desliga as cores ANSI (respeita também a variável NO_COLOR) |  |
@@ -301,6 +305,8 @@ Baixa os N primeiros resultados de uma busca no Qobuz, sem passar URL.
 | `--webhook` | `URL` | envia os eventos concluídos por POST (JSON) para esta URL |  |
 | `--ntfy` | `TOPICO_OU_URL` | notifica no ntfy (tópico, ou URL do seu servidor) ao fim da sessão |  |
 | `--rescan` | `SERVIDORES` | pede ao servidor de música que reescaneie a biblioteca se baixou arquivo novo: navidrome, subsonic, plex, jellyfin (separe com vírgula) |  |
+| `--atalho` |  | modo Atalho do iOS (a-Shell 'Execute Long Command'): avisa cada etapa no banner do iOS, deixa o terminal silencioso e devolve um resumo em texto puro no fim |  |
+| `--atalho-json` |  | com --atalho: acrescenta ao resumo final uma linha JSON ({"ok":true,"albuns":3,"novas":35,"falhas":0}) para o Atalho ler |  |
 | `-v`, `--verbose` |  | mostra mensagens de diagnóstico (nível DEBUG) |  |
 | `--quiet` |  | mostra apenas avisos e erros (bom para cron/scripts) |  |
 | `--no-color` |  | desliga as cores ANSI (respeita também a variável NO_COLOR) |  |
@@ -440,6 +446,8 @@ Sincroniza uma pasta local com uma playlist do Qobuz (baixa o que falta, remove 
 | `--webhook` | `URL` | envia os eventos concluídos por POST (JSON) para esta URL |  |
 | `--ntfy` | `TOPICO_OU_URL` | notifica no ntfy (tópico, ou URL do seu servidor) ao fim da sessão |  |
 | `--rescan` | `SERVIDORES` | pede ao servidor de música que reescaneie a biblioteca se baixou arquivo novo: navidrome, subsonic, plex, jellyfin (separe com vírgula) |  |
+| `--atalho` |  | modo Atalho do iOS (a-Shell 'Execute Long Command'): avisa cada etapa no banner do iOS, deixa o terminal silencioso e devolve um resumo em texto puro no fim |  |
+| `--atalho-json` |  | com --atalho: acrescenta ao resumo final uma linha JSON ({"ok":true,"albuns":3,"novas":35,"falhas":0}) para o Atalho ler |  |
 | `-v`, `--verbose` |  | mostra mensagens de diagnóstico (nível DEBUG) |  |
 | `--quiet` |  | mostra apenas avisos e erros (bom para cron/scripts) |  |
 | `--no-color` |  | desliga as cores ANSI (respeita também a variável NO_COLOR) |  |
@@ -603,6 +611,8 @@ Sincroniza os favoritos da conta com o catálogo local (novos/removidos) e baixa
 | `--webhook` | `URL` | envia os eventos concluídos por POST (JSON) para esta URL |  |
 | `--ntfy` | `TOPICO_OU_URL` | notifica no ntfy (tópico, ou URL do seu servidor) ao fim da sessão |  |
 | `--rescan` | `SERVIDORES` | pede ao servidor de música que reescaneie a biblioteca se baixou arquivo novo: navidrome, subsonic, plex, jellyfin (separe com vírgula) |  |
+| `--atalho` |  | modo Atalho do iOS (a-Shell 'Execute Long Command'): avisa cada etapa no banner do iOS, deixa o terminal silencioso e devolve um resumo em texto puro no fim |  |
+| `--atalho-json` |  | com --atalho: acrescenta ao resumo final uma linha JSON ({"ok":true,"albuns":3,"novas":35,"falhas":0}) para o Atalho ler |  |
 | `-v`, `--verbose` |  | mostra mensagens de diagnóstico (nível DEBUG) |  |
 | `--quiet` |  | mostra apenas avisos e erros (bom para cron/scripts) |  |
 | `--no-color` |  | desliga as cores ANSI (respeita também a variável NO_COLOR) |  |

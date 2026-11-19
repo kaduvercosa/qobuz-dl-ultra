@@ -113,8 +113,12 @@ class LibraryDB:
             conn.execute("PRAGMA busy_timeout=5000")
             conn.execute("PRAGMA foreign_keys=ON")
             try:
-                conn.execute("PRAGMA journal_mode=WAL")
-                conn.execute("PRAGMA synchronous=NORMAL")
+                # QOBUZ_DL_SQLITE_WAL=0 desliga o WAL (usa o journal comum).
+                # O WAL depende de memoria compartilhada (-shm) e de locks
+                # de arquivo, que em alguns sandboxes (iOS) podem travar.
+                if os.environ.get("QOBUZ_DL_SQLITE_WAL", "1") != "0":
+                    conn.execute("PRAGMA journal_mode=WAL")
+                    conn.execute("PRAGMA synchronous=NORMAL")
             except sqlite3.DatabaseError:
                 logger.debug("WAL indisponível neste armazenamento", exc_info=True)
             with conn:  # commit/rollback automático

@@ -30,12 +30,14 @@ def test_campos_e_padroes():
         "layout_interativo",
         "pending_status",
         "ultima_linha_vazia",
+        "espelho",
     }
     novo = ui.EstadoUI()
     assert (novo.quiet, novo.verbose) == (False, False)
     assert novo.color_enabled is None and novo.unicode_enabled is None
     assert novo.ui_mode is None
     assert novo.layout_interativo == "auto"
+    assert novo.espelho is None  # só o modo Atalho liga o espelho
 
 
 def test_redefinir_estado_volta_ao_padrao():

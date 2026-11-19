@@ -296,7 +296,11 @@ def dl_args(subparsers: Any) -> Any:
         "SOURCE",
         metavar="URL_OU_ARQUIVO",
         nargs="+",
-        help=("uma ou mais URLs (separadas por espaço) ou um arquivo de texto"),
+        help=(
+            "uma ou mais URLs (separadas por espaço) ou um arquivo de texto; "
+            "@fila baixa também a fila de links do modo Atalho "
+            "(python3 -m qobuz_dl.fila adicionar LINK)"
+        ),
     )
     download.add_argument(
         "-b",
@@ -1201,6 +1205,11 @@ def add_common_arg(
     from qobuz_dl.hooks import adicionar_args as _adicionar_args_hooks
 
     _adicionar_args_hooks(custom_parser)
+
+    # Modo Atalho do iOS (a-Shell "Execute Long Command"): --atalho.
+    from qobuz_dl.atalho import adicionar_args as _adicionar_args_atalho
+
+    _adicionar_args_atalho(custom_parser)
 
 
 # ----------------------------------------------------------------------------

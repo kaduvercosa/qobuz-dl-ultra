@@ -38,7 +38,7 @@ except ImportError as exc:
     sys.exit(f"Erro ao importar um componente de prompt_toolkit: {exc}")
 
 import qobuz_dl.postprocess as postprocess
-from qobuz_dl import downloader, qopy, ui
+from qobuz_dl import downloader, events, qopy, ui
 from qobuz_dl.artist_role import funcao_do_artista
 from qobuz_dl.bundle import Bundle
 from qobuz_dl.color import ANSI_BOLD, ANSI_CLEAR_SCREEN, GREEN, OFF, RED, RESET
@@ -1983,6 +1983,17 @@ class QobuzDL:
             )
 
             _playlist_started = time.monotonic()  # relogio do "Tempo total"
+            if is_playlist and not getattr(self, "playlist_as_albums", False):
+                # A pasta da playlist so ganharia evento depois da 1a faixa
+                # pronta (com `faixas=1`). Anunciar aqui da o total correto
+                # desde o inicio a quem acompanha o andamento (modo --atalho,
+                # hooks e --events). Repetir depois nao reemite (1x por pasta).
+                try:
+                    events.lancamento_iniciado(
+                        new_path, "playlist", content_name, "", str(item_id), len(items)
+                    )
+                except Exception as exc:  # nunca derruba o download
+                    logger.debug("Aviso de playlist ao --events falhou: %s", exc)
             if is_playlist:
                 from qobuz_dl.downloader import print_download_header
                 from qobuz_dl.utils import format_duration

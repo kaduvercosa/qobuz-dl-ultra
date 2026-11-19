@@ -32,6 +32,8 @@ import time
 from datetime import datetime, timezone
 from typing import Any, Callable, TextIO
 
+from qobuz_dl import vigia
+
 logger = logging.getLogger(__name__)
 
 # Sobe quando um campo existente muda de significado (campo novo não conta).
@@ -185,6 +187,7 @@ def desassinar(funcao: Callable[[dict[str, Any]], None]) -> None:
 
 def emitir(evento: str, **campos: Any) -> dict[str, Any]:
     """Monta o evento, grava uma linha e avisa os assinantes. Nunca levanta erro."""
+    vigia.pulso()  # todo evento é sinal de vida para o vigia do modo Atalho
     carga: dict[str, Any] = {"v": VERSAO_ESQUEMA, "ts": _agora(), "evento": evento}
     carga.update(campos)
     try:

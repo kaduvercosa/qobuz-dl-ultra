@@ -1,0 +1,20 @@
+========================================================================= test session starts ==========================================================================
+platform ios -- Python 3.13.1+, pytest-9.2.0, pluggy-1.6.0 -- python3
+cachedir: .pytest_cache
+hypothesis profile 'default'
+rootdir: /private/var/mobile/Containers/Shared/AppGroup/92BC1500-7E99-4391-A74B-7B216B4F0212/File Provider Storage/Repositories/qobuz-dl-ultra
+configfile: pyproject.toml
+plugins: httpx-0.36.2, hypothesis-6.155.7, asyncio-1.4.1.post1, respx-0.23.1, anyio-4.11.0, cov-7.0.0
+asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+collecting ... collected 8 items
+
+tests/unit/test_library_db.py::test_upsert_nao_apaga_campos_com_none PASSED                                                                                      [ 12%]
+tests/unit/test_library_db.py::test_upsert_preserva_estado_de_download PASSED                                                                                    [ 25%]
+tests/unit/test_library_db.py::test_set_download_state_preserva_caminho_ao_marcar_e_limpa_ao_desmarcar PASSED                                                    [ 37%]
+tests/unit/test_library_db.py::test_album_inexistente PASSED                                                                                                     [ 50%]
+tests/unit/test_library_db.py::test_mark_removed_e_retorno PASSED                                                                                                [ 62%]
+tests/unit/test_library_db.py::test_reset_stuck_e_relatorios PASSED                                                                                              [ 75%]
+tests/unit/test_library_db.py::test_historico_de_sync PASSED                                                                                                     [ 87%]
+tests/unit/test_library_db.py::test_schema_reabre_sem_erro PASSED                                                                                                [100%]
+
+========================================================================== 8 passed in 0.33s ===========================================================================

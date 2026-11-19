@@ -35,6 +35,16 @@ os.environ["NO_COLOR"] = "1"
 # A checagem de versao no PyPI e' ao vivo (sem cache): nos testes fica desligada
 # para nao tocar a rede nem mudar a tela inicial. Os testes dela religam.
 os.environ["QOBUZ_DL_NO_UPDATE_CHECK"] = "1"
+# SQLite sem WAL nos testes: evita locks/mmap do -shm (travavam no a-Shell).
+os.environ["QOBUZ_DL_SQLITE_WAL"] = "0"
+# A fila consulta o nome dos links na API do Qobuz; nos testes, nunca.
+os.environ["QOBUZ_DL_FILA_REDE"] = "0"
+# O vigia do modo Atalho mata o processo se nada andar; nos testes, nunca.
+os.environ["QOBUZ_DL_ATALHO_LIMITE_S"] = "0"
+# O anel fino e a batida do Atalho mudam o `progress` enviado; os testes antigos
+# contam 1 unidade por faixa e sem batida (os testes novos passam os valores).
+os.environ["QOBUZ_DL_ATALHO_ESCALA"] = "1"
+os.environ["QOBUZ_DL_ATALHO_BATIDA_S"] = "0"
 
 # O a-Shell define APPDIR e o projeto procura ffmpeg em $APPDIR/bin. Se a
 # variavel existir no ambiente de quem roda os testes, os testes que simulam
@@ -169,6 +179,25 @@ def _restaura_logging_do_ui():
 
 
 @pytest.fixture(autouse=True)
+def _estado_do_ui_limpo():
+    """Zera `ui.estado` antes de cada teste (cor e unicode são redetectados).
+
+    `ui.estado.unicode_enabled` é detectado uma vez e fica em cache. Um teste que
+    o deixe em False (ou que chame o ui com um stdout sem UTF-8) e não restaure faz
+    os seguintes receberem bordas ASCII ("+-|") no lugar de "╭│├". Com o
+    pytest-randomly a ordem muda a cada execução, então o problema aparecia só em
+    algumas rodadas.
+
+    Troca na mão, sem pedir o fixture `monkeypatch` (veja o motivo em
+    `_terminal_nao_interativo`). Só age se o teste já importou o ui.
+    """
+    ui = sys.modules.get("qobuz_dl.ui")
+    if ui is not None:
+        ui.redefinir_estado()
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _terminal_nao_interativo():
     """`library_cmd._interactive()` dá False por padrão nos testes.
 
@@ -225,3 +254,78 @@ def _restaura_estado_do_ui():
         return
     for nome, valor in antes.items():
         setattr(ui.estado, nome, valor)
+
+
+# --- Terminal limpo + vigia de travamento ------------------------------------
+# (adicionado por aplicar_correcao_travamento.py)
+import faulthandler  # noqa: E402
+
+
+def _devolver_terminal_ao_normal() -> None:
+    """Escreve ESC[0m no terminal de verdade.
+
+    Alguns testes ligam a cor e imprimem negrito (ESC[1m) sem o reset. Com a
+    captura do pytest desligada (-s) ou no a-Shell, isso vai direto ao terminal
+    e o negrito fica preso ate o fim. O reset aqui nao afeta a saida capturada.
+    """
+    for fluxo in (sys.__stdout__, sys.__stderr__):
+        try:
+            if fluxo is not None and fluxo.isatty():
+                fluxo.write("\033[0m")
+                fluxo.flush()
+        except Exception:  # noqa: BLE001 - nunca derrubar um teste por causa disto
+            pass
+
+
+@pytest.fixture(autouse=True)
+def _terminal_sem_negrito_preso():
+    yield
+    _devolver_terminal_ao_normal()
+
+
+_ARQ_TRAVAMENTO = None
+
+
+def _arquivo_de_travamento():
+    """Abre (uma vez) travamento.txt na raiz do projeto."""
+    global _ARQ_TRAVAMENTO
+    if _ARQ_TRAVAMENTO is None:
+        _ARQ_TRAVAMENTO = open(  # noqa: SIM115 - fica aberto a sessao toda
+            Path(__file__).resolve().parent.parent / "travamento.txt",
+            "w",
+            encoding="utf-8",
+        )
+    return _ARQ_TRAVAMENTO
+
+
+@pytest.fixture(autouse=True)
+def _vigia_de_travamento(request):
+    """Se um teste passar de QDL_TESTE_LIMITE_S (padrao 30 s), grava a pilha.
+
+    A pilha de TODAS as threads vai para `travamento.txt` (na raiz do projeto),
+    com o nome do teste no topo. Nao mata o teste. 0 desliga.
+    """
+    try:
+        limite = float(os.environ.get("QDL_TESTE_LIMITE_S", "30"))
+    except ValueError:
+        limite = 30.0
+    armado = False
+    if limite > 0:
+        try:
+            arq = _arquivo_de_travamento()
+            arq.seek(0)
+            arq.truncate()
+            arq.write(f"TESTE: {request.node.nodeid}\n(fase: setup/chamada, "
+                      f"limite {limite:g}s)\n\n")
+            arq.flush()
+            faulthandler.dump_traceback_later(limite, repeat=False, file=arq)
+            armado = True
+        except Exception:  # noqa: BLE001
+            armado = False
+    yield
+    if armado:
+        faulthandler.cancel_dump_traceback_later()
+
+
+def pytest_unconfigure(config):
+    _devolver_terminal_ao_normal()

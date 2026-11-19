@@ -1,6 +1,12 @@
+import sys as _sys
 from typing import Any
 
-__version__ = "2.6.8.2"
+if "--atalho" in _sys.argv:  # modo Atalho do iOS: avisar o iOS já na partida
+    from qobuz_dl import _partida
+
+    _partida.ligar()
+
+__version__ = "2.6.8.3"
 
 
 def __getattr__(name: str) -> Any:
