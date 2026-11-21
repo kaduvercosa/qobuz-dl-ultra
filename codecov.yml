@@ -1,7 +1,8 @@
 # Configuração completa do Codecov.
 #
-# O status project acompanha a cobertura total do repositório (mesmo piso do
-# CI e do pyproject: 60%; ao subir, altere os três juntos).
+# O status project acompanha a cobertura total do repositório e usa a META de
+# 75%. O PISO que quebra o CI é 60% (--cov-fail-under em tests.yml, igual ao
+# fail_under do pyproject); ao subir o piso, altere os dois juntos.
 # O status patch acompanha apenas as linhas alteradas e é informativo,
 # portanto não bloqueia o merge.
 #

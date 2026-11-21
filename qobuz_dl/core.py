@@ -91,6 +91,43 @@ _NAV_HOME = "__qobuz_nav_home__"
 _NAV_ARTIST = "__qobuz_nav_artist__"
 
 
+def _grupos_de_atalhos(columns, *, is_multi, sortable, item_category):
+    """Atalhos da TABELA agrupados por assunto: [(rótulo, texto), ...].
+
+    Devolve None se alguma linha não couber em ``columns`` (aí vale a linha
+    única de sempre). Mesmos atalhos de antes, só organizados em Lista / Ordem /
+    Navegar.
+    """
+    lista = ["[↑↓/jk] Mover"]
+    if not (is_multi and sortable):
+        lista.append("[1-9] Ir para")
+    if is_multi:
+        lista.extend(("[Espaço] Selecionar", "[t] Todos"))
+    abre_artista = item_category == "artist" and not is_multi
+    lista.append("[Enter] Abrir artista" if abre_artista else "[Enter] Confirmar")
+    ordem = ["[a] A-Z", "[y/Y] Ano"] if (sortable or abre_artista) else []
+    if item_category in {"album", "track"}:
+        navegar = ["[n] Nova", "[b] Artista", "[m] Menu"]
+    elif item_category == "filter":
+        navegar = []
+    else:
+        navegar = ["[n] Nova", "[m] Menu"]
+    grupos = [
+        (rotulo, itens)
+        for rotulo, itens in (("Lista", lista), ("Ordem", ordem), ("Navegar", navegar))
+        if itens
+    ]
+    largura_rotulo = max(len(rotulo) for rotulo, _ in grupos) + 2
+    linhas = []
+    for rotulo, itens in grupos:
+        prefixo = f" {rotulo:<{largura_rotulo}}"
+        texto = "  ".join(itens)
+        if get_cwidth(prefixo + texto) > columns - 1:
+            return None
+        linhas.append((prefixo, texto))
+    return linhas
+
+
 def _search_results_title(
     query: str, category: str, sub_filter: list[str] | None = None
 ) -> str:
@@ -663,7 +700,7 @@ async def _tui_select(
                 # Título (2 linhas) + rodapé com detalhes, contador e atalhos.
                 fixed_rows = 2 + _footer_rows()
             else:
-                fixed_rows = _HEADER_LINES + _FOOTER_LINES
+                fixed_rows = _HEADER_LINES + max(_FOOTER_LINES, _footer_rows())
             avail = (
                 info.window_height
                 if info is not None and info.window_height > 0
@@ -1347,6 +1384,23 @@ async def _tui_select(
             res.extend(("class:footer", f" {line}\n") for line in hint_lines)
             return res
 
+        if layout == "tabela":
+            grupos = _grupos_de_atalhos(
+                columns,
+                is_multi=is_multi,
+                sortable=sortable,
+                item_category=item_category,
+            )
+            if grupos is not None:
+                if is_multi:
+                    res.append(
+                        ("class:checkbox", f" * Selecionados: {len(selected_indices)}\n")
+                    )
+                for rotulo, texto in grupos:
+                    res.append(("class:meta", rotulo))
+                    res.append(("class:footer", f"{texto}\n"))
+                return res
+
         if is_multi:
             if not compact_mobile:
                 res.append(
@@ -1444,7 +1498,7 @@ async def _tui_select(
             columns = ui.raw_width()
         if ui.compact_mode(columns) or _layout_info(columns)[0] == "compacto":
             return Dimension.exact(max(1, _footer_rows()))
-        return Dimension.exact(_FOOTER_LINES)
+        return Dimension.exact(max(_FOOTER_LINES, _footer_rows()))
 
     footer_window = Window(
         content=FormattedTextControl(text=como_texto_formatado(get_footer_text)),

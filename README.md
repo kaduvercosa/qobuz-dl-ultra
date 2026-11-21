@@ -1,8 +1,21 @@
 # 𝗤𝗢𝗕𝗨𝗭-𝗗𝗟 𝗨𝗟𝗧𝗥𝗔
 [![Versão PyPI](https://img.shields.io/pypi/v/qobuz-dl-ultra.svg)](https://pypi.org/project/qobuz-dl-ultra/) [![Downloads PyPI](https://static.pepy.tech/personalized-badge/qobuz-dl-ultra?period=total&units=INTERNATIONAL_SYSTEM&left_color=BLACK&right_color=GREEN&left_text=downloads)](https://pepy.tech/projects/qobuz-dl-ultra) ![Docker Image CI](https://github.com/kaduvercosa/qobuz-dl-ultra/actions/workflows/docker.yml/badge.svg) [![codecov](https://codecov.io/gh/kaduvercosa/qobuz-dl-ultra/branch/master/graph/badge.svg)](https://codecov.io/gh/kaduvercosa/qobuz-dl-ultra)
 
+__Pesquise, explore e baixe músicas Lossless e Hi-Res do [Qobuz](https://www.qobuz.com/).__
+
+## ⚡ Início rápido
+
+```bash
+pip install qobuz-dl-ultra
+qobuz-dl                        # tela inicial: comandos, flags globais e início rápido
+qobuz-dl dl "<URL_DO_QOBUZ>"    # baixa um álbum, faixa, artista ou playlist
+```
+
+Docker, código-fonte e configuração completa: [📥 Instalação e Configuração](#-instalação-e-configuração).
+
 ## 📑 Índice
 
+* [⚡ Início rápido](#-início-rápido)
 * [✨ Funcionalidades](#-funcionalidades)
   * [🎧 Mecanismo Audiófilo e de Metadados](#-mecanismo-audiófilo-e-de-metadados)
   * [🚀 Mecanismo de Download Resiliente](#-mecanismo-de-download-resiliente)
@@ -19,87 +32,21 @@
   * [🔑 Como obter seu Auth Token](#-como-obter-seu-auth-token)
 
 * [💻 Uso e Exemplos Rápidos](#-uso-e-exemplos-rápidos)
+  * [📱 Layout do modo interativo (celular, tablet e PC)](#-layout-do-modo-interativo-celular-tablet-e-pc)
+  * [🧭 Fluxo e atalhos do modo interativo](#-fluxo-e-atalhos-do-modo-interativo)
+  * [💾 Verificação de espaço em disco](#-verificação-de-espaço-em-disco)
+  * [⚡ Cache de metadados e relatórios](#-cache-de-metadados-e-relatórios)
   * [🗄️ Gerenciamento de Banco de Dados e Biblioteca](#️-gerenciamento-de-banco-de-dados-e-biblioteca)
+  * [🗂️ Catálogo Local, Scan e Sync de Favoritos (novo na 2.6)](#️-catálogo-local-scan-e-sync-de-favoritos-novo-na-26)
+  * [🔔 Eventos em JSON e Hooks pós-download (novo)](#-eventos-em-json-e-hooks-pós-download-novo)
+  * [📲 Baixar por um Atalho do iOS (a-Shell "Execute Long Command")](#-baixar-por-um-atalho-do-ios-a-shell-execute-long-command)
   * [🛠️ Principais Variáveis de Formatação](#️-principais-variáveis-de-formatação)
 
+* [🧪 Desenvolvimento e Testes](#-desenvolvimento-e-testes)
 * [🔧 Solução de Problemas: Ambientes Headless e Servidores](#-solução-de-problemas-ambientes-headless-e-servidores)
+  * [🩺 Verificação manual de integridade de áudio](#-verificação-manual-de-integridade-de-áudio)
 * [🏆 Créditos](#-créditos)
 * [⚠️ Isenção de Responsabilidade (Aviso Legal)](#️-isenção-de-responsabilidade-aviso-legal)
-
-__Pesquise, explore e baixe músicas Lossless e Hi-Res do [Qobuz](https://www.qobuz.com/).__
-
-### Uso em celular e iPad
-
-A interface interativa adapta tabelas e cartões à largura do terminal. Para
-manter a experiência consistente entre um celular e um iPad, é possível
-forçar o modo visual desejado:
-
-```bash
-qobuz-dl interactive --ui compact
-qobuz-dl interactive --ui comfortable
-```
-
-`--ui auto` é o padrão e continua detectando a largura automaticamente.
-
-Nas listas de resultados (álbuns, faixas, artistas, playlists) o layout muda
-conforme a largura da tela:
-
-| Largura | Layout | O que aparece |
-| --- | --- | --- |
-| a partir de ~90 colunas | **tabela** | todas as colunas, com bordas |
-| até 72 colunas (celular) | **compacto** | uma linha por item (título, artista, ano, qualidade curta) e, no rodapé, um painel de 3 linhas com os detalhes do item sob o cursor |
-| entre os dois | **cartão** | um cartão de duas linhas por item |
-
-O compacto mostra bem mais resultados por tela que os cartões (num terminal
-de 40 colunas, 7 itens em vez de 4). Para fixar um layout, mude a opção
-`interactive_layout` do `config.ini` (`auto`, `cartao`, `compacto` ou
-`tabela`):
-
-```bash
-qobuz-dl config set interactive_layout cartao
-```
-
-Com `auto` (padrão), a tabela é usada quando cabe, o compacto até 72 colunas
-e o cartão acima disso. Menus simples (confirmações e filtros) continuam sempre
-iguais.
-Em dispositivos com pouco espaço livre, a verificação é automática: o programa
-estima o tamanho do álbum antes de começar e interrompe a operação com uma
-mensagem clara quando o download não cabe. Para desligá-la em um ambiente com
-quota ou montagem de disco incomum, use `--no-check-storage`:
-
-```bash
-qobuz-dl dl "https://play.qobuz.com/album/..." --no-check-storage
-```
-
-No modo interativo, itens repetidos são removidos automaticamente da fila.
-O fluxo é rotativo: depois de adicionar resultados, `✅ Sim` inicia uma nova
-pesquisa, `🏠 Menu inicial` permite escolher outra categoria sem perder a fila
-e `❌ Não` leva à revisão final. Os submenus de favoritos e artistas também
-oferecem retorno ao menu inicial; durante a pesquisa, `/menu` (ou `:menu`) faz
-o mesmo e `/novo` começa outra busca na categoria atual. Dentro de qualquer
-tabela ou cartão, `n` inicia nova pesquisa e `m` volta imediatamente ao menu
-inicial, sem precisar navegar até o fim da lista. Ao explorar um artista, `b`
-volta aos resultados de artistas; assim, o retorno do artista não é confundido
-com o menu inicial.
-
-Antes de iniciar o download, o programa mostra um resumo por tipo e permite
-revisar a fila com nomes de artista/título, remover itens selecionados ou
-cancelar a operação. Em qualquer lista de resultados, use `a` para ordenar
-alfabeticamente (A-Z), `y` para ordenar por ano do mais novo ao mais antigo e
-`Y` para inverter a ordem do ano. Nas listas de faixas, o ano aparece no lugar
-da duração em todos os layouts. Discografias com mais de 20 álbuns também
-exigem confirmação explícita antes de entrar na fila.
-
-Metadados de leitura da API podem ser reutilizados automaticamente por até 12
-horas, reduzindo chamadas repetidas em playlists, discografias e sincronizações.
-Tokens, credenciais e URLs assinadas nunca entram nesse cache. Para desativá-lo,
-defina `QOBUZ_DL_DISABLE_METADATA_CACHE=1`; o caminho, TTL e limite também podem
-ser ajustados com `QOBUZ_DL_METADATA_CACHE`, `QOBUZ_DL_METADATA_CACHE_TTL` e
-`QOBUZ_DL_METADATA_CACHE_MAX`.
-
-Durante o download, `.report.json` continua sendo atualizado a cada faixa, mas
-o `report.html` só é regenerado ao finalizar o álbum. Isso reduz escrita e
-processamento no iPad sem perder a retomada ou o diagnóstico incremental.
 
 ## ✨ Funcionalidades
 
@@ -324,15 +271,7 @@ Pelo **PyPI** use `pip install "qobuz-dl-ultra[extra]"`. Pelo **código-fonte** 
 | `enhanced` | aiolimiter | protege as chamadas à API contra rajadas | `pip install "qobuz-dl-ultra[enhanced]"` |
 | `all` | todos os acima | todos os recursos opcionais de uma vez | `pip install "qobuz-dl-ultra[all]"` |
 
-**Para desenvolver e rodar os testes** (só pelo código-fonte):
-
-| Quero | Comando |
-| :--- | :--- |
-| Versão editável já com tudo o que o `pytest` precisa (um comando só) | `pip install -r requirements-dev.txt` |
-| O mesmo, mais todos os recursos opcionais | `pip install -e ".[all,dev]"` |
-| Também ruff, mypy, vulture e pip-audit | `pip install -e ".[dev-full]"` |
-
-O `pip install -e .` sozinho instala apenas o núcleo (o pip não tem "extra padrão"); por isso existe o `requirements-dev.txt`.
+**Para desenvolver e rodar os testes** (modo editável + pytest), veja [🧪 Desenvolvimento e Testes](#-desenvolvimento-e-testes).
 
 Notas:
 - O comando `tags` **não depende do Pillow** para comparar capas (lê as dimensões do próprio JPEG/PNG); o Pillow só entra para recompactar uma capa acima de 16 MB.
@@ -492,12 +431,6 @@ directory = ~/Music/Qobuz_Lossless
 # Defina como 'true' se estiver executando em um servidor headless (NAS/Docker/WSL) 
 # para salvar tokens sem criptografia no config.ini em vez do Keyring do SO.
 disable_keyring = false
-
-# Defina como 'true' para restaurar substituições clássicas de caracteres ASCII
-legacy_charmap = false
-
-# Defina como 'true' para desativar a geração de arquivos .lrc externos
-no_lrc_files = true
 
 # Defina como 'true' para restaurar substituições clássicas de caracteres ASCII (ex.: substituir '/' por '-')
 legacy_charmap = false
@@ -660,6 +593,86 @@ Baixe uma faixa mantendo o arquivo estritamente bit-perfect, sem gravar quaisque
 ```
 python -m qobuz_dl dl "URL" --no-replaygain-tag
 ```
+
+### 📱 Layout do modo interativo (celular, tablet e PC)
+
+A interface interativa adapta tabelas e cartões à largura do terminal. Para
+manter a experiência consistente entre um celular e um iPad, é possível
+forçar o modo visual desejado:
+
+```bash
+qobuz-dl interactive --ui compact
+qobuz-dl interactive --ui comfortable
+```
+
+`--ui auto` é o padrão e continua detectando a largura automaticamente.
+
+Nas listas de resultados (álbuns, faixas, artistas, playlists) o layout muda
+conforme a largura da tela:
+
+| Largura | Layout | O que aparece |
+| --- | --- | --- |
+| a partir de ~90 colunas | **tabela** | todas as colunas, com bordas |
+| abaixo disso (celular, tablet, janela média) | **cartão** | um cartão de duas linhas por item |
+| só quando você pede (`interactive_layout = compacto`) | **compacto** | uma linha por item (título, artista, ano, qualidade curta) e, no rodapé, um painel de 3 linhas com os detalhes do item sob o cursor |
+
+O compacto mostra bem mais resultados por tela que os cartões (num terminal
+de 40 colunas, 7 itens em vez de 4). Para usá-lo (ou fixar outro layout), mude a opção
+`interactive_layout` do `config.ini` (`auto`, `cartao`, `compacto` ou
+`tabela`):
+
+```bash
+qobuz-dl config set interactive_layout compacto
+```
+
+Com `auto` (padrão), a tabela é usada quando cabe e o cartão nas demais
+larguras, inclusive no celular. Menus simples (confirmações e filtros)
+continuam sempre iguais.
+
+### 🧭 Fluxo e atalhos do modo interativo
+
+No modo interativo, itens repetidos são removidos automaticamente da fila.
+O fluxo é rotativo: depois de adicionar resultados, `✅ Sim` inicia uma nova
+pesquisa, `🏠 Menu inicial` permite escolher outra categoria sem perder a fila
+e `❌ Não` leva à revisão final. Os submenus de favoritos e artistas também
+oferecem retorno ao menu inicial; durante a pesquisa, `/menu` (ou `:menu`) faz
+o mesmo e `/novo` começa outra busca na categoria atual. Dentro de qualquer
+tabela ou cartão, `n` inicia nova pesquisa e `m` volta imediatamente ao menu
+inicial, sem precisar navegar até o fim da lista. Ao explorar um artista, `b`
+volta aos resultados de artistas; assim, o retorno do artista não é confundido
+com o menu inicial.
+
+Antes de iniciar o download, o programa mostra um resumo por tipo e permite
+revisar a fila com nomes de artista/título, remover itens selecionados ou
+cancelar a operação. Em qualquer lista de resultados, use `a` para ordenar
+alfabeticamente (A-Z), `y` para ordenar por ano do mais novo ao mais antigo e
+`Y` para inverter a ordem do ano. Nas listas de faixas, o ano aparece no lugar
+da duração em todos os layouts. Discografias com mais de 20 álbuns também
+exigem confirmação explícita antes de entrar na fila.
+
+### 💾 Verificação de espaço em disco
+
+Em dispositivos com pouco espaço livre, a verificação é automática: o programa
+estima o tamanho do álbum antes de começar e interrompe a operação com uma
+mensagem clara quando o download não cabe. Para desligá-la em um ambiente com
+quota ou montagem de disco incomum, use `--no-check-storage`:
+
+```bash
+qobuz-dl dl "https://play.qobuz.com/album/..." --no-check-storage
+```
+
+### ⚡ Cache de metadados e relatórios
+
+Metadados de leitura da API podem ser reutilizados automaticamente por até 12
+horas, reduzindo chamadas repetidas em playlists, discografias e sincronizações.
+Tokens, credenciais e URLs assinadas nunca entram nesse cache. Para desativá-lo,
+defina `QOBUZ_DL_DISABLE_METADATA_CACHE=1`; o caminho, TTL e limite também podem
+ser ajustados com `QOBUZ_DL_METADATA_CACHE`, `QOBUZ_DL_METADATA_CACHE_TTL` e
+`QOBUZ_DL_METADATA_CACHE_MAX`.
+
+Durante o download, `.report.json` continua sendo atualizado a cada faixa, mas
+o `report.html` só é regenerado ao finalizar o álbum. Isso reduz escrita e
+processamento no iPad sem perder a retomada ou o diagnóstico incremental.
 
 ### 🗄️ Gerenciamento de Banco de Dados e Biblioteca
 A Edição Ultra inclui poderosos gerenciadores de biblioteca local para acompanhar seus downloads, evitar duplicatas e corrigir seus metadados retroativamente.
@@ -1067,6 +1080,67 @@ Mantém simples, mas adiciona `[E]` somente se explícito e versões sem deixar 
 **3. A Estratégia de Faixa “Arquivista”**
 * `track_format = {track_number} - {track_title} [{isrc}]`
 * Saída: `08 - Get Lucky [USSM11302305].flac`
+
+## 🧪 Desenvolvimento e Testes
+
+Esta seção é para quem baixou o **código-fonte** (Opção B) e quer alterar o projeto ou rodar a suíte de testes.
+
+### 1. Instalar em modo editável
+
+```bash
+git clone https://github.com/kaduvercosa/qobuz-dl-ultra.git
+cd qobuz-dl-ultra
+python -m venv .venv && source .venv/bin/activate   # opcional (no a-Shell, pule esta linha)
+pip install -r requirements-dev.txt                 # rode dentro da pasta do projeto
+```
+
+O `requirements-dev.txt` contém só `-e .[dev]`: instala o projeto em **modo editável** (`-e`: o comando `qobuz-dl` passa a usar esta pasta, então cada edição no código vale na hora, sem reinstalar) junto com o **extra `dev`** (pytest e plugins). O `.` é relativo à pasta atual, por isso o comando precisa ser rodado na raiz do projeto.
+
+Para conferir que deu certo:
+
+```bash
+python -c "import qobuz_dl; print(qobuz_dl.__file__)"   # deve apontar para dentro desta pasta
+pytest --version
+```
+
+| Quero | Comando |
+| :--- | :--- |
+| Só o que o `pytest` precisa (recomendado) | `pip install -r requirements-dev.txt` |
+| Também ruff, mypy, vulture e pip-audit | `pip install -e ".[dev-full]"` |
+| Tudo: recursos opcionais + ferramentas de qualidade | `pip install -e ".[all,dev-full]"` |
+
+> O `pip install -e .` sozinho instala só o núcleo (o pip não tem "extra padrão"); por isso o `requirements-dev.txt` existe.
+
+### 2. Rodar os testes
+
+| Quero | Comando |
+| :--- | :--- |
+| Tudo, como o CI (pula os lentos) | `pytest -m "not slow"` |
+| Uma pasta | `pytest tests/ui` |
+| Um arquivo | `pytest tests/unit/test_db.py` |
+| Testes cujo nome contém uma palavra | `pytest -k playlist` |
+| Parar no primeiro erro, saída curta | `pytest -x -q` |
+| Ordem fixa (o `pytest-randomly` embaralha a cada execução) | `pytest -p no:randomly` |
+| Repetir a ordem de uma execução (a semente aparece no topo da saída) | `pytest --randomly-seed=1234` |
+| Em paralelo (PC; não use no a-Shell) | `pytest -n auto` |
+| Com cobertura | `pytest --cov=qobuz_dl --cov-report=term-missing` |
+| Os 10 testes mais lentos | `pytest --durations=10` |
+
+O `tests/conftest.py` já faz duas coisas por você: usa uma pasta de configuração **temporária** com credenciais inválidas de propósito (os testes nunca tocam no seu `config.ini` nem na API do Qobuz) e coloca a pasta do projeto na frente do `sys.path` (o pytest sempre testa o código desta pasta, não uma versão instalada no sistema).
+
+### 3. Qualidade do código
+
+```bash
+pip install -e ".[dev-full]"
+ruff check .
+mypy qobuz_dl        # mypy 1.15.0, a mesma versão do a-Shell e do CI
+```
+
+### 4. No a-Shell (iPhone/iPad)
+
+- Instale só `pip install -r requirements-dev.txt`; não instale os extras de recursos (use o que já vem no a-Shell).
+- Se um teste passar de 30 s, a pilha de todas as threads é gravada em `travamento.txt` (na raiz). Ajuste o limite com `QDL_TESTE_LIMITE_S=60 pytest` (`0` desliga).
+- Se o pytest terminar **sem a linha final** de resumo (`N passed in X s`), o processo foi encerrado antes do fim e o resultado não vale: rode `pytest -x -q -p no:randomly` e envie o `travamento.txt`.
 
 ## 🔧 Solução de Problemas: Ambientes Headless e Servidores
 Se você estiver executando o `qobuz-dl` em um NAS, Docker ou em um sistema Linux headless (como WSL sem daemon de chaveiro de interface gráfica), você poderá encontrar erros `401 Unauthorized` após redefinir a configuração.

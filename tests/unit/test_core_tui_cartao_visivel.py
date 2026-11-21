@@ -49,7 +49,7 @@ pytestmark = [
 
 @pytest.fixture(autouse=True)
 def _layout_cartao():
-    """Este arquivo testa o CARTÃO; em tela estreita o padrão ("auto") é o compacto."""
+    """Este arquivo testa o CARTÃO (que também é o padrão "auto" em tela estreita)."""
     with ui.estado_temporario(layout_interativo="cartao"):
         yield
 

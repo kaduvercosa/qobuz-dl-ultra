@@ -226,9 +226,9 @@ class TestCompacto:
 
 
 class TestEscolhaDoLayout:
-    def test_auto_em_tela_estreita_usa_compacto(self, tela):
+    def test_auto_em_tela_estreita_usa_cartao(self, tela):
         _c, lista, _r, _s = tela([_album(1)], 40, 30, layout="auto")
-        assert "╭" not in _texto(lista.content.text())
+        assert "╭" in _texto(lista.content.text())
 
     def test_cartao_forcado_mantem_as_bordas(self, tela):
         _c, lista, _r, _s = tela([_album(1)], 40, 30, layout="cartao")

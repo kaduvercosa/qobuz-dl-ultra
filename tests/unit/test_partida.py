@@ -7,6 +7,8 @@ import os
 import subprocess
 import sys
 
+import pytest
+
 from qobuz_dl import _partida
 
 
@@ -148,6 +150,11 @@ def test_parar_para_os_avisos() -> None:
     _limpo()
 
 
+@pytest.mark.skipif(
+    sys.platform == "ios",
+    reason="abre um processo python; no iOS/a-Shell o filho roda dentro do "
+    "pytest e encerra o app",
+)
 def test_pacote_nao_avisa_sem_a_flag_atalho() -> None:
     """Importar o pacote sem `--atalho` não toca no `progress`."""
     codigo = (

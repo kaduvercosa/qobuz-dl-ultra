@@ -305,9 +305,10 @@ def _get_table_layout(columns, is_multi, item_category, album_role=False):
 # ============================================================================
 LAYOUTS = LAYOUTS_INTERATIVOS
 
-# No modo "auto", telas com até esta largura usam o compacto; acima disso, e sem
-# espaço para a tabela, ficam os cartões (tablets, janelas médias).
-LARGURA_MAXIMA_COMPACTO_AUTO = 72
+# No modo "auto", telas com até esta largura usam o compacto. 0 = o compacto NÃO
+# é escolhido sozinho: sem espaço para a tabela (celular, tablet, janela média)
+# o padrão é o cartão. O compacto só entra com `interactive_layout = compacto`.
+LARGURA_MAXIMA_COMPACTO_AUTO = 0
 
 # Linhas do painel de detalhes do item focado (título em até 2 + 1 de dados).
 LINHAS_DETALHE = 3
@@ -325,8 +326,9 @@ def resolve_layout(
     ``preferencia`` vem do config.ini (``interactive_layout``); valor inválido
     vale "auto". Menus simples (sim/não, escolha de ação: categoria fora de
     ``_MIN_FLEX``) ficam sempre em cartão. Em "auto": a tabela se couber; senão
-    o compacto em tela estreita (``columns <= largura_max_compacto``) e o cartão
-    nas demais. ``tabela`` sem espaço para ela cai no compacto.
+    o cartão (também no celular). O compacto só é escolhido sozinho se
+    ``largura_max_compacto`` for > 0 e ``columns <= largura_max_compacto``;
+    ``tabela`` sem espaço para ela cai no cartão, como o "auto".
     """
     if item_category not in _MIN_FLEX:
         return "cartao"
@@ -337,8 +339,6 @@ def resolve_layout(
         return "compacto"
     if tabela_cabe:
         return "tabela"
-    if pref == "tabela":
-        return "compacto"
     return "compacto" if columns <= largura_max_compacto else "cartao"
 
 

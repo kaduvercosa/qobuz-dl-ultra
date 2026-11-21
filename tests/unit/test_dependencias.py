@@ -143,6 +143,12 @@ class TestExtras:
                 continue
             assert nome in declarado, f"extra '{nome}' faltando no [all]"
 
+    def test_extra_all_nao_instala_ferramentas_de_dev(self, meta):
+        """`[all]` e' para quem USA o programa: nao pode trazer ruff, mypy
+        (fixado) nem pip-audit. Quem desenvolve usa `[all,dev-full]`."""
+        declarado = meta["optional-dependencies"]["all"][0]
+        assert "dev" not in declarado
+
     def test_features_opcionais_nao_estao_no_nucleo(self, meta):
         nucleo = {
             re.split(r"[<>=!\[; ]", d)[0].strip().lower() for d in meta["dependencies"]

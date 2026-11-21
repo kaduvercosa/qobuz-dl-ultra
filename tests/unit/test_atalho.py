@@ -79,7 +79,7 @@ def test_links_de_faixa_dao_total_de_faixas_na_preparacao() -> None:
     )
 
     async def roda() -> None:
-        sessao = atalho.preparar(args, "9.9", {})
+        sessao = atalho.preparar(args, "9.9", {"QOBUZ_DL_ATALHO_LIMITE_S": "0"})
         assert sessao is not None
         assert sessao.faixas_esperadas == 2
         assert sessao.esperados == 2
@@ -591,7 +591,7 @@ def test_preparar_e_encerrar_abrem_e_fecham_a_sessao() -> None:
     )
 
     async def roda() -> None:
-        sessao = atalho.preparar(args, "9.9", {})
+        sessao = atalho.preparar(args, "9.9", {"QOBUZ_DL_ATALHO_LIMITE_S": "0"})
         assert sessao is not None
         assert sessao.esperados == 1
         assert sessao.faixas_esperadas == 0  # link de álbum: faixas desconhecidas

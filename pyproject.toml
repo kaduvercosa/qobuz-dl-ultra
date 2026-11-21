@@ -82,7 +82,7 @@ enhanced = [
     "aiolimiter>=1.2",
 ]
 all = [
-    "qobuz-dl-ultra[speed,covers,watch,duplicates,genius,analyze,enhanced,dev-full]",
+    "qobuz-dl-ultra[speed,covers,watch,duplicates,genius,analyze,enhanced]",
 ]
 dev = [
     "pytest>=8",
@@ -185,7 +185,7 @@ branch = true
 
 [tool.coverage.report]
 precision = 2
-fail_under = 75  # igual ao --cov-fail-under do CI e ao alvo do projeto no codecov.yml; suba os três juntos
+fail_under = 60  # piso que o CI exige (--cov-fail-under em tests.yml); a meta de 75% fica no codecov.yml. Suba o piso junto com o CI
 skip_covered = false
 exclude_also = [
     # Guarda de entrypoint (__main__.py): nunca roda sob pytest, cobrir

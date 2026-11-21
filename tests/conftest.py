@@ -315,8 +315,10 @@ def _vigia_de_travamento(request):
             arq = _arquivo_de_travamento()
             arq.seek(0)
             arq.truncate()
-            arq.write(f"TESTE: {request.node.nodeid}\n(fase: setup/chamada, "
-                      f"limite {limite:g}s)\n\n")
+            arq.write(
+                f"TESTE: {request.node.nodeid}\n(fase: setup/chamada, "
+                f"limite {limite:g}s)\n\n"
+            )
             arq.flush()
             faulthandler.dump_traceback_later(limite, repeat=False, file=arq)
             armado = True
@@ -328,4 +330,97 @@ def _vigia_de_travamento(request):
 
 
 def pytest_unconfigure(config):
+    global _ARQ_TRAVAMENTO
+    if _ARQ_TRAVAMENTO is not None:
+        try:
+            faulthandler.cancel_dump_traceback_later()
+            _ARQ_TRAVAMENTO.close()
+        except Exception:  # noqa: BLE001
+            pass
+        _ARQ_TRAVAMENTO = None
     _devolver_terminal_ao_normal()
+
+
+# --- Nenhum teste pode encerrar o processo do pytest -------------------------
+# (adicionado por aplicar_melhorias_testes_e_readme.py)
+@pytest.fixture(autouse=True)
+def _sem_saida_forcada():
+    """Impede o vigia do modo Atalho de chamar os._exit() dentro da suite.
+
+    `atalho.encerrar()` arma um `threading.Timer` que, depois de 15 s, encerra
+    o processo a' forca. Os testes de test_atalho.py passam `{}` como ambiente e
+    `limite_do_ambiente({})` devolve 420 s (ignora o QOBUZ_DL_ATALHO_LIMITE_S=0
+    do conftest): o Timer fica pendente e dispara em OUTRO teste, matando o
+    pytest sem resumo. Aqui `armar_saida` sem `forcar` explicito ganha um
+    `forcar` que nao faz nada, e `forcar_saida` (usada pelo Vigia) tambem.
+    """
+    from qobuz_dl import vigia
+
+    original = vigia.armar_saida
+
+    def armar_saida_segura(codigo=0, graca=vigia.GRACA_SAIDA_S, forcar=None):
+        if forcar is None:
+
+            def forcar(_codigo):
+                return None
+
+        return original(codigo, graca, forcar)
+
+    # MonkeyPatch proprio: ver o comentario em `_sem_os_system`.
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(vigia, "armar_saida", armar_saida_segura)
+        mp.setattr(vigia, "forcar_saida", lambda *a, **k: None)
+        yield
+
+
+# --- Nenhum teste roda comando de shell de verdade ---------------------------
+# (adicionado por aplicar_correcao_os_system_ashell.py)
+@pytest.fixture(autouse=True)
+def _sem_os_system():
+    """Troca `os.system` por um falso que devolve 0 em todos os testes.
+
+    No a-Shell (sys.platform == "ios") o Atalho e o `_partida` usam
+    `os.system("progress ... >/dev/null 2>&1")`, e ali o os.system roda o
+    comando DENTRO do processo do pytest, redirecionando e fechando
+    stdout/stderr: a captura perde os descritores e tudo falha com
+    `OSError: [Errno 9] Bad file descriptor`. O `atalho.preparar()` chama o
+    `progress` antes de o teste trocar o executor, entao a troca tem que ser
+    global. Quem quiser observar o comando faz monkeypatch por cima (ex.:
+    tests/unit/test_artist_review.py).
+    """
+    # MonkeyPatch proprio (e nao o fixture `monkeypatch`): o compartilhado seria
+    # criado ANTES dos autouse dos modulos e desfeito DEPOIS, invertendo a
+    # ordem de teardown (quebrava test_http_download_ssl.py).
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(os, "system", lambda comando: 0)
+        yield
+
+
+# --- Marcadores por pasta ----------------------------------------------------
+# (adicionado por aplicar_organizacao_config_e_testes.py)
+_MARCADOR_POR_PASTA = {
+    "unit": "unit",
+    "ui": "ui",
+    "network": "network",
+    "regression": "regression",
+    "lyrics": "lyrics",
+}
+
+
+def pytest_collection_modifyitems(config, items):
+    """Aplica unit/ui/network/regression/lyrics pela PASTA do teste.
+
+    Antes so' os arquivos com `pytestmark` tinham marcador, entao `-m ui` pegava
+    4 dos 11 arquivos de tests/ui. Arquivos `test_lyrics*.py` tambem ganham `lyrics`.
+    """
+    for item in items:
+        caminho = os.path.normpath(str(getattr(item, "path", None) or item.fspath))
+        partes = caminho.split(os.sep)
+        marcas = {
+            _MARCADOR_POR_PASTA[p] for p in partes[:-1] if p in _MARCADOR_POR_PASTA
+        }
+        if partes[-1].startswith("test_lyrics"):
+            marcas.add("lyrics")
+        for marca in sorted(marcas):
+            if item.get_closest_marker(marca) is None:
+                item.add_marker(getattr(pytest.mark, marca))

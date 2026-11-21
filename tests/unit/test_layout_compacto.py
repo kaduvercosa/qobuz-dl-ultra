@@ -36,21 +36,28 @@ class TestResolveLayout:
         "pref,cabe,colunas,esperado",
         [
             ("auto", True, 140, "tabela"),
-            ("auto", False, 40, "compacto"),
-            ("auto", False, 72, "compacto"),
+            ("auto", False, 40, "cartao"),
+            ("auto", False, 72, "cartao"),
             ("auto", False, 80, "cartao"),
             ("cartao", True, 140, "cartao"),
             ("cartao", False, 40, "cartao"),
             ("compacto", True, 140, "compacto"),
             ("compacto", False, 40, "compacto"),
             ("tabela", True, 140, "tabela"),
-            ("tabela", False, 40, "compacto"),
-            ("lixo", False, 40, "compacto"),  # inválido vale "auto"
+            ("tabela", False, 40, "cartao"),
+            ("lixo", False, 40, "cartao"),  # inválido vale "auto"
             (None, False, 80, "cartao"),
         ],
     )
     def test_matriz(self, pref, cabe, colunas, esperado):
         assert iu.resolve_layout(pref, cabe, "album", colunas) == esperado
+
+    def test_limite_configuravel_ainda_permite_compacto_no_auto(self):
+        assert iu.LARGURA_MAXIMA_COMPACTO_AUTO == 0
+        assert (
+            iu.resolve_layout("auto", False, "album", 40, largura_max_compacto=72)
+            == "compacto"
+        )
 
     @pytest.mark.parametrize("pref", iu.LAYOUTS)
     def test_menu_simples_sempre_cartao(self, pref):

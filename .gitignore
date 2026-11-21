@@ -44,3 +44,10 @@ musicas/
 # Ferramentas de aplicar mudanças (não fazem parte do projeto)
 /aplicar_*.py
 /.backup_*/
+
+# Artefatos de depuracao e backups locais
+.hypothesis/
+/travamento.txt
+/saida.txt
+*.bak*
+/.backup_limpeza/
