@@ -107,7 +107,7 @@ dev-full = [
     "ruff>=0.6",
     # Fixado na versão que roda no a-Shell, para o baseline e o CI concordarem
     # com o que aparece no celular.
-    "mypy==1.15.0",
+    "mypy==2.4.1",
     "types-aiofiles",
     "mypy-baseline>=0.7",
     # Qualidade (workflow qualidade.yml): codigo sem uso e vulnerabilidades.
