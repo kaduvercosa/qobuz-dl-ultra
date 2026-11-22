@@ -6,7 +6,7 @@ if "--atalho" in _sys.argv:  # modo Atalho do iOS: avisar o iOS já na partida
 
     _partida.ligar()
 
-__version__ = "2.6.8.3"
+__version__ = "2.6.8.4"
 
 
 def __getattr__(name: str) -> Any:
