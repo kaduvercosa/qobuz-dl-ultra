@@ -91,7 +91,113 @@ _NAV_HOME = "__qobuz_nav_home__"
 _NAV_ARTIST = "__qobuz_nav_artist__"
 
 
-def _grupos_de_atalhos(columns, *, is_multi, sortable, item_category):
+def _navegacao_de_atalhos(item_category: str) -> str:
+    """Trecho [n]/[b]/[m] da legenda do rodapé, conforme a categoria da lista."""
+    if item_category == "filter":
+        return ""
+    if item_category in {"album", "track"}:
+        return " [n] Nova [b] Artista [m] Menu"
+    return " [n] Nova [m] Menu"
+
+
+def _linhas_de_atalhos_compactos(
+    columns: int, *, is_multi: bool, sortable: bool, item_category: str
+) -> list[str]:
+    """Legenda do rodapé estreito: cada tecla em fragmento curto, quebrada em
+    linhas que cabem em ``columns - 2`` (só a legenda quebra; a lista não)."""
+    hints = ["↑↓ mover"]
+    if is_multi:
+        hints.append("Espaço marcar")
+    if sortable:
+        hints.extend(("a A-Z", "y ano"))
+        if is_multi:
+            hints.insert(2, "t todos")
+    elif is_multi:
+        hints.extend(("t todos", "1-9 ir"))
+
+    if item_category in {"album", "track"}:
+        hints.extend(("n nova busca", "b artista", "m menu"))
+    elif item_category != "filter":
+        hints.extend(("n nova busca", "m menu"))
+    hints.append("↵ abrir" if item_category == "artist" else "↵ confirmar")
+
+    hint_lines = []
+    current_line = ""
+    for hint in hints:
+        candidate = f"{current_line} · {hint}" if current_line else hint
+        if current_line and get_cwidth(candidate) > columns - 2:
+            hint_lines.append(current_line)
+            current_line = hint
+        else:
+            current_line = candidate
+    if current_line:
+        hint_lines.append(current_line)
+    return hint_lines
+
+
+def _linha_unica_de_atalhos(
+    columns: int, *, is_multi: bool, sortable: bool, item_category: str
+) -> str:
+    """A MAIOR legenda de uma linha que cabe em ``columns`` (do mais completo ao
+    mais curto); se nem a menor couber, corta no limite da largura."""
+    navigation_hint = _navegacao_de_atalhos(item_category)
+    if is_multi:
+        variants = (
+            (
+                f" [↑↓/jk] Mover [Espaço] Selecionar [t] Todos [a] A-Z [y/Y] Ano{navigation_hint} [Enter] Confirmar",
+                f" [↑↓/jk] Mover [Espaço] Marcar [t] Todos [a] A-Z [y/Y] Ano{navigation_hint} [Enter] OK",
+                f" [↑↓]Mover [Esp]Marcar [t]Todos [a]A-Z [y]Ano{navigation_hint} [↵]OK",
+                " ↑↓ Esp t a y n b m ↵" if navigation_hint else " ↑↓ Esp t a y ↵",
+            )
+            if sortable
+            else (
+                f" [↑↓/jk] Mover [Espaço] Selecionar [t] Todos [1-9] Ir para{navigation_hint} [Enter] Confirmar",
+                f" [↑↓/jk] Mover [Espaço] Marcar [t] Todos [1-9] Ir para{navigation_hint} [Enter] OK",
+                f" [↑↓]Mover [Esp]Marcar [t]Todos [1-9]Ir{navigation_hint} [↵]OK",
+                " ↑↓ Esp t ↵" if not navigation_hint else " ↑↓ Esp t n b m ↵",
+            )
+        )
+    elif item_category == "artist":
+        variants = (
+            f" [↑↓/jk] Mover [1-9] Ir para [a] A-Z [y/Y] Ano{navigation_hint} [Enter] Abrir artista",
+            f" [↑↓/jk] Mover [a] A-Z [y/Y] Ano{navigation_hint} [Enter] Abrir",
+            f" [↑↓]Mover [a]A-Z [y]Ano{navigation_hint} [↵]Abrir",
+            " ↑↓ a y n m ↵",
+        )
+    elif sortable:
+        variants = (
+            f" [↑↓/jk] Mover [1-9] Ir para [a] A-Z [y/Y] Ano{navigation_hint} [Enter] Confirmar",
+            f" [↑↓/jk] Mover [a] A-Z [y/Y] Ano{navigation_hint} [Enter] OK",
+            f" [↑↓]Mover [a]A-Z [y]Ano{navigation_hint} [↵]OK",
+            " ↑↓ a y n b m ↵" if navigation_hint else " ↑↓ a y ↵",
+        )
+    else:
+        variants = (
+            " [↑↓/jk] Mover [1-9] Ir para [Enter] Confirmar",
+            " [↑↓/jk] Mover [Enter] OK",
+            " [↑↓]Mover [↵]OK",
+            " ↑↓ ↵",
+        )
+    footer_msg = next(
+        (v for v in variants if get_cwidth(v) <= columns - 1), variants[-1]
+    )
+
+    if get_cwidth(footer_msg) > columns:
+        trunc_msg = ""
+        w = 0
+        for char in footer_msg:
+            cw = get_cwidth(char)
+            if w + cw > columns - 1:
+                break
+            trunc_msg += char
+            w += cw
+        return trunc_msg
+    return footer_msg
+
+
+def _grupos_de_atalhos(
+    columns: int, *, is_multi: bool, sortable: bool, item_category: str
+) -> list[tuple[str, str]] | None:
     """Atalhos da TABELA agrupados por assunto: [(rótulo, texto), ...].
 
     Devolve None se alguma linha não couber em ``columns`` (aí vale a linha
@@ -118,7 +224,7 @@ def _grupos_de_atalhos(columns, *, is_multi, sortable, item_category):
         if itens
     ]
     largura_rotulo = max(len(rotulo) for rotulo, _ in grupos) + 2
-    linhas = []
+    linhas: list[tuple[str, str]] = []
     for rotulo, itens in grupos:
         prefixo = f" {rotulo:<{largura_rotulo}}"
         texto = "  ".join(itens)
@@ -1341,47 +1447,19 @@ async def _tui_select(
                     ("class:meta", f" Item {cursor_pos + 1} de {len(options_dicts)}\n")
                 )
 
-        # Atalhos: escolhe a MAIOR versão que cabe na largura (do mais completo ao
-        # mais curto), em vez de limiares fixos que cortavam o texto em ~50 colunas.
-        if item_category == "filter":
-            navigation_hint = ""
-        elif item_category in {"album", "track"}:
-            navigation_hint = " [n] Nova [b] Artista [m] Menu"
-        else:
-            navigation_hint = " [n] Nova [m] Menu"
-
         if compact_mobile:
             # No rodapé estreito, explicar cada tecla em fragmentos curtos e
             # quebrar somente a legenda. Os cartões/lista mantêm a largura e a
             # altura próprias; o rodapé reserva as linhas necessárias.
-            hints = ["↑↓ mover"]
-            if is_multi:
-                hints.append("Espaço marcar")
-            if sortable:
-                hints.extend(("a A-Z", "y ano"))
-                if is_multi:
-                    hints.insert(2, "t todos")
-            elif is_multi:
-                hints.extend(("t todos", "1-9 ir"))
-
-            if item_category in {"album", "track"}:
-                hints.extend(("n nova busca", "b artista", "m menu"))
-            elif item_category != "filter":
-                hints.extend(("n nova busca", "m menu"))
-            hints.append("↵ abrir" if item_category == "artist" else "↵ confirmar")
-
-            hint_lines = []
-            current_line = ""
-            for hint in hints:
-                candidate = f"{current_line} · {hint}" if current_line else hint
-                if current_line and get_cwidth(candidate) > columns - 2:
-                    hint_lines.append(current_line)
-                    current_line = hint
-                else:
-                    current_line = candidate
-            if current_line:
-                hint_lines.append(current_line)
-            res.extend(("class:footer", f" {line}\n") for line in hint_lines)
+            res.extend(
+                ("class:footer", f" {line}\n")
+                for line in _linhas_de_atalhos_compactos(
+                    columns,
+                    is_multi=is_multi,
+                    sortable=sortable,
+                    item_category=item_category,
+                )
+            )
             return res
 
         if layout == "tabela":
@@ -1394,7 +1472,10 @@ async def _tui_select(
             if grupos is not None:
                 if is_multi:
                     res.append(
-                        ("class:checkbox", f" * Selecionados: {len(selected_indices)}\n")
+                        (
+                            "class:checkbox",
+                            f" * Selecionados: {len(selected_indices)}\n",
+                        )
                     )
                 for rotulo, texto in grupos:
                     res.append(("class:meta", rotulo))
@@ -1402,63 +1483,21 @@ async def _tui_select(
                 return res
 
         if is_multi:
-            if not compact_mobile:
-                res.append(
-                    ("class:checkbox", f" * Selecionados: {len(selected_indices)}\n")
+            res.append(
+                ("class:checkbox", f" * Selecionados: {len(selected_indices)}\n")
+            )
+        res.append(
+            (
+                "class:footer",
+                _linha_unica_de_atalhos(
+                    columns,
+                    is_multi=is_multi,
+                    sortable=sortable,
+                    item_category=item_category,
                 )
-            variants = (
-                (
-                    f" [↑↓/jk] Mover [Espaço] Selecionar [t] Todos [a] A-Z [y/Y] Ano{navigation_hint} [Enter] Confirmar",
-                    f" [↑↓/jk] Mover [Espaço] Marcar [t] Todos [a] A-Z [y/Y] Ano{navigation_hint} [Enter] OK",
-                    f" [↑↓]Mover [Esp]Marcar [t]Todos [a]A-Z [y]Ano{navigation_hint} [↵]OK",
-                    " ↑↓ Esp t a y n b m ↵" if navigation_hint else " ↑↓ Esp t a y ↵",
-                )
-                if sortable
-                else (
-                    f" [↑↓/jk] Mover [Espaço] Selecionar [t] Todos [1-9] Ir para{navigation_hint} [Enter] Confirmar",
-                    f" [↑↓/jk] Mover [Espaço] Marcar [t] Todos [1-9] Ir para{navigation_hint} [Enter] OK",
-                    f" [↑↓]Mover [Esp]Marcar [t]Todos [1-9]Ir{navigation_hint} [↵]OK",
-                    " ↑↓ Esp t ↵" if not navigation_hint else " ↑↓ Esp t n b m ↵",
-                )
+                + "\n",
             )
-        elif item_category == "artist":
-            variants = (
-                f" [↑↓/jk] Mover [1-9] Ir para [a] A-Z [y/Y] Ano{navigation_hint} [Enter] Abrir artista",
-                f" [↑↓/jk] Mover [a] A-Z [y/Y] Ano{navigation_hint} [Enter] Abrir",
-                f" [↑↓]Mover [a]A-Z [y]Ano{navigation_hint} [↵]Abrir",
-                " ↑↓ a y n m ↵",
-            )
-        elif sortable:
-            variants = (
-                f" [↑↓/jk] Mover [1-9] Ir para [a] A-Z [y/Y] Ano{navigation_hint} [Enter] Confirmar",
-                f" [↑↓/jk] Mover [a] A-Z [y/Y] Ano{navigation_hint} [Enter] OK",
-                f" [↑↓]Mover [a]A-Z [y]Ano{navigation_hint} [↵]OK",
-                " ↑↓ a y n b m ↵" if navigation_hint else " ↑↓ a y ↵",
-            )
-        else:
-            variants = (
-                " [↑↓/jk] Mover [1-9] Ir para [Enter] Confirmar",
-                " [↑↓/jk] Mover [Enter] OK",
-                " [↑↓]Mover [↵]OK",
-                " ↑↓ ↵",
-            )
-        footer_msg = next(
-            (v for v in variants if get_cwidth(v) <= columns - 1), variants[-1]
         )
-
-        if get_cwidth(footer_msg) > columns:
-            trunc_msg = ""
-            w = 0
-            for char in footer_msg:
-                cw = get_cwidth(char)
-                if w + cw > columns - 1:
-                    break
-                trunc_msg += char
-                w += cw
-            res.append(("class:footer", trunc_msg + "\n"))
-        else:
-            res.append(("class:footer", footer_msg + "\n"))
-
         return res
 
     header_window = Window(
