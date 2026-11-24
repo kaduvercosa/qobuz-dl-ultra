@@ -287,6 +287,7 @@ module = [
     "qobuz_dl.resilient_http",
     "qobuz_dl.retro_tagger",
     "qobuz_dl.retry_missing",
+    "qobuz_dl.reuso",
     "qobuz_dl.sentinel",
     "qobuz_dl.stats_view",
     "qobuz_dl.storage",

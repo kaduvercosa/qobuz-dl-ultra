@@ -105,6 +105,8 @@ Docker, código-fonte e configuração completa: [📥 Instalação e Configura�
  
 * **Tabela Profissional de Faixas Ausentes:** Se o mecanismo de sincronização detectar faixas na sua playlist online que estejam ausentes no seu disco local, ele gera uma tabela ASCII limpa e colorida com Título, Artista e ID para fácil acompanhamento.
  
+* **Faixa já baixada não baixa de novo:** a faixa é reconhecida pelo **ID do Qobuz** (registro no banco + tag `QOBUZTRACKID`/`QDL_TRACK_ID` + qualidade real do arquivo). Se já existe uma cópia em qualidade igual ou maior que a pedida (a máxima vale para qualquer pedido), ela é pulada, seja faixa avulsa ou playlist; só uma cópia de qualidade menor deixa baixar a melhor. No álbum, uma cópia melhor que a pedida (por exemplo 24-bit quando o pedido é CD) também é mantida, não baixada de novo. Arquivo movido ou renomeado dentro da biblioteca é achado pela tag. Para forçar um novo download use `--no-db`; se o banco foi perdido, `qobuz-dl --sync-db` o reconstrói lendo as tags.
+ 
 * **Busca Reversa Inteligente (Reverse Lookup):** Identifica automaticamente arquivos antigos lendo suas tags **ISRC** ou **UPC** e consultando a API do Qobuz para restaurar os IDs corretos no banco de dados.
  
 * **Validação Inteligente Prévia de Configuração:** Introduzido na v2.0.3, um sistema de validação inteligente verifica as strings de formatação do seu `config.ini` antes de iniciar qualquer download. Se detectar uma variável não reconhecida, o mecanismo aborta o processo com segurança e usa `difflib` para sugerir inteligentemente a variável correta, evitando exceções `KeyError` silenciosas.

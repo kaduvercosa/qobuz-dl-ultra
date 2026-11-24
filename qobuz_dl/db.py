@@ -202,6 +202,21 @@ def create_db(db_path: Any) -> Any:
         return db_path
 
 
+def _nome_curto_do_caminho(caminho: Any, limite: int = 36) -> str:
+    """Só o nome do arquivo/pasta (sem o caminho todo), cortado em `limite`.
+
+    Usado no aviso de registro obsoleto: o caminho completo estourava a tela
+    do celular (a-Shell, ~40 colunas) e não ajuda a identificar o item.
+    """
+    if not caminho:
+        return "sem caminho"
+    texto = str(caminho).replace("\\", "/").rstrip("/")
+    nome = texto.rsplit("/", 1)[-1] or texto
+    if len(nome) > limite:
+        nome = nome[: limite - 1] + "…"
+    return nome
+
+
 async def handle_download_id(
     db_path: Any,
     item_id: Any,
@@ -270,7 +285,20 @@ async def handle_download_id(
                 await conn.execute(
                     """
                     INSERT INTO downloads (id, media_type, quality, file_format, quality_met, bit_depth,
-                    sampling_rate, saved_path, url, release_date, status, artist, album) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    sampling_rate, saved_path, url, release_date, status, artist, album)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(id, quality) DO UPDATE SET
+                        media_type=excluded.media_type,
+                        file_format=excluded.file_format,
+                        quality_met=excluded.quality_met,
+                        bit_depth=excluded.bit_depth,
+                        sampling_rate=excluded.sampling_rate,
+                        saved_path=excluded.saved_path,
+                        url=excluded.url,
+                        release_date=excluded.release_date,
+                        status=excluded.status,
+                        artist=excluded.artist,
+                        album=excluded.album""",
                     (
                         item_id,
                         media_type,
@@ -288,30 +316,33 @@ async def handle_download_id(
                     ),
                 )
                 await conn.commit()
-            except sqlite3.IntegrityError:
-                # violou PRIMARY KEY (id, quality) -> ja foi baixado nessa mesma
-                # qualidade antes; nao e' erro real, so' avisa e segue
-                logger.info(f"{YELLOW}[i] Already in database, skipping.{OFF}")
             except sqlite3.Error as e:
                 logger.error(f"{RED}Unexpected DB error: {e}{OFF}")
         else:
             # MODO CONSULTA (lookup): so' checa se (id, quality) ja foi baixado antes,
             # usado pra decidir se pula o download (feature de Smart Reverse Lookup)
             cursor = await conn.execute(
-                "SELECT id, saved_path, status FROM downloads WHERE id=? AND quality=?",
+                "SELECT id, saved_path, status, media_type FROM downloads WHERE id=? AND quality=?",
                 (item_id, quality),
             )
             row = await cursor.fetchone()
-            caminho_existe = (
-                await asyncio.to_thread(os.path.exists, row[1])
-                if row and row[1]
-                else True
-            )
-            if row and row[1] and not caminho_existe:
+            caminho_existe = True
+            if row:
+                if not row[1]:
+                    # Registro legado sem caminho não comprova que o arquivo
+                    # ainda existe. Não pode bloquear um novo download.
+                    caminho_existe = False
+                elif len(row) > 3 and row[3] == "track":
+                    caminho_existe = await asyncio.to_thread(
+                        lambda: os.path.isfile(row[1]) and os.path.getsize(row[1]) > 0
+                    )
+                else:
+                    caminho_existe = await asyncio.to_thread(os.path.isdir, row[1])
+            if row and not caminho_existe:
                 logger.warning(
-                    "%sRegistro obsoleto removido do banco: caminho não existe (%s)%s",
+                    "%sRegistro obsoleto removido: %s%s",
                     YELLOW,
-                    row[1],
+                    _nome_curto_do_caminho(row[1]),
                     OFF,
                 )
                 await conn.execute(

@@ -398,7 +398,11 @@ class TestHandleDownloadId:
         caminho = str(tmp_path / "downloads.db")
         create_db(caminho)
 
-        await handle_download_id(caminho, "id-1", add_id=True, quality=27)
+        pasta = tmp_path / "album"
+        pasta.mkdir()
+        await handle_download_id(
+            caminho, "id-1", add_id=True, quality=27, saved_path=str(pasta)
+        )
         encontrado = await handle_download_id(caminho, "id-1", add_id=False, quality=27)
 
         assert encontrado is not None
@@ -424,6 +428,57 @@ class TestHandleDownloadId:
         assert await handle_download_id(caminho, "stale", quality=27) is None
         with _connect(caminho) as conn:
             assert conn.execute("SELECT COUNT(*) FROM downloads").fetchone()[0] == 0
+
+    async def test_upsert_atualiza_caminho_da_mesma_faixa_e_qualidade(self, tmp_path):
+        caminho = str(tmp_path / "downloads.db")
+        create_db(caminho)
+        arquivo_antigo = tmp_path / "antigo.flac"
+        arquivo_novo = tmp_path / "novo.flac"
+        arquivo_antigo.write_bytes(b"audio")
+        arquivo_novo.write_bytes(b"audio")
+
+        await handle_download_id(
+            caminho,
+            "track-1",
+            add_id=True,
+            media_type="track",
+            quality=27,
+            saved_path=str(arquivo_antigo),
+        )
+        await handle_download_id(
+            caminho,
+            "track-1",
+            add_id=True,
+            media_type="track",
+            quality=27,
+            saved_path=str(arquivo_novo),
+        )
+        row = await handle_download_id(caminho, "track-1", quality=27)
+        assert row is not None
+        assert row[1] == str(arquivo_novo)
+
+    async def test_lookup_de_registro_sem_caminho_remove_registro(self, tmp_path):
+        caminho = str(tmp_path / "downloads.db")
+        create_db(caminho)
+        await handle_download_id(
+            caminho, "sem-caminho", add_id=True, media_type="track", quality=27
+        )
+        assert await handle_download_id(caminho, "sem-caminho", quality=27) is None
+
+    async def test_lookup_de_faixa_com_arquivo_vazio_remove_registro(self, tmp_path):
+        caminho = str(tmp_path / "downloads.db")
+        create_db(caminho)
+        arquivo = tmp_path / "vazio.flac"
+        arquivo.touch()
+        await handle_download_id(
+            caminho,
+            "track-vazia",
+            add_id=True,
+            media_type="track",
+            quality=27,
+            saved_path=str(arquivo),
+        )
+        assert await handle_download_id(caminho, "track-vazia", quality=27) is None
 
     async def test_mesma_qualidade_duas_vezes_nao_derruba_o_programa(self, tmp_path):
         """PRIMARY KEY (id, quality) -- inserir a mesma combinação de
@@ -558,7 +613,8 @@ class TestHandleDownloadId:
         )
 
         assert resultado is None
-        verificar.assert_awaited_once_with(os.path.exists, arquivo_ausente)
+        # registro de álbum (media_type padrão): o código confere a PASTA com isdir
+        verificar.assert_awaited_once_with(os.path.isdir, arquivo_ausente)
 
 
 # ---------------------------------------------------------------------------

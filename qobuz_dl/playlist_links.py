@@ -31,7 +31,7 @@ import json
 import logging
 import os
 import sqlite3
-from typing import Any, TypedDict
+from typing import Any, Callable, TypedDict
 
 from qobuz_dl.constants import PLAYLIST_FOLDER
 
@@ -251,32 +251,69 @@ def _db_set_path(db_path: Any, track_id: Any, new_path: Any) -> None:
         logger.debug("Falha ao atualizar caminho no banco: %s", e)
 
 
-def _db_register_tracks(db_path: Any, files: Any, reg: Any) -> Any:
-    """Uma linha por faixa do álbum (INSERT OR IGNORE). Retorna quantas entraram."""
+def _db_register_tracks(
+    db_path: Any,
+    files: Any,
+    reg: Any,
+    reader: Callable[[str], Any] = read_track_id,
+) -> Any:
+    """Registra faixas e corrige referências obsoletas no banco.
+
+    Se o caminho antigo ainda contém esta faixa, preservamos a referência para
+    que a etapa seguinte compare as cópias e mantenha a de melhor qualidade.
+    Se sumiu ou aponta para outro ID, atualizamos para o arquivo recém-validado.
+    """
     n = 0
     try:
         with _conn(db_path) as c:
             for tid, path in files.items():
-                cur = c.execute(
-                    "INSERT OR IGNORE INTO downloads (id, media_type, quality, "
-                    "file_format, quality_met, bit_depth, sampling_rate, "
-                    "saved_path, url, release_date, status, artist, album) "
-                    "VALUES (?, 'track', ?, ?, ?, ?, ?, ?, ?, ?, 'downloaded', ?, ?)",
-                    (
-                        str(tid),
-                        reg.get("quality", 27),
-                        reg.get("file_format", "FLAC"),
-                        reg.get("quality_met", 0),
-                        reg.get("bit_depth"),
-                        reg.get("sampling_rate"),
-                        os.path.abspath(path),
-                        f"{_WEB_URL}track/{tid}",
-                        reg.get("release_date", "") or "",
-                        reg.get("artist", "") or "",
-                        reg.get("album", "") or "",
-                    ),
+                tid = str(tid)
+                novo = os.path.abspath(path)
+                row = c.execute(
+                    "SELECT saved_path FROM downloads "
+                    "WHERE id=? AND media_type='track' AND quality=?",
+                    (tid, reg.get("quality", 27)),
+                ).fetchone()
+                valores = (
+                    reg.get("file_format", "FLAC"),
+                    reg.get("quality_met", 0),
+                    reg.get("bit_depth"),
+                    reg.get("sampling_rate"),
+                    novo,
+                    f"{_WEB_URL}track/{tid}",
+                    reg.get("release_date", "") or "",
+                    reg.get("artist", "") or "",
+                    reg.get("album", "") or "",
                 )
-                n += max(0, cur.rowcount)
+                if row is None:
+                    cur = c.execute(
+                        "INSERT OR IGNORE INTO downloads (id, media_type, quality, "
+                        "file_format, quality_met, bit_depth, sampling_rate, "
+                        "saved_path, url, release_date, status, artist, album) "
+                        "VALUES (?, 'track', ?, ?, ?, ?, ?, ?, ?, ?, 'downloaded', ?, ?)",
+                        (tid, reg.get("quality", 27), *valores),
+                    )
+                    n += max(0, cur.rowcount)
+                    continue
+
+                antigo = str(row[0] or "")
+                try:
+                    antigo_valido = bool(
+                        antigo
+                        and os.path.isfile(antigo)
+                        and os.path.getsize(antigo) > 0
+                        and str(reader(antigo) or "") == tid
+                    )
+                except (OSError, ValueError):
+                    antigo_valido = False
+                if not antigo_valido:
+                    c.execute(
+                        "UPDATE downloads SET file_format=?, quality_met=?, "
+                        "bit_depth=?, sampling_rate=?, saved_path=?, url=?, "
+                        "release_date=?, status='downloaded', artist=?, album=? "
+                        "WHERE id=? AND media_type='track' AND quality=?",
+                        (*valores, tid, reg.get("quality", 27)),
+                    )
     except sqlite3.Error as e:
         logger.debug("Falha ao registrar faixas no banco: %s", e)
     return n
@@ -349,23 +386,32 @@ def absorb_playlist_copies_sync(
     reg: Any = None,
     reader: Any = read_track_id,
     ranker: Any = audio_rank,
+    dedupe: bool = True,
 ) -> Any:
     """Faz as faixas em `dest_files` ({id: caminho no álbum}) existirem só no
     álbum. Retorna {"absorbed": [(id, antigo, novo)], "kept": [caminhos],
-    "registered": n}."""
+    "registered": n}.
+
+    `dedupe=False` (config `playlist_dedupe = false`) só REGISTRA as faixas no
+    banco, sem mexer em nenhuma playlist: o registro por ID é o que impede um
+    novo download da faixa depois, então ele não pode depender dessa opção."""
     stats: _AbsorbStats = {"absorbed": [], "kept": [], "registered": 0}
     dest = {str(k): os.path.abspath(v) for k, v in (dest_files or {}).items()}
     if not dest:
         return stats
 
     if db_path and reg is not None:
-        stats["registered"] = _db_register_tracks(db_path, dest, reg)
+        stats["registered"] = _db_register_tracks(db_path, dest, reg, reader)
 
-    root = playlist_root(library_root)
-    if not os.path.isdir(root):
+    if not dedupe:
         return stats
 
-    # 1) onde estão as cópias de playlist dessas faixas
+    root = playlist_root(library_root)
+    base = os.path.abspath(os.path.expanduser(str(library_root)))
+
+    # 1) onde estão as outras cópias dessas faixas: as de playlist (em Playlist/)
+    #    e qualquer outra que o banco conheça dentro da biblioteca (faixa baixada
+    #    avulsa, nome antigo...). O álbum vence: a faixa passa a existir só nele.
     copies: dict[str, set[str]] = {}
     if db_path:
         for tid, p in _db_rows(db_path, dest):
@@ -375,7 +421,15 @@ def absorb_playlist_copies_sync(
                         copies.setdefault(tid, set()).update(paths)
             elif os.path.isfile(p) and _is_under(p, root):
                 copies.setdefault(tid, set()).add(os.path.abspath(p))
-    else:
+            elif (
+                os.path.isfile(p)
+                and os.path.abspath(p) != dest.get(tid)
+                and _is_under(p, base)
+                and reader(p) == tid
+            ):
+                # Só dentro da biblioteca e só se a TAG confirmar o ID.
+                copies.setdefault(tid, set()).add(os.path.abspath(p))
+    elif os.path.isdir(root):
         for tid, paths in scan_track_paths(root, reader).items():
             if tid in dest:
                 copies.setdefault(tid, set()).update(paths)
@@ -398,7 +452,7 @@ def absorb_playlist_copies_sync(
                 logger.debug("Não removi %s: %s", old, e)
                 stats["kept"].append(old)
                 continue
-            _prune_empty_dirs(os.path.dirname(old), playlist_dir_for(old, root) or root)
+            _prune_empty_dirs(os.path.dirname(old), playlist_dir_for(old, root) or base)
             absorbed.append((tid, old, album_file))
             if db_path:
                 _db_set_path(db_path, tid, album_file)
@@ -433,9 +487,22 @@ def absorb_playlist_copies_sync(
 
 
 async def absorb_playlist_copies(
-    library_root: Any, db_path: Any, dest_files: Any, reg: Any = None
+    library_root: Any,
+    db_path: Any,
+    dest_files: Any,
+    reg: Any = None,
+    dedupe: bool = True,
 ) -> Any:
     """Versão assíncrona (roda em thread): ver absorb_playlist_copies_sync."""
+    if not dedupe:
+        return await asyncio.to_thread(
+            absorb_playlist_copies_sync,
+            library_root,
+            db_path,
+            dest_files,
+            reg,
+            dedupe=False,
+        )
     return await asyncio.to_thread(
         absorb_playlist_copies_sync, library_root, db_path, dest_files, reg
     )

@@ -144,6 +144,18 @@ class TestResolveOutputPath:
         path, estado = ti.resolve_output_path(c, "9")
         assert (path, estado) == (c[1], ti.STATE_NEW)
 
+    def test_todos_candidatos_ocupados_gera_nome_alternativo_sem_sobrescrever(
+        self, tmp_path, ids_em_disco
+    ):
+        c = self._cands(tmp_path)
+        for index, candidate in enumerate(c):
+            Path(candidate).write_text(f"arquivo-sem-id-{index}", encoding="utf-8")
+        path, estado = ti.resolve_output_path(c, "9")
+        assert estado == ti.STATE_NEW
+        assert path not in c
+        assert path.endswith("[2] (2).flac")
+        assert not Path(path).exists()
+
     def test_reserva_em_andamento_de_outra_faixa_e_respeitada(
         self, tmp_path, ids_em_disco
     ):

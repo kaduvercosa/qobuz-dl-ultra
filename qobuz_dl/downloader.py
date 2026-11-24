@@ -69,6 +69,7 @@ from qobuz_dl.playlist_links import (
     scan_dest_folder,
 )
 from qobuz_dl.resilient_http import http_budget, request_async
+from qobuz_dl.reuso import adotar_copia_com_origem, esperado_do_qobuz, pasta_de_origem
 from qobuz_dl.settings import QobuzDLSettings
 from qobuz_dl.storage import (
     InsufficientStorageError,
@@ -657,8 +658,12 @@ class Download:
             return
         cfg = getattr(self, "settings", None)
         root = getattr(cfg, "library_root", None)
-        if not root or not getattr(cfg, "playlist_dedupe", True):
+        if not root:
             return
+        # Com playlist_dedupe desligado as playlists não são tocadas, mas as
+        # faixas continuam sendo REGISTRADAS no banco (é o que evita baixá-las
+        # de novo depois).
+        dedupe = bool(getattr(cfg, "playlist_dedupe", True))
         try:
             if dest_files is None and dest_dir:
                 dest_files = await asyncio.to_thread(scan_dest_folder, dest_dir)
@@ -669,6 +674,7 @@ class Download:
                 self.download_db,
                 dest_files,
                 reg={"quality": self.quality, **reg},
+                dedupe=dedupe,
             )
         except Exception as e:
             logger.debug(f"Limpeza de duplicatas playlist/álbum falhou: {e}")
@@ -676,13 +682,20 @@ class Download:
         n = len(stats["absorbed"])
         if n:
             ui.ok(
-                f"{n} faixa(s) que estavam em playlist agora ficam só neste "
-                "álbum (a playlist aponta para elas)"
+                f"{n} faixa(s) que já existiam em outra pasta (playlist ou "
+                "faixa avulsa) agora ficam só neste álbum:"
             )
+            for _tid, antigo, novo in stats["absorbed"][:12]:
+                ui.info(
+                    f"    · {os.path.basename(novo)}  ←  "
+                    f"{pasta_de_origem(antigo, root)}"
+                )
+            if n > 12:
+                ui.info(f"    … e mais {n - 12} faixa(s)")
         for kept in stats["kept"]:
             ui.skip(
-                "Cópia da playlist mantida (qualidade maior que a do álbum): "
-                f"{os.path.basename(kept)}"
+                "Cópia existente mantida (qualidade maior que a do álbum): "
+                f"{os.path.basename(kept)} (em {pasta_de_origem(kept, root)})"
             )
 
     async def download_release(self, suppress_header: bool = False) -> Any:
@@ -2042,7 +2055,51 @@ class Download:
             )
             mb_task = asyncio.create_task(_musicbrainz_ids(track_metadata, _album_mb))
 
-        for attempt_fmt in qualities_to_try:
+        # Faixa já baixada em OUTRA pasta (típico: veio por uma playlist)? Só copia o
+        # arquivo em vez de baixar de novo DEPOIS de conferir com o Qobuz (ID,
+        # duração, formato, bit depth e taxa) e de verificar a integridade (ffmpeg).
+        # Qualquer dúvida => baixa normal e explica o motivo. Sem banco (`--no-db`):
+        # baixa normal.
+        formato_reaproveitado: Optional[int] = None
+        if not getattr(self, "is_playlist", False):
+            _base = getattr(getattr(self, "settings", None), "library_root", None)
+
+            async def _integridade(caminho: str) -> Any:
+                return await loop.run_in_executor(
+                    heavy_executor(getattr(self.settings, "max_workers", 1)),
+                    verify_audio_integrity,
+                    caminho,
+                    120,
+                )
+
+            reaproveitada = await adotar_copia_com_origem(
+                self.download_db,
+                track_id_str,
+                self.quality,
+                filename,
+                esperado_do_qobuz(track_url_dict, track_metadata),
+                _integridade,
+                raiz_biblioteca=_base,
+            )
+            if reaproveitada.formato is not None:
+                formato_reaproveitado = reaproveitada.formato
+                ui.step(
+                    f"{_skip_pfx}Reaproveitando: {os.path.basename(final_file)} "
+                    f"(já baixada em {pasta_de_origem(reaproveitada.origem, _base)}; "
+                    f"{reaproveitada.detalhes}; sem novo download)"
+                )
+                success = True
+                final_fmt = reaproveitada.formato
+            elif reaproveitada.motivo:
+                ui.warn(
+                    f"{_skip_pfx}Faixa já existe em "
+                    f"{pasta_de_origem(reaproveitada.origem, _base)}, mas não foi "
+                    f"reaproveitada: {reaproveitada.motivo}. Baixando do Qobuz."
+                )
+
+        for attempt_fmt in (
+            [] if formato_reaproveitado is not None else qualities_to_try
+        ):
             if abort_event.is_set():
                 return False
 
@@ -2109,8 +2166,8 @@ class Download:
                                 "falha de rede ou bloqueio do servidor"
                             )
                         ui.warn(
-                            f"Bloqueio Akamai detectado (ou falha de rede: {e}). "
-                            "Ativando download segmentado de fallback..."
+                            f"Download direto falhou ({_motivo_curto_da_falha(e)}). "
+                            "Tentando o modo segmentado..."
                         )
                         fresh_track_dict = await get_fresh_url(force_segments=True)
 
@@ -2991,6 +3048,22 @@ async def _tqdm_download_atomic(
                 await http.aclose()
             except Exception as exc:
                 logger.debug("Falha ao fechar client HTTP: %s", exc)
+
+
+def _motivo_curto_da_falha(exc: BaseException, limite: int = 70) -> str:
+    """Só o último motivo da falha, sem o texto repetido das tentativas.
+
+    O erro chega como "Falha definitiva após 5 tentativas: Falha após 5
+    tentativas. Último erro: RemoteProtocolError: Server disconnected ..."; o
+    aviso mostra só o que vem depois de "Último erro:" e não afirma a causa (a
+    CDN derrubar a conexão e a rede instável dão o mesmo erro).
+    """
+    texto = " ".join(str(exc).split())
+    if "Último erro:" in texto:
+        texto = texto.rsplit("Último erro:", 1)[1].strip()
+    if len(texto) > limite:
+        texto = texto[: limite - 1] + "…"
+    return texto or type(exc).__name__
 
 
 async def tqdm_download(

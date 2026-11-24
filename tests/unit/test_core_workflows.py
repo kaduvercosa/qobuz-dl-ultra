@@ -127,10 +127,36 @@ async def test_download_from_id_ja_baixado_pula(monkeypatch):
     monkeypatch.setattr(core, "handle_download_id", handle_download_id)
     monkeypatch.setattr(core.downloader, "Download", Download)
 
-    result = await core.QobuzDL.download_from_id(app, "123", is_playlist=True)
+    result = await core.QobuzDL.download_from_id(
+        app, "123", album=False, is_playlist=True
+    )
 
     assert result is True
     assert app.settings.pl_existing == 1
+
+
+async def test_download_from_id_nao_pula_album_apenas_por_registro(monkeypatch):
+    """Registro de álbum não prova que todas as faixas continuam no disco.
+    O downloader deve reconciliar individualmente as faixas do álbum."""
+    app = _build_app()
+    chamada = {}
+
+    async def handle_download_id(db, item_id, add_id, quality):
+        return (item_id, "/biblioteca/album", "downloaded")
+
+    class FakeDownload:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def download_id_by_type(self, is_track, **kwargs):
+            chamada["is_track"] = is_track
+            return True
+
+    monkeypatch.setattr(core, "handle_download_id", handle_download_id)
+    monkeypatch.setattr(core.downloader, "Download", FakeDownload)
+    result = await core.QobuzDL.download_from_id(app, "album-1", album=True)
+    assert result is True
+    assert chamada["is_track"] is False
 
 
 async def test_download_from_id_sucesso_repassa_album_vs_track(monkeypatch):

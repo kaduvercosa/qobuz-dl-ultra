@@ -47,6 +47,7 @@ from qobuz_dl.color import WARNING as YELLOW
 from qobuz_dl.concurrency import run_bounded
 from qobuz_dl.db import create_db, handle_download_id
 from qobuz_dl.exceptions import NonStreamable
+from qobuz_dl.faixa_existente import localizar_faixa_ja_baixada
 from qobuz_dl.pipeline import build_slots, resolve_pending, run_in_pipeline
 from qobuz_dl.playlist_links import link_existing_track, playlist_root
 from qobuz_dl.settings import QobuzDLSettings
@@ -1800,10 +1801,29 @@ class QobuzDL:
         (banco local), instanciar o downloader.Download de fato, tratar
         erros sem derrubar o programa inteiro (loga e segue pro próximo
         item), e aplicar o --delay entre downloads se configurado."""
-        _row = await handle_download_id(
-            self.downloads_db, item_id, add_id=False, quality=self.quality
-        )
-        if _row:
+        # Faixa (avulsa ou de playlist): confere pelo ID do Qobuz se já existe uma
+        # cópia em qualidade IGUAL OU MAIOR que a pedida (a máxima vale para
+        # qualquer pedido). Vem ANTES da consulta antiga porque ela apaga do
+        # banco o registro cujo arquivo sumiu, e aqui ainda dá para achar o
+        # arquivo movido. Ver faixa_existente.py.
+        existente = None
+        _row: Any  # tupla do banco ou None (sem isto o mypy fixa o tipo na tupla)
+        if not album:
+            existente = await localizar_faixa_ja_baixada(
+                self.downloads_db, item_id, self.quality, self.directory
+            )
+        if existente:
+            _row = (str(item_id), existente.caminho, "downloaded", "track")
+        else:
+            _row = await handle_download_id(
+                self.downloads_db, item_id, add_id=False, quality=self.quality
+            )
+        # Para faixas avulsas, o registro só é suficiente quando o arquivo
+        # continua presente (validado por handle_download_id). Para álbuns,
+        # NÃO pule com base apenas no registro: o diretório pode existir com
+        # uma ou mais faixas removidas. Deixe o downloader reconciliar cada
+        # ID individualmente e baixar somente o que estiver faltando.
+        if _row and not album:
             # Faixa de playlist que já existe em outra pasta (álbum ou outra
             # playlist): não baixa de novo, mas a playlist passa a apontar
             # pro arquivo existente (aparece no .m3u e o sync a reconhece).
@@ -1819,10 +1839,17 @@ class QobuzDL:
             # aparecia no terminal e não dizia qual faixa tinha sido pulada.
             _pos = f"[{int(playlist_index):02d}] " if playlist_index else ""
             _nome = title or f"ID {item_id}"
-            ui.skip(
-                f"{_pos}{_nome} (já baixada: ID {item_id} consta no banco "
-                "local; use --no-db para baixar de novo)"
-            )
+            if existente:
+                ui.skip(
+                    f"{_pos}{_nome} (já baixada: ID {item_id} confere em "
+                    f"{os.path.basename(existente.caminho)}, {existente.descricao}"
+                    "; use --no-db para baixar de novo)"
+                )
+            else:
+                ui.skip(
+                    f"{_pos}{_nome} (já baixada: ID {item_id} consta no banco "
+                    "local; use --no-db para baixar de novo)"
+                )
             if is_playlist:
                 self.settings.pl_existing = getattr(self.settings, "pl_existing", 0) + 1
             return True

@@ -151,10 +151,26 @@ def resolve_output_path(
                     claimed.append(path)
                 return path, STATE_NEW
 
-        # Passo 3 (praticamente inalcançável): todos os candidatos estão
-        # ocupados por outras faixas/arquivos ilegíveis. Usa o último (o que
-        # leva o ID) e deixa o fluxo normal tratar o arquivo existente.
-        return candidates[-1], STATE_EXISTING
+        # Passo 3: todos os candidatos estão ocupados por arquivos que não
+        # pertencem a esta faixa. Nunca devolva um caminho ocupado como
+        # STATE_EXISTING: o downloader poderia pular a faixa ou sobrescrever
+        # conteúdo de outra música. Gere um nome determinístico alternativo.
+        base, extension = os.path.splitext(candidates[-1])
+        suffix = 2
+        while True:
+            alternative = f"{base} ({suffix}){extension}"
+            key = _norm(alternative)
+            if key not in _claims and not os.path.exists(alternative):
+                _claims[key] = track_id
+                if claimed is not None:
+                    claimed.append(alternative)
+                logger.warning(
+                    "Conflito de nomes para a faixa %s; usando %s",
+                    track_id,
+                    alternative,
+                )
+                return alternative, STATE_NEW
+            suffix += 1
 
 
 def release_claims(claimed: Iterable[str]) -> None:

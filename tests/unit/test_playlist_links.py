@@ -212,11 +212,82 @@ class TestAbsorb:
         # idempotente
         assert _absorb(tmp_path, db, {"1": a1, "2": a2}, reg=reg)["registered"] == 0
 
-    def test_registro_nao_sobrescreve_linha_existente(self, tmp_path):
+    def test_registro_atualiza_caminho_antigo_ausente(self, tmp_path):
         a1 = _touch(tmp_path / "Album" / "A" / "1.flac")
         db = _db(tmp_path, [("1", "/outro/lugar.flac")])
         _absorb(tmp_path, db, {"1": a1}, reg={"quality": 27})
-        assert _saved(db, "1") == "/outro/lugar.flac"
+        assert _saved(db, "1") == os.path.abspath(a1)
+
+    def test_registro_atualiza_caminho_quando_nova_copia_tem_mesma_qualidade(
+        self, tmp_path
+    ):
+        a1 = _touch(tmp_path / "Album" / "A" / "1.flac")
+        antigo = _touch(tmp_path / "OutraPasta" / "1.flac")
+        db = _db(tmp_path, [("1", antigo)])
+        _absorb(tmp_path, db, {"1": a1}, reg={"quality": 27})
+        assert _saved(db, "1") == os.path.abspath(a1)
+
+    def test_registro_preserva_copia_de_qualidade_superior(self, tmp_path):
+        a1 = _touch(tmp_path / "Album" / "A" / "1.flac")
+        antigo = _touch(tmp_path / "OutraPasta" / "1_hi.flac")
+        db = _db(tmp_path, [("1", antigo)])
+        _absorb(tmp_path, db, {"1": a1}, reg={"quality": 27})
+        assert _saved(db, "1") == antigo
+
+
+class TestAbsorbFaixaAvulsa:
+    """O álbum vence: faixa baixada avulsa (fora de Playlist/) também some."""
+
+    def test_remove_faixa_avulsa_de_outra_pasta_e_atualiza_o_banco(self, tmp_path):
+        avulsa = _touch(tmp_path / "Singles" / "Artista" / "1.flac")
+        album = _touch(tmp_path / "Album" / "A" / "1.flac")
+        db = _db(tmp_path, [("1", avulsa)])
+        st = _absorb(tmp_path, db, {"1": album})
+        assert [t for t, _o, _n in st["absorbed"]] == ["1"]
+        assert not os.path.exists(avulsa) and os.path.exists(album)
+        assert not os.path.exists(tmp_path / "Singles")  # pastas vazias somem
+        assert os.path.isdir(tmp_path)  # ... mas só até a pasta de downloads
+        assert _saved(db, "1") == album
+
+    def test_funciona_sem_a_pasta_playlist(self, tmp_path):
+        assert not os.path.isdir(pl.playlist_root(tmp_path))
+        avulsa = _touch(tmp_path / "Outra" / "1.flac")
+        album = _touch(tmp_path / "Album" / "A" / "1.flac")
+        db = _db(tmp_path, [("1", avulsa)])
+        assert _absorb(tmp_path, db, {"1": album})["absorbed"]
+        assert not os.path.exists(avulsa)
+
+    def test_renomeada_na_mesma_pasta_do_album_nao_fica_duplicada(self, tmp_path):
+        velha = _touch(tmp_path / "Album" / "A" / "1_nome_antigo.flac")
+        nova = _touch(tmp_path / "Album" / "A" / "1.flac")
+        db = _db(tmp_path, [("1", velha)])
+        assert _absorb(tmp_path, db, {"1": nova})["absorbed"]
+        assert not os.path.exists(velha) and os.path.exists(nova)
+
+    def test_nao_apaga_se_a_tag_nao_confere(self, tmp_path):
+        outra = _touch(tmp_path / "Singles" / "999.flac")  # a tag diz que é a 999
+        album = _touch(tmp_path / "Album" / "A" / "1.flac")
+        db = _db(tmp_path, [("1", outra)])
+        assert _absorb(tmp_path, db, {"1": album})["absorbed"] == []
+        assert os.path.exists(outra)
+
+    def test_nao_apaga_arquivo_fora_da_biblioteca(self, tmp_path):
+        biblioteca = tmp_path / "biblioteca"
+        fora = _touch(tmp_path / "fora" / "1.flac")
+        album = _touch(biblioteca / "Album" / "A" / "1.flac")
+        db = _db(tmp_path, [("1", fora)])
+        st = pl.absorb_playlist_copies_sync(
+            str(biblioteca), db, {"1": album}, reader=_reader, ranker=_ranker
+        )
+        assert st["absorbed"] == [] and os.path.exists(fora)
+
+    def test_nao_apaga_avulsa_de_qualidade_maior(self, tmp_path):
+        avulsa = _touch(tmp_path / "Singles" / "1_hi.flac")
+        album = _touch(tmp_path / "Album" / "A" / "1.flac")  # rank menor
+        db = _db(tmp_path, [("1", avulsa)])
+        st = _absorb(tmp_path, db, {"1": album})
+        assert st["absorbed"] == [] and st["kept"] == [os.path.abspath(avulsa)]
+        assert os.path.exists(avulsa)
 
 
 class TestM3uReescrita:
