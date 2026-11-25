@@ -11,6 +11,8 @@ Qobuz e o motivo é mostrado ao usuário:
   1. o banco local conhece a faixa (mesmo ID Qobuz, em qualquer qualidade) e o
      arquivo ainda existe; se o arquivo foi movido/renomeado, ele é achado pela
      tag com o ID (`faixa_existente.py`, mesma regra de faixa avulsa/playlist);
+     faixa que está no disco mas não no banco também é achada pela tag (índice
+     da biblioteca, `indice_biblioteca.py`), de qualquer qualidade;
   2. a TAG do arquivo traz esse mesmo ID (e o ISRC, quando os dois lados têm);
   3. o Qobuz (resposta de `track/getFileUrl` desta faixa) confirma o ID e a
      duração (tolerância de 2 s) e a QUALIDADE: o arquivo tem que ser do mesmo
@@ -33,8 +35,11 @@ import shutil
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, NamedTuple, Optional
 
-from qobuz_dl.db import handle_download_id
-from qobuz_dl.faixa_existente import localizar_faixa_ja_baixada
+from qobuz_dl.faixa_existente import (
+    arquivos_da_faixa,
+    linhas_da_faixa,
+    localizar_faixa_ja_baixada,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -286,30 +291,36 @@ async def _candidatas(db_path: Any, track_id: str, quality: Any) -> list[str]:
 
     Qualquer qualidade serve como candidata: quem decide é a conferência com o
     Qobuz (a qualidade REAL do arquivo tem que ser igual ou maior que a que o
-    Qobuz entrega).
+    Qobuz entrega). Só LÊ o banco: registro cujo arquivo sumiu é ignorado (não é
+    apagado nem avisado; quem acha o arquivo movido é `faixa_existente`, e o
+    registro é refeito quando a faixa é baixada).
     """
     try:
         pedida = int(quality)
     except (TypeError, ValueError):
         return []
+    try:
+        linhas = await asyncio.to_thread(linhas_da_faixa, str(db_path), track_id)
+    except Exception:
+        logger.debug("Consulta ao banco falhou; baixando normalmente", exc_info=True)
+        return []
+    por_qualidade: dict[int, str] = {}
+    for linha in linhas:
+        caminho = str(linha.get("saved_path") or "")
+        if (
+            caminho
+            and linha.get("status") in (None, "", "downloaded")
+            and os.path.isfile(caminho)
+        ):
+            try:
+                por_qualidade[int(linha["quality"])] = caminho
+            except (TypeError, ValueError):
+                # qualidade ilegível no banco: essa linha não serve de candidata
+                continue
     achadas: list[str] = []
     for q in [pedida] + [x for x in _QUALIDADES if x != pedida]:
-        try:
-            linha = await handle_download_id(db_path, track_id, add_id=False, quality=q)
-        except Exception:
-            logger.debug(
-                "Consulta ao banco falhou; baixando normalmente", exc_info=True
-            )
-            return achadas
-        if not linha or len(linha) < 2 or not linha[1]:
-            continue
-        status = linha[2] if len(linha) > 2 else "downloaded"
-        caminho = str(linha[1])
-        if (
-            status in (None, "", "downloaded")
-            and os.path.isfile(caminho)
-            and caminho not in achadas
-        ):
+        caminho = por_qualidade.get(q, "")
+        if caminho and caminho not in achadas:
             achadas.append(caminho)
     return achadas
 
@@ -398,6 +409,14 @@ async def adotar_copia_com_origem(
     candidatas = await _candidatas(db_path, track_id, quality)
     if achada and achada.caminho not in candidatas:
         candidatas.insert(0, achada.caminho)
+    if not candidatas and raiz_biblioteca:
+        # O banco não conhece a faixa, mas ela pode estar no disco (índice da
+        # biblioteca, pela tag). Qualquer qualidade entra: quem decide se serve
+        # é a conferência com o Qobuz logo abaixo.
+        candidatas = [
+            arq.caminho
+            for arq in await arquivos_da_faixa(db_path, track_id, raiz_biblioteca)
+        ]
     for origem in candidatas:
         resultado = await _tentar(
             origem, track_id, destino, esperado, verificar_integridade

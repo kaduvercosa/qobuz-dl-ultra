@@ -1781,6 +1781,20 @@ class QobuzDL:
             logger.debug("Detalhes do erro inesperado", exc_info=True)
         return False
 
+    async def _maximo_da_faixa(self, track_id: Any) -> Optional[tuple[int, float]]:
+        """(bit depth, taxa em kHz) máximos que o Qobuz tem para a faixa, ou None.
+
+        Usado só para reconhecer, pelo ID, uma faixa que já está no disco na
+        melhor qualidade que existe (ver faixa_existente.py). Os metadados vêm do
+        cache de metadados, então repetir a consulta não custa uma chamada nova.
+        """
+        meta = await self.client.get_track_meta(track_id)
+        bits = meta.get("maximum_bit_depth") if isinstance(meta, dict) else None
+        taxa = meta.get("maximum_sampling_rate") if isinstance(meta, dict) else None
+        if not bits or not taxa:
+            return None
+        return int(bits), float(taxa)
+
     async def download_from_id(
         self,
         item_id: Any,
@@ -1810,7 +1824,11 @@ class QobuzDL:
         _row: Any  # tupla do banco ou None (sem isto o mypy fixa o tipo na tupla)
         if not album:
             existente = await localizar_faixa_ja_baixada(
-                self.downloads_db, item_id, self.quality, self.directory
+                self.downloads_db,
+                item_id,
+                self.quality,
+                self.directory,
+                consultar_maximo=self._maximo_da_faixa,
             )
         if existente:
             _row = (str(item_id), existente.caminho, "downloaded", "track")

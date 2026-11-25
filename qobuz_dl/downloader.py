@@ -2647,7 +2647,11 @@ class Download:
                     "bloqueado por região ou removido)"
                 )
 
-        track_dict = item_dict if is_track_id else item_dict["tracks"]["items"][0]
+        track_dict = (
+            item_dict
+            if is_track_id
+            else _faixa_de_maior_qualidade(item_dict["tracks"]["items"])
+        )
         quality_met = True
 
         try:
@@ -3048,6 +3052,36 @@ async def _tqdm_download_atomic(
                 await http.aclose()
             except Exception as exc:
                 logger.debug("Falha ao fechar client HTTP: %s", exc)
+
+
+def _faixa_de_maior_qualidade(faixas: Any) -> Any:
+    """Faixa do álbum que melhor representa a qualidade do lançamento.
+
+    Edições mistas (Deluxe com faixa bônus só em CD, por exemplo) fazem a faixa 1
+    enganar: o formato, a estimativa de espaço e o teste "atende à qualidade?"
+    saíam da faixa errada. Escolhe a que pode ser transmitida e tem a maior
+    resolução máxima (bits, depois taxa); em empate fica a mais antiga na lista
+    (a faixa 1, como antes). Só usa metadados que o álbum já traz.
+    """
+
+    def chave(faixa: Any) -> tuple[bool, float, float]:
+        if not isinstance(faixa, dict):
+            return (False, 0.0, 0.0)
+        return (
+            bool(faixa.get("streamable", True)),
+            _numero(faixa.get("maximum_bit_depth")),
+            _numero(faixa.get("maximum_sampling_rate")),
+        )
+
+    return max(faixas, key=chave)
+
+
+def _numero(valor: Any) -> float:
+    """Número do metadado, ou 0 se faltar ou vier em formato estranho."""
+    try:
+        return float(valor or 0)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def _motivo_curto_da_falha(exc: BaseException, limite: int = 70) -> str:

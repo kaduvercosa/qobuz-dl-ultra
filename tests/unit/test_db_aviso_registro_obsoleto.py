@@ -42,7 +42,7 @@ async def test_aviso_de_registro_obsoleto_nao_traz_o_caminho_todo(tmp_path, capl
     create_db(banco)
     sumiu = tmp_path / "pasta" / "muito" / "funda" / "Faixa.flac"
     await handle_download_id(
-        banco, "123", add_id=True, quality=27, saved_path=str(sumiu)
+        banco, "123", add_id=True, media_type="track", quality=27, saved_path=str(sumiu)
     )
 
     with caplog.at_level(logging.WARNING, logger="qobuz_dl.db"):
@@ -54,3 +54,27 @@ async def test_aviso_de_registro_obsoleto_nao_traz_o_caminho_todo(tmp_path, capl
     assert "Faixa.flac" in mensagens[0]
     assert str(tmp_path) not in mensagens[0]
     assert "funda" not in mensagens[0]
+
+
+async def test_registro_de_album_que_sumiu_e_limpo_sem_aviso(tmp_path, caplog):
+    """Pasta de álbum que sumiu é só limpeza: o download do álbum confere faixa
+    por faixa e não depende desse registro, então não faz barulho."""
+    banco = str(tmp_path / "downloads.db")
+    create_db(banco)
+    pasta_sumida = tmp_path / "Artista" / "Album"
+    await handle_download_id(
+        banco,
+        "abc",
+        add_id=True,
+        media_type="album",
+        quality=27,
+        saved_path=str(pasta_sumida),
+    )
+
+    with caplog.at_level(logging.WARNING, logger="qobuz_dl.db"):
+        resultado = await handle_download_id(banco, "abc", add_id=False, quality=27)
+
+    assert resultado is None
+    assert [r for r in caplog.records if "obsoleto" in r.getMessage()] == []
+    # e o registro foi apagado mesmo assim
+    assert await handle_download_id(banco, "abc", add_id=False, quality=27) is None

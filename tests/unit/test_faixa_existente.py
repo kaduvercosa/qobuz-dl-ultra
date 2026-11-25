@@ -204,7 +204,7 @@ async def test_arquivo_movido_sem_pasta_de_biblioteca_nao_varre_nada(tmp_path):
     assert await fe.localizar_faixa_ja_baixada(db, "100", 27, None) is None
 
 
-async def test_biblioteca_e_varrida_uma_vez_so(tmp_path, monkeypatch):
+async def test_indice_e_atualizado_uma_vez_so_por_execucao(tmp_path, monkeypatch):
     _arquivo(tmp_path, "Outra pasta/100.flac")
     _arquivo(tmp_path, "Outra pasta/101.flac")
     db = _banco(
@@ -215,9 +215,9 @@ async def test_biblioteca_e_varrida_uma_vez_so(tmp_path, monkeypatch):
         ],
     )
     chamadas = []
-    original = fe._varrer
+    original = fe._atualizar_indice
     monkeypatch.setattr(
-        fe, "_varrer", lambda raiz: chamadas.append(raiz) or original(raiz)
+        fe, "_atualizar_indice", lambda r, i: chamadas.append(r) or original(r, i)
     )
 
     assert await fe.localizar_faixa_ja_baixada(db, "100", 27, tmp_path)
@@ -225,11 +225,167 @@ async def test_biblioteca_e_varrida_uma_vez_so(tmp_path, monkeypatch):
     assert len(chamadas) == 1
 
 
+async def test_faixa_so_no_disco_e_reconhecida_e_registrada_sozinha(tmp_path):
+    """Sem registro no banco (banco perdido, arquivo de fora): o índice acha pela
+    tag e o banco é preenchido, sem `--sync-db`."""
+    arq = _arquivo(tmp_path, "Album/100.flac")  # áudio falso: 24-bit/96 kHz
+    db = _banco(tmp_path, [])
+
+    achou = await fe.localizar_faixa_ja_baixada(db, "100", 7, tmp_path)
+
+    assert achou == fe.FaixaExistente(arq, 7, "biblioteca")  # 24/96 = nível 7
+    conn = sqlite3.connect(db)
+    linha = conn.execute(
+        "SELECT quality, saved_path, bit_depth, sampling_rate, status, file_format "
+        "FROM downloads WHERE id='100' AND media_type='track'"
+    ).fetchone()
+    conn.close()
+    assert linha == (7, os.path.abspath(arq), "24", "96", "downloaded", "FLAC")
+    # na vez seguinte o banco resolve sozinho (certeza pela tag, sem índice)
+    fe.esquecer_indice()
+    de_novo = await fe.localizar_faixa_ja_baixada(db, "100", 6, tmp_path)
+    assert de_novo is not None and de_novo.certeza == "tag"
+
+
+def _maximo(valor, chamadas=None):
+    async def consultar(track_id):
+        if chamadas is not None:
+            chamadas.append(track_id)
+        if isinstance(valor, Exception):
+            raise valor
+        return valor
+
+    return consultar
+
+
+async def test_faixa_no_disco_que_ja_e_o_maximo_do_qobuz_nao_e_baixada(tmp_path):
+    """Pedido 24-bit/192 kHz, mas o Qobuz só tem a faixa em 24/96: o arquivo que
+    está no disco já é o máximo. Registra como qualidade pedida (como um download)."""
+    arq = _arquivo(tmp_path, "Album/100.flac")  # 24/96
+    db = _banco(tmp_path, [])
+    chamadas = []
+
+    achou = await fe.localizar_faixa_ja_baixada(
+        db, "100", 27, tmp_path, consultar_maximo=_maximo((24, 96.0), chamadas)
+    )
+
+    assert achou == fe.FaixaExistente(arq, 27, "biblioteca")
+    assert chamadas == ["100"]
+    conn = sqlite3.connect(db)
+    assert conn.execute("SELECT quality FROM downloads WHERE id='100'").fetchall() == [
+        (27,)
+    ]
+    conn.close()
+    # próxima execução: o banco já resolve, sem perguntar nada ao Qobuz
+    fe.esquecer_indice()
+    de_novo = await fe.localizar_faixa_ja_baixada(
+        db, "100", 27, tmp_path, consultar_maximo=_maximo(RuntimeError("sem rede"))
+    )
+    assert de_novo is not None and de_novo.certeza == "tag"
+
+
+async def test_faixa_so_em_cd_no_qobuz_com_pedido_maximo_nao_e_baixada(tmp_path):
+    arq = _arquivo(tmp_path, "Album/100_cd.flac")
+    db = _banco(tmp_path, [])
+
+    achou = await fe.localizar_faixa_ja_baixada(
+        db, "100", 27, tmp_path, consultar_maximo=_maximo((16, 44.1))
+    )
+
+    assert achou == fe.FaixaExistente(arq, 27, "biblioteca")
+
+
+async def test_arquivo_abaixo_do_maximo_do_qobuz_deixa_baixar_o_upgrade(tmp_path):
+    _arquivo(tmp_path, "Album/100.flac")  # 24/96, mas o Qobuz tem 24/192
+    db = _banco(tmp_path, [])
+
+    achou = await fe.localizar_faixa_ja_baixada(
+        db, "100", 27, tmp_path, consultar_maximo=_maximo((24, 192.0))
+    )
+
+    assert achou is None
+    conn = sqlite3.connect(db)
+    assert conn.execute("SELECT count(*) FROM downloads").fetchone()[0] == 0
+    conn.close()
+
+
+@pytest.mark.parametrize(
+    "consultar",
+    [_maximo(RuntimeError("sem rede")), _maximo(None), _maximo((0, 0.0))],
+)
+async def test_sem_resposta_do_qobuz_nao_assume_que_e_o_maximo(tmp_path, consultar):
+    _arquivo(tmp_path, "Album/100_cd.flac")
+    db = _banco(tmp_path, [])
+
+    assert (
+        await fe.localizar_faixa_ja_baixada(
+            db, "100", 27, tmp_path, consultar_maximo=consultar
+        )
+        is None
+    )
+
+
+async def test_nao_pergunta_ao_qobuz_quando_o_arquivo_ja_basta(tmp_path):
+    _arquivo(tmp_path, "Album/100.flac")  # 24/96 = nível 7; pedido 7
+    db = _banco(tmp_path, [])
+    chamadas = []
+
+    achou = await fe.localizar_faixa_ja_baixada(
+        db, "100", 7, tmp_path, consultar_maximo=_maximo((24, 192.0), chamadas)
+    )
+
+    assert achou is not None and chamadas == []
+
+
+async def test_faixa_so_no_disco_em_qualidade_menor_que_a_pedida_nao_serve(tmp_path):
+    _arquivo(tmp_path, "Album/100_cd.flac")
+    db = _banco(tmp_path, [])
+
+    assert await fe.localizar_faixa_ja_baixada(db, "100", 27, tmp_path) is None
+    conn = sqlite3.connect(db)
+    assert conn.execute("SELECT count(*) FROM downloads").fetchone()[0] == 0
+    conn.close()
+
+
+async def test_faixa_so_no_disco_com_tag_de_outra_faixa_nao_e_confundida(tmp_path):
+    _arquivo(tmp_path, "Album/999.flac")
+    db = _banco(tmp_path, [])
+
+    assert await fe.localizar_faixa_ja_baixada(db, "100", 27, tmp_path) is None
+
+
+async def test_avisa_so_na_primeira_indexacao(tmp_path, monkeypatch):
+    avisos = []
+    monkeypatch.setattr(fe, "_avisar", avisos.append)
+    _arquivo(tmp_path, "Album/100.flac")
+    db = _banco(tmp_path, [])
+
+    await fe.localizar_faixa_ja_baixada(db, "100", 27, tmp_path)
+    assert len(avisos) == 2 and "Indexando" in avisos[0] and "1 arquivos" in avisos[1]
+
+    fe.esquecer_indice()  # nova execução: o índice já existe, não avisa
+    await fe.localizar_faixa_ja_baixada(db, "100", 27, tmp_path)
+    assert len(avisos) == 2
+
+
+async def test_arquivos_da_faixa_devolve_o_melhor_primeiro(tmp_path):
+    _arquivo(tmp_path, "A/100_cd.flac")
+    _arquivo(tmp_path, "B/100.flac")
+    db = _banco(tmp_path, [])
+
+    achados = await fe.arquivos_da_faixa(db, "100", tmp_path)
+
+    assert [os.path.basename(a.caminho) for a in achados] == ["100.flac", "100_cd.flac"]
+    assert await fe.arquivos_da_faixa(None, "100", tmp_path) == []
+    assert await fe.arquivos_da_faixa(db, "100", tmp_path / "nao_existe") == []
+
+
 async def test_sem_banco_nao_cria_arquivo_e_devolve_none(tmp_path):
     db = str(tmp_path / "nao_existe.db")
 
     assert await fe.localizar_faixa_ja_baixada(db, "100", 27, tmp_path) is None
     assert not os.path.exists(db)
+    assert not os.path.exists(tmp_path / "track_index.db")  # nada é criado
     assert await fe.localizar_faixa_ja_baixada(None, "100", 27, tmp_path) is None
     assert await fe.localizar_faixa_ja_baixada(db, None, 27, tmp_path) is None
 
@@ -258,6 +414,38 @@ def test_download_from_id_consulta_a_checagem_por_id_antes_do_banco_antigo():
         "handle_download_id("
     )
     assert "if not album:" in fonte
+    # a faixa do disco que já é o máximo do Qobuz também é reconhecida
+    assert "consultar_maximo=self._maximo_da_faixa" in fonte
+
+
+class _ClienteFalso:
+    def __init__(self, meta):
+        self.meta = meta
+
+    async def get_track_meta(self, track_id):
+        if isinstance(self.meta, Exception):
+            raise self.meta
+        return self.meta
+
+
+@pytest.mark.parametrize(
+    ("meta", "esperado"),
+    [
+        ({"maximum_bit_depth": 24, "maximum_sampling_rate": 96.0}, (24, 96.0)),
+        ({"maximum_bit_depth": 16, "maximum_sampling_rate": 44.1}, (16, 44.1)),
+        ({"maximum_bit_depth": 24}, None),
+        ({}, None),
+        (None, None),
+    ],
+)
+async def test_maximo_da_faixa_le_os_metadados_do_qobuz(meta, esperado):
+    from types import SimpleNamespace
+
+    from qobuz_dl import core
+
+    eu = SimpleNamespace(client=_ClienteFalso(meta))
+
+    assert await core.QobuzDL._maximo_da_faixa(eu, "1") == esperado
 
 
 def test_registro_das_faixas_do_album_nao_depende_de_playlist_dedupe(tmp_path):

@@ -339,12 +339,21 @@ async def handle_download_id(
                 else:
                     caminho_existe = await asyncio.to_thread(os.path.isdir, row[1])
             if row and not caminho_existe:
-                logger.warning(
-                    "%sRegistro obsoleto removido: %s%s",
-                    YELLOW,
-                    _nome_curto_do_caminho(row[1]),
-                    OFF,
-                )
+                # Faixa que sumiu avisa (ela vai ser baixada de novo). Registro de
+                # ÁLBUM (pasta) que sumiu é só limpeza: o download de álbum não
+                # depende dele (confere faixa por faixa), então não faz barulho.
+                if len(row) > 3 and row[3] == "track":
+                    logger.warning(
+                        "%sRegistro obsoleto removido: %s%s",
+                        YELLOW,
+                        _nome_curto_do_caminho(row[1]),
+                        OFF,
+                    )
+                else:
+                    logger.debug(
+                        "Registro de álbum obsoleto removido: %s",
+                        _nome_curto_do_caminho(row[1]),
+                    )
                 await conn.execute(
                     "DELETE FROM downloads WHERE id=? AND quality=?",
                     (item_id, quality),

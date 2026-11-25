@@ -17,6 +17,9 @@ def _build_app(**overrides):
     """
     app = SimpleNamespace(
         downloads_db=None,
+        # callback da consulta ao máximo do Qobuz (faixa_existente); sem banco
+        # a busca por ID devolve None antes de chamá-lo
+        _maximo_da_faixa=None,
         quality=6,
         client=None,
         directory="/tmp/qdl-teste",

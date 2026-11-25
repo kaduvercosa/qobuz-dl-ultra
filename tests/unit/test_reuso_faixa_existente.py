@@ -313,6 +313,64 @@ async def test_arquivo_movido_e_achado_pela_tag_e_reaproveitado(
     assert await handle_download_id(banco, "1", add_id=False, quality=27) is not None
 
 
+async def test_faixa_so_no_disco_sem_registro_e_reaproveitada_pelo_indice(
+    tmp_path, banco, arquivos, monkeypatch
+):
+    """O banco não conhece a faixa, mas ela está na biblioteca (tag com o ID):
+    é achada pelo índice e, conferida com o Qobuz, copiada em vez de baixada."""
+    from qobuz_dl import faixa_existente as fe
+
+    fe.esquecer_indice()
+    biblioteca = tmp_path / "lib"
+    (biblioteca / "Playlist" / "Minha").mkdir(parents=True)
+    # faixa só em CD (nível 6) e o pedido é 24-bit: o Qobuz também só tem CD
+    origem = _faixa(
+        biblioteca, arquivos, "Playlist/Minha/f.flac", FLAC_1644, dados=b"CDONLY"
+    )
+    monkeypatch.setattr(fe, "_ler_id", lambda c: arquivos[c][1])
+    monkeypatch.setattr(fe, "_ler_info", lambda c: ("flac", 16, 44.1))
+    esperado = reuso.esperado_do_qobuz(
+        {"format_id": 27, "bit_depth": 16, "sampling_rate": 44.1, "duration": 252}, {}
+    )
+    destino = str(tmp_path / "t.tmp")
+
+    r = await reuso.adotar_copia_com_origem(
+        banco,
+        "1",
+        27,
+        destino,
+        esperado,
+        _verificador(),
+        raiz_biblioteca=str(biblioteca),
+    )
+
+    fe.esquecer_indice()
+    assert r.formato == 27 and r.origem == origem
+    assert open(destino, "rb").read() == b"CDONLY"
+
+
+async def test_candidatas_ignora_registro_de_arquivo_sumido_sem_apagar(
+    tmp_path, banco, arquivos, caplog
+):
+    """Consultar o banco para reaproveitar é só leitura: registro com arquivo
+    sumido não vira candidata, não é apagado e não gera aviso."""
+    import logging
+
+    from qobuz_dl.faixa_existente import linhas_da_faixa
+
+    sumiu = str(tmp_path / "sumiu" / "f.flac")
+    await _registrar(banco, "1", sumiu)
+
+    with caplog.at_level(logging.DEBUG):
+        achadas = await reuso._candidatas(banco, "1", 27)
+        de_novo = await reuso._candidatas(banco, "1", 27)
+
+    assert achadas == [] and de_novo == []
+    assert [r for r in caplog.records if "obsoleto" in r.getMessage()] == []
+    # o registro continua lá (quem limpa é o download normal, com a faixa refeita)
+    assert [x["saved_path"] for x in linhas_da_faixa(banco, "1")] == [sumiu]
+
+
 async def test_arquivo_movido_sem_raiz_da_biblioteca_baixa_normal(
     tmp_path, banco, arquivos
 ):

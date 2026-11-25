@@ -19,12 +19,21 @@ Como a cópia é confirmada (nesta ordem):
      banco). Isso evita tratar como "máxima" uma cópia que caiu para CD no meio
      do download;
   4. arquivo movido/renomeado: o banco aponta para um caminho que não existe
-     mais, então a biblioteca é varrida UMA vez por execução procurando a tag
-     com o ID; achando, o caminho do banco é corrigido e a faixa não é baixada.
+     mais, então o ÍNDICE DA BIBLIOTECA (`indice_biblioteca.py`) procura a tag
+     com o ID; achando, o caminho do banco é corrigido e a faixa não é baixada;
+  5. faixa que está no disco mas NÃO está no banco (banco perdido, arquivo
+     copiado de fora): o mesmo índice a acha pela tag, a qualidade é medida no
+     próprio arquivo e o programa REGISTRA a faixa no banco sozinho. Não precisa
+     rodar `--sync-db`.
 
-Não cobre: faixa que não tem registro nenhum no banco (banco perdido, arquivo
-copiado de fora). Para isso, `qobuz-dl --sync-db` reconstrói o banco lendo as
-tags da biblioteca. `--no-db` continua sendo a forma de FORÇAR um novo download.
+O índice é incremental e guardado em arquivo: a primeira execução lê as tags da
+biblioteca toda (demora, e avisa); depois só olha os arquivos novos ou alterados.
+Só é consultado quando o banco não resolve, ou seja, uma vez por execução.
+
+Não cobre: faixa que só existe no disco em qualidade MENOR que a pedida mas que é
+a melhor que o Qobuz tem (ex.: faixa só em CD com pedido 24-bit). Isso o Qobuz é
+quem diz; quem pergunta é o reaproveitamento do álbum (`reuso.py`), que também usa
+este índice. `--no-db` continua sendo a forma de FORÇAR um novo download.
 
 Nunca levanta exceção: qualquer problema devolve None e o fluxo normal segue
 (o pior caso é baixar, nunca pular por engano).
@@ -37,7 +46,10 @@ import logging
 import os
 import sqlite3
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any, Awaitable, Callable, Optional
+
+from qobuz_dl import indice_biblioteca
+from qobuz_dl.indice_biblioteca import ArquivoIndexado
 
 logger = logging.getLogger(__name__)
 
@@ -146,7 +158,7 @@ def _conferir_arquivo(caminho: str, track_id: str, linha: dict[str, Any]) -> str
 # ---------------------------------------------------------------------------
 # Banco (síncrono, em thread; só abre se o arquivo já existe: nunca cria banco)
 # ---------------------------------------------------------------------------
-def _linhas_da_faixa(db_path: str, track_id: str) -> list[dict[str, Any]]:
+def linhas_da_faixa(db_path: str, track_id: str) -> list[dict[str, Any]]:
     if not db_path or not os.path.isfile(db_path):
         return []
     conn = sqlite3.connect(db_path, timeout=10)
@@ -178,65 +190,147 @@ def _corrigir_caminho(
 
 
 # ---------------------------------------------------------------------------
-# Índice da biblioteca (só para arquivo movido; uma varredura por execução)
+# Índice da biblioteca (persistente: ver indice_biblioteca.py)
 # ---------------------------------------------------------------------------
-_indices: dict[str, dict[str, list[str]]] = {}
+_atualizados: set[str] = set()
 _trava: Optional[asyncio.Lock] = None
 
 
-def _varrer(raiz: str) -> dict[str, list[str]]:
-    from qobuz_dl.playlist_links import scan_track_paths
+def _atualizar_indice(raiz: str, index_path: str) -> dict[str, int]:
+    # lambdas: as funções de leitura são procuradas na hora da chamada (testes
+    # as trocam por leitores falsos)
+    return indice_biblioteca.atualizar(
+        raiz, index_path, lambda c: _ler_id(c), lambda c: _ler_info(c)
+    )
 
-    return dict(scan_track_paths(raiz, _ler_id))
+
+def _avisar(mensagem: str) -> None:
+    try:
+        from qobuz_dl import ui
+
+        ui.info(mensagem)
+    except Exception:
+        logger.info(mensagem)
 
 
-async def _indice_da_biblioteca(raiz: str) -> dict[str, list[str]]:
+async def _indice_em_dia(db_path: Any, raiz: Any) -> str:
+    """Atualiza o índice UMA vez por execução (downloads em paralelo esperam)."""
     global _trava
-    chave = os.path.abspath(os.path.expanduser(str(raiz)))
-    if chave in _indices:
-        return _indices[chave]
+    index_path = indice_biblioteca.caminho_do_indice(db_path)
+    chave = f"{index_path}|{os.path.abspath(os.path.expanduser(str(raiz)))}"
+    if chave in _atualizados:
+        return index_path
     if _trava is None:
         _trava = asyncio.Lock()
-    async with _trava:  # downloads em paralelo não varrem duas vezes
-        if chave not in _indices:
-            logger.info("Procurando faixa movida: varrendo a biblioteca (uma vez).")
-            _indices[chave] = await asyncio.to_thread(_varrer, chave)
-    return _indices[chave]
+    async with _trava:
+        if chave not in _atualizados:
+            primeira = not os.path.exists(index_path)
+            if primeira:
+                _avisar(
+                    "Indexando a biblioteca (só na primeira vez; depois só os "
+                    "arquivos novos)..."
+                )
+            stats = await asyncio.to_thread(_atualizar_indice, str(raiz), index_path)
+            if primeira or stats["lidos"] >= 200:
+                _avisar(f"Biblioteca indexada: {stats['total']} arquivos.")
+            _atualizados.add(chave)
+    return index_path
 
 
 def esquecer_indice() -> None:
-    """Descarta o índice em memória (testes; ou depois de reorganizar a pasta)."""
-    _indices.clear()
+    """Esquece que o índice já foi atualizado nesta execução (testes)."""
+    _atualizados.clear()
+
+
+async def arquivos_da_faixa(
+    db_path: Any, track_id: Any, raiz_biblioteca: Any
+) -> list[ArquivoIndexado]:
+    """Arquivos da biblioteca com a tag deste ID, de qualquer qualidade, do melhor
+    para o pior. Atualiza o índice se ainda não foi atualizado nesta execução.
+    Nunca levanta exceção (devolve [])."""
+    try:
+        if not db_path or not raiz_biblioteca or track_id in (None, ""):
+            return []
+        if not os.path.isfile(str(db_path)) or not os.path.isdir(
+            os.path.expanduser(str(raiz_biblioteca))
+        ):
+            return []
+        index_path = await _indice_em_dia(db_path, raiz_biblioteca)
+        achados = await asyncio.to_thread(
+            indice_biblioteca.consultar, index_path, str(track_id)
+        )
+        return sorted(
+            achados,
+            key=lambda a: indice_biblioteca.nivel_de_qualidade(
+                a.formato, a.bits, a.taxa_khz
+            ),
+            reverse=True,
+        )
+    except Exception:
+        logger.debug("Índice da biblioteca indisponível", exc_info=True)
+        return []
+
+
+def _registrar_no_banco(db_path: str, track_id: str, arq: ArquivoIndexado, nivel: int):
+    """Grava no banco uma faixa que estava só no disco (a qualidade é a REAL)."""
+    from qobuz_dl.playlist_links import _db_register_tracks
+
+    flac = arq.formato == "flac"
+    reg = {
+        "quality": nivel,
+        "file_format": "FLAC" if flac else "MP3",
+        "quality_met": 1,
+        "bit_depth": str(arq.bits) if flac else None,
+        "sampling_rate": f"{arq.taxa_khz:g}" if flac else None,
+    }
+    _db_register_tracks(db_path, {track_id: arq.caminho}, reg, lambda c: _ler_id(c))
 
 
 # ---------------------------------------------------------------------------
 # API
 # ---------------------------------------------------------------------------
+# Pergunta ao Qobuz o MÁXIMO da faixa: (bit depth, taxa em kHz) ou None.
+ConsultarMaximo = Callable[[str], Awaitable[Optional[tuple[int, float]]]]
+
+
 async def localizar_faixa_ja_baixada(
     db_path: Any,
     track_id: Any,
     qualidade_pedida: Any,
     raiz_biblioteca: Any = None,
+    consultar_maximo: Optional[ConsultarMaximo] = None,
 ) -> Optional[FaixaExistente]:
-    """Cópia já baixada desta faixa (por ID) em qualidade >= a pedida, ou None."""
+    """Cópia já baixada desta faixa (por ID) em qualidade >= a pedida, ou None.
+
+    `consultar_maximo` (opcional) deixa reconhecer como "máxima" uma faixa do disco
+    que fica abaixo do nível pedido porque o Qobuz não tem mais que aquilo (ex.:
+    pedido 24-bit/192 kHz e a faixa só existe em 24-bit/96 kHz ou em CD). Só é
+    chamada para faixa achada no disco SEM registro no banco, então custa pouco.
+    """
     try:
-        return await _localizar(db_path, track_id, qualidade_pedida, raiz_biblioteca)
+        return await _localizar(
+            db_path, track_id, qualidade_pedida, raiz_biblioteca, consultar_maximo
+        )
     except Exception:
         logger.debug("Checagem de faixa já baixada falhou; baixando", exc_info=True)
         return None
 
 
 async def _localizar(
-    db_path: Any, track_id: Any, qualidade_pedida: Any, raiz_biblioteca: Any
+    db_path: Any,
+    track_id: Any,
+    qualidade_pedida: Any,
+    raiz_biblioteca: Any,
+    consultar_maximo: Optional[ConsultarMaximo] = None,
 ) -> Optional[FaixaExistente]:
     if not db_path or track_id in (None, ""):
         return None
     track_id = str(track_id)
     minimo = _rank(qualidade_pedida)
-    if minimo < 0:
+    if minimo < 0 or not os.path.isfile(str(db_path)):
         return None
 
-    linhas = await asyncio.to_thread(_linhas_da_faixa, str(db_path), track_id)
+    linhas = await asyncio.to_thread(linhas_da_faixa, str(db_path), track_id)
     candidatas = [
         linha
         for linha in linhas
@@ -254,21 +348,75 @@ async def _localizar(
         if estado == AUSENTE:
             sumidas.append(linha)
 
+    if not raiz_biblioteca:
+        return None
+    arquivos = await arquivos_da_faixa(db_path, track_id, raiz_biblioteca)
+    if not arquivos:
+        return None
+
     # Registro cujo arquivo sumiu do caminho: ele foi movido/renomeado?
-    if sumidas and raiz_biblioteca:
-        indice = await _indice_da_biblioteca(str(raiz_biblioteca))
-        for linha in sumidas:
-            for novo in indice.get(track_id, []):
-                estado = await asyncio.to_thread(
-                    _conferir_arquivo, novo, track_id, linha
+    for linha in sumidas:
+        for arq in arquivos:
+            estado = await asyncio.to_thread(
+                _conferir_arquivo, arq.caminho, track_id, linha
+            )
+            if estado == OK_TAG:
+                await asyncio.to_thread(
+                    _corrigir_caminho,
+                    str(db_path),
+                    track_id,
+                    linha["quality"],
+                    arq.caminho,
                 )
-                if estado == OK_TAG:
-                    await asyncio.to_thread(
-                        _corrigir_caminho,
-                        str(db_path),
-                        track_id,
-                        linha["quality"],
-                        novo,
-                    )
-                    return FaixaExistente(novo, int(linha["quality"]), "biblioteca")
+                return FaixaExistente(arq.caminho, int(linha["quality"]), "biblioteca")
+
+    # Sem registro (ou registro que não serve): a faixa está no disco e o banco
+    # não sabe. A qualidade é medida no arquivo; se serve, registra sozinho.
+    maximo_do_qobuz: Optional[tuple[int, float]] = None
+    consultou = False
+    for arq in arquivos:
+        nivel = indice_biblioteca.nivel_de_qualidade(
+            arq.formato, arq.bits, arq.taxa_khz
+        )
+        qualidade_registrada = nivel
+        if _rank(nivel) < minimo:
+            # Abaixo do nível pedido. Se o Qobuz não tem mais que isto para esta
+            # faixa, o arquivo JÁ É o máximo e não há o que baixar.
+            if consultar_maximo is None or arq.formato != "flac":
+                continue
+            if not consultou:
+                consultou = True
+                maximo_do_qobuz = await _perguntar_maximo(consultar_maximo, track_id)
+            if not _atinge_o_maximo(arq, maximo_do_qobuz):
+                continue
+            qualidade_registrada = int(qualidade_pedida)
+        estado = await asyncio.to_thread(_conferir_arquivo, arq.caminho, track_id, {})
+        if estado == OK_TAG:
+            await asyncio.to_thread(
+                _registrar_no_banco,
+                str(db_path),
+                track_id,
+                arq,
+                qualidade_registrada,
+            )
+            return FaixaExistente(arq.caminho, qualidade_registrada, "biblioteca")
     return None
+
+
+async def _perguntar_maximo(
+    consultar: ConsultarMaximo, track_id: str
+) -> Optional[tuple[int, float]]:
+    try:
+        return await consultar(track_id)
+    except Exception:
+        logger.debug("Não consegui consultar o máximo da faixa", exc_info=True)
+        return None
+
+
+def _atinge_o_maximo(arq: ArquivoIndexado, maximo: Optional[tuple[int, float]]) -> bool:
+    if not maximo:
+        return False
+    bits_max, taxa_max = maximo
+    if bits_max <= 0 or taxa_max <= 0:
+        return False  # resposta sem o dado: não dá para afirmar que é o máximo
+    return arq.bits >= bits_max and arq.taxa_khz >= taxa_max - 0.05
