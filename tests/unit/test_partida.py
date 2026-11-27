@@ -122,9 +122,12 @@ def test_batimento_renova_o_titulo_com_os_segundos() -> None:
     async def roda() -> None:
         _partida.ligar(executar=g)
         _partida.iniciar_batimento()
-        for _ in range(3):
-            relogio[0] += 2
-            await asyncio.sleep(0.05)
+        for segundos in (2, 4, 6):
+            relogio[0] = _partida.T0 + segundos
+            for _ in range(200):  # até 2 s, sem depender da velocidade do runner
+                if any(f"· {segundos} s" in c for c in g.comandos):
+                    break
+                await asyncio.sleep(0.01)
         _partida.parar()
 
     try:
