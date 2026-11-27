@@ -78,8 +78,11 @@ def test_anel_avanca_a_cada_etapa_e_nunca_fecha() -> None:
     _limpo()
 
 
-def test_titulo_traz_a_fase_e_os_segundos() -> None:
+def test_titulo_traz_a_fase_e_os_segundos(monkeypatch: pytest.MonkeyPatch) -> None:
     _limpo()
+    # T0 redondo: com o uptime real do runner, `(T0 + 2.0) - T0` podia dar 1,999...
+    # (T0 perto de uma potência de 2) e a fronteira exata de 2 s falhava ao acaso.
+    monkeypatch.setattr(_partida, "T0", 1000.0)
     _partida.fase("lendo o link")
     texto = _partida.titulo(_partida.T0 + 13.4)
     assert texto == "Qobuz · lendo o link · 12 s"

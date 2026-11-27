@@ -14,7 +14,7 @@ publicar, renomeie a seção para a nova versão e a data.
 ## [Não lançado]
 
 ### Corrigido
-- **Teste intermitente no CI (py3.14):** `test_batimento_renova_o_titulo_com_os_segundos` falhava quando o `T0` do runner (uptime) caía logo abaixo de uma potência de 2: lá `(T0 + 6) - T0` dá `5,999…` e o título saía `4 s` em vez de `6 s`. O teste agora fixa um `T0` assim e usa meio segundo de folga no relógio falso. Só o teste mudou; `_partida.py` está certo (tempo real não depende de aritmética exata).
+- **Teste intermitente no CI (py3.14):** `test_batimento_renova_o_titulo_com_os_segundos` falhava quando o `T0` do runner (uptime) caía logo abaixo de uma potência de 2: lá `(T0 + 6) - T0` dá `5,999…` e o título saía `4 s` em vez de `6 s`. O mesmo vício derrubou `test_titulo_traz_a_fase_e_os_segundos` (fronteira exata `T0 + 2.0`, `T0` = 63,64 no py3.13). Os dois testes agora fixam o `T0` (um perto de uma potência de 2, outro redondo) e o primeiro usa meio segundo de folga. Só os testes mudaram; `_partida.py` está certo (tempo real não depende de aritmética exata).
 
 ## [2.6.8.5] - 2026-11-26
 
