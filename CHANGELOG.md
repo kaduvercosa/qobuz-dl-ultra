@@ -13,6 +13,9 @@ publicar, renomeie a seção para a nova versão e a data.
 
 ## [Não lançado]
 
+### Corrigido
+- **Teste intermitente no CI (py3.14):** `test_batimento_renova_o_titulo_com_os_segundos` falhava quando o `T0` do runner (uptime) caía logo abaixo de uma potência de 2: lá `(T0 + 6) - T0` dá `5,999…` e o título saía `4 s` em vez de `6 s`. O teste agora fixa um `T0` assim e usa meio segundo de folga no relógio falso. Só o teste mudou; `_partida.py` está certo (tempo real não depende de aritmética exata).
+
 ## [2.6.8.5] - 2026-11-26
 
 > Reúne tudo o que entrou desde a **2.6.8**, inclusive as tags 2.6.8.1 a 2.6.8.4, que nunca ganharam seção própria.

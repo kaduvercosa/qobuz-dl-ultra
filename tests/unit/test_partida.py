@@ -113,6 +113,11 @@ def test_executar_que_levanta_erro_nao_derruba_a_partida() -> None:
 def test_batimento_renova_o_titulo_com_os_segundos() -> None:
     _limpo()
     g = _Gravador()
+    # T0 logo abaixo de uma potência de 2: lá, `(T0 + 6) - T0` dá 5,999999999999972
+    # e o `int()` do título cairia para "4 s". Num runner recém-iniciado o T0 real
+    # (uptime) cai nessa faixa de vez em quando, e o teste ficava intermitente.
+    t0_real = _partida.T0
+    _partida.T0 = 255.6883819514001
     relogio = [_partida.T0]
     real = _partida._relogio
     _partida._relogio = lambda: relogio[0]
@@ -123,7 +128,8 @@ def test_batimento_renova_o_titulo_com_os_segundos() -> None:
         _partida.ligar(executar=g)
         _partida.iniciar_batimento()
         for segundos in (2, 4, 6):
-            relogio[0] = _partida.T0 + segundos
+            # meio segundo de folga: o título arredonda para baixo (de 2 em 2 s)
+            relogio[0] = _partida.T0 + segundos + 0.5
             for _ in range(200):  # até 2 s, sem depender da velocidade do runner
                 if any(f"· {segundos} s" in c for c in g.comandos):
                     break
@@ -135,6 +141,7 @@ def test_batimento_renova_o_titulo_com_os_segundos() -> None:
     finally:
         _partida._relogio = real
         _partida.INTERVALO_S = antigo
+        _partida.T0 = t0_real
     titulos = [c for c in g.comandos if c.startswith("progress --title")]
     assert any("· 2 s" in t for t in titulos)
     assert any("· 6 s" in t for t in titulos)
