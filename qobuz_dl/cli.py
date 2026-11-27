@@ -1952,7 +1952,7 @@ _COMMAND_DESCRIPTIONS_PT = {
     "inspect": "Mostra tudo de uma faixa local: dados técnicos, tags por assunto, capas, letras, diagnóstico e autenticidade (ou resume uma pasta).",
     "auth": "Mostra a conta e a assinatura (perfil, plano, limites; --json traz o bruto) ou atualiza e-mail e token com -l. Também responde por user, account, profile, me e info.",
     "config": "Mostra e altera o config.ini sem abrir um editor: show, path, get CHAVE, set CHAVE VALOR (preserva comentários) e reset. Credenciais ficam ocultas.",
-    "duplicates": "Acha faixas repetidas e diz qual cópia fica; --mover leva as sobras para _duplicatas (sem apagar) e --desfazer devolve.",
+    "duplicates": "Acha faixas repetidas e diz qual cópia fica; --mover leva as sobras para _duplicatas (sem apagar) e --desfazer devolve; --historico lista as faixas baixadas mais de uma vez.",
     "cleanup": "Limpa temporários de download abandonados e pastas vazias. Simula por padrão; --apagar remove de verdade.",
     "sync-db": "Restaura no banco de downloads os IDs das faixas que já estão numa pasta (o mesmo que --sync-db).",
     "watch": "Observa a pasta e injeta letras em arquivos novos (o mesmo que --watch).",
@@ -2532,6 +2532,7 @@ async def async_main() -> None:
                 await cmd_duplicates(
                     offline_args,
                     directory=_pasta_da_biblioteca(offline_args.DIR, cfg_dir),
+                    db_path=QOBUZ_DB,
                 )
             )
         if offline_command in ("cleanup", "clean"):
@@ -3257,6 +3258,15 @@ async def async_main() -> None:
             token,
             force_english,
         )
+        # Biblioteca inteira (não é de uma faixa): indexa logo abaixo de "Logado"
+        # e "Qualidade máxima", antes do primeiro download. Só nos comandos que
+        # baixam; o resultado vale para a execução toda.
+        from qobuz_dl.faixa_existente import preparar_indice
+        from qobuz_dl.hooks import COMANDOS_DE_DOWNLOAD
+
+        if arguments.command in COMANDOS_DE_DOWNLOAD:
+            _partida.fase("indexando a biblioteca")
+            await preparar_indice(qobuz.downloads_db, qobuz.directory)
         _partida.fase("lendo o link")
 
     from qobuz_dl import __version__ as _versao_pacote

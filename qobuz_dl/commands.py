@@ -1793,7 +1793,7 @@ def duplicates_args(subparsers: Any) -> Any:
     dup = subparsers.add_parser(
         "duplicates",
         aliases=["dups"],
-        usage="qobuz-dl duplicates [PASTA] [--mover | --desfazer] [--json]",
+        usage="qobuz-dl duplicates [PASTA] [--mover | --desfazer | --historico] [--json]",
         description=(
             "Acha faixas repetidas (MD5 do áudio FLAC, ID/ISRC ou metadados) e "
             "diz qual cópia ficaria: FLAC antes de outros formatos, depois o "
@@ -1821,6 +1821,12 @@ def duplicates_args(subparsers: Any) -> Any:
         action="store_true",
         default=False,
         help="devolve ao lugar o que o último --mover tirou",
+    )
+    grupo.add_argument(
+        "--historico",
+        action="store_true",
+        default=False,
+        help="lista as faixas baixadas mais de uma vez (do histórico de downloads)",
     )
     dup.add_argument("--json", action="store_true", default=False, help="saída em JSON")
     return dup

@@ -119,3 +119,44 @@ def test_o_indice_fica_ao_lado_do_banco(tmp_path):
     assert ib.caminho_do_indice(str(tmp_path / "qobuz_dl.db")) == str(
         tmp_path / "track_index.db"
     )
+
+
+def test_progresso_conta_do_primeiro_ao_ultimo_arquivo(tmp_path, monkeypatch):
+    monkeypatch.setattr(ib, "PASSO_PROGRESSO", 2)
+    lib = tmp_path / "lib"
+    for n in range(5):
+        _arquivo(lib, f"Album/{100 + n}.flac")
+    _arquivo(lib, "Album/capa.jpg")  # não é áudio: fora da conta
+    leitores = Leitores()
+    vistos = []
+
+    ib.atualizar(
+        lib,
+        str(tmp_path / "track_index.db"),
+        leitores.ler_id,
+        leitores.ler_info,
+        lambda feitos, total: vistos.append((feitos, total)),
+    )
+
+    assert vistos == [(2, 5), (4, 5), (5, 5)]  # a cada 2 e sempre no último
+
+
+def test_erro_no_progresso_nao_derruba_a_indexacao(tmp_path, monkeypatch):
+    monkeypatch.setattr(ib, "PASSO_PROGRESSO", 1)
+    lib = tmp_path / "lib"
+    _arquivo(lib, "Album/100.flac")
+    _arquivo(lib, "Album/101.flac")
+    leitores = Leitores()
+
+    def quebrado(feitos, total):
+        raise RuntimeError("terminal sem suporte")
+
+    stats = ib.atualizar(
+        lib,
+        str(tmp_path / "track_index.db"),
+        leitores.ler_id,
+        leitores.ler_info,
+        quebrado,
+    )
+
+    assert stats == {"total": 2, "lidos": 2, "removidos": 0}

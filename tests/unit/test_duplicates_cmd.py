@@ -140,3 +140,56 @@ async def test_cmd_json_lista_fica_e_sobras(tmp_path, capsys):
 
 async def test_cmd_pasta_inexistente(tmp_path):
     assert await dup.cmd_duplicates(_args(), directory=str(tmp_path / "nada")) == 1
+
+
+# --- duplicates --historico ---------------------------------------------------
+
+
+def _historico_com(db, linhas):
+    from qobuz_dl import historico
+
+    for track_id, titulo, vezes in linhas:
+        for _ in range(vezes):
+            historico.registrar(
+                db, track_id, "ISRC" + track_id, titulo, "Art", "FLAC", "24", "96", "/p"
+            )
+
+
+async def test_cmd_historico_lista_as_faixas_baixadas_mais_de_uma_vez(tmp_path, capsys):
+    db = str(tmp_path / "qobuz_dl.db")
+    _historico_com(db, [("1", "Hurt", 3), ("2", "Teardrop", 2), ("3", "Uma vez só", 1)])
+
+    codigo = await dup.cmd_duplicates(
+        _args(historico=True), directory=str(tmp_path / "nao_importa"), db_path=db
+    )
+
+    saida = capsys.readouterr().out
+    assert codigo == 0  # não olha a pasta da biblioteca
+    assert "Hurt" in saida and "3x" in saida and "Teardrop" in saida and "2x" in saida
+    assert "Uma vez só" not in saida
+
+
+async def test_cmd_historico_sem_historico_explica(tmp_path, capsys):
+    db = str(tmp_path / "qobuz_dl.db")
+    codigo = await dup.cmd_duplicates(
+        _args(historico=True), directory=str(tmp_path), db_path=db
+    )
+    assert codigo == 0
+    assert "Ainda não há histórico" in capsys.readouterr().out
+
+
+async def test_cmd_historico_json(tmp_path, capsys):
+    db = str(tmp_path / "qobuz_dl.db")
+    _historico_com(db, [("1", "Hurt", 2)])
+    await dup.cmd_duplicates(
+        _args(historico=True, json=True), directory=str(tmp_path), db_path=db
+    )
+    dados = json.loads(capsys.readouterr().out)
+    assert dados["total_repetidas"] == 1 and dados["isrc_com_ids_diferentes"] == 0
+    assert [(i["id"], i["titulo"], i["vezes"]) for i in dados["repetidas"]] == [
+        ("1", "Hurt", 2)
+    ]
+
+
+async def test_cmd_historico_sem_banco_da_erro(tmp_path):
+    assert await dup.cmd_duplicates(_args(historico=True), directory=str(tmp_path)) == 1

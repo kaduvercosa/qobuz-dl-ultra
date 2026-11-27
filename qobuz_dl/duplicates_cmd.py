@@ -19,6 +19,7 @@
 # ONDE PROCURAR:
 #   - regra de escolha da cópia   -> `escolher_copia`
 #   - movimentação e diário       -> `mover_sobras`, `desfazer_movimentos`
+#   - `--historico` (faixas baixadas mais de uma vez) -> `_mostrar_historico`
 # ==============================================================================
 
 from __future__ import annotations
@@ -28,7 +29,7 @@ import os
 import shutil
 from typing import Any, Awaitable, Callable, Optional
 
-from qobuz_dl import ui
+from qobuz_dl import historico, ui
 
 PASTA_SOBRAS = "_duplicatas"
 DIARIO = ".movidos.json"
@@ -171,13 +172,71 @@ def _painel_plano(plano: list[tuple[str, list[str]]], diretorio: str) -> None:
         ui.emit_always(f"   … e mais {len(plano) - _LISTA_MAX} grupo(s).")
 
 
+def _cortar(texto: str, largura: int) -> str:
+    """Corta com reticências para caber em `largura` colunas."""
+    texto = " ".join(str(texto).split())
+    return texto if len(texto) <= largura else texto[: largura - 1].rstrip() + "…"
+
+
+def _mostrar_historico(db_path: Optional[str], como_json: bool) -> int:
+    """`duplicates --historico`: faixas baixadas mais de uma vez e ISRC repetido."""
+    if not db_path:
+        ui.error("Banco de downloads não encontrado.")
+        return 1
+    itens = historico.repetidas(db_path, _LISTA_MAX)
+    total = historico.total_de_repetidas(db_path)
+    mesmo_isrc = historico.isrc_com_ids_diferentes(db_path)
+
+    if como_json:
+        ui.emit_json(
+            {
+                "repetidas": [
+                    {
+                        "id": i.track_id,
+                        "titulo": i.titulo,
+                        "artista": i.artista,
+                        "vezes": i.vezes,
+                        "ultima": i.ultima,
+                    }
+                    for i in itens
+                ],
+                "total_repetidas": total,
+                "isrc_com_ids_diferentes": mesmo_isrc,
+            }
+        )
+        return 0
+
+    painel = ui.Painel("🕘 HISTÓRICO DE FAIXAS")
+    painel.kv("Baixadas mais de uma vez", str(total))
+    painel.kv("ISRC igual, ID diferente", str(mesmo_isrc))
+    if not historico.tem_historico(db_path):
+        painel.info("Ainda não há histórico: ele é gravado a cada download.")
+    elif not total:
+        painel.ok("Nenhuma faixa foi baixada mais de uma vez.")
+    painel.emit()
+    if itens:
+        ui.emit_always(ui.dim(f"{'FAIXA':<24} {'VEZES':>5}  ÚLTIMA"))
+        for i in itens:
+            ui.emit_always(
+                f"{_cortar(i.titulo or i.track_id, 24):<24} {i.vezes:>4}x"
+                f"  {historico.dia_e_mes(i.ultima)}"
+            )
+        if total > len(itens):
+            ui.emit_always(f"   … e mais {total - len(itens)} faixa(s).")
+    return 0
+
+
 async def cmd_duplicates(
     args: Any,
     *,
     directory: str,
     buscar: Optional[Callable[[str], Awaitable[dict[str, list[str]]]]] = None,
+    db_path: Optional[str] = None,
 ) -> int:
     """Executa ``duplicates``; devolve o código de saída (0 ok, 1 erro parcial)."""
+    if getattr(args, "historico", False):
+        return _mostrar_historico(db_path, bool(getattr(args, "json", False)))
+
     diretorio = os.path.abspath(os.path.expanduser(directory))
     if not os.path.isdir(diretorio):
         ui.error(f"Pasta não encontrada: {diretorio}")

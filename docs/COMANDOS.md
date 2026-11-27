@@ -768,9 +768,9 @@ Mostra e altera o config.ini sem abrir um editor: show, path, get CHAVE, set CHA
 
 ## duplicates
 
-Acha faixas repetidas e diz qual cópia fica; --mover leva as sobras para _duplicatas (sem apagar) e --desfazer devolve.
+Acha faixas repetidas e diz qual cópia fica; --mover leva as sobras para _duplicatas (sem apagar) e --desfazer devolve; --historico lista as faixas baixadas mais de uma vez.
 
-**Uso:** `qobuz-dl duplicates [PASTA] [--mover | --desfazer] [--json]`
+**Uso:** `qobuz-dl duplicates [PASTA] [--mover | --desfazer | --historico] [--json]`
 
 **Apelidos:** `dups`
 
@@ -781,6 +781,7 @@ Acha faixas repetidas e diz qual cópia fica; --mover leva as sobras para _dupli
 | `PASTA` | `PASTA` | biblioteca a verificar (padrão: directory do config.ini) |  |
 | `--mover` |  | move as cópias a mais para PASTA/_duplicatas |  |
 | `--desfazer` |  | devolve ao lugar o que o último --mover tirou |  |
+| `--historico` |  | lista as faixas baixadas mais de uma vez (do histórico de downloads) |  |
 | `--json` |  | saída em JSON |  |
 | `-v`, `--verbose` |  | mostra mensagens de diagnóstico (nível DEBUG) |  |
 | `--quiet` |  | mostra apenas avisos e erros (bom para cron/scripts) |  |

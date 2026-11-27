@@ -66,7 +66,7 @@ EXEMPLOS = {
         "config set default_quality 27",
     ),
     "duplicates": (
-        "duplicates [PASTA] [--mover | --desfazer]",
+        "duplicates [PASTA] [--mover | --desfazer | --historico]",
         "duplicates ~/Music --mover",
     ),
     "cleanup": ("cleanup [PASTA] [--apagar] [--idade HORAS]", "cleanup --apagar"),

@@ -54,6 +54,14 @@ def test_duplicates_mover_e_desfazer_sao_exclusivos():
         _parse("duplicates", "--mover", "--desfazer")
 
 
+def test_duplicates_historico_e_exclusivo_com_mover_e_desfazer():
+    assert _parse("duplicates", "--historico").historico is True
+    assert _parse("duplicates").historico is False
+    for outra in ("--mover", "--desfazer"):
+        with pytest.raises(SystemExit):
+            _parse("duplicates", "--historico", outra)
+
+
 def test_duplicates_opcoes():
     a = _parse("duplicates", "Musicas", "--mover")
     assert (a.DIR, a.mover, a.desfazer) == ("Musicas", True, False)

@@ -29,6 +29,7 @@ logger = logging.getLogger(__name__)
 
 NOME_DO_INDICE = "track_index.db"
 EXTENSOES_DE_AUDIO = (".flac", ".mp3")
+PASSO_PROGRESSO = 25  # de quantos em quantos arquivos avisa o progresso
 
 LeitorDeId = Callable[[str], Optional[str]]
 LeitorDeInfo = Callable[[str], Optional[tuple[str, int, float]]]
@@ -71,10 +72,14 @@ def atualizar(
     index_path: str,
     ler_id: LeitorDeId,
     ler_info: LeitorDeInfo,
+    progresso: Optional[Callable[[int, int], None]] = None,
 ) -> dict[str, int]:
     """Põe o índice em dia com a pasta `raiz`; devolve {"total","lidos","removidos"}.
 
     `lidos` = arquivos cuja tag foi lida agora (novos ou alterados).
+    `progresso(feitos, total)` é chamado a cada PASSO_PROGRESSO arquivos e no
+    último (de dentro da thread de trabalho); um erro nele não interrompe a
+    indexação.
     """
     stats = {"total": 0, "lidos": 0, "removidos": 0}
     raiz = os.path.abspath(os.path.expanduser(str(raiz)))
@@ -90,36 +95,48 @@ def atualizar(
             )
         }
         vistos: set[str] = set()
+        # Lista antes de ler: assim o total é conhecido e dá para mostrar o
+        # progresso (a leitura das tags é o que demora na primeira vez).
+        arquivos = [
+            os.path.join(pasta, nome)
+            for pasta, _dirs, nomes in os.walk(raiz)
+            for nome in nomes
+            if nome.lower().endswith(EXTENSOES_DE_AUDIO)
+        ]
+        previsto = len(arquivos)
         with conn:
-            for pasta, _dirs, nomes in os.walk(raiz):
-                for nome in nomes:
-                    if not nome.lower().endswith(EXTENSOES_DE_AUDIO):
-                        continue
-                    caminho = os.path.join(pasta, nome)
-                    st = _estatisticas(caminho)
-                    if st is None:
-                        continue  # sumiu no meio da varredura: o próximo ciclo acerta
-                    vistos.add(caminho)
-                    stats["total"] += 1
-                    if conhecidos.get(caminho) == (st.st_mtime_ns, st.st_size):
-                        continue
-                    track_id = ler_id(caminho)
-                    info = ler_info(caminho) if track_id else None
-                    formato, bits, taxa = info if info else ("", 0, 0.0)
-                    conn.execute(
-                        "INSERT OR REPLACE INTO arquivos (caminho, mtime_ns, tamanho, "
-                        "track_id, formato, bits, taxa_khz) VALUES (?,?,?,?,?,?,?)",
-                        (
-                            caminho,
-                            st.st_mtime_ns,
-                            st.st_size,
-                            str(track_id) if track_id else None,
-                            formato,
-                            bits,
-                            taxa,
-                        ),
-                    )
-                    stats["lidos"] += 1
+            for feitos, caminho in enumerate(arquivos, 1):
+                if progresso is not None and (
+                    feitos % PASSO_PROGRESSO == 0 or feitos == previsto
+                ):
+                    try:
+                        progresso(feitos, previsto)
+                    except Exception:  # só cosmético: nunca derruba a indexação
+                        logger.debug("falha ao informar o progresso", exc_info=True)
+                st = _estatisticas(caminho)
+                if st is None:
+                    continue  # sumiu no meio da varredura: o próximo ciclo acerta
+                vistos.add(caminho)
+                stats["total"] += 1
+                if conhecidos.get(caminho) == (st.st_mtime_ns, st.st_size):
+                    continue
+                track_id = ler_id(caminho)
+                info = ler_info(caminho) if track_id else None
+                formato, bits, taxa = info if info else ("", 0, 0.0)
+                conn.execute(
+                    "INSERT OR REPLACE INTO arquivos (caminho, mtime_ns, tamanho, "
+                    "track_id, formato, bits, taxa_khz) VALUES (?,?,?,?,?,?,?)",
+                    (
+                        caminho,
+                        st.st_mtime_ns,
+                        st.st_size,
+                        str(track_id) if track_id else None,
+                        formato,
+                        bits,
+                        taxa,
+                    ),
+                )
+                stats["lidos"] += 1
             sumidos = [c for c in conhecidos if c not in vistos]
             for i in range(0, len(sumidos), 400):
                 parte = sumidos[i : i + 400]

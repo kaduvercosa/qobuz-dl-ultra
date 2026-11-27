@@ -31,7 +31,7 @@ from tqdm import tqdm
 
 import qobuz_dl.metadata as metadata
 import qobuz_dl.postprocess as postprocess
-from qobuz_dl import musicbrainz, progresso_bytes, ui, vigia
+from qobuz_dl import historico, musicbrainz, progresso_bytes, ui, vigia
 from qobuz_dl.color import (
     OFF,
     RED,
@@ -1124,6 +1124,26 @@ class Download:
                         track_meta.get("id"),
                         exc_info=(type(result), result, result.__traceback__),
                     )
+            # Histórico: só faixa baixada DE VERDADE (`True`); "existing" e
+            # "skipped" não entram.
+            for faixa_meta, resultado in zip(album_meta["tracks"]["items"], results):
+                if resultado is True:
+                    await self._registrar_historico(
+                        faixa_meta,
+                        _artist_label(
+                            faixa_meta,
+                            fallback=_safe_get(
+                                faixa_meta,
+                                "performer",
+                                "name",
+                                default=report_artist_name,
+                            ),
+                        ),
+                        file_format,
+                        bit_depth,
+                        sampling_rate,
+                        dirn,
+                    )
             failed_tracks = sum(
                 res is False or isinstance(res, BaseException) for res in results
             )
@@ -1326,6 +1346,53 @@ class Download:
 
         return bool(results) and failed_tracks == 0 and not aborted_by_user
 
+    async def _avisar_isrc_repetido(self, track_meta: Any) -> None:
+        """Avisa se a MESMA gravação (ISRC) já foi baixada com outro ID.
+
+        Só informa; o download segue. Qualquer erro aqui é ignorado.
+        """
+        if not self.download_db:
+            return
+        try:
+            anterior = await asyncio.to_thread(
+                historico.ultima_com_isrc,
+                self.download_db,
+                track_meta.get("isrc"),
+                self.item_id,
+            )
+            if anterior is not None:
+                historico.mostrar_aviso(anterior, self.item_id)
+        except Exception as e:
+            logger.debug(f"Falha ao checar o ISRC no histórico: {e}")
+
+    async def _registrar_historico(
+        self,
+        track_meta: Any,
+        artista: Any,
+        file_format: Any,
+        bit_depth: Any,
+        sampling_rate: Any,
+        pasta: Any,
+    ) -> None:
+        """Anota no histórico uma faixa recém-baixada (melhor esforço)."""
+        if not self.download_db:
+            return
+        try:
+            await asyncio.to_thread(
+                historico.registrar,
+                self.download_db,
+                track_meta.get("id", self.item_id),
+                track_meta.get("isrc"),
+                _get_title(track_meta),
+                artista,
+                file_format,
+                bit_depth,
+                sampling_rate,
+                pasta,
+            )
+        except Exception as e:
+            logger.debug(f"Falha ao gravar o histórico: {e}")
+
     async def download_track(
         self,
         is_parallel: bool = False,
@@ -1461,6 +1528,7 @@ class Download:
                 track_attr = self._get_track_attr(
                     track_meta, track_title, bit_depth, sampling_rate, file_format
                 )
+                await self._avisar_isrc_repetido(track_meta)
 
                 self._determine_formats(
                     album_meta=track_meta.get("album", {}),
@@ -1668,6 +1736,14 @@ class Download:
                 release_date=release_date,
                 artist=db_artist,
                 album=db_album,
+            )
+            await self._registrar_historico(
+                track_meta,
+                db_artist,
+                file_format,
+                bit_depth,
+                sampling_rate,
+                getattr(self, "last_downloaded_file", dirn),
             )
 
             # Faixa avulsa (não playlist): se ela também está numa playlist,

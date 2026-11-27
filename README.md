@@ -854,6 +854,7 @@ qobuz-dl config reset [-y]               # recria o config.ini (pergunta antes; 
 qobuz-dl duplicates [PASTA]              # lista faixas repetidas e qual cópia ficaria
 qobuz-dl duplicates [PASTA] --mover      # leva as sobras para PASTA/_duplicatas (não apaga)
 qobuz-dl duplicates [PASTA] --desfazer   # devolve ao lugar o que o --mover tirou
+qobuz-dl duplicates --historico          # faixas baixadas mais de uma vez (do histórico de downloads)
 
 qobuz-dl cleanup [PASTA]                 # simula: .part abandonados e pastas vazias
 qobuz-dl cleanup [PASTA] --apagar        # remove de verdade (--idade HORAS; padrão 24)

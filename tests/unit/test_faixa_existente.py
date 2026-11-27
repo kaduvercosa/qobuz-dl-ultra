@@ -217,7 +217,9 @@ async def test_indice_e_atualizado_uma_vez_so_por_execucao(tmp_path, monkeypatch
     chamadas = []
     original = fe._atualizar_indice
     monkeypatch.setattr(
-        fe, "_atualizar_indice", lambda r, i: chamadas.append(r) or original(r, i)
+        fe,
+        "_atualizar_indice",
+        lambda r, i, p=None: chamadas.append(r) or original(r, i, p),
     )
 
     assert await fe.localizar_faixa_ja_baixada(db, "100", 27, tmp_path)
@@ -356,7 +358,13 @@ async def test_faixa_so_no_disco_com_tag_de_outra_faixa_nao_e_confundida(tmp_pat
 
 async def test_avisa_so_na_primeira_indexacao(tmp_path, monkeypatch):
     avisos = []
-    monkeypatch.setattr(fe, "_avisar", avisos.append)
+    monkeypatch.setattr(
+        fe,
+        "_avisar",
+        lambda titulo, detalhe="", concluido=False: avisos.append(
+            f"{titulo} {detalhe}"
+        ),
+    )
     _arquivo(tmp_path, "Album/100.flac")
     db = _banco(tmp_path, [])
 
@@ -366,6 +374,23 @@ async def test_avisa_so_na_primeira_indexacao(tmp_path, monkeypatch):
     fe.esquecer_indice()  # nova execução: o índice já existe, não avisa
     await fe.localizar_faixa_ja_baixada(db, "100", 27, tmp_path)
     assert len(avisos) == 2
+
+
+def test_aviso_da_indexacao_usa_marca_de_etapa_e_de_concluido(monkeypatch):
+    """Linhas da execução seguem o padrão da tela: `[*]` na etapa, `[+]` no fim,
+    e não texto cru (`ui.info`), que saía sem cor nem marca."""
+    from qobuz_dl import ui
+
+    saidas = []
+    monkeypatch.setattr(ui, "step", lambda m: saidas.append(("step", str(m))))
+    monkeypatch.setattr(ui, "ok", lambda m: saidas.append(("ok", str(m))))
+
+    fe._avisar("Indexando a biblioteca", "só na primeira vez")
+    fe._avisar("Biblioteca indexada", "416 arquivos", concluido=True)
+
+    assert [t for t, _ in saidas] == ["step", "ok"]
+    assert "Indexando a biblioteca" in saidas[0][1]
+    assert "416 arquivos" in saidas[1][1]
 
 
 async def test_arquivos_da_faixa_devolve_o_melhor_primeiro(tmp_path):
@@ -475,3 +500,139 @@ def test_downloader_registra_faixas_mesmo_com_dedupe_desligado():
     fonte = inspect.getsource(downloader.Download._absorb_playlist_copies)
     assert "dedupe=dedupe" in fonte
     assert 'getattr(cfg, "playlist_dedupe", True)' in fonte
+
+
+# --- progresso da indexação -------------------------------------------------
+
+
+def test_milhar_usa_ponto_do_portugues():
+    assert fe._milhar(12400) == "12.400"
+    assert fe._milhar(20800000) == "20.800.000"
+    assert fe._milhar(7) == "7"
+
+
+def test_barra_tem_sempre_a_mesma_largura():
+    assert len(fe._barra(0, 100)) == 10
+    assert len(fe._barra(59, 100)) == 10
+    assert len(fe._barra(100, 100)) == 10
+    assert len(fe._barra(5, 0)) == 10  # total desconhecido não divide por zero
+    # 60% = 6 células cheias (qualquer que seja o glifo, as vazias são as outras)
+    barra = fe._barra(60, 100)
+    assert barra[:6] == barra[0] * 6 and barra[6:] == barra[-1] * 4
+    assert barra[0] != barra[-1]
+
+
+def test_faltam_em_segundos_e_em_minutos():
+    assert fe._faltam(0.2) == "faltam ~1 s"
+    assert fe._faltam(40) == "faltam ~40 s"
+    assert fe._faltam(180) == "faltam ~3 min"
+
+
+def test_progresso_da_indexacao_sempre_da_sinal_de_vida(monkeypatch):
+    """Ler milhares de tags não emite evento; sem o pulso o vigia do Atalho
+    acharia que travou. Vale mesmo quando a linha não é desenhada."""
+    from qobuz_dl import vigia
+
+    vigia._pulso[0] = 0.0
+    fe._reportar_progresso(False)(10, 100)
+    assert vigia.segundos_parado() < 5.0
+
+
+def test_progresso_mostrado_escreve_uma_linha_com_barra_e_percentual(monkeypatch):
+    from qobuz_dl import ui
+
+    linhas = []
+    monkeypatch.setattr(ui, "step_inline", lambda m: linhas.append(str(m)))
+
+    progresso = fe._reportar_progresso(True)
+    progresso(12400, 20800)
+    progresso(12425, 20800)  # menos de 1 s depois: não repete a linha
+    progresso(20800, 20800)  # o último sempre aparece
+
+    assert len(linhas) == 2
+    assert "Indexando a biblioteca" in linhas[0]
+    assert "12.400/20.800" in linhas[0] and "59%" in linhas[0]
+    assert "20.800/20.800" in linhas[1] and "100%" in linhas[1]
+
+
+def test_progresso_nao_mostrado_nao_escreve_nada(monkeypatch):
+    from qobuz_dl import ui
+
+    linhas = []
+    monkeypatch.setattr(ui, "step_inline", lambda m: linhas.append(m))
+    fe._reportar_progresso(False)(50, 100)
+    assert linhas == []
+
+
+def test_progresso_sem_terminal_interativo_escreve_so_de_10_em_10_por_cento(
+    monkeypatch,
+):
+    """Em pipe/CI a linha não se sobrescreve: sem isso saíam centenas de linhas."""
+    from qobuz_dl import ui
+
+    linhas = []
+    relogio = [0.0]
+
+    def _agora():
+        relogio[0] += 2.0  # cada chamada passa mais que o 1 s do limitador
+        return relogio[0]
+
+    monkeypatch.setattr(ui, "_status_inline_supported", lambda: False)
+    monkeypatch.setattr(ui, "step_inline", lambda m: linhas.append(str(m)))
+    monkeypatch.setattr(fe.time, "monotonic", _agora)
+
+    progresso = fe._reportar_progresso(True)
+    for feitos in range(1, 101):
+        progresso(feitos, 100)
+
+    assert len(linhas) == 11  # 0-9%, 10%, 20% ... 90% e o 100% final
+    assert "100%" in linhas[-1]
+
+
+# --- indexação na partida (abaixo de "Logado" e "Qualidade máxima") ---------
+
+
+async def test_preparar_indice_indexa_uma_vez_na_partida(tmp_path, monkeypatch):
+    db = tmp_path / "qobuz_dl.db"
+    db.write_bytes(b"")
+    lib = tmp_path / "lib"
+    lib.mkdir()
+    chamadas = []
+
+    async def _falso(db_path, raiz):
+        chamadas.append((str(db_path), str(raiz)))
+        return "x"
+
+    monkeypatch.setattr(fe, "_indice_em_dia", _falso)
+    await fe.preparar_indice(str(db), str(lib))
+    assert chamadas == [(str(db), str(lib))]
+
+
+async def test_preparar_indice_sem_banco_ou_sem_pasta_nao_faz_nada(
+    tmp_path, monkeypatch
+):
+    chamadas = []
+
+    async def _falso(db_path, raiz):
+        chamadas.append(1)
+        return "x"
+
+    monkeypatch.setattr(fe, "_indice_em_dia", _falso)
+    lib = tmp_path / "lib"
+    lib.mkdir()
+    await fe.preparar_indice(None, str(lib))
+    await fe.preparar_indice(str(tmp_path / "nao_existe.db"), str(lib))
+    (tmp_path / "a.db").write_bytes(b"")
+    await fe.preparar_indice(str(tmp_path / "a.db"), str(tmp_path / "sem_pasta"))
+    assert chamadas == []
+
+
+async def test_preparar_indice_nunca_levanta(tmp_path, monkeypatch):
+    (tmp_path / "a.db").write_bytes(b"")
+    (tmp_path / "lib").mkdir()
+
+    async def _quebrado(db_path, raiz):
+        raise RuntimeError("disco cheio")
+
+    monkeypatch.setattr(fe, "_indice_em_dia", _quebrado)
+    await fe.preparar_indice(str(tmp_path / "a.db"), str(tmp_path / "lib"))

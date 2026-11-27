@@ -45,10 +45,11 @@ import asyncio
 import logging
 import os
 import sqlite3
+import time
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Optional
 
-from qobuz_dl import indice_biblioteca
+from qobuz_dl import indice_biblioteca, vigia
 from qobuz_dl.indice_biblioteca import ArquivoIndexado
 
 logger = logging.getLogger(__name__)
@@ -196,21 +197,104 @@ _atualizados: set[str] = set()
 _trava: Optional[asyncio.Lock] = None
 
 
-def _atualizar_indice(raiz: str, index_path: str) -> dict[str, int]:
+def _atualizar_indice(
+    raiz: str,
+    index_path: str,
+    progresso: Optional[Callable[[int, int], None]] = None,
+) -> dict[str, int]:
     # lambdas: as funções de leitura são procuradas na hora da chamada (testes
     # as trocam por leitores falsos)
     return indice_biblioteca.atualizar(
-        raiz, index_path, lambda c: _ler_id(c), lambda c: _ler_info(c)
+        raiz,
+        index_path,
+        lambda c: _ler_id(c),
+        lambda c: _ler_info(c),
+        progresso,
     )
 
 
-def _avisar(mensagem: str) -> None:
+def _milhar(n: int) -> str:
+    """12400 -> '12.400' (o ponto de milhar do português)."""
+    return f"{n:,}".replace(",", ".")
+
+
+def _barra(feitos: int, total: int, largura: int = 10) -> str:
+    """Barra `▰▰▰▱▱` (ou `###--` sem Unicode); sempre com `largura` células."""
+    cheias = min(largura, int(largura * feitos / total)) if total else largura
     try:
         from qobuz_dl import ui
 
-        ui.info(mensagem)
+        cheia, vazia = ui._glyph("\u25b0", "#"), ui._glyph("\u25b1", "-")
     except Exception:
-        logger.info(mensagem)
+        cheia, vazia = "#", "-"
+    return cheia * cheias + vazia * (largura - cheias)
+
+
+def _faltam(segundos: float) -> str:
+    """'faltam ~3 min' / 'faltam ~40 s'."""
+    if segundos < 60:
+        return f"faltam ~{max(int(segundos), 1)} s"
+    return f"faltam ~{round(segundos / 60)} min"
+
+
+def _reportar_progresso(mostrar: bool) -> Callable[[int, int], None]:
+    """Função de progresso da indexação.
+
+    Sempre dá `vigia.pulso()`: a leitura de milhares de tags não emite evento
+    nenhum, e o vigia do Atalho trata silêncio longo como travamento. Só
+    desenha a linha (que se atualiza sozinha) quando `mostrar`, no máximo uma
+    vez por segundo; sem terminal interativo, só de 10 em 10%.
+    """
+    inicio = time.monotonic()
+    ultimo = [0.0]
+    ultimo_degrau = [-1]
+
+    def _progresso(feitos: int, total: int) -> None:
+        vigia.pulso()
+        if not mostrar or total <= 0:
+            return
+        agora = time.monotonic()
+        if feitos < total and agora - ultimo[0] < 1.0:
+            return
+        ultimo[0] = agora
+        decorrido = agora - inicio
+        restante = (
+            _faltam(decorrido / feitos * (total - feitos))
+            if feitos < total and decorrido >= 3 and feitos > 0
+            else ""
+        )
+        try:
+            from qobuz_dl import ui
+
+            if not ui._status_inline_supported():
+                # Sem terminal interativo a linha não se sobrescreve: cada
+                # atualização viraria uma linha nova no log. Só de 10 em 10%.
+                degrau = int(100 * feitos / total) // 10
+                if degrau == ultimo_degrau[0] and feitos < total:
+                    return
+                ultimo_degrau[0] = degrau
+            detalhe = ui.join_meta(
+                f"{_barra(feitos, total)} {_milhar(feitos)}/{_milhar(total)}",
+                f"{int(100 * feitos / total)}%",
+                restante,
+            )
+            ui.step_inline(ui.tail("Indexando a biblioteca", detalhe))
+        except Exception:
+            logger.debug("sem linha de progresso", exc_info=True)
+
+    return _progresso
+
+
+def _avisar(titulo: str, detalhe: str = "", concluido: bool = False) -> None:
+    """Linha da execução no padrão do resto da tela: `[*]` (etapa) ou `[+]` (feito),
+    título em cor e detalhe em cinza. `ui.info` é texto cru, sem cor nem marca."""
+    try:
+        from qobuz_dl import ui
+
+        mensagem = ui.tail(titulo, detalhe)
+        (ui.ok if concluido else ui.step)(mensagem)
+    except Exception:
+        logger.info("%s %s", titulo, detalhe)
 
 
 async def _indice_em_dia(db_path: Any, raiz: Any) -> str:
@@ -227,14 +311,43 @@ async def _indice_em_dia(db_path: Any, raiz: Any) -> str:
             primeira = not os.path.exists(index_path)
             if primeira:
                 _avisar(
-                    "Indexando a biblioteca (só na primeira vez; depois só os "
-                    "arquivos novos)..."
+                    "Indexando a biblioteca",
+                    "só na primeira vez; depois só os arquivos novos",
                 )
-            stats = await asyncio.to_thread(_atualizar_indice, str(raiz), index_path)
+            inicio = time.monotonic()
+            stats = await asyncio.to_thread(
+                _atualizar_indice,
+                str(raiz),
+                index_path,
+                _reportar_progresso(primeira),
+            )
             if primeira or stats["lidos"] >= 200:
-                _avisar(f"Biblioteca indexada: {stats['total']} arquivos.")
+                _avisar(
+                    "Biblioteca indexada",
+                    f"{_milhar(stats['total'])} arquivos"
+                    f" · {vigia.duracao_texto(time.monotonic() - inicio)}",
+                    concluido=True,
+                )
             _atualizados.add(chave)
     return index_path
+
+
+async def preparar_indice(db_path: Any, raiz_biblioteca: Any) -> None:
+    """Põe o índice em dia JÁ NA PARTIDA, logo abaixo de `Logado` e `Qualidade
+    máxima`, em vez de no meio dos downloads (onde cairia na primeira faixa
+    checada). Informação da biblioteca inteira fica no topo; só o que é de uma
+    faixa fica junto dela. O resultado vale para o resto da execução
+    (`_atualizados`): `arquivos_da_faixa` não indexa de novo. Nunca levanta."""
+    try:
+        if not db_path or not raiz_biblioteca:
+            return
+        if not os.path.isfile(str(db_path)) or not os.path.isdir(
+            os.path.expanduser(str(raiz_biblioteca))
+        ):
+            return
+        await _indice_em_dia(db_path, raiz_biblioteca)
+    except Exception:
+        logger.debug("não foi possível indexar na partida", exc_info=True)
 
 
 def esquecer_indice() -> None:
@@ -271,7 +384,9 @@ async def arquivos_da_faixa(
         return []
 
 
-def _registrar_no_banco(db_path: str, track_id: str, arq: ArquivoIndexado, nivel: int):
+def _registrar_no_banco(
+    db_path: str, track_id: str, arq: ArquivoIndexado, nivel: int
+) -> None:
     """Grava no banco uma faixa que estava só no disco (a qualidade é a REAL)."""
     from qobuz_dl.playlist_links import _db_register_tracks
 
